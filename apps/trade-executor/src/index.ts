@@ -1,9 +1,9 @@
 import { Worker } from 'bullmq';
-import IORedis from 'ioredis';
+import { Redis } from 'ioredis';
 import { DEFAULT_RISK_CONFIG } from '@swat/shared';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const redis = new IORedis(redisUrl, { maxRetriesPerRequest: null });
+const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const mode = process.env.TRADING_MODE ?? 'paper';
 
 let consecutiveFailures = 0;

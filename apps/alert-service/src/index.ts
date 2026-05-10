@@ -1,8 +1,8 @@
 import { Worker } from 'bullmq';
-import IORedis from 'ioredis';
+import { Redis } from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const redis = new IORedis(redisUrl, { maxRetriesPerRequest: null });
+const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const telegramChatId = process.env.TELEGRAM_CHAT_ID;
@@ -27,11 +27,46 @@ async function sendTelegram(message: string) {
   }
 }
 
+function formatSignalAlert(payload: {
+  signalId: string;
+  pattern: string;
+  tokenMint?: string;
+  clusterId?: string;
+  buyerCount?: number;
+  confidence?: number;
+  score?: number;
+  window?: string;
+}) {
+  const ca = payload.tokenMint ?? 'N/A';
+  const lines = [
+    '🚨 SWAT SIGNAL',
+    '',
+    `CA: ${ca}`,
+    `Pattern: ${payload.pattern}`,
+    `Score: ${payload.score ?? 'N/A'} | Confidence: ${payload.confidence ?? 'N/A'}%`,
+    `Cluster: ${payload.clusterId ?? 'N/A'}`,
+    `Buyers: ${payload.buyerCount ?? 'N/A'} in ${payload.window ?? 'N/A'}`,
+    '',
+    `Signal ID: ${payload.signalId}`,
+    'Action: Paste CA into your execution bot.'
+  ];
+  return lines.join('\n');
+}
+
 new Worker(
   'swat:alerts',
   async (job) => {
-    const payload = job.data as { signalId: string; pattern: string };
-    await sendTelegram(`🎯 SIGNAL: ${payload.pattern}\nSignal ID: ${payload.signalId}`);
+    const payload = job.data as {
+      signalId: string;
+      pattern: string;
+      tokenMint?: string;
+      clusterId?: string;
+      buyerCount?: number;
+      confidence?: number;
+      score?: number;
+      window?: string;
+    };
+    await sendTelegram(formatSignalAlert(payload));
     return { sent: true };
   },
   { connection: redis }

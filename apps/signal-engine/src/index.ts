@@ -1,10 +1,10 @@
-import IORedis from 'ioredis';
+import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
-import { insertSignal, query } from '@swat/db';
+import { insertSignalWithDedupe, query } from '@swat/db';
 import { REDIS_CHANNELS } from '@swat/shared';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const redis = new IORedis(redisUrl, { maxRetriesPerRequest: null });
+const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const alertQueue = new Queue('swat:alerts', { connection: redis });
 const tradeQueue = new Queue('swat:trades', { connection: redis });
 
@@ -24,7 +24,7 @@ async function detectSnipePattern() {
   `);
 
   for (const row of rows) {
-    const signal = await insertSignal({
+    const signal = await insertSignalWithDedupe({
       patternType: 'snipe',
       clusterId: row.cluster_id,
       tokenMint: row.token_mint,
@@ -33,8 +33,30 @@ async function detectSnipePattern() {
       triggerData: { buyerCount: row.buyer_count, window: '5m' }
     });
 
-    await alertQueue.add('signal-alert', { signalId: (signal as { id: string }).id, pattern: 'snipe' }, { removeOnComplete: true });
-    await tradeQueue.add('signal-trade', { signalId: (signal as { id: string }).id, score: 82 }, { removeOnComplete: true });
+    if (!signal) {
+      continue;
+    }
+
+    if (!signal.inserted) {
+      console.log(`[signal-engine] duplicate signal skipped: ${signal.id}`);
+      continue;
+    }
+
+    await alertQueue.add(
+      'signal-alert',
+      {
+        signalId: signal.id,
+        pattern: 'snipe',
+        tokenMint: row.token_mint,
+        clusterId: row.cluster_id,
+        buyerCount: row.buyer_count,
+        confidence: 87,
+        score: 82,
+        window: '5m'
+      },
+      { removeOnComplete: true }
+    );
+    await tradeQueue.add('signal-trade', { signalId: signal.id, score: 82 }, { removeOnComplete: true });
   }
 }
 
@@ -49,7 +71,7 @@ async function tick() {
 setInterval(tick, 15_000);
 void tick();
 
-const subscriber = new IORedis(redisUrl, { maxRetriesPerRequest: null });
+const subscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
 await subscriber.subscribe(REDIS_CHANNELS.walletSwap);
 subscriber.on('message', (_channel, message) => {
   console.log('[signal-engine] wallet swap event', message);
