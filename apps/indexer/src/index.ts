@@ -188,8 +188,7 @@ async function backfillWallet(address: string) {
       continue;
     }
 
-    await upsertToken(parsed.tokenIn);
-    await upsertToken(parsed.tokenOut);
+    await Promise.all([upsertToken(parsed.tokenIn), upsertToken(parsed.tokenOut)]);
 
     const blockTime = tx.blockTime;
     const timestamp = new Date(blockTime * 1000);
