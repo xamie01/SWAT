@@ -1,0 +1,20 @@
+{
+  "name": "@swat/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node -e \"console.log('No tests in @swat/api')\""
+  },
+  "dependencies": {
+    "@swat/db": "workspace:*",
+    "@swat/shared": "workspace:*",
+    "fastify": "^5.2.2",
+    "zod": "^3.24.4"
+  }
+}
