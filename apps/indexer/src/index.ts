@@ -137,7 +137,7 @@ async function backfillWallet(address: string) {
 
   const signatures = await heliusRpc<HeliusSignature[]>('getSignaturesForAddress', [address, { limit: 1000 }]);
   if (signatures.length === 0) {
-    await refreshWalletActivity(address, null);
+    await refreshWalletActivity(address, null, 0);
     return { fetched: 0, inserted: 0, skipped: 0 };
   }
 
@@ -165,11 +165,16 @@ async function backfillWallet(address: string) {
       continue;
     }
 
+    if (!tx.blockTime) {
+      skipped += 1;
+      continue;
+    }
+
     await upsertToken(parsed.tokenIn);
     await upsertToken(parsed.tokenOut);
 
-    const blockTime = tx.blockTime ?? null;
-    const timestamp = new Date((blockTime ?? Math.floor(Date.now() / 1000)) * 1000);
+    const blockTime = tx.blockTime;
+    const timestamp = new Date(blockTime * 1000);
     const persisted = await insertParsedTransaction({
       signature,
       walletAddress: address,
@@ -188,7 +193,7 @@ async function backfillWallet(address: string) {
     if (!persisted) continue;
 
     inserted += 1;
-    if (blockTime && (!latestBlockTime || blockTime > latestBlockTime)) {
+    if (!latestBlockTime || blockTime > latestBlockTime) {
       latestBlockTime = blockTime;
     }
 
@@ -204,7 +209,7 @@ async function backfillWallet(address: string) {
     );
   }
 
-  await refreshWalletActivity(address, latestBlockTime ? new Date(latestBlockTime * 1000) : null);
+  await refreshWalletActivity(address, latestBlockTime ? new Date(latestBlockTime * 1000) : null, inserted);
   return { fetched: signatureList.length, inserted, skipped };
 }
 
