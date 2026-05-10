@@ -3,7 +3,7 @@
 Monorepo scaffold for the SWAT design in `swat.md`, covering the MVP foundation:
 
 - `apps/api` – Fastify REST API
-- `apps/indexer` – wallet ingestion + backfill queue scaffold
+- `apps/indexer` – wallet ingestion + Helius backfill worker (parsed transaction ingestion)
 - `apps/signal-engine` – pattern detection + signal generation scaffold
 - `apps/trade-executor` – paper/live trade execution worker scaffold
 - `apps/alert-service` – Telegram alert worker scaffold

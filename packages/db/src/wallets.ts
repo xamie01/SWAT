@@ -41,3 +41,19 @@ export async function upsertWallet(wallet: WalletInsert) {
 export async function deleteWallet(address: string) {
   await query('DELETE FROM wallets WHERE address = $1', [address]);
 }
+
+export async function refreshWalletActivity(address: string, lastActive?: Date | null, tradeIncrement = 0) {
+  const rows = await query(
+    `UPDATE wallets w
+     SET
+       status = 'active',
+       last_active = COALESCE($2::timestamp, w.last_active, NOW()),
+       total_trades = COALESCE(w.total_trades, 0) + $3::int,
+       updated_at = NOW()
+     WHERE w.address = $1
+     RETURNING *`,
+    [address, lastActive ?? null, tradeIncrement]
+  );
+
+  return rows[0] ?? null;
+}
