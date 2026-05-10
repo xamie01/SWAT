@@ -6,6 +6,14 @@ import { REDIS_CHANNELS, walletInputSchema } from '@swat/shared';
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const SWAP_PROGRAM_IDS = new Set([
+  '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM
+  'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CLMM
+  'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Orca Whirlpool
+  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', // Jupiter v6
+  '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun
+  'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo' // Meteora DLMM
+]);
 const heliusApiKey = process.env.HELIUS_API_KEY;
 const heliusRpcUrl = heliusApiKey ? `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}` : null;
 
@@ -53,6 +61,16 @@ type HeliusParsedTransaction = {
     postTokenBalances?: HeliusTokenBalance[];
   };
 };
+
+function extractProgramId(tx: HeliusParsedTransaction): string | null {
+  const instructions = tx.transaction?.message?.instructions ?? [];
+  const ids = instructions
+    .map((instruction) => instruction.programId)
+    .filter((programId): programId is string => typeof programId === 'string');
+
+  const matchedSwapProgram = ids.find((programId) => SWAP_PROGRAM_IDS.has(programId));
+  return matchedSwapProgram ?? ids[0] ?? null;
+}
 
 async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!heliusRpcUrl) {
@@ -111,8 +129,8 @@ function getWalletTokenDeltas(tx: HeliusParsedTransaction, walletAddress: string
   const positives = deltas.filter((entry) => entry.delta > 0n);
   if (negatives.length === 0 || positives.length === 0) return null;
 
-  const tokenIn = negatives.sort((a, b) => (a.delta < b.delta ? -1 : 1))[0];
-  const tokenOut = positives.sort((a, b) => (a.delta > b.delta ? -1 : 1))[0];
+  const tokenIn = negatives.reduce((min, current) => (current.delta < min.delta ? current : min));
+  const tokenOut = positives.reduce((max, current) => (current.delta > max.delta ? current : max));
 
   if (!tokenIn || !tokenOut) return null;
 
@@ -184,7 +202,7 @@ async function backfillWallet(address: string) {
       amountOut: parsed.amountOut,
       direction: parsed.direction,
       targetToken: parsed.targetToken,
-      programId: tx.transaction?.message?.instructions?.[0]?.programId ?? null,
+      programId: extractProgramId(tx),
       slot: tx.slot ?? null,
       timestamp,
       blockTime
