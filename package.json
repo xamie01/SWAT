@@ -1,0 +1,25 @@
+{
+  "name": "swat",
+  "private": true,
+  "packageManager": "pnpm@10.2.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:migrate": "pnpm --filter @swat/db migrate",
+    "dev:api": "pnpm --filter @swat/api dev",
+    "dev:indexer": "pnpm --filter @swat/indexer dev",
+    "dev:signals": "pnpm --filter @swat/signal-engine dev",
+    "dev:alerts": "pnpm --filter @swat/alert-service dev",
+    "dev:web": "pnpm --filter @swat/web dev",
+    "dev:trade": "pnpm --filter @swat/trade-executor dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "tsx": "^4.19.3",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.3"
+  }
+}
