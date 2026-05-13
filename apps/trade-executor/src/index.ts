@@ -6,76 +6,133 @@ const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const mode = process.env.TRADING_MODE ?? 'paper';
 
+const TROJAN_WEBHOOK_URL = process.env.TROJAN_WEBHOOK_URL;
+const TROJAN_API_KEY = process.env.TROJAN_API_KEY;
+const BASE_POSITION_SOL = parseFloat(process.env.BASE_POSITION_SOL ?? '0.5');
+const AUTO_EXECUTE = process.env.AUTO_EXECUTE === 'true';
+const AUTO_EXECUTE_MIN_SCORE = Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 90);
+
 let consecutiveFailures = 0;
 
-const TROJAN_WEBHOOK_URL = process.env.TROJAN_WEBHOOK_URL;
-const BASE_POSITION_SOL = 0.1; // Base position size
+// ─── Position Sizing (§9.5 of swat.md) ───────────────────────────────────────
 
-function calculatePositionSize(score: number): number {
-  if (score >= 95) return BASE_POSITION_SOL * 2.0; // High conviction
-  if (score >= 90) return BASE_POSITION_SOL * 1.5;
-  if (score >= 80) return BASE_POSITION_SOL * 1.0;
-  return 0; // Below threshold
+type ClusterTier = 'elite' | 'pro' | 'promising' | 'speculative';
+
+const TIER_MULTIPLIER: Record<ClusterTier, number> = {
+  elite:       1.0,
+  pro:         0.75,
+  promising:   0.5,
+  speculative: 0.25
+};
+
+function calculatePositionSize(score: number, clusterTier: ClusterTier = 'promising'): number {
+  const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
+  const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
+  return Number((BASE_POSITION_SOL * tierMult * scoreMult).toFixed(4));
 }
+
+// ─── Trojan API integration ───────────────────────────────────────────────────
+
+async function triggerTrojan(params: {
+  tokenMint: string;
+  amountSol: number;
+  slippageBps?: number;
+}) {
+  const url = TROJAN_WEBHOOK_URL;
+  if (!url) throw new Error('TROJAN_WEBHOOK_URL is not configured');
+
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (TROJAN_API_KEY) {
+    headers['Authorization'] = `Bearer ${TROJAN_API_KEY}`;
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      action:          'buy',
+      token:           params.tokenMint,
+      amount:          params.amountSol,
+      slippage:        (params.slippageBps ?? 1500) / 100, // bps → %
+      mev_protection:  true,
+      source:          'SWAT_ENGINE'
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Trojan API error ${response.status}: ${text}`);
+  }
+
+  return response.json();
+}
+
+// ─── Worker ───────────────────────────────────────────────────────────────────
 
 new Worker(
   'swat:trades',
   async (job) => {
     if (consecutiveFailures >= DEFAULT_RISK_CONFIG.maxConsecutiveFailures) {
-      throw new Error('Circuit breaker active: too many consecutive failures');
+      throw new Error('[trade-executor] Circuit breaker active: too many consecutive failures');
     }
 
-    const payload = job.data as { signalId: string; score: number; tokenMint: string };
+    const payload = job.data as {
+      signalId: string;
+      score: number;
+      tokenMint: string;
+      clusterTier?: ClusterTier;
+      manual?: boolean;
+    };
 
-    if (payload.score < 80) {
-      return { status: 'ignored', reason: 'score below auto execute threshold' };
-    }
-
-    const sizeSol = calculatePositionSize(payload.score);
-
-    if (mode === 'paper') {
-      console.log(`[trade-executor] PAPER MODE: Would execute buy for ${payload.tokenMint} with ${sizeSol} SOL`);
+    // Auto-execute only fires above the configured threshold unless manually triggered
+    if (!payload.manual && (!AUTO_EXECUTE || payload.score < AUTO_EXECUTE_MIN_SCORE)) {
       return {
-        status: 'paper-filled',
-        signalId: payload.signalId,
-        sizeSol,
-        note: 'Paper mode execution only, no on-chain swap sent'
+        status: 'skipped',
+        reason: `Auto-execute disabled or score ${payload.score} < threshold ${AUTO_EXECUTE_MIN_SCORE}`
       };
     }
 
-    // Live Execution via Trojan Bot Webhook
-    if (!TROJAN_WEBHOOK_URL) {
-      throw new Error('TROJAN_WEBHOOK_URL is missing in live mode');
+    const sizeSol = calculatePositionSize(payload.score, payload.clusterTier ?? 'promising');
+
+    if (sizeSol <= 0) {
+      return { status: 'skipped', reason: 'Position size calculated to 0' };
     }
 
-    const response = await fetch(TROJAN_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        action: 'buy',
-        tokenAddress: payload.tokenMint,
-        amountSol: sizeSol,
-        slippageBps: 200,
-        priorityFeeSol: 0.005,
-        source: 'SWAT_ENGINE'
-      })
+    if (mode === 'paper') {
+      console.log(`[trade-executor] PAPER: would buy ${payload.tokenMint} with ${sizeSol} SOL (score: ${payload.score})`);
+      return {
+        status:    'paper-filled',
+        signalId:  payload.signalId,
+        tokenMint: payload.tokenMint,
+        sizeSol,
+        mode:      'paper'
+      };
+    }
+
+    // Live execution via Trojan
+    const result = await triggerTrojan({
+      tokenMint:   payload.tokenMint,
+      amountSol:   sizeSol,
+      slippageBps: 1500
     });
 
-    if (!response.ok) {
-      throw new Error(`Trojan webhook failed: ${response.status}`);
-    }
-
-    console.log(`[trade-executor] LIVE MODE: Executed buy for ${payload.tokenMint} with ${sizeSol} SOL via Trojan`);
-    return { status: 'live-executed', signalId: payload.signalId, sizeSol };
+    console.log(`[trade-executor] LIVE: executed buy for ${payload.tokenMint} @ ${sizeSol} SOL`);
+    return {
+      status:    'live-executed',
+      signalId:  payload.signalId,
+      tokenMint: payload.tokenMint,
+      sizeSol,
+      trojanResult: result
+    };
   },
-  {
-    connection: redis
-  }
-).on('failed', (_job, err) => {
-  consecutiveFailures += 1;
-  console.error('[trade-executor] job failed', err.message);
-}).on('completed', () => {
-  consecutiveFailures = 0;
-});
+  { connection: redis }
+)
+  .on('failed', (_job, err) => {
+    consecutiveFailures++;
+    console.error('[trade-executor] job failed', err.message);
+  })
+  .on('completed', () => {
+    consecutiveFailures = 0;
+  });
 
-console.log(`[trade-executor] service running in ${mode} mode`);
+console.log(`[trade-executor] running in ${mode} mode | auto-execute: ${AUTO_EXECUTE} (min score: ${AUTO_EXECUTE_MIN_SCORE})`);

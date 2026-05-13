@@ -17,13 +17,52 @@ export type ParsedTransactionInsert = {
   blockTime?: number | null;
 };
 
-export async function upsertToken(mint: string) {
-  await query(
-    `INSERT INTO tokens (mint)
-     VALUES ($1)
-     ON CONFLICT (mint) DO NOTHING`,
+export type TokenMintInfo = {
+  decimals?: number | null;
+  mintAuthorityDisabled?: boolean | null;
+  freezeAuthorityDisabled?: boolean | null;
+  symbol?: string | null;
+  name?: string | null;
+};
+
+/**
+ * Upsert a token record. On first insert, optionally populate metadata.
+ * On subsequent calls, only updates fields that are provided.
+ */
+export async function upsertToken(mint: string, info?: TokenMintInfo) {
+  if (info) {
+    await query(
+      `INSERT INTO tokens (mint, decimals, mint_authority_disabled, freeze_authority_disabled, symbol, name)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (mint) DO UPDATE SET
+         decimals = COALESCE(EXCLUDED.decimals, tokens.decimals),
+         mint_authority_disabled = COALESCE(EXCLUDED.mint_authority_disabled, tokens.mint_authority_disabled),
+         freeze_authority_disabled = COALESCE(EXCLUDED.freeze_authority_disabled, tokens.freeze_authority_disabled),
+         symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
+         name = COALESCE(EXCLUDED.name, tokens.name)`,
+      [
+        mint,
+        info.decimals ?? null,
+        info.mintAuthorityDisabled ?? null,
+        info.freezeAuthorityDisabled ?? null,
+        info.symbol ?? null,
+        info.name ?? null
+      ]
+    );
+  } else {
+    await query(
+      `INSERT INTO tokens (mint) VALUES ($1) ON CONFLICT (mint) DO NOTHING`,
+      [mint]
+    );
+  }
+}
+
+export async function getTokenDecimals(mint: string): Promise<number | null> {
+  const rows = await query<{ decimals: number | null }>(
+    `SELECT decimals FROM tokens WHERE mint = $1`,
     [mint]
   );
+  return rows[0]?.decimals ?? null;
 }
 
 export async function insertParsedTransaction(input: ParsedTransactionInsert) {
