@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool } from './client.js';
 
@@ -7,10 +7,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 async function main() {
-  const migrationPath = resolve(__dirname, '../sql/001_init.sql');
-  const sql = await readFile(migrationPath, 'utf-8');
-  await pool.query(sql);
-  console.log('Migration completed: 001_init.sql');
+  const sqlDir = resolve(__dirname, '../sql');
+  const files = await readdir(sqlDir);
+  const sqlFiles = files.filter(f => f.endsWith('.sql')).sort();
+  
+  for (const file of sqlFiles) {
+    const filePath = join(sqlDir, file);
+    const sql = await readFile(filePath, 'utf-8');
+    await pool.query(sql);
+    console.log(`Migration completed: ${file}`);
+  }
+  
   await pool.end();
 }
 

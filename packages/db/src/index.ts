@@ -2,3 +2,6 @@ export * from './client.js';
 export * from './wallets.js';
 export * from './signals.js';
 export * from './transactions.js';
+export * from './scoring-queries.js';
+export * from './discovery-queries.js';
+export * from './clustering-queries.js';

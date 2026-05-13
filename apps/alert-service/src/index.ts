@@ -33,23 +33,44 @@ function formatSignalAlert(payload: {
   tokenMint?: string;
   clusterId?: string;
   buyerCount?: number;
+  buyVolume?: number;
   confidence?: number;
   score?: number;
   window?: string;
+  isSafe?: boolean;
+  warnings?: string[];
 }) {
   const ca = payload.tokenMint ?? 'N/A';
+  
+  const header = payload.isSafe === false ? '⚠️ UNSAFE SIGNAL DETECTED' : '🚨 SWAT SIGNAL';
+  const action = payload.isSafe === false 
+    ? '🛑 Action: Do NOT trade. Execution blocked.' 
+    : '✅ Action: Safe for execution.';
+    
   const lines = [
-    '🚨 SWAT SIGNAL',
+    header,
     '',
     `CA: ${ca}`,
     `Pattern: ${payload.pattern}`,
     `Score: ${payload.score ?? 'N/A'} | Confidence: ${payload.confidence ?? 'N/A'}%`,
     `Cluster: ${payload.clusterId ?? 'N/A'}`,
-    `Buyers: ${payload.buyerCount ?? 'N/A'} in ${payload.window ?? 'N/A'}`,
-    '',
-    `Signal ID: ${payload.signalId}`,
-    'Action: Paste CA into your execution bot.'
   ];
+  
+  if (payload.buyerCount) lines.push(`Buyers: ${payload.buyerCount} in ${payload.window ?? 'N/A'}`);
+  if (payload.buyVolume) lines.push(`Volume: $${payload.buyVolume} in ${payload.window ?? 'N/A'}`);
+  
+  lines.push('');
+  lines.push(`Signal ID: ${payload.signalId}`);
+  
+  if (payload.isSafe === false && payload.warnings && payload.warnings.length > 0) {
+    lines.push('');
+    lines.push('⚠️ WARNINGS:');
+    payload.warnings.forEach(w => lines.push(`- ${w}`));
+  }
+  
+  lines.push('');
+  lines.push(action);
+  
   return lines.join('\n');
 }
 
@@ -62,9 +83,12 @@ new Worker(
       tokenMint?: string;
       clusterId?: string;
       buyerCount?: number;
+      buyVolume?: number;
       confidence?: number;
       score?: number;
       window?: string;
+      isSafe?: boolean;
+      warnings?: string[];
     };
     await sendTelegram(formatSignalAlert(payload));
     return { sent: true };

@@ -14,7 +14,9 @@
     "dev:signals": "pnpm --filter @swat/signal-engine dev",
     "dev:alerts": "pnpm --filter @swat/alert-service dev",
     "dev:web": "pnpm --filter @swat/web dev",
-    "dev:trade": "pnpm --filter @swat/trade-executor dev"
+    "dev:trade": "pnpm --filter @swat/trade-executor dev",
+    "dev:scorer": "pnpm --filter @swat/scorer dev",
+    "dev:discovery": "pnpm --filter @swat/discovery dev"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",

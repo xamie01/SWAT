@@ -1,7 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { insertParsedTransaction, refreshWalletActivity, upsertToken, upsertWallet } from '@swat/db';
-import { REDIS_CHANNELS, walletInputSchema } from '@swat/shared';
+import { REDIS_CHANNELS, walletInputSchema, fetchTokenPriceUsd } from '@swat/shared';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
@@ -147,6 +147,50 @@ function getWalletTokenDeltas(tx: HeliusParsedTransaction, walletAddress: string
   };
 }
 
+async function getCachedSolPrice(): Promise<number> {
+  const cached = await redis.get('sol:price');
+  if (cached) return parseFloat(cached);
+  
+  const price = await fetchTokenPriceUsd(SOL_MINT) ?? 150;
+  await redis.setex('sol:price', 30, price.toString());
+  return price;
+}
+
+async function enrichTransactionUsd(
+  tokenIn: string,
+  tokenOut: string,
+  amountInStr: string,
+  amountOutStr: string,
+  targetToken: string
+): Promise<{ amountInUsd: number | null; amountOutUsd: number | null }> {
+  const solPrice = await getCachedSolPrice();
+
+  if (tokenIn === SOL_MINT) {
+    const amountInUsd = (Number(amountInStr) / 1e9) * solPrice;
+    return { amountInUsd, amountOutUsd: amountInUsd };
+  } else if (tokenOut === SOL_MINT) {
+    const amountOutUsd = (Number(amountOutStr) / 1e9) * solPrice;
+    return { amountInUsd: amountOutUsd, amountOutUsd };
+  }
+
+  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  if (tokenIn === USDC_MINT) {
+    const amountInUsd = Number(amountInStr) / 1e6;
+    return { amountInUsd, amountOutUsd: amountInUsd };
+  } else if (tokenOut === USDC_MINT) {
+    const amountOutUsd = Number(amountOutStr) / 1e6;
+    return { amountInUsd: amountOutUsd, amountOutUsd };
+  }
+
+  const targetPrice = await fetchTokenPriceUsd(targetToken);
+  if (targetPrice) {
+    // Just return null because we don't know the decimals of the target token here easily
+    // without another RPC call, and non-SOL/USDC pairs are rare.
+  }
+  
+  return { amountInUsd: null, amountOutUsd: null };
+}
+
 async function backfillWallet(address: string) {
   if (!heliusRpcUrl) {
     console.warn('[indexer] skipping backfill: HELIUS_API_KEY is not set');
@@ -192,6 +236,15 @@ async function backfillWallet(address: string) {
 
     const blockTime = tx.blockTime;
     const timestamp = new Date(blockTime * 1000);
+    
+    const { amountInUsd, amountOutUsd } = await enrichTransactionUsd(
+      parsed.tokenIn,
+      parsed.tokenOut,
+      parsed.amountIn,
+      parsed.amountOut,
+      parsed.targetToken
+    );
+
     const persisted = await insertParsedTransaction({
       signature,
       walletAddress: address,
@@ -199,6 +252,8 @@ async function backfillWallet(address: string) {
       tokenOut: parsed.tokenOut,
       amountIn: parsed.amountIn,
       amountOut: parsed.amountOut,
+      amountInUsd,
+      amountOutUsd,
       direction: parsed.direction,
       targetToken: parsed.targetToken,
       programId: extractProgramId(tx),

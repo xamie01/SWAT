@@ -5,6 +5,16 @@ import { walletAddressSchema, walletInputSchema } from '@swat/shared';
 
 const app = Fastify({ logger: true });
 
+const API_KEY = process.env.API_KEY || 'swat-dev-key';
+
+app.addHook('onRequest', async (request, reply) => {
+  if (request.url.startsWith('/v1/health')) return;
+  const apiKey = request.headers['x-api-key'];
+  if (apiKey !== API_KEY) {
+    return reply.code(401).send({ error: 'Unauthorized' });
+  }
+});
+
 app.get('/v1/health', async () => ({ status: 'ok', service: 'api', ts: new Date().toISOString() }));
 
 app.get('/v1/wallets', async () => listWallets());

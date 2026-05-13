@@ -7,6 +7,8 @@ export type ParsedTransactionInsert = {
   tokenOut: string;
   amountIn: string;
   amountOut: string;
+  amountInUsd?: number | null;
+  amountOutUsd?: number | null;
   direction: 'buy' | 'sell';
   targetToken: string;
   programId?: string | null;
@@ -33,6 +35,8 @@ export async function insertParsedTransaction(input: ParsedTransactionInsert) {
       token_out,
       amount_in,
       amount_out,
+      amount_in_usd,
+      amount_out_usd,
       direction,
       target_token,
       program_id,
@@ -40,7 +44,7 @@ export async function insertParsedTransaction(input: ParsedTransactionInsert) {
       timestamp,
       block_time
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT (signature, wallet_address, target_token) DO NOTHING
     RETURNING id`,
     [
@@ -50,6 +54,8 @@ export async function insertParsedTransaction(input: ParsedTransactionInsert) {
       input.tokenOut,
       input.amountIn,
       input.amountOut,
+      input.amountInUsd ?? null,
+      input.amountOutUsd ?? null,
       input.direction,
       input.targetToken,
       input.programId ?? null,

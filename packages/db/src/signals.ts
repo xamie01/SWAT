@@ -7,12 +7,14 @@ type SignalInput = {
   confidence: number;
   signalScore: number;
   triggerData: Record<string, unknown>;
+  safetyFlags?: string[];
+  safetyWarnings?: string[];
 };
 
 export async function insertSignal(input: SignalInput) {
   const rows = await query(
-    `INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
     [
       input.patternType,
@@ -20,7 +22,9 @@ export async function insertSignal(input: SignalInput) {
       input.tokenMint ?? null,
       input.confidence,
       input.signalScore,
-      JSON.stringify(input.triggerData)
+      JSON.stringify(input.triggerData),
+      input.safetyFlags ?? [],
+      input.safetyWarnings ?? []
     ]
   );
   return rows[0];
@@ -34,13 +38,13 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
       WHERE pattern_type = $1
         AND cluster_id IS NOT DISTINCT FROM $2::uuid
         AND token_mint IS NOT DISTINCT FROM $3::varchar
-        AND created_at > NOW() - make_interval(mins => $7::int)
+        AND created_at > NOW() - make_interval(mins => $9::int)
       ORDER BY created_at DESC
       LIMIT 1
     ),
     inserted AS (
-      INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, expires_at)
-      SELECT $1, $2, $3, $4, $5, $6, NOW() + make_interval(mins => $7::int)
+      INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings, expires_at)
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, NOW() + make_interval(mins => $9::int)
       WHERE NOT EXISTS (SELECT 1 FROM existing)
       RETURNING *
     )
@@ -54,6 +58,8 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
       input.confidence,
       input.signalScore,
       JSON.stringify(input.triggerData),
+      input.safetyFlags ?? [],
+      input.safetyWarnings ?? [],
       dedupeMinutes
     ]
   );
