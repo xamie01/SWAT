@@ -1,5 +1,4 @@
 import { query } from '@swat/db';
-import { fetchDexScreenerPrice } from '@swat/shared';
 
 export type SafetyResult = {
   isSafe: boolean;

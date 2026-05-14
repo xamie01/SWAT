@@ -38,13 +38,13 @@ Everything else can stay at defaults for local dev.
 ## Step 2 — Start Infrastructure
 
 ```bash
-docker-compose up -d postgres redis
+sudo docker-compose up -d postgres redis
 ```
 
 Verify both containers are running:
 
 ```bash
-docker-compose ps
+sudo docker-compose ps
 ```
 
 ---

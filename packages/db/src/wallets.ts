@@ -30,7 +30,10 @@ export async function upsertWallet(wallet: WalletInsert) {
      VALUES ($1, $2, $3)
      ON CONFLICT (address) DO UPDATE SET
        nickname = COALESCE(EXCLUDED.nickname, wallets.nickname),
-       source = EXCLUDED.source,
+       source = CASE
+         WHEN wallets.source IN ('manual', 'shiller') THEN wallets.source
+         ELSE EXCLUDED.source
+       END,
        updated_at = NOW()
      RETURNING *`,
     [wallet.address, wallet.source, wallet.nickname ?? null]

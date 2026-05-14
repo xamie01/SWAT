@@ -18,6 +18,7 @@
     "@swat/shared": "workspace:*",
     "bullmq": "^5.52.1",
     "fastify": "^5.0.0",
+    "fastify-raw-body": "^5.0.0",
     "ioredis": "^5.6.1"
   }
 }

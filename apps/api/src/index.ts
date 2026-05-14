@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { Redis } from 'ioredis';
+import { Queue } from 'bullmq';
 import {
-  listSignals,
   deleteWallet,
   getWallet,
   listWallets,
@@ -13,6 +13,7 @@ import { walletAddressSchema, walletInputSchema } from '@swat/shared';
 const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const tradeQueue = new Queue('swat:trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -300,13 +301,7 @@ app.get('/v1/signals', async (req) => {
   return { items: await query(sql, params) };
 });
 
-app.get('/v1/signals/:id', async (req, reply) => {
-  const { id } = req.params as { id: string };
-  const [signal] = await query(`SELECT * FROM signals WHERE id = $1`, [id]);
-  if (!signal) return reply.code(404).send({ error: 'Signal not found' });
-  return { item: signal };
-});
-
+// NOTE: /stats must be registered BEFORE /:id, otherwise Fastify matches 'stats' as an :id
 app.get('/v1/signals/stats', async () => {
   const [stats] = await query(`
     SELECT
@@ -318,6 +313,13 @@ app.get('/v1/signals/stats', async () => {
     FROM signals
   `);
   return stats ?? {};
+});
+
+app.get('/v1/signals/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const [signal] = await query(`SELECT * FROM signals WHERE id = $1`, [id]);
+  if (!signal) return reply.code(404).send({ error: 'Signal not found' });
+  return { item: signal };
 });
 
 app.post('/v1/signals/:id/ignore', async (req, reply) => {
@@ -333,13 +335,13 @@ app.post('/v1/signals/:id/execute', async (req, reply) => {
   );
   if (!signal) return reply.code(404).send({ error: 'Signal not found' });
 
-  // Enqueue to trade executor
-  await redis.publish('swat:trade:queue', JSON.stringify({
+  // Enqueue to trade executor via BullMQ (not redis pubsub)
+  await tradeQueue.add('signal-trade', {
     signalId: id,
     score: signal.signal_score,
     tokenMint: signal.token_mint,
     manual: true
-  }));
+  }, { removeOnComplete: true });
   return { queued: true };
 });
 

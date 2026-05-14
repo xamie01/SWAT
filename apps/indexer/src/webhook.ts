@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import fastifyRawBody from 'fastify-raw-body';
 import crypto from 'node:crypto';
 import { upsertWallet, refreshWalletActivity } from '@swat/db';
 import { processTransaction } from './index.js';
@@ -8,18 +9,31 @@ const webhookPort = Number(process.env.WEBHOOK_PORT ?? 3002);
 
 const app = Fastify({ logger: true });
 
+// Register raw body plugin — needed to access the unparsed body for HMAC verification
+await app.register(fastifyRawBody, {
+  field: 'rawBody',
+  global: false,       // Only attach to routes that opt in
+  encoding: false,     // Return Buffer, not string
+  runFirst: true       // Run before JSON parser
+});
+
 /**
  * Helius sends a SHA-256 HMAC in the 'Authorization' header.
  * Verify it to ensure the request is authentic.
  */
-function verifyHeliusSignature(rawBody: Buffer, authHeader: string | undefined): boolean {
+function verifyHeliusSignature(rawBody: Buffer | undefined, authHeader: string | undefined): boolean {
   if (!webhookSecret) {
     console.warn('[webhook] HELIUS_WEBHOOK_SECRET not set — skipping signature verification');
     return true;
   }
-  if (!authHeader) return false;
+  if (!authHeader || !rawBody) return false;
   const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
+  } catch {
+    // timingSafeEqual throws if lengths differ
+    return false;
+  }
 }
 
 /**
@@ -30,7 +44,7 @@ function verifyHeliusSignature(rawBody: Buffer, authHeader: string | undefined):
 app.post('/webhook/helius', {
   config: { rawBody: true }
 }, async (req, reply) => {
-  const rawBody = (req as any).rawBody as Buffer;
+  const rawBody = (req as any).rawBody as Buffer | undefined;
   const authHeader = req.headers['authorization'] as string | undefined;
 
   if (!verifyHeliusSignature(rawBody, authHeader)) {
