@@ -6,11 +6,48 @@
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Node.js | 20+ | `nvm install 20` |
-| pnpm | 9+ | `npm install -g pnpm` |
-| Docker | any | [docker.com](https://docs.docker.com/get-docker/) |
+| Tool | Min Version | Install |
+|------|-------------|---------|
+| Node.js | **22+** | See below |
+| pnpm | **9+** | `sudo npm install -g pnpm` |
+| Docker | any | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
+
+### Installing Node.js 22 (Ubuntu/Debian)
+
+The pnpm workspace requires Node.js 22. The default Ubuntu apt repository ships v18 which is too old.
+
+```bash
+# Download the NodeSource setup script for Node 22
+curl -fsSL https://deb.nodesource.com/setup_22.x -o setup_node22.sh
+sudo bash setup_node22.sh
+sudo apt-get install -y nodejs
+
+# Verify
+node -v   # should print v22.x.x
+
+# Install pnpm
+sudo npm install -g pnpm
+pnpm -v   # should print 9.x.x or higher
+```
+
+### Installing Docker (Ubuntu)
+
+```bash
+# Official Docker install script (recommended over apt)
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Add your user to the docker group (avoids needing sudo every time)
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Install docker-compose
+sudo apt install -y docker-compose
+
+# Verify
+docker --version
+docker-compose --version
+```
 
 ---
 
@@ -22,30 +59,32 @@ cd SWAT
 cp .env.example .env
 ```
 
-Open `.env` and fill in at minimum:
+Open `.env` and fill in the **minimum required** values:
 
 ```bash
-HELIUS_API_KEY=          # Required — get from helius.dev
-TELEGRAM_BOT_TOKEN=      # Required — get from @BotFather
-TELEGRAM_CHAT_ID=        # Required — your Telegram chat/group ID
-API_KEY=some-secret-key  # Change from default
+HELIUS_API_KEY=          # Required — get from helius.dev (free tier works)
+TELEGRAM_BOT_TOKEN=      # Required — get from @BotFather on Telegram
+TELEGRAM_CHAT_ID=        # Required — your personal chat ID or group ID
+API_KEY=some-secret-key  # Required — change from the default 'swat-dev-key'
 ```
 
-Everything else can stay at defaults for local dev.
+> Everything else has safe defaults for local development.
 
 ---
 
 ## Step 2 — Start Infrastructure
 
 ```bash
-sudo docker-compose up -d postgres redis
+docker-compose up -d postgres redis
 ```
 
-Verify both containers are running:
+Verify both containers are healthy:
 
 ```bash
-sudo docker-compose ps
+docker-compose ps
 ```
+
+You should see `postgres` and `redis` with status `Up`.
 
 ---
 
@@ -57,77 +96,90 @@ pnpm db:migrate
 ```
 
 This runs all SQL migrations in order:
-- `001_init.sql` — base schema
-- `002_schema_alignment.sql` — enrichment fields
-- `003_fix_clustering.sql` — unique indexes + config alignment
+- `001_init.sql` — base schema (wallets, tokens, transactions, signals, trades)
+- `002_schema_alignment.sql` — adds enrichment columns (execution_mode, amount_sol, safety_flags)
+- `003_fix_clustering.sql` — UNIQUE index on cluster names + aligns config thresholds to spec
 
 ---
 
-## Step 4 — Seed Initial Wallets
+## Step 4 — Wallet Seeding (How It Works)
 
-Option A — via environment variable (indexer starts and backfills automatically):
+You do **not** need to fill `WALLET_ADDRESSES` to get started. The system has three ways to bring wallets in — you only need one:
 
-```bash
-# In .env:
-WALLET_ADDRESSES=wallet1address,wallet2address,wallet3address
-```
+### Option A — Seed token CA (Recommended for first run)
 
-Option B — via API after services are running:
+You give SWAT a token contract address. It scans on-chain history, finds wallets that bought it **within the first 10 minutes** with 0.5+ SOL, and auto-adds them as tracked wallets.
 
 ```bash
+# Run this after services are started (Step 5)
 curl -X POST http://localhost:3001/v1/discovery/from-token \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-api-key" \
-  -d '{"tokenMint": "YOUR_SEED_TOKEN_MINT"}'
+  -d '{"tokenMint": "TOKEN_CA_HERE"}'
 ```
+
+### Option B — Add known wallet addresses directly
+
+If you already know which elite wallets to track:
+
+```bash
+curl -X POST http://localhost:3001/v1/wallets \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"wallets": [{"address": "WALLET_ADDRESS_HERE", "source": "manual"}]}'
+```
+
+### Option C — Pre-seed via .env (startup only)
+
+```bash
+# In .env — comma-separated, no spaces
+WALLET_ADDRESSES=wallet1,wallet2,wallet3
+```
+
+The indexer reads this on startup and queues a backfill for each address automatically.
+
+### Auto-discovery (runs nightly — no action required)
+
+Once you have any elite/pro-tier wallets tracked, the system expands itself:
+- **02:00 UTC** — scorer re-ranks all wallets, assigns tiers
+- **02:30 UTC** — discovery finds wallets funded by your elites + frequent co-buyers
+- Newly discovered wallets are ingested and scored on the next cycle
 
 ---
 
 ## Step 5 — Start All Services
 
-### Local development (all services in parallel):
+### All services in parallel (recommended):
 
 ```bash
 turbo run dev
 ```
 
-### Or start individually in separate terminals:
+### Or individually in separate terminals:
 
 ```bash
-pnpm dev:api        # REST API         → http://localhost:3001
-pnpm dev:indexer    # Backfill + Webhook listener → port 3002
-pnpm dev:signals    # Pattern detection (runs every 15s)
-pnpm dev:alerts     # Telegram delivery worker
-pnpm dev:scorer     # Nightly scoring (02:00 UTC) — runs on startup if RUN_ON_STARTUP=true
-pnpm dev:discovery  # Nightly discovery (02:30 UTC) — same flag
-pnpm dev:web        # Next.js dashboard → http://localhost:3000
+pnpm dev:api        # REST API              → http://localhost:3001
+pnpm dev:indexer    # Backfill + Webhook    → port 3002
+pnpm dev:signals    # Pattern detection       (polls every 15s)
+pnpm dev:alerts     # Telegram delivery       (BullMQ worker)
+pnpm dev:scorer     # Nightly scoring         (02:00 UTC cron)
+pnpm dev:discovery  # Nightly wallet discovery (02:30 UTC cron)
+pnpm dev:web        # Next.js dashboard     → http://localhost:3000
 ```
 
 ---
 
-## Step 6 — Register Helius Webhook (Real-Time Mode)
-
-To get < 3-second signal latency, register your server URL with Helius:
-
-1. Go to [helius.dev](https://helius.dev) → Dashboard → Webhooks
-2. Click **Add Webhook**
-3. Set URL to: `https://your-domain.com/webhook/helius`
-4. Type: **Enhanced Transactions**
-5. Set Secret: copy your `HELIUS_WEBHOOK_SECRET` from `.env`
-6. Add tracked wallet addresses
-
-> **Local testing:** Use `ngrok http 3002` to expose your local webhook port.
-
----
-
-## Step 7 — Verify Everything Works
+## Step 6 — Verify Everything Works
 
 ```bash
-# Health check
+# Health check (no auth required)
 curl http://localhost:3001/v1/health
 
-# Stats (should reflect real DB counts after seeding)
+# Live stats from DB
 curl -H "x-api-key: your-api-key" http://localhost:3001/v1/stats
+
+# Tracked wallets
+curl -H "x-api-key: your-api-key" http://localhost:3001/v1/wallets
 
 # Recent signals
 curl -H "x-api-key: your-api-key" http://localhost:3001/v1/signals
@@ -138,46 +190,74 @@ open http://localhost:3000
 
 ---
 
-## Production Deployment (VPS — Hetzner CX21, ~$6/mo)
+## Step 7 — Register Helius Webhook (Real-Time Mode)
+
+Without this step, the system polls every 15 seconds. With it, signals fire in **< 3 seconds**.
+
+1. Go to [helius.dev](https://helius.dev) → Dashboard → Webhooks
+2. Click **Add Webhook**
+3. **URL:** `https://your-domain.com/webhook/helius`
+4. **Type:** Enhanced Transactions
+5. **Secret:** paste your `HELIUS_WEBHOOK_SECRET` value
+6. **Addresses:** add the wallet addresses you're tracking
+
+> **Local testing:** Use `ngrok http 3002` to get a public URL pointing to your local webhook server.
+
+---
+
+## Production Deployment (VPS)
+
+Recommended: Hetzner CX21 (~$6/mo) or any Ubuntu 22.04 VPS.
 
 ### 1. Server setup
 
 ```bash
-# On your VPS (Ubuntu 22.04)
-apt update && apt install -y docker.io docker-compose git curl
+# Node.js 22
+curl -fsSL https://deb.nodesource.com/setup_22.x -o setup_node22.sh
+sudo bash setup_node22.sh
+sudo apt-get install -y nodejs
 
-# Install Node + pnpm
-curl -fsSL https://get.pnpm.io/install.sh | sh
-source ~/.bashrc
-pnpm env use --global 20
+# Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+sudo apt install -y docker-compose
+
+# pnpm
+sudo npm install -g pnpm pm2
 ```
 
-### 2. Clone, configure, and start
+### 2. Clone, configure, build
 
 ```bash
 git clone <your-repo>
 cd SWAT
 cp .env.example .env
-nano .env   # Fill in real keys
+nano .env          # Fill in all required keys
 
 docker-compose up -d
-pnpm install && pnpm db:migrate
+pnpm install
+pnpm db:migrate
+```
 
-# Run as background processes (use PM2 or systemd)
-npm install -g pm2
+### 3. Run services with PM2
+
+```bash
 pm2 start "pnpm dev:api"       --name swat-api
 pm2 start "pnpm dev:indexer"   --name swat-indexer
 pm2 start "pnpm dev:signals"   --name swat-signals
 pm2 start "pnpm dev:alerts"    --name swat-alerts
 pm2 start "pnpm dev:scorer"    --name swat-scorer
 pm2 start "pnpm dev:discovery" --name swat-discovery
-pm2 startup && pm2 save
+
+# Auto-restart on server reboot
+pm2 startup
+pm2 save
 ```
 
-### 3. Reverse proxy (Caddy — auto HTTPS)
+### 4. Reverse proxy with Caddy (auto HTTPS)
 
 ```bash
-apt install -y caddy
+sudo apt install -y caddy
 ```
 
 `/etc/caddy/Caddyfile`:
@@ -193,60 +273,72 @@ app.yourdomain.com {
 ```
 
 ```bash
-systemctl reload caddy
+sudo systemctl reload caddy
 ```
 
 ---
 
-## Key Variables Reference
+## Environment Variables Reference
 
-| Variable | Default | Required | Purpose |
+| Variable | Default | Required | Used By |
 |---|---|---|---|
-| `HELIUS_API_KEY` | — | ✅ Yes | RPC + backfill |
-| `HELIUS_WEBHOOK_SECRET` | — | For live mode | Webhook HMAC verification |
-| `TELEGRAM_BOT_TOKEN` | — | ✅ Yes | Alert delivery |
-| `TELEGRAM_CHAT_ID` | — | ✅ Yes | Alert target |
-| `API_KEY` | `swat-dev-key` | ✅ Change it | API auth |
-| `TROJAN_WEBHOOK_URL` | — | Live trading | Auto-execution |
-| `TROJAN_API_KEY` | — | Live trading | Trojan auth |
-| `TRADING_MODE` | `paper` | — | `paper` or `live` |
-| `AUTO_EXECUTE` | `false` | — | Enable auto-trades |
-| `AUTO_EXECUTE_MIN_SCORE` | `90` | — | Min score for auto-trade |
-| `BASE_POSITION_SOL` | `0.5` | — | Base trade size |
-| `RUN_ON_STARTUP` | `false` | — | Run scorer/discovery immediately |
+| `DATABASE_URL` | `postgresql://swat:swat@...` | ✅ Always | All services |
+| `REDIS_URL` | `redis://localhost:6379` | ✅ Always | 5 services |
+| `HELIUS_API_KEY` | — | ✅ Always | Indexer backfill, Safety checks |
+| `TELEGRAM_BOT_TOKEN` | — | ✅ For alerts | alert-service |
+| `TELEGRAM_CHAT_ID` | — | ✅ For alerts | alert-service |
+| `API_KEY` | `swat-dev-key` | ✅ Change it | API auth header |
+| `HELIUS_WEBHOOK_SECRET` | — | Real-time mode | Webhook HMAC verification |
+| `TROJAN_WEBHOOK_URL` | — | Live trading | trade-executor |
+| `TROJAN_API_KEY` | — | Live trading | trade-executor |
+| `PORT` | `3001` | Optional | api |
+| `WEBHOOK_PORT` | `3002` | Optional | indexer webhook |
+| `TRADING_MODE` | `paper` | Optional | trade-executor |
+| `AUTO_EXECUTE` | `false` | Optional | trade-executor |
+| `AUTO_EXECUTE_MIN_SCORE` | `90` | Optional | trade-executor |
+| `BASE_POSITION_SOL` | `0.5` | Optional | trade-executor, alert-service |
+| `MIN_SIGNAL_SCORE` | `70` | Optional | signal-engine |
+| `RUN_ON_STARTUP` | `false` | Optional | scorer, discovery |
+| `WALLET_ADDRESSES` | — | Optional | indexer (startup seed only) |
 
 ---
 
 ## Live Trading Checklist
 
-> **Do not enable `AUTO_EXECUTE=true` until all of these are confirmed:**
+> Do not enable `AUTO_EXECUTE=true` until all boxes are checked:
 
 - [ ] Paper trading running for **2+ weeks**
 - [ ] Signal win rate **> 55%**
 - [ ] Safety checker blocking rate **< 30%**
-- [ ] Fewer than **3 rugs** slipped through safety checks
+- [ ] Fewer than **3 rug slippage events** in 2 weeks
 - [ ] Alert-to-operator latency **< 5 seconds**
-- [ ] `TROJAN_WEBHOOK_URL` tested in paper mode first
-- [ ] Daily spend cap configured in Trojan bot
+- [ ] `TROJAN_WEBHOOK_URL` tested end-to-end in paper mode
+- [ ] Daily spend cap configured inside your Trojan bot settings
 
 ---
 
 ## Useful Commands
 
 ```bash
-# Run scoring batch immediately (without waiting for 02:00 UTC)
+# Force scoring batch to run now (skip the 02:00 UTC wait)
 RUN_ON_STARTUP=true pnpm dev:scorer
 
-# Backfill USD values for existing transactions
+# Force discovery batch now
+RUN_ON_STARTUP=true pnpm dev:discovery
+
+# Backfill USD values for existing un-priced transactions
 npx tsx apps/indexer/src/backfill-usd.ts
 
-# Trigger discovery manually
+# Manually trigger discovery from the API
 curl -X POST http://localhost:3001/v1/discovery/run \
   -H "x-api-key: your-api-key"
 
-# View recent logs (PM2)
+# PM2: tail logs for a specific service
 pm2 logs swat-signals --lines 50
 
-# Check all service status
+# PM2: check all service health
 pm2 status
+
+# PM2: restart a single service
+pm2 restart swat-indexer
 ```
