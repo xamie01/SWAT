@@ -26,7 +26,7 @@ const SWAP_PROGRAM_IDS = new Set([
 const heliusApiKey = process.env.HELIUS_API_KEY;
 const heliusRpcUrl = heliusApiKey ? `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}` : null;
 
-const backfillQueue = new Queue('swat:backfill-wallet', { connection: redis });
+const backfillQueue = new Queue('swat-backfill-wallet', { connection: redis });
 
 export async function ingestWallets(input: Array<{ address: string; source?: 'shiller' | 'manual' | 'discovered'; nickname?: string }>) {
   const parsed = input.map((wallet) => walletInputSchema.safeParse(wallet));
@@ -335,7 +335,7 @@ async function backfillWallet(address: string) {
 // ─── BullMQ Worker ────────────────────────────────────────────────────────────
 
 new Worker(
-  'swat:backfill-wallet',
+  'swat-backfill-wallet',
   async (job) => {
     const address = (job.data as { address: string }).address;
     console.log(`[indexer] backfill started for ${address}`);

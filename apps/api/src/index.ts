@@ -13,7 +13,7 @@ import { walletAddressSchema, walletInputSchema } from '@swat/shared';
 const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const tradeQueue = new Queue('swat:trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+const tradeQueue = new Queue('swat-trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 

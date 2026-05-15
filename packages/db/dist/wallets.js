@@ -1,0 +1,40 @@
+import { query } from './client.js';
+export async function listWallets() {
+    return query(`SELECT address, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
+     FROM wallets
+     ORDER BY composite_score DESC NULLS LAST, created_at DESC`);
+}
+export async function getWallet(address) {
+    const rows = await query(`SELECT address, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
+     FROM wallets
+     WHERE address = $1`, [address]);
+    return rows[0] ?? null;
+}
+export async function upsertWallet(wallet) {
+    const rows = await query(`INSERT INTO wallets (address, source, nickname)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (address) DO UPDATE SET
+       nickname = COALESCE(EXCLUDED.nickname, wallets.nickname),
+       source = CASE
+         WHEN wallets.source IN ('manual', 'shiller') THEN wallets.source
+         ELSE EXCLUDED.source
+       END,
+       updated_at = NOW()
+     RETURNING *`, [wallet.address, wallet.source, wallet.nickname ?? null]);
+    return rows[0];
+}
+export async function deleteWallet(address) {
+    await query('DELETE FROM wallets WHERE address = $1', [address]);
+}
+export async function refreshWalletActivity(address, lastActive, tradeIncrement = 0) {
+    const rows = await query(`UPDATE wallets w
+     SET
+       status = 'active',
+       last_active = COALESCE($2::timestamp, w.last_active, NOW()),
+       total_trades = COALESCE(w.total_trades, 0) + $3::int,
+       updated_at = NOW()
+     WHERE w.address = $1
+     RETURNING *`, [address, lastActive ?? null, tradeIncrement]);
+    return rows[0] ?? null;
+}
+//# sourceMappingURL=wallets.js.map

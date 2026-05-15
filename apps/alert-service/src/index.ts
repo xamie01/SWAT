@@ -205,7 +205,7 @@ async function formatSignalAlert(payload: AlertPayload): Promise<string> {
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
 new Worker(
-  'swat:alerts',
+  'swat-alerts',
   async (job) => {
     const payload = job.data as AlertPayload;
     const message = await formatSignalAlert(payload);

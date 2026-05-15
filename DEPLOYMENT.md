@@ -115,12 +115,11 @@ You give SWAT a token contract address. It scans on-chain history, finds wallets
 curl -X POST http://localhost:3001/v1/discovery/from-token \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-api-key" \
-  -d '{"tokenMint": "TOKEN_CA_HERE"}'
+  -d '{"tokenMint": "b77PRZ39rF5tWL89aARgsaCsC84K5M4Bq41mq7xpump"}'
 ```
 
 ### Option B — Add known wallet addresses directly
 
-If you already know which elite wallets to track:
 
 ```bash
 curl -X POST http://localhost:3001/v1/wallets \
@@ -152,7 +151,7 @@ Once you have any elite/pro-tier wallets tracked, the system expands itself:
 ### All services in parallel (recommended):
 
 ```bash
-turbo run dev
+pnpm dev
 ```
 
 ### Or individually in separate terminals:

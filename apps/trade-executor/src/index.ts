@@ -70,7 +70,7 @@ async function triggerTrojan(params: {
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
 new Worker(
-  'swat:trades',
+  'swat-trades',
   async (job) => {
     if (consecutiveFailures >= DEFAULT_RISK_CONFIG.maxConsecutiveFailures) {
       throw new Error('[trade-executor] Circuit breaker active: too many consecutive failures');

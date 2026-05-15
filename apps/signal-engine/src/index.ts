@@ -6,8 +6,8 @@ import { checkTokenSafety } from './safety.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const alertQueue = new Queue('swat:alerts', { connection: redis });
-const tradeQueue = new Queue('swat:trades', { connection: redis });
+const alertQueue = new Queue('swat-alerts', { connection: redis });
+const tradeQueue = new Queue('swat-trades', { connection: redis });
 
 const MIN_SIGNAL_SCORE = Number(process.env.MIN_SIGNAL_SCORE ?? 70);
 
