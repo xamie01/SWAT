@@ -1,0 +1,5 @@
+
+
+> @swat/alert-service@0.1.0 build /home/xahmie/Documents/SWAT/apps/alert-service
+> tsc -p tsconfig.json
+

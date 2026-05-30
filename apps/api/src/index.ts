@@ -147,16 +147,16 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
       target_token AS mint,
       tok.symbol,
       tok.name,
-      SUM(CASE WHEN direction = 'buy'  THEN amount_in  ELSE 0 END)::bigint AS total_bought,
-      SUM(CASE WHEN direction = 'sell' THEN amount_out ELSE 0 END)::bigint AS total_sold,
+      SUM(CASE WHEN direction = 'buy'  THEN amount_out ELSE 0 END)::bigint AS total_bought,
+      SUM(CASE WHEN direction = 'sell' THEN amount_in  ELSE 0 END)::bigint AS total_sold,
       SUM(CASE WHEN direction = 'buy'  THEN amount_in_usd  ELSE 0 END) AS cost_basis_usd,
       SUM(CASE WHEN direction = 'sell' THEN amount_out_usd ELSE 0 END) AS realized_usd
     FROM transactions t
     LEFT JOIN tokens tok ON t.target_token = tok.mint
     WHERE t.wallet_address = $1
     GROUP BY t.target_token, tok.symbol, tok.name
-    HAVING SUM(CASE WHEN direction = 'buy' THEN amount_in ELSE 0 END)
-         > SUM(CASE WHEN direction = 'sell' THEN amount_out ELSE 0 END)
+    HAVING SUM(CASE WHEN direction = 'buy' THEN amount_out ELSE 0 END)
+         > SUM(CASE WHEN direction = 'sell' THEN amount_in  ELSE 0 END)
     ORDER BY cost_basis_usd DESC NULLS LAST
   `, [address]);
 

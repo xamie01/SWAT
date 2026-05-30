@@ -41,7 +41,7 @@ export async function ingestWallets(input: Array<{ address: string; source?: 'sh
 
   for (const wallet of valid) {
     await upsertWallet(wallet);
-    await backfillQueue.add('backfill-wallet', { address: wallet.address }, { jobId: `backfill:${wallet.address}`, removeOnComplete: true, removeOnFail: 1000 });
+    await backfillQueue.add('backfill-wallet', { address: wallet.address }, { jobId: `backfill-${wallet.address}`, removeOnComplete: true, removeOnFail: 1000 });
   }
 
   return { accepted: valid.length, rejected: parsed.length - valid.length };

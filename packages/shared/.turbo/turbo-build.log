@@ -1,0 +1,5 @@
+
+
+> @swat/shared@0.1.0 build /home/xahmie/Documents/SWAT/packages/shared
+> tsc -p tsconfig.json
+

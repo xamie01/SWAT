@@ -1,0 +1,5 @@
+
+
+> @swat/trade-executor@0.1.0 build /home/xahmie/Documents/SWAT/apps/trade-executor
+> tsc -p tsconfig.json
+

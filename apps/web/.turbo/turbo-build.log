@@ -1,0 +1,28 @@
+
+
+> @swat/web@0.1.0 build /home/xahmie/Documents/SWAT/apps/web
+> next build
+
+   ▲ Next.js 15.5.18
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 51s
+   Linting and checking validity of types     ✓ Linting and checking validity of types 
+   Collecting page data     ✓ Collecting page data 
+ ✓ Generating static pages (5/5)
+   Collecting build traces     ✓ Collecting build traces 
+   Finalizing page optimization     ✓ Finalizing page optimization 
+
+Route (app)                                 Size  First Load JS
+┌ ƒ /                                      127 B         102 kB
+├ ○ /_not-found                            992 B         103 kB
+└ ƒ /signals                               127 B         102 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/1403cfaa-6db8521358bcd91a.js  54.2 kB
+  ├ chunks/159-562cdab042031441.js       45.7 kB
+  └ other shared chunks (total)           1.9 kB
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
