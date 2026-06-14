@@ -55,7 +55,7 @@ SWAT is a **monorepo of microservices** that work together to form an intelligen
 | **`apps/trade-executor`** | Trade execution | Paper-trade logging, Trojan integration, position sizing by tier + score, circuit breaker |
 | **`apps/alert-service`** | Telegram notifications | Rich execution-ready alerts with CA, safety, cluster ROI, suggested entry |
 | **`apps/api`** | REST API | Wallet CRUD, signal/cluster/trade endpoints, discovery triggers, stats |
-| **`apps/web`** | Dashboard | Next.js UI — wallets, signals, clusters (basic scaffold) |
+| **`apps/web`** | Web Dashboard | Interactive UI for wallet management, cluster exploration, discovery triggers, and signal monitoring |
 | **`packages/db`** | Database layer | PostgreSQL schema + query helpers |
 | **`packages/shared`** | Shared utilities | Types, scoring, validation, price fetchers |
 
@@ -128,13 +128,42 @@ pnpm dev:web          # Dashboard on :3000
 
 ---
 
+## Web Interface
+
+Once the services are running, access the **web dashboard** at [http://localhost:3000](http://localhost:3000).
+
+### Available Pages
+
+| Page | URL | Features |
+|------|-----|----------|
+| **Dashboard** | `/` | Live stats (wallets, clusters, signals), recent signal feed |
+| **Signals** | `/signals` | All detected signals with pattern type, confidence, score |
+| **Wallets** | `/wallets` | Add wallets (single or bulk), view tracked wallets with tiers/scores |
+| **Clusters** | `/clusters` | View all clusters, expand to see members |
+| **Setup** | `/setup` | Trigger discovery, bootstrap checklist |
+
+The web UI covers the **entire bootstrap workflow** — no terminal commands required. API endpoints are still available for automation/scripting.
+
+---
+
 ## Getting Your First Signal
 
 Signals only fire when **cluster wallets trade together**. Fresh install = no clusters = no signals. Here's how to bootstrap:
 
+**🎯 Recommended:** Use the **[web interface](http://localhost:3000)** (GUI) for all steps below.  
+**Alternative:** Use the API directly via `curl` (commands shown in each step).
+
 ### Step 1: Ingest seed wallets
 
-Add 5–10 known profitable wallets (find them on [Solscan](https://solscan.io/), [Photon](https://photon-sol.tinyastro.io/), or whale-tracker Discord):
+Add 5–10 known profitable wallets (find them on [Solscan](https://solscan.io/), [Photon](https://photon-sol.tinyastro.io/), or whale-tracker Discord).
+
+**Via Web UI:**
+1. Visit [http://localhost:3000/wallets](http://localhost:3000/wallets)
+2. Use the **"Add Single Wallet"** form or **bulk paste** multiple addresses
+3. Click "Add" — the indexer backfills automatically (~30–60s per wallet)
+
+<details>
+<summary><strong>Via API (click to expand)</strong></summary>
 
 ```bash
 curl -X POST http://localhost:3001/v1/wallets \
@@ -147,62 +176,71 @@ curl -X POST http://localhost:3001/v1/wallets \
     ]
   }'
 ```
-
-The indexer will **automatically backfill** their transaction history (up to 1,000 signatures per wallet). This takes ~30–60 seconds per wallet.
+</details>
 
 ### Step 2: Run the scoring batch
 
-Clustering requires scored wallets. Either:
+Clustering requires scored wallets. The scorer runs **nightly at 02:00 UTC**, or you can trigger it manually:
 
-**Option A:** Set `RUN_ON_STARTUP=true` in `.env` and restart the scorer, or  
-**Option B:** Wait until 02:00 UTC for the nightly cron, or  
-**Option C:** Trigger manually via the API:
+**Via Web UI:**
+1. Visit [http://localhost:3000/setup](http://localhost:3000/setup)
+2. Follow the **"Step 2: Run Scorer Batch"** instructions
+3. Set `RUN_ON_STARTUP=true` in `.env` and restart `pnpm dev:scorer`
 
-```bash
-# (Not exposed yet — add an endpoint or exec into the scorer container)
-```
+<details>
+<summary><strong>What the scorer does</strong></summary>
 
-The scorer will:
 1. Compute metrics (win rate, ROI, early-entry, consistency) per wallet
 2. Assign composite scores + tiers (elite/pro/promising/speculative)
 3. **Generate funding clusters** — wallets funded by the same source get grouped
 4. **Generate behavioral clusters** — wallets that buy the same tokens within 5min get grouped
+</details>
 
-Check clusters were created:
+**Verify clusters were created:**
+- **Web UI:** Visit [http://localhost:3000/clusters](http://localhost:3000/clusters)
+- **API:** `curl -H "X-Api-Key: swat-dev-key" http://localhost:3001/v1/clusters`
 
-```bash
-curl -H "X-Api-Key: swat-dev-key" http://localhost:3001/v1/clusters
-```
-
-If you see `"items": []`, your seed wallets either:
+If you see no clusters, your seed wallets either:
 - Haven't traded recently enough for behavioral clustering
 - Don't have common funders for funding clustering
-- **Solution:** Add more wallets or use the discovery endpoint (next step)
+- **Solution:** Add more wallets or use discovery (Step 3)
 
 ### Step 3: Expand via discovery
 
-Once you have 1–2 scored wallets, auto-discover their network:
+Auto-discover wallets from a profitable token's early buyers (top 50 within 10 min of launch, >0.5 SOL invested).
+
+**Via Web UI:**
+1. Visit [http://localhost:3000/setup](http://localhost:3000/setup)
+2. Scroll to **"Step 3: Discover Wallets from Token"**
+3. Paste a token mint address and click **"Discover Wallets"**
+4. Wait for confirmation — discovered wallets are backfilled automatically
+
+<details>
+<summary><strong>Via API (click to expand)</strong></summary>
 
 ```bash
-# Find wallets that bought a profitable token early
 curl -X POST http://localhost:3001/v1/discovery/from-token \
   -H "X-Api-Key: swat-dev-key" \
   -H "Content-Type: application/json" \
   -d '{"tokenMint": "TokenMintAddress111111111111111111111111111"}'
 ```
+</details>
 
-This finds the top 50 early buyers (within 10 min of launch, >0.5 SOL invested) and ingests them as `source: discovered`.
+After discovery completes, **re-run the scorer** (Step 2) to cluster the new wallets.
 
-Re-run the scorer to cluster the new wallets.
+### Step 4: Monitor for signals
 
-### Step 4: Wait for live activity
-
-The signal-engine polls every **15 seconds** and looks for:
+The signal-engine polls every **15 seconds** and detects 4 patterns:
 
 - **Snipe:** 3+ cluster wallets buy the same token within 5 minutes
 - **Accumulation:** Cluster buys the same token across 3+ days with $50k+ volume
 - **Rotation:** Cluster sells token A and buys token B within 1 hour
 - **Exit:** 50%+ of cluster sells >50% of position within 1 hour
+
+**View signals:**
+- **Web UI:** [http://localhost:3000](http://localhost:3000) (Dashboard) or [http://localhost:3000/signals](http://localhost:3000/signals)
+- **API:** `curl -H "X-Api-Key: swat-dev-key" http://localhost:3001/v1/signals`
+- **Telegram:** Signals with score ≥ 70 auto-send to your configured chat
 
 **When a pattern fires:**
 1. Safety checks run (mint authority, freeze authority, top-holder %, liquidity)
@@ -214,14 +252,14 @@ The signal-engine polls every **15 seconds** and looks for:
 
 ## Verification Checklist
 
-| Check | Command | Expected Output |
-|-------|---------|-----------------|
+| Check | How to Verify | Expected Output |
+|-------|---------------|-----------------|
 | **PostgreSQL up** | `docker ps \| grep postgres` | Container running |
 | **Redis up** | `docker ps \| grep redis` | Container running |
 | **Migrations ran** | `docker exec -it swat-postgres-1 psql -U swat -d swat -c '\dt'` | Lists ~10 tables |
-| **Wallets ingested** | `curl -H "X-Api-Key: swat-dev-key" localhost:3001/v1/wallets` | JSON array with wallets |
-| **Transactions backfilled** | `curl -H "X-Api-Key: swat-dev-key" localhost:3001/v1/wallets/ADDR/history` | Transaction list |
-| **Clusters exist** | `curl -H "X-Api-Key: swat-dev-key" localhost:3001/v1/clusters` | At least 1 cluster |
+| **Web UI accessible** | Visit [http://localhost:3000](http://localhost:3000) | Dashboard loads |
+| **Wallets ingested** | [/wallets](http://localhost:3000/wallets) or `curl -H "X-Api-Key: swat-dev-key" localhost:3001/v1/wallets` | Wallet list visible |
+| **Clusters exist** | [/clusters](http://localhost:3000/clusters) or `curl -H "X-Api-Key: swat-dev-key" localhost:3001/v1/clusters` | At least 1 cluster |
 | **Scorer ran** | Check scorer logs | `"Scored N wallets"`, `"Batch complete"` |
 | **Signal-engine listening** | Check signal-engine logs | `[signal-engine] service running` |
 | **Telegram configured** | Check alert-service logs | No auth errors |
@@ -232,11 +270,11 @@ The signal-engine polls every **15 seconds** and looks for:
 
 ### No signals firing
 
-**Symptom:** Signal-engine runs but `/v1/signals` returns empty.
+**Symptom:** Signal-engine runs but no signals appear on the dashboard or `/v1/signals` returns empty.
 
 **Causes & fixes:**
 
-1. **No clusters exist** → Run the scorer batch, verify `/v1/clusters` is not empty
+1. **No clusters exist** → Run the scorer batch, verify [/clusters](http://localhost:3000/clusters) shows at least 1 cluster
 2. **Cluster wallets not trading** → Wait for live activity or backfill more active wallets
 3. **`MIN_SIGNAL_SCORE` too high** → Lower it in `.env` (default 70)
 4. **Clock skew** → Patterns use `NOW() - INTERVAL` — ensure system time is correct
