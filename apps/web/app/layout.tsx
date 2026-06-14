@@ -12,6 +12,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Link href="/signals">Signals</Link>
           <Link href="/wallets">Wallets</Link>
           <Link href="/clusters">Clusters</Link>
+          <Link href="/setup">Setup</Link>
         </nav>
         <div className="container">
           {children}
