@@ -14,13 +14,19 @@ export async function generateFundingClusters() {
     ON CONFLICT (name) DO NOTHING
   `);
 
-  // Add members — NOTE: correct table is cluster_memberships (not cluster_members)
+  // Add members — NOTE: correct table is cluster_memberships (not cluster_members).
+  // Insert BOTH sides of each funding edge: the funder (wallet_a, after whom the
+  // cluster is named) and the funded wallet (wallet_b). Previously only wallet_b
+  // was inserted, so the funder was missing from its own cluster and
+  // wallet_count was undercounted.
   await query(`
     INSERT INTO cluster_memberships (cluster_id, wallet_address)
-    SELECT c.id, wr.wallet_b
+    SELECT c.id, edge.wallet_address
     FROM wallet_relationships wr
     JOIN wallet_clusters c ON c.name = 'Funding Group ' || wr.wallet_a
+    CROSS JOIN LATERAL (VALUES (wr.wallet_a), (wr.wallet_b)) AS edge(wallet_address)
     WHERE wr.relationship_type = 'funding'
+      AND edge.wallet_address IN (SELECT address FROM wallets)
     ON CONFLICT (cluster_id, wallet_address) DO NOTHING
   `);
 
