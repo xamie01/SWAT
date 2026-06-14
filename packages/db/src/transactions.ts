@@ -65,6 +65,22 @@ export async function getTokenDecimals(mint: string): Promise<number | null> {
   return rows[0]?.decimals ?? null;
 }
 
+/**
+ * Record the earliest observed transaction time for a token as its
+ * launch_timestamp. Only moves the value earlier, never later, so the
+ * estimate converges on the true launch as more history is ingested.
+ *
+ * This powers the early-entry component of the wallet composite score.
+ */
+export async function updateTokenLaunchTimestamp(mint: string, observedAt: Date) {
+  await query(
+    `UPDATE tokens
+       SET launch_timestamp = LEAST(COALESCE(launch_timestamp, $2::timestamp), $2::timestamp)
+     WHERE mint = $1`,
+    [mint, observedAt]
+  );
+}
+
 export async function insertParsedTransaction(input: ParsedTransactionInsert) {
   const rows = await query(
     `INSERT INTO transactions (

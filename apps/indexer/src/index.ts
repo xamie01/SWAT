@@ -5,13 +5,20 @@ import {
   refreshWalletActivity,
   upsertToken,
   upsertWallet,
-  getTokenDecimals
+  getTokenDecimals,
+  updateTokenLaunchTimestamp,
+  recordFundingEdge
 } from '@swat/db';
 import { REDIS_CHANNELS, walletInputSchema, fetchTokenPriceUsd } from '@swat/shared';
+import {
+  extractFundingTransfers,
+  getWalletTokenDeltas,
+  SOL_MINT,
+  type HeliusParsedTransaction
+} from './parse.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 const SWAP_PROGRAM_IDS = new Set([
@@ -43,25 +50,6 @@ export async function ingestWallets(input: Array<{ address: string; source?: 'sh
 // ─── Helius RPC helpers ───────────────────────────────────────────────────────
 
 type HeliusSignature = { signature: string; slot: number; blockTime?: number };
-
-type HeliusTokenBalance = {
-  owner?: string;
-  mint: string;
-  uiTokenAmount?: { amount?: string };
-};
-
-type HeliusParsedTransaction = {
-  slot?: number;
-  blockTime?: number;
-  transaction?: {
-    signatures?: string[];
-    message?: { instructions?: Array<{ programId?: string }> };
-  };
-  meta?: {
-    preTokenBalances?: HeliusTokenBalance[];
-    postTokenBalances?: HeliusTokenBalance[];
-  };
-};
 
 async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!heliusRpcUrl) throw new Error('HELIUS_API_KEY is not set');
@@ -115,52 +103,6 @@ function extractProgramId(tx: HeliusParsedTransaction): string | null {
     .filter((id): id is string => typeof id === 'string');
 
   return ids.find((id) => SWAP_PROGRAM_IDS.has(id)) ?? ids[0] ?? null;
-}
-
-function getWalletTokenDeltas(tx: HeliusParsedTransaction, walletAddress: string) {
-  const pre = tx.meta?.preTokenBalances ?? [];
-  const post = tx.meta?.postTokenBalances ?? [];
-  const balances = new Map<string, { pre: bigint; post: bigint }>();
-
-  for (const item of pre) {
-    if (item.owner !== walletAddress || !item.mint) continue;
-    const amount = BigInt(item.uiTokenAmount?.amount ?? '0');
-    const current = balances.get(item.mint) ?? { pre: 0n, post: 0n };
-    balances.set(item.mint, { pre: current.pre + amount, post: current.post });
-  }
-
-  for (const item of post) {
-    if (item.owner !== walletAddress || !item.mint) continue;
-    const amount = BigInt(item.uiTokenAmount?.amount ?? '0');
-    const current = balances.get(item.mint) ?? { pre: 0n, post: 0n };
-    balances.set(item.mint, { pre: current.pre, post: current.post + amount });
-  }
-
-  const deltas = Array.from(balances.entries())
-    .map(([mint, value]) => ({ mint, delta: value.post - value.pre }))
-    .filter((e) => e.delta !== 0n);
-
-  if (deltas.length < 2) return null;
-
-  const negatives = deltas.filter((e) => e.delta < 0n);
-  const positives = deltas.filter((e) => e.delta > 0n);
-  if (negatives.length === 0 || positives.length === 0) return null;
-
-  const tokenIn = negatives.reduce((min, cur) => cur.delta < min.delta ? cur : min);
-  const tokenOut = positives.reduce((max, cur) => cur.delta > max.delta ? cur : max);
-  if (!tokenIn || !tokenOut) return null;
-
-  const direction: 'buy' | 'sell' = tokenIn.mint === SOL_MINT ? 'buy' : tokenOut.mint === SOL_MINT ? 'sell' : 'buy';
-  const targetToken = direction === 'buy' ? tokenOut.mint : tokenIn.mint;
-
-  return {
-    tokenIn: tokenIn.mint,
-    tokenOut: tokenOut.mint,
-    amountIn: (-tokenIn.delta).toString(),
-    amountOut: tokenOut.delta.toString(),
-    direction,
-    targetToken
-  };
 }
 
 // ─── SOL Price Cache ──────────────────────────────────────────────────────────
@@ -275,6 +217,11 @@ export async function processTransaction(tx: HeliusParsedTransaction, address: s
   });
 
   if (persisted) {
+    // Record earliest-seen time for the traded token (powers early-entry score)
+    // and any SOL-funding edges observed in this transaction.
+    await updateTokenLaunchTimestamp(parsed.targetToken, timestamp);
+    await recordFundingEdges(tx);
+
     await redis.publish(
       REDIS_CHANNELS.walletSwap,
       JSON.stringify({
@@ -289,6 +236,21 @@ export async function processTransaction(tx: HeliusParsedTransaction, address: s
   }
 
   return persisted ? 'inserted' : 'skipped';
+}
+
+/**
+ * Persist any meaningful SOL transfers in this transaction as funding edges.
+ * Best-effort: failures are logged but never block ingestion.
+ */
+async function recordFundingEdges(tx: HeliusParsedTransaction) {
+  const transfers = extractFundingTransfers(tx);
+  for (const t of transfers) {
+    try {
+      await recordFundingEdge(t.source, t.destination, t.lamports);
+    } catch (error) {
+      console.error('[indexer] failed to record funding edge', error);
+    }
+  }
 }
 
 // ─── Backfill ─────────────────────────────────────────────────────────────────

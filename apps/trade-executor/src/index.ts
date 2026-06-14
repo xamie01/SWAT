@@ -1,10 +1,13 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { DEFAULT_RISK_CONFIG } from '@swat/shared';
+import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd } from '@swat/shared';
+import { insertTrade, markSignalExecuted } from '@swat/db';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const mode = process.env.TRADING_MODE ?? 'paper';
+
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 const TROJAN_WEBHOOK_URL = process.env.TROJAN_WEBHOOK_URL;
 const TROJAN_API_KEY = process.env.TROJAN_API_KEY;
@@ -13,6 +16,57 @@ const AUTO_EXECUTE = process.env.AUTO_EXECUTE === 'true';
 const AUTO_EXECUTE_MIN_SCORE = Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 90);
 
 let consecutiveFailures = 0;
+
+// ─── Price helpers ─────────────────────────────────────────────────────────────
+
+/** SOL/USD with a 30s Redis cache (shared key with the indexer). */
+async function getCachedSolPrice(): Promise<number> {
+  const cached = await redis.get('sol:price');
+  if (cached) return parseFloat(cached);
+  const price = (await fetchTokenPriceUsd(SOL_MINT)) ?? 150;
+  await redis.setex('sol:price', 30, price.toString());
+  return price;
+}
+
+/**
+ * Persist a filled trade. Best-effort: a logging failure must not fail the job
+ * (which would trip the circuit breaker for a non-execution reason).
+ */
+async function persistTrade(opts: {
+  signalId: string;
+  tokenMint: string;
+  sizeSol: number;
+  executionMode: 'paper' | 'live';
+  executor: 'paper' | 'trojan';
+  signature?: string | null;
+}) {
+  try {
+    const [solPrice, tokenPrice] = await Promise.all([
+      getCachedSolPrice(),
+      fetchTokenPriceUsd(opts.tokenMint)
+    ]);
+    const amountUsd = opts.sizeSol * solPrice;
+    const tokenAmount = tokenPrice && tokenPrice > 0 ? amountUsd / tokenPrice : null;
+
+    await insertTrade({
+      signalId: opts.signalId,
+      tokenMint: opts.tokenMint,
+      direction: 'buy',
+      amountSol: opts.sizeSol,
+      amountUsd,
+      tokenAmount,
+      priceUsd: tokenPrice,
+      slippageBps: 1500,
+      signature: opts.signature ?? null,
+      executionMode: opts.executionMode,
+      executor: opts.executor,
+      status: 'filled'
+    });
+    await markSignalExecuted(opts.signalId);
+  } catch (error) {
+    console.error('[trade-executor] failed to persist trade', error);
+  }
+}
 
 // ─── Position Sizing (§9.5 of swat.md) ───────────────────────────────────────
 
@@ -100,6 +154,13 @@ new Worker(
 
     if (mode === 'paper') {
       console.log(`[trade-executor] PAPER: would buy ${payload.tokenMint} with ${sizeSol} SOL (score: ${payload.score})`);
+      await persistTrade({
+        signalId: payload.signalId,
+        tokenMint: payload.tokenMint,
+        sizeSol,
+        executionMode: 'paper',
+        executor: 'paper'
+      });
       return {
         status:    'paper-filled',
         signalId:  payload.signalId,
@@ -117,6 +178,14 @@ new Worker(
     });
 
     console.log(`[trade-executor] LIVE: executed buy for ${payload.tokenMint} @ ${sizeSol} SOL`);
+    await persistTrade({
+      signalId: payload.signalId,
+      tokenMint: payload.tokenMint,
+      sizeSol,
+      executionMode: 'live',
+      executor: 'trojan',
+      signature: (result as { signature?: string } | null)?.signature ?? null
+    });
     return {
       status:    'live-executed',
       signalId:  payload.signalId,
