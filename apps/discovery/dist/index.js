@@ -1,4 +1,6 @@
 import cron from 'node-cron';
+import { Redis } from 'ioredis';
+import { REDIS_CHANNELS } from '@swat/shared';
 import { findFundedUnknownWallets, findFrequentCounterparties, logDiscoveryRun, upsertWallet } from '@swat/db';
 async function ingestDiscoveredWallets(addresses, source, seedValue) {
     let ingested = 0;
@@ -47,8 +49,47 @@ cron.schedule('30 2 * * *', () => {
 }, {
     timezone: "UTC"
 });
-console.log('[discovery] Service running. Scheduled at 02:30 UTC daily.');
+// On-demand discovery: the API's POST /v1/discovery/run publishes here. Without
+// this subscriber the endpoint was a silent no-op (returned success, did
+// nothing). A simple in-flight guard prevents overlapping manual+nightly runs.
+let discoveryRunning = false;
+async function runNightlyDiscoverySafe() {
+    if (discoveryRunning) {
+        console.log('[discovery] run already in progress, ignoring trigger.');
+        return;
+    }
+    discoveryRunning = true;
+    try {
+        await runNightlyDiscovery();
+    }
+    catch (e) {
+        console.error('[discovery] run failed', e);
+    }
+    finally {
+        discoveryRunning = false;
+    }
+}
+const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const subscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
+function subscribeChannels() {
+    subscriber.subscribe(REDIS_CHANNELS.discoveryRun, REDIS_CHANNELS.discoverySeedToken, (err) => {
+        if (err)
+            console.error('[discovery] subscribe failed', err);
+        else
+            console.log('[discovery] subscribed to discovery channels.');
+    });
+}
+subscribeChannels();
+// ioredis does not auto-resubscribe after a reconnect — do it explicitly.
+subscriber.on('ready', subscribeChannels);
+subscriber.on('error', (e) => console.error('[discovery] redis error', e.message));
+subscriber.on('message', (channel) => {
+    if (channel === REDIS_CHANNELS.discoveryRun || channel === REDIS_CHANNELS.discoverySeedToken) {
+        void runNightlyDiscoverySafe();
+    }
+});
+console.log('[discovery] Service running. Scheduled at 02:30 UTC daily; listening for on-demand triggers.');
 if (process.env.RUN_ON_STARTUP === 'true') {
-    runNightlyDiscovery();
+    void runNightlyDiscoverySafe();
 }
 //# sourceMappingURL=index.js.map

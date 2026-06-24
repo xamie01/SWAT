@@ -1,8 +1,17 @@
 import Link from 'next/link';
 
+// Server component: runs on the host, so reads the server-side API_KEY and the
+// configured base URL (not a hardcoded localhost, which breaks non-local
+// deployments and would 401 once auth is enforced).
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const API_KEY = process.env.API_KEY ?? 'swat-dev-key';
+
 async function getSignals() {
   try {
-    const response = await fetch('http://localhost:3001/v1/signals', { cache: 'no-store' });
+    const response = await fetch(`${API_BASE}/v1/signals`, {
+      cache: 'no-store',
+      headers: { 'x-api-key': API_KEY }
+    });
     if (!response.ok) return [];
     const data = await response.json();
     return data.items || [];
@@ -30,7 +39,7 @@ export default async function SignalsPage() {
           signals.map((signal: any) => (
             <div key={signal.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h3 style={{ marginBottom: '0.5rem', color: 'var(--accent)' }}>{signal.pattern_type.toUpperCase()} SIGNAL</h3>
+                <h3 style={{ marginBottom: '0.5rem', color: 'var(--accent)' }}>{(signal.pattern_type ?? 'unknown').toUpperCase()} SIGNAL</h3>
                 <p style={{ margin: '0 0 0.5rem 0' }}>
                   <strong>Token:</strong> {signal.token_mint} <br/>
                   <strong>Cluster:</strong> {signal.cluster_id}

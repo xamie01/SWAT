@@ -100,7 +100,9 @@ export async function insertParsedTransaction(input: ParsedTransactionInsert) {
       block_time
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-    ON CONFLICT (signature, wallet_address, target_token) DO NOTHING
+    -- Matches the NULL-safe unique index idx_tx_dedup (migration 005) so rows
+    -- with a NULL target_token still dedupe on re-ingestion.
+    ON CONFLICT (signature, wallet_address, COALESCE(target_token, '')) DO NOTHING
     RETURNING id`,
     [
       input.signature,

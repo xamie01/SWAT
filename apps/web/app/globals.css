@@ -11,6 +11,10 @@
   --danger: #ef4444;
 }
 
+* {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -20,6 +24,7 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
 }
 
 nav {
@@ -133,4 +138,81 @@ input:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+/* Prevent fixed-width content (long Solana addresses, <code>) from
+   blowing out the layout on small screens. */
+code {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+/* ─── Responsive: tablet ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  nav {
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    flex-wrap: wrap;
+    /* Allow the link row to scroll horizontally instead of overflowing. */
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .container {
+    padding: 1.25rem;
+  }
+
+  .grid {
+    gap: 1rem;
+    margin-top: 1.5rem;
+    /* Cards reflow to a single column when they can't fit side by side. */
+    grid-template-columns: 1fr;
+  }
+
+  /* Any page that hard-codes a multi-column grid via inline styles still
+     collapses to one column on small screens. */
+  .grid[style*="gridTemplateColumns"],
+  .grid[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  .card {
+    padding: 1.25rem;
+  }
+
+  .card .value {
+    font-size: 1.6rem;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+}
+
+/* ─── Responsive: phones ───────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .brand {
+    font-size: 1.25rem;
+    /* Keep the logo on its own line, links wrap underneath. */
+    margin-right: 0;
+    width: 100%;
+  }
+
+  nav {
+    gap: 0.85rem;
+  }
+
+  nav a {
+    font-size: 0.9rem;
+  }
+
+  .container {
+    padding: 1rem;
+  }
+
+  /* Buttons and inputs go full width so they're easy to tap. */
+  form button,
+  .card form button {
+    width: 100%;
+  }
 }

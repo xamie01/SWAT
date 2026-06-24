@@ -112,9 +112,10 @@ This creates the PostgreSQL schema (wallets, transactions, signals, clusters, et
 
 ### 5. Start services
 
-**Run all services in parallel** (separate terminals or tmux):
+**Run all services in parallel** (separate terminals or tmux): 
 
 ```bash
+pnpm dev              #Start all services at once
 pnpm dev:api          # REST API on :3001
 pnpm dev:indexer      # Backfill worker + webhook server
 pnpm dev:scorer       # Nightly scoring + clustering (runs at 02:00 UTC, or set RUN_ON_STARTUP=true)

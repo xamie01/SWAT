@@ -25,16 +25,27 @@ export async function markToMarketOpenPositions(): Promise<{ updated: number; sk
     SELECT
       t.signal_id,
       t.token_mint,
-      SUM(t.amount_usd)                                   AS cost_basis_usd,
-      -- weighted-ish entry price: total USD / total token amount
+      -- Cost basis / entry price only from rows that actually have both USD and
+      -- token amount, so a row missing token_amount can't skew the weighted
+      -- average. Fall back to AVG(price_usd) when no priced rows exist.
+      SUM(t.amount_usd) FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0) AS cost_basis_usd,
       CASE
-        WHEN SUM(t.token_amount) > 0
-          THEN SUM(t.amount_usd) / NULLIF(SUM(t.token_amount), 0)
+        WHEN SUM(t.token_amount) FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0) > 0
+          THEN SUM(t.amount_usd)     FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0)
+             / SUM(t.token_amount)   FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0)
         ELSE AVG(t.price_usd)
       END                                                 AS entry_price_usd
     FROM trades t
     WHERE t.signal_id IS NOT NULL
       AND t.direction = 'buy'
+      AND t.status = 'filled'
+      -- Exclude positions that have already been closed by a sell.
+      AND NOT EXISTS (
+        SELECT 1 FROM trades s
+        WHERE s.signal_id = t.signal_id
+          AND s.token_mint = t.token_mint
+          AND s.direction = 'sell'
+      )
     GROUP BY t.signal_id, t.token_mint
   `);
 

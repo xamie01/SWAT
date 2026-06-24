@@ -2,8 +2,15 @@
 
 import { useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = 'swat-dev-key';
+// Derive the API host from how the page is being viewed, so it works both on
+// the dev machine (localhost) and from another device on the LAN (the host's IP).
+// NEXT_PUBLIC_API_URL overrides this when set.
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : 'http://localhost:3001');
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 export default function SetupPage() {
   const [loading, setLoading] = useState(false);
@@ -30,12 +37,17 @@ export default function SetupPage() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || 'Failed to trigger discovery');
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || data.message || 'Failed to trigger discovery');
       }
 
       const data = await res.json();
-      setSuccess(`Discovery complete! Found ${data.discovered || 0} wallets. They will be backfilled automatically.`);
+      // The API returns `ingested` (from existing data) and `queued` (the deeper
+      // on-chain scan has been kicked off in the background).
+      setSuccess(
+        `Found ${data.ingested || 0} wallets from existing data. ` +
+        `Now scanning the chain for this token's early & biggest buyers — they'll be backfilled, scored, and clustered automatically.`
+      );
       setTokenMint('');
     } catch (err: any) {
       setError(err.message);

@@ -26,7 +26,7 @@ export interface SignalRecord {
     tokenMint: string | null;
     confidence: number;
     signalScore: number;
-    status: 'pending' | 'executed' | 'alerted' | 'expired' | 'rejected';
+    status: 'pending' | 'executed' | 'alerted' | 'expired' | 'rejected' | 'ignored';
     createdAt: Date;
 }
 //# sourceMappingURL=types.d.ts.map

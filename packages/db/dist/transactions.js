@@ -29,6 +29,18 @@ export async function getTokenDecimals(mint) {
     const rows = await query(`SELECT decimals FROM tokens WHERE mint = $1`, [mint]);
     return rows[0]?.decimals ?? null;
 }
+/**
+ * Record the earliest observed transaction time for a token as its
+ * launch_timestamp. Only moves the value earlier, never later, so the
+ * estimate converges on the true launch as more history is ingested.
+ *
+ * This powers the early-entry component of the wallet composite score.
+ */
+export async function updateTokenLaunchTimestamp(mint, observedAt) {
+    await query(`UPDATE tokens
+       SET launch_timestamp = LEAST(COALESCE(launch_timestamp, $2::timestamp), $2::timestamp)
+     WHERE mint = $1`, [mint, observedAt]);
+}
 export async function insertParsedTransaction(input) {
     const rows = await query(`INSERT INTO transactions (
       signature,
@@ -47,7 +59,9 @@ export async function insertParsedTransaction(input) {
       block_time
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-    ON CONFLICT (signature, wallet_address, target_token) DO NOTHING
+    -- Matches the NULL-safe unique index idx_tx_dedup (migration 005) so rows
+    -- with a NULL target_token still dedupe on re-ingestion.
+    ON CONFLICT (signature, wallet_address, COALESCE(target_token, '')) DO NOTHING
     RETURNING id`, [
         input.signature,
         input.walletAddress,

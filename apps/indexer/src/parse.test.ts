@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractFundingTransfers,
+  extractTokenBuyers,
   getWalletTokenDeltas,
   SOL_MINT,
   SYSTEM_PROGRAM_ID,
@@ -181,5 +182,63 @@ describe('getWalletTokenDeltas', () => {
       }
     };
     expect(getWalletTokenDeltas(tx, WALLET)).toBeNull();
+  });
+});
+
+describe('extractTokenBuyers', () => {
+  const BUYER_A = 'BuyerAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const BUYER_B = 'BuyerBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+
+  it('returns owners whose mint balance increased', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [{ owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '0' } }],
+        postTokenBalances: [{ owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '500' } }]
+      }
+    };
+    expect(extractTokenBuyers(tx, TOKEN)).toEqual([{ owner: BUYER_A, amount: 500n }]);
+  });
+
+  it('excludes sellers and unchanged owners', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [
+          { owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '1000' } },
+          { owner: BUYER_B, mint: TOKEN, uiTokenAmount: { amount: '300' } }
+        ],
+        postTokenBalances: [
+          { owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '400' } }, // sold
+          { owner: BUYER_B, mint: TOKEN, uiTokenAmount: { amount: '300' } }  // unchanged
+        ]
+      }
+    };
+    expect(extractTokenBuyers(tx, TOKEN)).toEqual([]);
+  });
+
+  it('ignores other mints', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [{ owner: BUYER_A, mint: SOL_MINT, uiTokenAmount: { amount: '0' } }],
+        postTokenBalances: [{ owner: BUYER_A, mint: SOL_MINT, uiTokenAmount: { amount: '999' } }]
+      }
+    };
+    expect(extractTokenBuyers(tx, TOKEN)).toEqual([]);
+  });
+
+  it('aggregates multiple token accounts for the same owner', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [
+          { owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '100' } },
+          { owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '0' } }
+        ],
+        postTokenBalances: [
+          { owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '300' } },
+          { owner: BUYER_A, mint: TOKEN, uiTokenAmount: { amount: '200' } }
+        ]
+      }
+    };
+    // (300+200) - (100+0) = 400
+    expect(extractTokenBuyers(tx, TOKEN)).toEqual([{ owner: BUYER_A, amount: 400n }]);
   });
 });

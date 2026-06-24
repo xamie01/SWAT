@@ -2,8 +2,15 @@
 
 import { useState, useEffect } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = 'swat-dev-key';
+// Derive the API host from how the page is being viewed, so it works both on
+// the dev machine (localhost) and from another device on the LAN (the host's IP).
+// NEXT_PUBLIC_API_URL overrides this when set.
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : 'http://localhost:3001');
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 export default function ClustersPage() {
   const [clusters, setClusters] = useState<any[]>([]);
@@ -36,7 +43,8 @@ export default function ClustersPage() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/v1/clusters/${clusterId}/members`, {
+      // The API exposes members under GET /v1/clusters/:id (returns { cluster, members }).
+      const res = await fetch(`${API_BASE}/v1/clusters/${clusterId}`, {
         headers: { 'X-Api-Key': API_KEY }
       });
       if (!res.ok) throw new Error('Failed to fetch members');
@@ -112,17 +120,17 @@ export default function ClustersPage() {
                       {cluster.cluster_type}
                     </span>
                     <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)', marginRight: '0.5rem' }}>
-                      {cluster.member_count || 0} members
+                      {cluster.wallet_count || 0} members
                     </span>
-                    {cluster.avg_confidence != null && (
+                    {cluster.confidence != null && (
                       <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
-                        Confidence: {(cluster.avg_confidence * 100).toFixed(0)}%
+                        Confidence: {(cluster.confidence * 100).toFixed(0)}%
                       </span>
                     )}
                   </div>
-                  {cluster.avg_roi != null && (
+                  {cluster.total_realized_roi != null && (
                     <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                      Avg ROI: {(cluster.avg_roi * 100).toFixed(1)}%
+                      Avg ROI: {(cluster.total_realized_roi * 100).toFixed(1)}%
                     </div>
                   )}
                 </div>
@@ -154,7 +162,7 @@ export default function ClustersPage() {
                           }}
                         >
                           <code style={{ fontSize: '0.85rem', color: 'var(--accent)' }}>
-                            {member.wallet_address}
+                            {member.address}
                           </code>
                           {member.tier && (
                             <span className={`badge ${

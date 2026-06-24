@@ -1,6 +1,17 @@
 import type { ReactNode } from 'react';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import Link from 'next/link';
+
+export const metadata: Metadata = {
+  title: 'SWAT',
+  description: 'SWAT intelligence layer'
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

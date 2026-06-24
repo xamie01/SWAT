@@ -1,9 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = 'swat-dev-key';
+// Derive the API host from how the page is being viewed, so it works both on
+// the dev machine (localhost) and from another device on the LAN (the host's IP).
+// NEXT_PUBLIC_API_URL overrides this when set.
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:3001`
+    : 'http://localhost:3001');
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<any[]>([]);
@@ -23,7 +30,28 @@ export default function WalletsPage() {
       });
       if (!res.ok) throw new Error('Failed to fetch wallets');
       const data = await res.json();
-      setWallets(data.items || []);
+      // The API returns a bare array; tolerate a wrapped { items } shape too.
+      setWallets(Array.isArray(data) ? data : data.items ?? []);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reindexAll = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${API_BASE}/v1/wallets/reindex`, {
+        method: 'POST',
+        headers: { 'X-Api-Key': API_KEY }
+      });
+      if (!res.ok) throw new Error('Failed to start indexer');
+      const data = await res.json();
+      setSuccess(`Indexer started — backfilling ${data.queued ?? 0} wallet(s). This can take a few minutes.`);
+      setTimeout(() => fetchWallets(), 4000);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -101,9 +129,9 @@ export default function WalletsPage() {
   };
 
   // Load wallets on mount
-  useState(() => {
+  useEffect(() => {
     fetchWallets();
-  });
+  }, []);
 
   return (
     <main>
@@ -212,21 +240,39 @@ export default function WalletsPage() {
       <div style={{ marginTop: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h2>Tracked Wallets ({wallets.length})</h2>
-          <button
-            onClick={fetchWallets}
-            disabled={loading}
-            style={{
-              padding: '0.5rem 1rem',
-              background: 'rgba(59, 130, 246, 0.1)',
-              color: 'var(--accent)',
-              border: '1px solid var(--accent)',
-              borderRadius: '6px',
-              cursor: loading ? 'wait' : 'pointer',
-              fontWeight: 500
-            }}
-          >
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              onClick={reindexAll}
+              disabled={loading || wallets.length === 0}
+              style={{
+                padding: '0.5rem 1rem',
+                background: 'var(--accent)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: loading ? 'wait' : 'pointer',
+                fontWeight: 600,
+                opacity: loading || wallets.length === 0 ? 0.5 : 1
+              }}
+            >
+              {loading ? 'Working...' : 'Start Indexer'}
+            </button>
+            <button
+              onClick={fetchWallets}
+              disabled={loading}
+              style={{
+                padding: '0.5rem 1rem',
+                background: 'rgba(59, 130, 246, 0.1)',
+                color: 'var(--accent)',
+                border: '1px solid var(--accent)',
+                borderRadius: '6px',
+                cursor: loading ? 'wait' : 'pointer',
+                fontWeight: 500
+              }}
+            >
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
         {wallets.length === 0 ? (

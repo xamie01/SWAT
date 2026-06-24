@@ -78,3 +78,49 @@ export async function markSignalExecuted(signalId: string) {
     [signalId]
   );
 }
+
+/**
+ * Atomically claim a signal for execution. Sets status to 'executing' only if
+ * it is not already executing/executed, and returns true if THIS caller won the
+ * claim. This is the idempotency guard that prevents a duplicate/re-delivered
+ * signal from triggering a second (live) trade — it must be called BEFORE the
+ * trade is placed. Returns false if the signal was already claimed/executed.
+ */
+export async function claimSignalForExecution(signalId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE signals
+       SET status = 'executing'
+     WHERE id = $1
+       AND status NOT IN ('executing', 'executed')
+     RETURNING id`,
+    [signalId]
+  );
+  return rows.length > 0;
+}
+
+/** Revert a claim back to 'active' when execution fails, so it can be retried. */
+export async function releaseSignalClaim(signalId: string) {
+  await query(
+    `UPDATE signals SET status = 'active' WHERE id = $1 AND status = 'executing'`,
+    [signalId]
+  );
+}
+
+/**
+ * Whether a filled buy for this token was placed within the last N minutes.
+ * Used by the executor to suppress re-buying a token the system just bought
+ * (a held position keeps re-triggering snipe signals after the dedupe window).
+ */
+export async function hasRecentBuy(tokenMint: string, withinMinutes: number): Promise<boolean> {
+  const rows = await query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM trades
+       WHERE token_mint = $1
+         AND direction = 'buy'
+         AND status = 'filled'
+         AND executed_at > NOW() - make_interval(mins => $2)
+     ) AS exists`,
+    [tokenMint, withinMinutes]
+  );
+  return rows[0]?.exists === true;
+}

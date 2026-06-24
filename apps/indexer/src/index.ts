@@ -7,12 +7,15 @@ import {
   upsertWallet,
   getTokenDecimals,
   updateTokenLaunchTimestamp,
-  recordFundingEdge
+  recordFundingEdge,
+  logDiscoveryRun
 } from '@swat/db';
-import { REDIS_CHANNELS, walletInputSchema, fetchTokenPriceUsd } from '@swat/shared';
+import { REDIS_CHANNELS, QUEUES, walletInputSchema, fetchTokenPriceUsd } from '@swat/shared';
 import {
   extractFundingTransfers,
+  extractTokenBuyers,
   getWalletTokenDeltas,
+  baseUnitsToFloat,
   SOL_MINT,
   type HeliusParsedTransaction
 } from './parse.js';
@@ -51,20 +54,46 @@ export async function ingestWallets(input: Array<{ address: string; source?: 'sh
 
 type HeliusSignature = { signature: string; slot: number; blockTime?: number };
 
+const HELIUS_RPC_TIMEOUT_MS = Number(process.env.HELIUS_RPC_TIMEOUT_MS ?? 15000);
+const HELIUS_MAX_RETRIES = Number(process.env.HELIUS_MAX_RETRIES ?? 5);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!heliusRpcUrl) throw new Error('HELIUS_API_KEY is not set');
 
-  const response = await fetch(heliusRpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params })
-  });
+  for (let attempt = 0; ; attempt++) {
+    // Without a timeout a single stalled request hangs the whole backfill batch
+    // (Promise.all never settles). Abort slow requests so they fail fast.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HELIUS_RPC_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(heliusRpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
-  if (!response.ok) throw new Error(`Helius RPC failed: ${response.status}`);
+    // Back off and retry on rate limits (429) and transient 5xx — the Helius
+    // free tier throttles aggressively during bulk backfills.
+    if ((response.status === 429 || response.status >= 500) && attempt < HELIUS_MAX_RETRIES) {
+      const retryAfter = Number(response.headers.get('retry-after')) * 1000;
+      const backoff = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 500 * 2 ** attempt;
+      await sleep(backoff);
+      continue;
+    }
 
-  const json = (await response.json()) as { result?: T; error?: { message?: string } };
-  if (json.error) throw new Error(`Helius RPC error (${method}): ${json.error.message ?? 'unknown'}`);
-  return json.result as T;
+    if (!response.ok) throw new Error(`Helius RPC failed: ${response.status}`);
+
+    const json = (await response.json()) as { result?: T; error?: { message?: string } };
+    if (json.error) throw new Error(`Helius RPC error (${method}): ${json.error.message ?? 'unknown'}`);
+    return json.result as T;
+  }
 }
 
 // ─── Token metadata fetcher ───────────────────────────────────────────────────
@@ -107,11 +136,26 @@ function extractProgramId(tx: HeliusParsedTransaction): string | null {
 
 // ─── SOL Price Cache ──────────────────────────────────────────────────────────
 
-async function getCachedSolPrice(): Promise<number> {
+async function getCachedSolPrice(): Promise<number | null> {
   const cached = await redis.get('sol:price');
-  if (cached) return parseFloat(cached);
+  if (cached) {
+    const p = parseFloat(cached);
+    if (Number.isFinite(p)) return p;
+  }
 
-  const price = await fetchTokenPriceUsd(SOL_MINT) ?? 150;
+  // Negative cache: if the price lookup just failed (e.g. APIs unreachable), a
+  // marker is set for a short window so we don't re-hit the network — and
+  // re-log the failure — on every single transaction in a backfill batch.
+  if (await redis.get('sol:price:fail')) return null;
+
+  // Do NOT fabricate a fallback price — a wrong SOL price silently corrupts every
+  // SOL-leg trade's USD value (and gets cached for 30s). Return null on failure
+  // and only cache a real price.
+  const price = await fetchTokenPriceUsd(SOL_MINT);
+  if (price === null || !Number.isFinite(price)) {
+    await redis.setex('sol:price:fail', 15, '1');
+    return null;
+  }
   await redis.setex('sol:price', 30, price.toString());
   return price;
 }
@@ -127,39 +171,45 @@ async function enrichTransactionUsd(
 ): Promise<{ amountInUsd: number | null; amountOutUsd: number | null }> {
   const solPrice = await getCachedSolPrice();
 
-  // SOL → token (buy) or token → SOL (sell) — both legs measured in SOL
+  // SOL → token (buy) or token → SOL (sell) — both legs measured in SOL.
+  // If the SOL price is unavailable, leave USD null rather than fabricating it.
   if (tokenIn === SOL_MINT) {
-    const amountInUsd = (Number(amountInStr) / 1e9) * solPrice;
+    if (solPrice === null) return { amountInUsd: null, amountOutUsd: null };
+    const amountInUsd = baseUnitsToFloat(amountInStr, 9) * solPrice;
     return { amountInUsd, amountOutUsd: amountInUsd };
   }
   if (tokenOut === SOL_MINT) {
-    const amountOutUsd = (Number(amountOutStr) / 1e9) * solPrice;
+    if (solPrice === null) return { amountInUsd: null, amountOutUsd: null };
+    const amountOutUsd = baseUnitsToFloat(amountOutStr, 9) * solPrice;
     return { amountInUsd: amountOutUsd, amountOutUsd };
   }
 
   // USDC-denominated pairs
   if (tokenIn === USDC_MINT) {
-    const amountInUsd = Number(amountInStr) / 1e6;
+    const amountInUsd = baseUnitsToFloat(amountInStr, 6);
     return { amountInUsd, amountOutUsd: amountInUsd };
   }
   if (tokenOut === USDC_MINT) {
-    const amountOutUsd = Number(amountOutStr) / 1e6;
+    const amountOutUsd = baseUnitsToFloat(amountOutStr, 6);
     return { amountInUsd: amountOutUsd, amountOutUsd };
   }
 
   // Token-to-token swaps (Jupiter routed) — use target token price + known decimals
   const targetPrice = await fetchTokenPriceUsd(targetToken);
   if (targetPrice) {
-    // Try to get decimals from DB (populated during upsertToken)
-    let decimals = await getTokenDecimals(targetToken);
-    if (decimals === null) decimals = 6; // safe default for most SPL tokens
+    // Decimals must be known: applying the wrong scale (e.g. defaulting 9-decimal
+    // tokens to 6) produces a 1000x-wrong USD value. If we don't know the
+    // decimals, leave USD null rather than recording a fabricated number — the
+    // backfill-usd pass can fill it once the token's decimals are populated.
+    const decimals = await getTokenDecimals(targetToken);
+    if (decimals === null) return { amountInUsd: null, amountOutUsd: null };
 
     // Determine which side is the target
     if (targetToken === tokenOut) {
-      const amountUsd = (Number(amountOutStr) / Math.pow(10, decimals)) * targetPrice;
+      const amountUsd = baseUnitsToFloat(amountOutStr, decimals) * targetPrice;
       return { amountInUsd: amountUsd, amountOutUsd: amountUsd };
     } else {
-      const amountUsd = (Number(amountInStr) / Math.pow(10, decimals)) * targetPrice;
+      const amountUsd = baseUnitsToFloat(amountInStr, decimals) * targetPrice;
       return { amountInUsd: amountUsd, amountOutUsd: amountUsd };
     }
   }
@@ -253,6 +303,149 @@ async function recordFundingEdges(tx: HeliusParsedTransaction) {
   }
 }
 
+// ─── On-chain token discovery ─────────────────────────────────────────────────
+
+// How many signatures, from the OLDEST (launch) forward, to scan for buyers.
+const TOKEN_DISCOVERY_WINDOW = Number(process.env.TOKEN_DISCOVERY_WINDOW ?? 5000);
+// Hard cap on total signatures paged while walking back to the launch, so a
+// hyper-active token can't make us page forever. If we hit this before reaching
+// the genesis the launch time is best-effort (logged).
+const TOKEN_DISCOVERY_MAX_TOTAL_SIGNATURES = Number(process.env.TOKEN_DISCOVERY_MAX_TOTAL_SIGNATURES ?? 20000);
+// 40 earliest big buyers (kept unconditionally) + 10 biggest buyers (profit-gated
+// later by the scorer's pruneUnprofitableBigBuyers).
+const EARLY_BUYER_SLOTS = Number(process.env.EARLY_BUYER_SLOTS ?? 40);
+const BIG_BUYER_SLOTS = Number(process.env.BIG_BUYER_SLOTS ?? 10);
+
+const SYSTEM_PROGRAM_ID_OWNER = '11111111111111111111111111111111';
+
+// Owners that are never real trader wallets — the mint itself and the swap
+// programs. Pool/vault accounts can still slip through; the backfill+scoring
+// pass and the token-big profit prune filter those out downstream.
+function isDiscardableOwner(owner: string, mint: string): boolean {
+  return owner === mint || SWAP_PROGRAM_IDS.has(owner) || owner === SYSTEM_PROGRAM_ID_OWNER;
+}
+
+/**
+ * Discover and seed a token's early & biggest buyers from on-chain history.
+ *
+ * 1. Page `getSignaturesForAddress(mint)` back to the launch (bounded by a safety
+ *    cap), reverse to chronological order, take the first `TOKEN_DISCOVERY_WINDOW`
+ *    signatures from launch forward.
+ * 2. Fetch those txs, and for each gather the accounts that net-gained the mint
+ *    (`extractTokenBuyers`). Aggregate per owner: earliest buy time + total base
+ *    units acquired.
+ * 3. Take the 40 EARLIEST distinct buyers (`token-early`, kept unconditionally)
+ *    and, from the rest, the 10 LARGEST by acquired amount (`token-big`,
+ *    profit-gated later). Upsert each and enqueue a normal history backfill so the
+ *    scorer can score/cluster them like any other wallet.
+ */
+export async function discoverFromToken(mint: string) {
+  if (!heliusRpcUrl) {
+    console.warn('[indexer] skipping token discovery: HELIUS_API_KEY is not set');
+    return { earlyBuyers: 0, bigBuyers: 0, scanned: 0 };
+  }
+
+  // ── 1. Walk signatures back to the launch ───────────────────────────────────
+  const all: HeliusSignature[] = [];
+  let before: string | undefined;
+  let cappedOut = false;
+  while (all.length < TOKEN_DISCOVERY_MAX_TOTAL_SIGNATURES) {
+    const page = await heliusRpc<HeliusSignature[]>('getSignaturesForAddress', [
+      mint,
+      before ? { limit: 1000, before } : { limit: 1000 }
+    ]);
+    if (page.length === 0) break;
+    all.push(...page);
+    before = page[page.length - 1].signature;
+    if (page.length < 1000) break; // reached the genesis of this account
+    await sleep(150); // gentle pacing
+  }
+  if (all.length >= TOKEN_DISCOVERY_MAX_TOTAL_SIGNATURES) {
+    cappedOut = true;
+    console.warn(`[indexer] token ${mint}: hit signature cap (${TOKEN_DISCOVERY_MAX_TOTAL_SIGNATURES}); launch detection best-effort`);
+  }
+  if (all.length === 0) {
+    console.warn(`[indexer] token ${mint}: no signatures found`);
+    return { earlyBuyers: 0, bigBuyers: 0, scanned: 0 };
+  }
+
+  // Oldest-first. getSignaturesForAddress returns newest→oldest within a page and
+  // we paged from newest→oldest, so the global ordering is already newest→oldest;
+  // sort ascending by (blockTime, then reversed index) to get launch-forward.
+  all.sort((a, b) => (a.blockTime ?? 0) - (b.blockTime ?? 0));
+  const window = all.slice(0, TOKEN_DISCOVERY_WINDOW);
+  const launchBlockTime = window[0]?.blockTime;
+
+  // Ensure the token row + decimals exist so USD math elsewhere works, and record
+  // the launch time (LEAST → only moves earlier).
+  const mintInfo = await fetchTokenMintInfo(mint);
+  await upsertToken(mint, mintInfo ? { decimals: mintInfo.decimals } : undefined);
+  if (launchBlockTime) await updateTokenLaunchTimestamp(mint, new Date(launchBlockTime * 1000));
+
+  console.log(`[indexer] token ${mint}: scanning ${window.length}/${all.length} sigs from launch${cappedOut ? ' (capped)' : ''}`);
+
+  // ── 2. Fetch the window's transactions and aggregate buyers ──────────────────
+  type Agg = { earliest: number; amount: bigint };
+  const buyers = new Map<string, Agg>();
+  const sigList = window.map((s) => s.signature);
+  const BATCH = Number(process.env.BACKFILL_BATCH_SIZE ?? 5);
+  for (let i = 0; i < sigList.length; i += BATCH) {
+    if (i > 0) await sleep(150);
+    const batch = sigList.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map((sig) =>
+        heliusRpc<HeliusParsedTransaction | null>('getTransaction', [
+          sig,
+          { maxSupportedTransactionVersion: 0, commitment: 'confirmed', encoding: 'jsonParsed' }
+        ]).catch(() => null)
+      )
+    );
+    for (const tx of results) {
+      if (!tx?.blockTime) continue;
+      for (const buyer of extractTokenBuyers(tx, mint)) {
+        if (isDiscardableOwner(buyer.owner, mint)) continue;
+        const cur = buyers.get(buyer.owner);
+        if (cur) {
+          cur.amount += buyer.amount;
+          if (tx.blockTime < cur.earliest) cur.earliest = tx.blockTime;
+        } else {
+          buyers.set(buyer.owner, { earliest: tx.blockTime, amount: buyer.amount });
+        }
+      }
+    }
+    if ((i / BATCH) % 20 === 0) console.log(`[indexer] token ${mint}: scanned ${Math.min(i + BATCH, sigList.length)}/${sigList.length}`);
+  }
+
+  // ── 3. Allocate slots: 40 earliest, then 10 biggest of the rest ──────────────
+  const entries = Array.from(buyers.entries()); // [owner, Agg]
+  const byEarliest = [...entries].sort((a, b) => a[1].earliest - b[1].earliest);
+  const early = byEarliest.slice(0, EARLY_BUYER_SLOTS).map(([owner]) => owner);
+  const earlySet = new Set(early);
+
+  const byAmount = [...entries]
+    .filter(([owner]) => !earlySet.has(owner))
+    .sort((a, b) => (b[1].amount > a[1].amount ? 1 : b[1].amount < a[1].amount ? -1 : 0));
+  const big = byAmount.slice(0, BIG_BUYER_SLOTS).map(([owner]) => owner);
+
+  // ── 4. Seed wallets + enqueue history backfill ───────────────────────────────
+  for (const owner of early) {
+    await upsertWallet({ address: owner, source: 'discovered', discoveryMethod: 'token-early' });
+    await backfillQueue.add('backfill-wallet', { address: owner }, { jobId: `backfill-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
+  }
+  for (const owner of big) {
+    await upsertWallet({ address: owner, source: 'discovered', discoveryMethod: 'token-big' });
+    await backfillQueue.add('backfill-wallet', { address: owner }, { jobId: `backfill-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
+  }
+
+  await logDiscoveryRun('token', mint, early.length + big.length);
+  // Tell the scorer to (re)cluster once backfills settle; the profit prune runs
+  // there too. Best-effort — the nightly batch would pick it up regardless.
+  await redis.publish(REDIS_CHANNELS.clusterRefresh, JSON.stringify({ reason: 'token-discovery', mint }));
+
+  console.log(`[indexer] token ${mint}: seeded ${early.length} early + ${big.length} big buyers from ${buyers.size} candidates`);
+  return { earlyBuyers: early.length, bigBuyers: big.length, scanned: window.length };
+}
+
 // ─── Backfill ─────────────────────────────────────────────────────────────────
 
 async function backfillWallet(address: string) {
@@ -261,17 +454,37 @@ async function backfillWallet(address: string) {
     return { fetched: 0, inserted: 0, skipped: 0 };
   }
 
-  const signatures = await heliusRpc<HeliusSignature[]>('getSignaturesForAddress', [address, { limit: 1000 }]);
+  const sigLimit = Number(process.env.BACKFILL_SIGNATURE_LIMIT ?? 1000);
+  const signatures = await heliusRpc<HeliusSignature[]>('getSignaturesForAddress', [address, { limit: sigLimit }]);
   if (signatures.length === 0) {
     await refreshWalletActivity(address, null, 0);
     return { fetched: 0, inserted: 0, skipped: 0 };
   }
 
   const signatureList = signatures.map((s) => s.signature);
-  const txs = await heliusRpc<Array<HeliusParsedTransaction | null>>('getParsedTransactions', [
-    signatureList,
-    { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }
-  ]);
+  console.log(`[indexer] fetching ${signatureList.length} transactions for ${address}`);
+  // Solana JSON-RPC has no `getParsedTransactions` (plural) method — Helius
+  // replies "Method not found". Fetch each signature with `getTransaction`
+  // (jsonParsed), in bounded-concurrency batches to respect rate limits.
+  const txs: Array<HeliusParsedTransaction | null> = [];
+  const BATCH = Number(process.env.BACKFILL_BATCH_SIZE ?? 5);
+  for (let i = 0; i < signatureList.length; i += BATCH) {
+    if (i > 0) await sleep(150); // gentle pacing to stay under rate limits
+    const batch = signatureList.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map((sig) =>
+        heliusRpc<HeliusParsedTransaction | null>('getTransaction', [
+          sig,
+          { maxSupportedTransactionVersion: 0, commitment: 'confirmed', encoding: 'jsonParsed' }
+        ]).catch((err) => {
+          console.warn(`[indexer] getTransaction failed for ${sig}:`, err instanceof Error ? err.message : err);
+          return null;
+        })
+      )
+    );
+    txs.push(...results);
+    console.log(`[indexer] ${address}: fetched ${txs.length}/${signatureList.length}`);
+  }
 
   let inserted = 0;
   let skipped = 0;
@@ -305,7 +518,24 @@ new Worker(
     console.log(`[indexer] backfill complete for ${address}:`, result);
     return { address, ...result };
   },
-  { connection: redis }
+  // Concurrency 1: backfill one wallet at a time so we don't fan out hundreds of
+  // concurrent Helius requests and trip the rate limiter.
+  { connection: redis, concurrency: Number(process.env.BACKFILL_CONCURRENCY ?? 1) }
+);
+
+// Token-discovery worker: heavy on-chain scan that seeds early/big buyers.
+new Worker(
+  QUEUES.tokenDiscovery,
+  async (job) => {
+    const mint = (job.data as { tokenMint: string }).tokenMint;
+    console.log(`[indexer] token discovery started for ${mint}`);
+    const result = await discoverFromToken(mint);
+    console.log(`[indexer] token discovery complete for ${mint}:`, result);
+    return { mint, ...result };
+  },
+  // Concurrency 1: a single discovery already pages thousands of Helius requests;
+  // running several in parallel would trip the rate limiter.
+  { connection: redis, concurrency: 1 }
 );
 
 // ─── Startup seed from env ────────────────────────────────────────────────────

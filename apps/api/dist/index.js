@@ -1,22 +1,73 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { deleteWallet, getWallet, listWallets, upsertWallet, query } from '@swat/db';
-import { walletAddressSchema, walletInputSchema } from '@swat/shared';
+import { walletAddressSchema, walletInputSchema, REDIS_CHANNELS, QUEUES } from '@swat/shared';
 const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const tradeQueue = new Queue('swat-trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+// Same queue/job contract the indexer worker consumes (see apps/indexer/src/index.ts).
+const backfillQueue = new Queue('swat-backfill-wallet', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+// On-chain token discovery: the indexer's tokenDiscovery worker consumes this.
+const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+// Enqueue a backfill so the indexer fetches a wallet's transaction history.
+// jobId is keyed by address; `backfillQueue.add` is a no-op if an identical
+// job is already pending, so callers can fire this freely.
+async function enqueueBackfill(address) {
+    await backfillQueue.add('backfill-wallet', { address }, { jobId: `backfill-${address}`, removeOnComplete: true, removeOnFail: 1000 });
+}
+// ─── CORS ───────────────────────────────────────────────────────────────────
+// Allow the web UI (any LAN origin / device) to call the API from the browser.
+// CORS_ORIGIN can pin this to a specific origin in production.
+const corsOrigin = process.env.CORS_ORIGIN;
+await app.register(cors, {
+    origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-Api-Key']
+});
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+// Fail fast in production rather than silently falling back to a publicly-known
+// dev key (which is also baked into the web client bundle).
+if (!process.env.API_KEY && process.env.NODE_ENV === 'production') {
+    throw new Error('[api] API_KEY must be set in production');
+}
 const API_KEY = process.env.API_KEY || 'swat-dev-key';
+const API_KEY_HASH = createHash('sha256').update(API_KEY).digest();
+/** Constant-time API key check (hash both sides so lengths always match). */
+function isValidApiKey(provided) {
+    const value = Array.isArray(provided) ? provided[0] ?? '' : provided ?? '';
+    const providedHash = createHash('sha256').update(value).digest();
+    return timingSafeEqual(providedHash, API_KEY_HASH);
+}
 app.addHook('onRequest', async (request, reply) => {
+    // Let CORS preflight requests through untouched.
+    if (request.method === 'OPTIONS')
+        return;
     if (request.url === '/v1/health')
         return;
-    const apiKey = request.headers['x-api-key'];
-    if (apiKey !== API_KEY) {
+    if (!isValidApiKey(request.headers['x-api-key'])) {
         return reply.code(401).send({ error: 'Unauthorized' });
     }
 });
+// ─── Query-param coercion helpers ───────────────────────────────────────────
+// Query-string values are always strings. Coerce + bound them so a caller can't
+// pass `?limit=99999999` (full table scan) or `?min_score=abc` (DB type error
+// → 500 → broken pagination).
+function clampLimit(raw, def = 100, max = 200) {
+    const n = Number(raw);
+    if (!Number.isFinite(n))
+        return def;
+    return Math.min(Math.max(Math.trunc(n), 1), max);
+}
+function parseOptionalNumber(raw) {
+    if (raw === undefined || raw === null || raw === '')
+        return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+}
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get('/v1/health', async () => ({
     status: 'ok',
@@ -79,7 +130,16 @@ app.post('/v1/wallets', async (req, reply) => {
     if (invalid.length > 0)
         return reply.code(400).send({ error: 'Invalid wallet payload' });
     const inserted = await Promise.all(parsed.map((r) => upsertWallet(r.data)));
-    return { inserted: inserted.length, wallets: inserted };
+    // Kick off indexing so wallets added via the UI actually get their history.
+    await Promise.all(inserted.map((w) => enqueueBackfill(w.address)));
+    return { inserted: inserted.length, wallets: inserted, backfillQueued: inserted.length };
+});
+// Re-index: enqueue a backfill for every tracked wallet. Powers the
+// "Start indexer" button in the web UI.
+app.post('/v1/wallets/reindex', async () => {
+    const wallets = await listWallets();
+    await Promise.all(wallets.map((w) => enqueueBackfill(w.address)));
+    return { queued: wallets.length };
 });
 app.delete('/v1/wallets/:address', async (req, reply) => {
     const parsed = walletAddressSchema.safeParse(req.params.address);
@@ -90,7 +150,9 @@ app.delete('/v1/wallets/:address', async (req, reply) => {
 });
 app.get('/v1/wallets/:address/history', async (req, reply) => {
     const address = req.params.address;
-    const { limit = 50, before } = req.query;
+    const q = req.query;
+    const limit = clampLimit(q.limit, 50, 200);
+    const before = q.before;
     const parsed = walletAddressSchema.safeParse(address);
     if (!parsed.success)
         return reply.code(400).send({ error: 'Invalid wallet address' });
@@ -103,7 +165,7 @@ app.get('/v1/wallets/:address/history', async (req, reply) => {
     ORDER BY timestamp DESC
     LIMIT $2
   `, before ? [address, limit, before] : [address, limit]);
-    const nextCursor = rows.length === Number(limit)
+    const nextCursor = rows.length === limit
         ? rows[rows.length - 1].timestamp
         : null;
     return { items: rows, nextCursor };
@@ -136,10 +198,13 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
 // ─── Discovery ────────────────────────────────────────────────────────────────
 app.post('/v1/discovery/from-token', async (req, reply) => {
     const { tokenMint } = (req.body ?? {});
-    if (!tokenMint)
-        return reply.code(400).send({ error: 'tokenMint required' });
+    // A token mint is a Solana address; reuse the address schema to reject garbage
+    // before it pollutes discovery_log / Redis.
+    const parsedMint = walletAddressSchema.safeParse(tokenMint);
+    if (!parsedMint.success)
+        return reply.code(400).send({ error: 'Valid tokenMint required' });
     // Publish to Redis so the discovery service picks it up
-    await redis.publish('swat:discovery:seed-token', JSON.stringify({ tokenMint }));
+    await redis.publish(REDIS_CHANNELS.discoverySeedToken, JSON.stringify({ tokenMint }));
     // Also run inline early-buyer extraction
     const earlyBuyers = await query(`
     SELECT wallet_address
@@ -161,18 +226,24 @@ app.post('/v1/discovery/from-token', async (req, reply) => {
         ingested++;
     }
     await query(`INSERT INTO discovery_log (source, seed_value, wallets_discovered) VALUES ($1, $2, $3)`, ['token', tokenMint, ingested]);
-    return { ingested, tokenMint };
+    // Additionally kick off the deeper ON-CHAIN scan: the indexer pages the token's
+    // history back to launch and seeds its early + biggest buyers (then backfills
+    // and scores them). This is async — the immediate `ingested` count above comes
+    // from data we already had; `queued` signals the chain scan has started. jobId
+    // keyed by mint dedupes concurrent requests for the same token.
+    await tokenDiscoveryQueue.add('token-discovery', { tokenMint }, { jobId: `token-discovery-${tokenMint}`, removeOnComplete: true, removeOnFail: 1000 });
+    return { ingested, queued: true, tokenMint };
 });
 app.post('/v1/discovery/run', async () => {
-    await redis.publish('swat:discovery:run', JSON.stringify({ trigger: 'manual' }));
+    await redis.publish(REDIS_CHANNELS.discoveryRun, JSON.stringify({ trigger: 'manual' }));
     return { queued: true };
 });
 app.get('/v1/discovery/log', async (req) => {
-    const { limit = 50 } = req.query;
+    const limit = clampLimit(req.query.limit, 50, 200);
     const rows = await query(`
     SELECT id, source, seed_value, wallets_discovered, ran_at
     FROM discovery_log
-    ORDER BY ran_at DESC
+    ORDER BY ran_at DESC, id DESC
     LIMIT $1
   `, [limit]);
     return { items: rows };
@@ -219,7 +290,7 @@ app.get('/v1/clusters/:id/performance', async (req) => {
 });
 app.post('/v1/clusters/:id/refresh', async (req) => {
     const { id } = req.params;
-    await redis.publish('swat:cluster:refresh', JSON.stringify({ clusterId: id }));
+    await redis.publish(REDIS_CHANNELS.clusterRefresh, JSON.stringify({ clusterId: id }));
     return { queued: true };
 });
 app.get('/v1/clusters/:id/timeline', async (req) => {
@@ -235,23 +306,25 @@ app.get('/v1/clusters/:id/timeline', async (req) => {
 });
 // ─── Signals ──────────────────────────────────────────────────────────────────
 app.get('/v1/signals', async (req) => {
-    const { status, min_score, pattern, limit = 100 } = req.query;
+    const q = req.query;
+    const minScore = parseOptionalNumber(q.min_score);
+    const limit = clampLimit(q.limit);
     let sql = `SELECT * FROM signals WHERE 1=1`;
     const params = [];
     let i = 1;
-    if (status) {
+    if (q.status) {
         sql += ` AND status = $${i++}`;
-        params.push(status);
+        params.push(q.status);
     }
-    if (min_score) {
+    if (minScore !== undefined) {
         sql += ` AND signal_score >= $${i++}`;
-        params.push(min_score);
+        params.push(minScore);
     }
-    if (pattern) {
+    if (q.pattern) {
         sql += ` AND pattern_type = $${i++}`;
-        params.push(pattern);
+        params.push(q.pattern);
     }
-    sql += ` ORDER BY created_at DESC LIMIT $${i++}`;
+    sql += ` ORDER BY created_at DESC, id DESC LIMIT $${i++}`;
     params.push(limit);
     return { items: await query(sql, params) };
 });
@@ -349,13 +422,25 @@ app.get('/v1/config', async () => {
     const rows = await query(`SELECT key, value FROM config ORDER BY key`);
     return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 });
-app.post('/v1/config', async (req) => {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
+// Only these config keys may be written through the API. Prevents an arbitrary
+// caller from creating junk rows or shadowing keys consumers don't expect.
+const ALLOWED_CONFIG_KEYS = new Set(['signals', 'trading', 'risk', 'discovery']);
+app.post('/v1/config', async (req, reply) => {
+    const body = req.body;
+    // Guard against non-object bodies (Object.entries(null) throws → 500).
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return reply.code(400).send({ error: 'Body must be a JSON object of config keys' });
+    }
+    const entries = Object.entries(body);
+    const unknown = entries.filter(([key]) => !ALLOWED_CONFIG_KEYS.has(key)).map(([key]) => key);
+    if (unknown.length > 0) {
+        return reply.code(400).send({ error: `Unknown config key(s): ${unknown.join(', ')}` });
+    }
+    for (const [key, value] of entries) {
         await query(`INSERT INTO config (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, [key, JSON.stringify(value)]);
     }
-    return { updated: true };
+    return { updated: entries.length };
 });
 // ─── Start ────────────────────────────────────────────────────────────────────
 const port = Number(process.env.PORT ?? 3001);

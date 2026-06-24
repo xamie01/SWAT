@@ -1,7 +1,20 @@
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
+// Default per-request timeout. Without it a stalled price host (e.g. an IPv4
+// route that black-holes) hangs the whole backfill on undici's long default.
+const PRICE_FETCH_TIMEOUT_MS = Number(process.env.PRICE_FETCH_TIMEOUT_MS ?? 8000);
+async function fetchWithTimeout(url, timeoutMs = PRICE_FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
 export async function fetchDexScreenerPrice(tokenMint) {
     try {
-        const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`);
+        const response = await fetchWithTimeout(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`);
         if (!response.ok)
             return null;
         const data = await response.json();
@@ -10,7 +23,10 @@ export async function fetchDexScreenerPrice(tokenMint) {
             return null;
         // Sort by liquidity to get the most accurate price
         pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-        return parseFloat(pairs[0].priceUsd);
+        // priceUsd may be missing/non-numeric; honour the number|null contract
+        // rather than returning NaN.
+        const price = parseFloat(pairs[0].priceUsd);
+        return Number.isFinite(price) ? price : null;
     }
     catch (error) {
         console.error(`[prices] DexScreener error for ${tokenMint}:`, error);
@@ -19,7 +35,7 @@ export async function fetchDexScreenerPrice(tokenMint) {
 }
 export async function fetchCoinGeckoPrice(tokenMint) {
     try {
-        const response = await fetch(`https://api.coingecko.com/api/v3/simple/token_price/solana?contract_addresses=${tokenMint}&vs_currencies=usd`);
+        const response = await fetchWithTimeout(`https://api.coingecko.com/api/v3/simple/token_price/solana?contract_addresses=${tokenMint}&vs_currencies=usd`);
         if (!response.ok)
             return null;
         const data = await response.json();
@@ -35,14 +51,15 @@ export async function fetchCoinGeckoPrice(tokenMint) {
 }
 export async function fetchJupiterPrice(tokenMint) {
     try {
-        const response = await fetch(`https://price.jup.ag/v6/price?ids=${tokenMint}`);
+        // The old `price.jup.ag/v6` host was retired (DNS no longer resolves). The
+        // live endpoint is the Price API v3 on lite-api.jup.ag, which returns
+        //   { "<mint>": { "usdPrice": <number>, ... } }
+        const response = await fetchWithTimeout(`https://lite-api.jup.ag/price/v3?ids=${tokenMint}`);
         if (!response.ok)
             return null;
         const data = await response.json();
-        if (data.data && data.data[tokenMint] && data.data[tokenMint].price) {
-            return data.data[tokenMint].price;
-        }
-        return null;
+        const price = data?.[tokenMint]?.usdPrice;
+        return typeof price === 'number' && Number.isFinite(price) ? price : null;
     }
     catch (error) {
         console.error(`[prices] Jupiter error for ${tokenMint}:`, error);

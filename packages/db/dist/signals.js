@@ -49,7 +49,7 @@ export async function insertSignalWithDedupe(input, dedupeMinutes = 10) {
 export async function listSignals(limit = 100) {
     return query(`SELECT id, pattern_type, cluster_id, token_mint, confidence, signal_score, status, created_at, expires_at
      FROM signals
-     ORDER BY created_at DESC
+     ORDER BY created_at DESC, id DESC
      LIMIT $1`, [limit]);
 }
 //# sourceMappingURL=signals.js.map

@@ -1,4 +1,5 @@
 import { query } from './client.js';
+import { deleteWalletCascade } from './wallets.js';
 export async function getWalletMetrics(address) {
     const rows = await query(`
     WITH
@@ -10,8 +11,13 @@ export async function getWalletMetrics(address) {
         SUM(CASE WHEN direction = 'sell' THEN amount_out_usd ELSE 0 END) AS realized_value
       FROM transactions
       WHERE wallet_address = $1
-        AND amount_in_usd  IS NOT NULL
-        AND amount_out_usd IS NOT NULL
+        -- A swap row populates only its own USD side (buys → amount_in_usd,
+        -- sells → amount_out_usd). Requiring BOTH non-null dropped almost every
+        -- real row; filter per-side instead.
+        AND (
+          (direction = 'buy'  AND amount_in_usd  IS NOT NULL) OR
+          (direction = 'sell' AND amount_out_usd IS NOT NULL)
+        )
       GROUP BY target_token
       -- Only count positions where at least some selling occurred (closed)
       HAVING SUM(CASE WHEN direction = 'sell' THEN 1 ELSE 0 END) > 0
@@ -50,8 +56,10 @@ export async function getWalletMetrics(address) {
         SUM(CASE WHEN t.direction = 'buy'  THEN t.amount_in_usd  ELSE 0 END) AS monthly_pnl
       FROM transactions t
       WHERE t.wallet_address = $1
-        AND t.amount_in_usd IS NOT NULL
-        AND t.amount_out_usd IS NOT NULL
+        AND (
+          (t.direction = 'buy'  AND t.amount_in_usd  IS NOT NULL) OR
+          (t.direction = 'sell' AND t.amount_out_usd IS NOT NULL)
+        )
       GROUP BY month
     ),
     consistency_calc AS (
@@ -99,7 +107,8 @@ export async function pauseUnderperformingWallets() {
     WHERE status = 'active'
       AND (
         (total_trades >= 50 AND composite_score < 40)
-        OR (last_active < NOW() - INTERVAL '30 days' AND last_active IS NOT NULL)
+        -- last_active < ... already excludes NULLs, so no explicit NULL guard needed.
+        OR (last_active < NOW() - INTERVAL '30 days')
       )
   `);
 }
@@ -113,12 +122,50 @@ export async function promoteHighScoringDiscoveredWallets() {
   `);
 }
 export async function reactivateDormantWallets() {
-    // Reactivate paused wallets that had a new transaction in the last 7 days
+    // Reactivate paused wallets that had a new transaction in the last 7 days,
+    // BUT NOT wallets that would immediately be re-paused by the
+    // underperformance rule — otherwise a low-score-but-recently-active wallet
+    // oscillates active↔paused every nightly batch.
     await query(`
     UPDATE wallets SET status = 'active'
     WHERE status = 'paused'
       AND last_active > NOW() - INTERVAL '7 days'
+      AND NOT (total_trades >= 50 AND composite_score < 40)
   `);
+}
+/**
+ * Delete token-discovered "biggest buyer" wallets that turned out unprofitable
+ * once their history was backfilled and scored. Keep criterion: realized ROI > 0
+ * AND win rate >= 0.5. Only wallets with enough scored data (total_trades >=
+ * minTrades) are judged; an unscored wallet has NULL realized_roi, so the
+ * `realized_roi > 0` test is NULL and it is NOT selected (left to be judged once
+ * scored). Early-buyer wallets ('token-early') are never touched here.
+ *
+ * Returns the addresses removed (the caller cascade-deletes each).
+ */
+export async function findUnprofitableBigBuyers(minTrades = 5) {
+    const rows = await query(`
+    SELECT address
+    FROM wallets
+    WHERE discovery_method = 'token-big'
+      AND total_trades >= $1
+      AND NOT (realized_roi > 0 AND win_rate >= 0.5)
+  `, [minTrades]);
+    return rows.map(r => r.address);
+}
+/**
+ * Cascade-delete the unprofitable 'token-big' wallets found by
+ * findUnprofitableBigBuyers. Runs in the scorer batch AFTER scoring (so
+ * realized_roi/win_rate are populated) and BEFORE clustering (so dead wallets
+ * don't pollute clusters). 'token-early' wallets are never considered. Returns
+ * the number removed.
+ */
+export async function pruneUnprofitableBigBuyers(minTrades = 5) {
+    const addresses = await findUnprofitableBigBuyers(minTrades);
+    for (const address of addresses) {
+        await deleteWalletCascade(address);
+    }
+    return addresses.length;
 }
 export async function getActiveWallets() {
     return query(`SELECT address FROM wallets WHERE status = 'active'`);

@@ -39,14 +39,19 @@ export async function findFrequentCounterparties() {
     JOIN transactions t2
       ON t1.target_token = t2.target_token
       AND ABS(EXTRACT(EPOCH FROM (t1.timestamp - t2.timestamp))) < 300
+      -- A wallet must not match itself (t1.id != t2.id) and the two sides must
+      -- be different wallets; without these guards a wallet's own two buys
+      -- match and counts are double-inflated.
+      AND t1.id <> t2.id
+      AND t1.wallet_address <> t2.wallet_address
     JOIN wallets w ON t1.wallet_address = w.address
     WHERE w.tier IN ('elite', 'pro')
       AND t1.direction = 'buy'
       AND t2.direction = 'buy'
       AND t2.wallet_address NOT IN (SELECT address FROM wallets)
     GROUP BY t2.wallet_address
-    HAVING COUNT(*) >= 5
-    ORDER BY COUNT(*) DESC
+    HAVING COUNT(DISTINCT t2.id) >= 5
+    ORDER BY COUNT(DISTINCT t2.id) DESC
     LIMIT 50
   `);
     return rows.map(r => r.wallet_address);

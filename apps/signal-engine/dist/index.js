@@ -1,8 +1,19 @@
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import { insertSignalWithDedupe, query } from '@swat/db';
-import { REDIS_CHANNELS } from '@swat/shared';
+import { REDIS_CHANNELS, scoreToTier } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
+/**
+ * Resolve a cluster's tier from its average composite score (same thresholds as
+ * wallet tiers). Used to size trades correctly — previously the trade payload
+ * hardcoded 'promising', so every auto-trade was sized at the 0.5x multiplier
+ * regardless of the cluster's real quality.
+ */
+async function getClusterTier(clusterId) {
+    const rows = await query(`SELECT avg_composite_score FROM wallet_clusters WHERE id = $1`, [clusterId]);
+    const score = rows[0]?.avg_composite_score;
+    return score != null ? scoreToTier(Number(score)) : 'promising';
+}
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const alertQueue = new Queue('swat-alerts', { connection: redis });
@@ -42,13 +53,20 @@ async function enqueueSignal(opts) {
         liquidity: safety.liquidity,
         top10HolderPct: safety.top10HolderPct,
         ...opts.triggerData
-    }, { removeOnComplete: true });
+    }, {
+        removeOnComplete: true,
+        // Retry transient Telegram failures (429/5xx) with backoff; the alert
+        // worker is idempotent via signals.alerted_at so retries can't double-send.
+        attempts: 4,
+        backoff: { type: 'exponential', delay: 2000 }
+    });
     if (!opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
+        const clusterTier = await getClusterTier(opts.clusterId);
         await tradeQueue.add('signal-trade', {
             signalId: signal.id,
             score: opts.signalScore,
             tokenMint: opts.tokenMint,
-            clusterTier: 'promising' // will be enriched from cluster record in executor
+            clusterTier // resolved from the cluster's avg composite score
         }, { removeOnComplete: true });
     }
     else if (!safety.isSafe) {
@@ -248,13 +266,26 @@ async function tick() {
 }
 setInterval(tick, 15_000);
 void tick();
-// React immediately to real-time wallet swap events from indexer
+// React immediately to real-time wallet swap events from indexer.
+// Pub/sub is a latency optimization only — the 15s polling tick() is the
+// authoritative detector — but ioredis does NOT auto-resubscribe after a
+// reconnect, so resubscribe on every 'ready' to avoid silently going deaf.
 const subscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
-await subscriber.subscribe(REDIS_CHANNELS.walletSwap);
-subscriber.on('message', (_channel, message) => {
-    // Trigger an immediate detection cycle on any new swap
+function subscribeSwaps() {
+    subscriber.subscribe(REDIS_CHANNELS.walletSwap, (err) => {
+        if (err)
+            console.error('[signal-engine] swap subscribe failed', err);
+        else
+            console.log('[signal-engine] subscribed to wallet-swap channel.');
+    });
+}
+subscribeSwaps();
+subscriber.on('ready', subscribeSwaps);
+subscriber.on('error', (e) => console.error('[signal-engine] redis error', e.message));
+subscriber.on('message', () => {
+    // Trigger an immediate detection cycle on any new swap. Don't log the full
+    // payload (high-volume; avoids leaking wallet-activity detail into logs).
     void tick();
-    console.log('[signal-engine] swap event received:', message);
 });
 console.log('[signal-engine] service running');
 //# sourceMappingURL=index.js.map

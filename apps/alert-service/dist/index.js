@@ -163,9 +163,27 @@ async function formatSignalAlert(payload) {
 // ─── Worker ───────────────────────────────────────────────────────────────────
 new Worker('swat-alerts', async (job) => {
     const payload = job.data;
-    const message = await formatSignalAlert(payload);
-    await sendTelegram(message);
-    return { sent: true };
+    // Idempotency: atomically claim the alert via signals.alerted_at so a
+    // re-delivered job (lock expiry mid-send) can't double-send. If another
+    // worker already claimed it, skip.
+    if (payload.signalId) {
+        const claimed = await query(`UPDATE signals SET alerted_at = NOW() WHERE id = $1 AND alerted_at IS NULL RETURNING id`, [payload.signalId]);
+        if (claimed.length === 0) {
+            return { sent: false, reason: 'already alerted' };
+        }
+    }
+    try {
+        const message = await formatSignalAlert(payload);
+        await sendTelegram(message);
+        return { sent: true };
+    }
+    catch (err) {
+        // Release the claim so a retry can re-send.
+        if (payload.signalId) {
+            await query(`UPDATE signals SET alerted_at = NULL WHERE id = $1`, [payload.signalId]).catch(() => { });
+        }
+        throw err;
+    }
 }, { connection: redis });
 console.log('[alert-service] service running');
 //# sourceMappingURL=index.js.map
