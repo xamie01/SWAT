@@ -17,9 +17,19 @@ export type TradeInsert = {
   signature?: string | null;
   /** 'paper' | 'live' */
   executionMode?: string | null;
-  /** 'paper' | 'trojan' | ... */
+  /** 'paper' | 'trojan' | 'jupiter-sim' | ... */
   executor?: string | null;
   status?: string;
+
+  // ── Jupiter simulation fields (paper trades only) ─────────────────────
+  /** Price impact the swap would cause (e.g. 0.45 = 0.45 %). */
+  priceImpactPct?: number | null;
+  /** Full Jupiter route plan (DEX hops, amounts, fees). */
+  routeInfo?: unknown | null;
+  /** Solana slot at which the Jupiter quote was computed. */
+  quoteSlot?: number | null;
+  /** Minimum output after slippage, in human token units. */
+  minTokenAmount?: number | null;
 };
 
 /**
@@ -43,9 +53,13 @@ export async function insertTrade(input: TradeInsert) {
        signature,
        execution_mode,
        executor,
-       status
+       status,
+       price_impact_pct,
+       route_info,
+       quote_slot,
+       min_token_amount
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING id`,
     [
       input.signalId ?? null,
@@ -60,7 +74,11 @@ export async function insertTrade(input: TradeInsert) {
       input.signature ?? null,
       input.executionMode ?? null,
       input.executor ?? null,
-      input.status ?? 'filled'
+      input.status ?? 'filled',
+      input.priceImpactPct ?? null,
+      input.routeInfo ? JSON.stringify(input.routeInfo) : null,
+      input.quoteSlot ?? null,
+      input.minTokenAmount ?? null
     ]
   );
   return rows[0] ?? null;

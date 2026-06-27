@@ -4,3 +4,21 @@ node_modules/
 .next/
 .turbo/
 dist/
+
+# Generated SWAT Starter Pack Outputs
+wallet-starter-pack.json
+
+# Logs and Debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Local backups
+*.bak
+*.tmp

@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd } from '@swat/shared';
+import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd, getJupiterSimulatedFill } from '@swat/shared';
+import type { JupiterSimulatedFill } from '@swat/shared';
 import { insertTrade, markSignalExecuted, claimSignalForExecution, releaseSignalClaim, hasRecentBuy } from '@swat/db';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -11,6 +12,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 const TROJAN_WEBHOOK_URL = process.env.TROJAN_WEBHOOK_URL;
 const TROJAN_API_KEY = process.env.TROJAN_API_KEY;
+const JUPITER_API_KEY = process.env.JUPITER_API_KEY || undefined;
 const BASE_POSITION_SOL = parseFloat(process.env.BASE_POSITION_SOL ?? '0.5');
 // Absolute ceiling on a single position, as a final safety clamp on the
 // computed size (defends against misconfiguration sending a huge live buy).
@@ -54,14 +56,20 @@ async function getCachedSolPrice(): Promise<number | null> {
 /**
  * Persist a filled trade. Best-effort: a logging failure must not fail the job
  * (which would trip the circuit breaker for a non-execution reason).
+ *
+ * When `jupiterFill` is provided (paper trades with a successful Jupiter quote),
+ * its token amount and price impact override the simple spot-price division.
+ * The spot-price values are still fetched and stored as `price_usd` for
+ * reference, but `token_amount` comes from Jupiter's AMM-routed output.
  */
 async function persistTrade(opts: {
   signalId: string;
   tokenMint: string;
   sizeSol: number;
   executionMode: 'paper' | 'live';
-  executor: 'paper' | 'trojan';
+  executor: 'paper' | 'trojan' | 'jupiter-sim';
   signature?: string | null;
+  jupiterFill?: JupiterSimulatedFill | null;
 }) {
   try {
     const [solPrice, tokenPrice] = await Promise.all([
@@ -71,8 +79,13 @@ async function persistTrade(opts: {
     // If SOL price is unavailable, store null USD rather than a fabricated cost
     // basis — the on-chain SOL amount is still recorded for later reconciliation.
     const amountUsd = solPrice !== null ? opts.sizeSol * solPrice : null;
-    const tokenAmount =
-      amountUsd !== null && tokenPrice && tokenPrice > 0 ? amountUsd / tokenPrice : null;
+
+    // Prefer the Jupiter-simulated token amount (AMM-routed, accounts for
+    // slippage and price impact) over the naive spot-price division.
+    const jup = opts.jupiterFill;
+    const tokenAmount = jup
+      ? jup.tokenAmount
+      : (amountUsd !== null && tokenPrice && tokenPrice > 0 ? amountUsd / tokenPrice : null);
 
     await insertTrade({
       signalId: opts.signalId,
@@ -82,11 +95,16 @@ async function persistTrade(opts: {
       amountUsd,
       tokenAmount,
       priceUsd: tokenPrice,
-      slippageBps: 1500,
+      slippageBps: jup ? 150 : 1500,
       signature: opts.signature ?? null,
       executionMode: opts.executionMode,
       executor: opts.executor,
-      status: 'filled'
+      status: 'filled',
+      // Jupiter simulation enrichment (null for live trades / legacy paper)
+      priceImpactPct: jup?.priceImpactPct ?? null,
+      routeInfo: jup?.routePlan ?? null,
+      quoteSlot: jup?.contextSlot ?? null,
+      minTokenAmount: jup?.minTokenAmount ?? null
     });
     await markSignalExecuted(opts.signalId);
   } catch (error) {
@@ -193,20 +211,50 @@ async function handleJob(job: { data: unknown }) {
 
   try {
     if (mode === 'paper') {
-      console.log(`[trade-executor] PAPER: would buy ${payload.tokenMint} with ${sizeSol} SOL (score: ${payload.score})`);
+      // Fetch a Jupiter quote for a realistic simulated fill.  If the quote
+      // fails (network, rate limit, no route for this token) we fall back to
+      // the existing spot-price logic — the trade is still recorded, just
+      // without AMM-routed accuracy.
+      const jupiterFill = await getJupiterSimulatedFill(
+        {
+          inputMint:     SOL_MINT,
+          outputMint:    payload.tokenMint,
+          amountLamports: Math.round(sizeSol * 1e9),
+          slippageBps:   150
+        },
+        undefined, // outputDecimals — default 9 for most SPL tokens
+        JUPITER_API_KEY
+      );
+
+      if (jupiterFill) {
+        console.log(
+          `[trade-executor] PAPER (jupiter-sim): ${payload.tokenMint} | ` +
+          `${sizeSol} SOL → ${jupiterFill.tokenAmount.toFixed(4)} tokens | ` +
+          `impact: ${jupiterFill.priceImpactPct}% | ` +
+          `route hops: ${jupiterFill.routePlan.length} | ` +
+          `slot: ${jupiterFill.contextSlot}`
+        );
+      } else {
+        console.log(
+          `[trade-executor] PAPER (spot-price fallback): ${payload.tokenMint} | ${sizeSol} SOL (score: ${payload.score})`
+        );
+      }
+
       await persistTrade({
         signalId: payload.signalId,
         tokenMint: payload.tokenMint,
         sizeSol,
         executionMode: 'paper',
-        executor: 'paper'
+        executor: jupiterFill ? 'jupiter-sim' : 'paper',
+        jupiterFill
       });
       return {
         status:    'paper-filled',
         signalId:  payload.signalId,
         tokenMint: payload.tokenMint,
         sizeSol,
-        mode:      'paper'
+        mode:      'paper',
+        simulatedVia: jupiterFill ? 'jupiter' : 'spot-price'
       };
     }
 

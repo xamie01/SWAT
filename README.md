@@ -149,37 +149,29 @@ The web UI covers the **entire bootstrap workflow** — no terminal commands req
 
 ## Getting Your First Signal
 
-Signals only fire when **cluster wallets trade together**. Fresh install = no clusters = no signals. Here's how to bootstrap:
+Signals only fire when **cluster wallets trade together**. A fresh install starts with no wallets and no clusters, so no signals will fire. Follow this guide to bootstrap your setup with high-performance wallets:
 
-**🎯 Recommended:** Use the **[web interface](http://localhost:3000)** (GUI) for all steps below.  
-**Alternative:** Use the API directly via `curl` (commands shown in each step).
+### Step 1: Bootstrap a "Starter Pack" of profitable wallets
 
-### Step 1: Ingest seed wallets
+SWAT comes with a standalone tool to automatically mine profitable wallets from recent on-chain activity. This script queries DexScreener to locate high-volume, newly-launched tokens and uses Helius RPC to isolate snipers, multi-wallet parent operators, and graduates.
 
-Add 5–10 known profitable wallets (find them on [Solscan](https://solscan.io/), [Photon](https://photon-sol.tinyastro.io/), or whale-tracker Discord).
-
-**Via Web UI:**
-1. Visit [http://localhost:3000/wallets](http://localhost:3000/wallets)
-2. Use the **"Add Single Wallet"** form or **bulk paste** multiple addresses
-3. Click "Add" — the indexer backfills automatically (~30–60s per wallet)
-
-<details>
-<summary><strong>Via API (click to expand)</strong></summary>
-
+**1. Generate the wallet starter pack:**
 ```bash
-curl -X POST http://localhost:3001/v1/wallets \
-  -H "X-Api-Key: swat-dev-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "wallets": [
-      {"address": "Wallet1111111111111111111111111111111111111", "source": "manual"},
-      {"address": "Wallet2222222222222222222222222222222222222", "source": "manual"}
-    ]
-  }'
+npx tsx --env-file=.env discover-starter-pack.ts
 ```
-</details>
+This scans active targets and outputs a list of profitable wallets to `wallet-starter-pack.json`. You can edit the search terms and target limits inside the script's `CONFIG` section.
+
+**2. Ingest and enqueue the wallets:**
+```bash
+cd apps/scorer
+npx tsx --env-file=../../.env _ingest_wallets.ts
+```
+This loads all wallets from the generated starter pack into your PostgreSQL database and enqueues them for on-chain indexing.
+
+---
 
 ### Step 2: Run the scoring batch
+
 
 Clustering requires scored wallets. The scorer runs **nightly at 02:00 UTC**, or you can trigger it manually:
 
