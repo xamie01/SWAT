@@ -6,52 +6,10 @@
    ▲ Next.js 15.5.18
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 7.4s
+ ✓ Compiled successfully in 8.0s
    Linting and checking validity of types     ✓ Linting and checking validity of types 
    Collecting page data     ✓ Collecting page data 
-API fetch error for /v1/trading/performance: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used revalidate: 0 fetch http://localhost:3001/v1/trading/performance /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
-    at r (.next/server/chunks/206.js:24:42619)
-    at <unknown> (.next/server/chunks/206.js:19:166958)
-    at <unknown> (.next/server/chunks/206.js:19:188242)
-    at e.with (.next/server/chunks/206.js:19:47947)
-    at i.with (.next/server/chunks/206.js:19:42194)
-    at i.startActiveSpan (.next/server/chunks/206.js:19:57160)
-    at e.startActiveSpan (.next/server/chunks/206.js:19:57694)
-    at <unknown> (.next/server/chunks/206.js:19:187770)
-    at e.with (.next/server/chunks/206.js:19:47947)
-    at i.with (.next/server/chunks/206.js:19:42194) {
-  description: "Route /performance couldn't be rendered statically because it used revalidate: 0 fetch http://localhost:3001/v1/trading/performance /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
-  digest: 'DYNAMIC_SERVER_USAGE'
-}
-API fetch error for /v1/trading/portfolio: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/portfolio /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
-    at r (.next/server/chunks/206.js:24:42619)
-    at <unknown> (.next/server/chunks/206.js:19:169855)
-    at <unknown> (.next/server/chunks/206.js:19:188242)
-    at e.with (.next/server/chunks/206.js:19:47947)
-    at i.with (.next/server/chunks/206.js:19:42194)
-    at i.startActiveSpan (.next/server/chunks/206.js:19:57160)
-    at e.startActiveSpan (.next/server/chunks/206.js:19:57694)
-    at <unknown> (.next/server/chunks/206.js:19:187770)
-    at e.with (.next/server/chunks/206.js:19:47947)
-    at i.with (.next/server/chunks/206.js:19:42194) {
-  description: "Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/portfolio /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
-  digest: 'DYNAMIC_SERVER_USAGE'
-}
-API fetch error for /v1/trading/trades: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/trades /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
-    at r (.next/server/chunks/206.js:24:42619)
-    at <unknown> (.next/server/chunks/206.js:19:169855)
-    at <unknown> (.next/server/chunks/206.js:19:188242)
-    at e.with (.next/server/chunks/206.js:19:47947)
-    at i.with (.next/server/chunks/206.js:19:42194)
-    at i.startActiveSpan (.next/server/chunks/206.js:19:57160)
-    at e.startActiveSpan (.next/server/chunks/206.js:19:57694)
-    at <unknown> (.next/server/chunks/206.js:19:187770)
-    at e.with (.next/server/chunks/206.js:19:47947)
-    at i.with (.next/server/chunks/206.js:19:42194) {
-  description: "Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/trades /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
-  digest: 'DYNAMIC_SERVER_USAGE'
-}
- ✓ Generating static pages (10/10)
+ ✓ Generating static pages (7/7)
    Collecting build traces     ✓ Collecting build traces 
    Finalizing page optimization     ✓ Finalizing page optimization 
 

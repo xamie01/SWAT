@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const API_KEY = process.env.API_KEY ?? 'swat-dev-key';
 

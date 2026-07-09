@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+
 // Server component: runs on the host, so reads the server-side API_KEY and the
 // configured base URL (not a hardcoded localhost, which breaks non-local
 // deployments and would 401 once auth is enforced).
