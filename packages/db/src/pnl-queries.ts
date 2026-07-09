@@ -56,8 +56,9 @@ export async function markToMarketOpenPositions(): Promise<{ updated: number; sk
   for (const pos of positions) {
     let currentPrice = priceCache.get(pos.token_mint);
     if (currentPrice === undefined) {
-      currentPrice = await fetchTokenPriceUsd(pos.token_mint);
-      priceCache.set(pos.token_mint, currentPrice);
+      const fetched = await fetchTokenPriceUsd(pos.token_mint);
+      priceCache.set(pos.token_mint, fetched);
+      currentPrice = fetched;
     }
 
     const pnl = markToMarketPnl(
