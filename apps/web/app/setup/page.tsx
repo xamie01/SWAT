@@ -30,7 +30,25 @@ export default function SetupPage() {
         });
         if (res.ok) {
           const config = await res.json();
-          setBlacklist(config.blacklist || []);
+          const rawValue = config.blacklist;
+          if (rawValue) {
+            let parsedList: string[] = [];
+            if (Array.isArray(rawValue)) {
+              parsedList = rawValue;
+            } else if (typeof rawValue === 'string') {
+              try {
+                const parsed = JSON.parse(rawValue);
+                parsedList = Array.isArray(parsed) ? parsed : [parsed];
+              } catch {
+                parsedList = rawValue.trim().startsWith('[') 
+                  ? [] 
+                  : rawValue.split(',').map((s: string) => s.trim());
+              }
+            }
+            setBlacklist(parsedList);
+          } else {
+            setBlacklist([]);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch config', err);
@@ -107,7 +125,8 @@ export default function SetupPage() {
         headers: {
           'X-Api-Key': API_KEY,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({})
       });
 
       if (!res.ok) {

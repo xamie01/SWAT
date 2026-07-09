@@ -43,9 +43,28 @@ async function enqueueSignal(opts: {
   // 1. Check Blacklist config setting
   try {
     const blacklistRows = await query<{ value: string }>(`SELECT value FROM config WHERE key = 'blacklist'`);
-    if (blacklistRows[0]?.value) {
-      const blacklist = JSON.parse(blacklistRows[0].value) as string[];
-      if (Array.isArray(blacklist) && blacklist.includes(opts.tokenMint)) {
+    const rawValue = blacklistRows[0]?.value;
+    if (rawValue) {
+      let blacklist: string[] = [];
+      try {
+        const parsed = JSON.parse(rawValue);
+        if (Array.isArray(parsed)) {
+          blacklist = parsed;
+        } else if (typeof parsed === 'string') {
+          try {
+            const parsed2 = JSON.parse(parsed);
+            blacklist = Array.isArray(parsed2) ? parsed2 : [parsed];
+          } catch {
+            blacklist = [parsed];
+          }
+        }
+      } catch {
+        blacklist = rawValue.trim().startsWith('[') 
+          ? [] 
+          : rawValue.split(',').map(s => s.trim());
+      }
+      
+      if (blacklist.includes(opts.tokenMint)) {
         console.log(`[signal-engine] SKIPPED: token ${opts.tokenMint} is in the blacklist.`);
         return;
       }

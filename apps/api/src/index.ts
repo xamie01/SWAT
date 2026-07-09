@@ -515,10 +515,13 @@ app.get('/v1/logs', async () => {
 });
 
 app.get('/v1/logs/stream', async (req, reply) => {
-  reply.raw.setHeader('Content-Type', 'text/event-stream');
-  reply.raw.setHeader('Cache-Control', 'no-cache');
-  reply.raw.setHeader('Connection', 'keep-alive');
-  reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  reply.sent = true;
   
   const sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
   await sub.subscribe('swat:logs:stream');

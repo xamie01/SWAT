@@ -6,7 +6,7 @@
    ▲ Next.js 15.5.18
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 33.2s
+ ✓ Compiled successfully in 7.4s
    Linting and checking validity of types     ✓ Linting and checking validity of types 
    Collecting page data     ✓ Collecting page data 
 API fetch error for /v1/trading/performance: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used revalidate: 0 fetch http://localhost:3001/v1/trading/performance /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
@@ -61,7 +61,7 @@ Route (app)                                 Size  First Load JS
 ├ ○ /clusters                            1.76 kB         104 kB
 ├ ○ /logs                                2.45 kB         104 kB
 ├ ƒ /performance                           131 B         102 kB
-├ ○ /setup                                3.1 kB         105 kB
+├ ○ /setup                               3.21 kB         105 kB
 ├ ƒ /signals                               131 B         102 kB
 └ ○ /wallets                             2.21 kB         104 kB
 + First Load JS shared by all             102 kB
