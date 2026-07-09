@@ -42,26 +42,33 @@ async function enqueueSignal(opts: {
 }) {
   // 1. Check Blacklist config setting
   try {
-    const blacklistRows = await query<{ value: string }>(`SELECT value FROM config WHERE key = 'blacklist'`);
+    const blacklistRows = await query<{ value: any }>(`SELECT value FROM config WHERE key = 'blacklist'`);
     const rawValue = blacklistRows[0]?.value;
     if (rawValue) {
       let blacklist: string[] = [];
-      try {
-        const parsed = JSON.parse(rawValue);
-        if (Array.isArray(parsed)) {
-          blacklist = parsed;
-        } else if (typeof parsed === 'string') {
-          try {
-            const parsed2 = JSON.parse(parsed);
-            blacklist = Array.isArray(parsed2) ? parsed2 : [parsed];
-          } catch {
-            blacklist = [parsed];
+      if (Array.isArray(rawValue)) {
+        blacklist = rawValue;
+      } else if (typeof rawValue === 'string') {
+        try {
+          const parsed = JSON.parse(rawValue);
+          if (Array.isArray(parsed)) {
+            blacklist = parsed;
+          } else if (typeof parsed === 'string') {
+            try {
+              const parsed2 = JSON.parse(parsed);
+              blacklist = Array.isArray(parsed2) ? parsed2 : [parsed];
+            } catch {
+              blacklist = [parsed];
+            }
           }
+        } catch {
+          const trimmed = rawValue.trim();
+          blacklist = trimmed.startsWith('[') 
+            ? [] 
+            : trimmed.split(',').map(s => s.trim());
         }
-      } catch {
-        blacklist = rawValue.trim().startsWith('[') 
-          ? [] 
-          : rawValue.split(',').map(s => s.trim());
+      } else if (typeof rawValue === 'object' && rawValue !== null) {
+        blacklist = Object.values(rawValue).filter(v => typeof v === 'string') as string[];
       }
       
       if (blacklist.includes(opts.tokenMint)) {
