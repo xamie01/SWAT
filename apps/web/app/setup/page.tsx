@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 // Derive the API host from how the page is being viewed, so it works both on
 // the dev machine (localhost) and from another device on the LAN (the host's IP).
@@ -18,6 +18,83 @@ export default function SetupPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [tokenMint, setTokenMint] = useState('');
+  const [blacklist, setBlacklist] = useState<string[]>([]);
+  const [newBlacklistMint, setNewBlacklistMint] = useState('');
+
+  // Fetch blacklist config on load
+  useEffect(() => {
+    async function fetchConfig() {
+      try {
+        const res = await fetch(`${API_BASE}/v1/config`, {
+          headers: { 'x-api-key': API_KEY }
+        });
+        if (res.ok) {
+          const config = await res.json();
+          setBlacklist(config.blacklist || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch config', err);
+      }
+    }
+    fetchConfig();
+  }, []);
+
+  const addToBlacklist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const mint = newBlacklistMint.trim();
+    if (!mint) return;
+    if (blacklist.includes(mint)) {
+      setError('Token address is already blacklisted');
+      return;
+    }
+
+    const updatedList = [...blacklist, mint];
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${API_BASE}/v1/config`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ blacklist: updatedList })
+      });
+      if (!res.ok) throw new Error('Failed to save blacklist configuration');
+      setBlacklist(updatedList);
+      setNewBlacklistMint('');
+      setSuccess(`Added token ${mint.substring(0, 8)}... to blacklist.`);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeFromBlacklist = async (mint: string) => {
+    const updatedList = blacklist.filter(item => item !== mint);
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`${API_BASE}/v1/config`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ blacklist: updatedList })
+      });
+      if (!res.ok) throw new Error('Failed to save blacklist configuration');
+      setBlacklist(updatedList);
+      setSuccess(`Removed token ${mint.substring(0, 8)}... from blacklist.`);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const triggerScorer = async () => {
     setScorerLoading(true);
@@ -181,6 +258,90 @@ export default function SetupPage() {
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '1rem' }}>
             Returns up to 50 early buyers. Run the scorer again after discovery completes.
           </p>
+        </div>
+
+        {/* Token Blacklist Card */}
+        <div className="card">
+          <h3>Token Blacklist Settings</h3>
+          <p style={{ color: 'var(--text-secondary)', margin: '1rem 0' }}>
+            Add token mint contract addresses (e.g. stablecoins USDC/USDT, or specific spam/honeypots) that you want to ignore. Coordinated buys/sells on these tokens will not generate intelligence signals.
+          </p>
+          <form onSubmit={addToBlacklist}>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="text"
+                placeholder="Token Mint Address to blacklist..."
+                value={newBlacklistMint}
+                onChange={(e) => setNewBlacklistMint(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem',
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.9rem',
+                  fontFamily: 'monospace'
+                }}
+              />
+              <button
+                type="submit"
+                disabled={loading || !newBlacklistMint.trim()}
+                style={{
+                  padding: '0.75rem 1.5rem',
+                  background: 'var(--danger)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  cursor: loading || !newBlacklistMint.trim() ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Blacklist
+              </button>
+            </div>
+          </form>
+
+          {blacklist.length === 0 ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '1.5rem', fontStyle: 'italic' }}>
+              No contract addresses currently blacklisted.
+            </p>
+          ) : (
+            <div style={{ marginTop: '1.5rem' }}>
+              <h4 style={{ color: 'var(--text-primary)', fontSize: '0.9rem', marginBottom: '0.5rem' }}>Blacklisted Contracts ({blacklist.length}):</h4>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '200px', overflowY: 'auto' }}>
+                {blacklist.map((mint) => (
+                  <li key={mint} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '0.5rem 0.75rem',
+                    background: 'rgba(0,0,0,0.2)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem',
+                    fontSize: '0.85rem'
+                  }}>
+                    <code style={{ color: 'var(--text-secondary)' }}>{mint}</code>
+                    <button
+                      onClick={() => removeFromBlacklist(mint)}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid var(--danger)',
+                        color: 'var(--danger)',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Bootstrap checklist */}

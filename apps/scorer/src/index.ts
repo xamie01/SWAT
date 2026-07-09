@@ -12,7 +12,9 @@ import {
   generateBehavioralClusters,
   markToMarketOpenPositions
 } from '@swat/db';
-import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS } from '@swat/shared';
+import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger } from '@swat/shared';
+
+initLogger('scorer');
 
 /** Regenerate clusters on demand (API POST /v1/clusters/:id/refresh). */
 async function regenerateClusters() {

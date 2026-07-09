@@ -10,7 +10,7 @@ import {
   recordFundingEdge,
   logDiscoveryRun
 } from '@swat/db';
-import { REDIS_CHANNELS, QUEUES, walletInputSchema, fetchTokenPriceUsd } from '@swat/shared';
+import { REDIS_CHANNELS, QUEUES, walletInputSchema, fetchTokenPriceUsd, initLogger } from '@swat/shared';
 import {
   extractFundingTransfers,
   extractTokenBuyers,
@@ -19,6 +19,8 @@ import {
   SOL_MINT,
   type HeliusParsedTransaction
 } from './parse.js';
+
+initLogger('indexer');
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });

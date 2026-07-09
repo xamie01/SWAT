@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.2",
+    "ioredis": "^5.4.1",
     "zod": "^3.24.4"
   },
   "devDependencies": {

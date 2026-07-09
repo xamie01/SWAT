@@ -31,4 +31,6 @@ export interface SignalRecord {
   signalScore: number;
   status: 'pending' | 'executed' | 'alerted' | 'expired' | 'rejected' | 'ignored';
   createdAt: Date;
+  tokenName?: string | null;
+  tokenSymbol?: string | null;
 }

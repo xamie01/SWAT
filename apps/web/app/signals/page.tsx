@@ -41,7 +41,8 @@ export default async function SignalsPage() {
               <div>
                 <h3 style={{ marginBottom: '0.5rem', color: 'var(--accent)' }}>{(signal.pattern_type ?? 'unknown').toUpperCase()} SIGNAL</h3>
                 <p style={{ margin: '0 0 0.5rem 0' }}>
-                  <strong>Token:</strong> {signal.token_mint} <br/>
+                  <strong>Token:</strong> {signal.token_symbol ? `$${signal.token_symbol} (${signal.token_name})` : signal.token_mint} <br/>
+                  {signal.token_symbol && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', margin: '0.1rem 0' }}>CA: <code>{signal.token_mint}</code></span>}
                   <strong>Cluster:</strong> {signal.cluster_id}
                 </p>
                 <div>

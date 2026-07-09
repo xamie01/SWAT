@@ -29,6 +29,9 @@ importers:
       '@swat/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@swat/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       bullmq:
         specifier: ^5.52.1
         version: 5.76.8
@@ -217,6 +220,9 @@ importers:
       '@solana/web3.js':
         specifier: ^1.98.2
         version: 1.98.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.10.1
       zod:
         specifier: ^3.24.4
         version: 3.25.76

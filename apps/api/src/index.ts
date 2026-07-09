@@ -10,7 +10,9 @@ import {
   upsertWallet,
   query
 } from '@swat/db';
-import { walletAddressSchema, walletInputSchema, REDIS_CHANNELS, QUEUES } from '@swat/shared';
+import { walletAddressSchema, walletInputSchema, REDIS_CHANNELS, QUEUES, initLogger } from '@swat/shared';
+
+initLogger('api');
 
 const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -497,9 +499,33 @@ app.post('/v1/scorer/run', async () => {
   return { queued: true };
 });
 
+app.get('/v1/logs', async () => {
+  const logs = await redis.lrange('swat:logs:list', 0, -1);
+  return { items: logs.map(l => JSON.parse(l)) };
+});
+
+app.get('/v1/logs/stream', async (req, reply) => {
+  reply.raw.setHeader('Content-Type', 'text/event-stream');
+  reply.raw.setHeader('Cache-Control', 'no-cache');
+  reply.raw.setHeader('Connection', 'keep-alive');
+  reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+  
+  const sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
+  await sub.subscribe('swat:logs:stream');
+  
+  sub.on('message', (channel, message) => {
+    reply.raw.write(`data: ${message}\n\n`);
+  });
+  
+  req.raw.on('close', async () => {
+    await sub.quit();
+  });
+});
+
+
 // Only these config keys may be written through the API. Prevents an arbitrary
 // caller from creating junk rows or shadowing keys consumers don't expect.
-const ALLOWED_CONFIG_KEYS = new Set(['signals', 'trading', 'risk', 'discovery']);
+const ALLOWED_CONFIG_KEYS = new Set(['signals', 'trading', 'risk', 'discovery', 'blacklist']);
 
 app.post('/v1/config', async (req, reply) => {
   const body = req.body;

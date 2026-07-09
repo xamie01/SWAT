@@ -9,12 +9,14 @@ type SignalInput = {
   triggerData: Record<string, unknown>;
   safetyFlags?: string[];
   safetyWarnings?: string[];
+  tokenName?: string | null;
+  tokenSymbol?: string | null;
 };
 
 export async function insertSignal(input: SignalInput) {
   const rows = await query(
-    `INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING *`,
     [
       input.patternType,
@@ -24,7 +26,9 @@ export async function insertSignal(input: SignalInput) {
       input.signalScore,
       JSON.stringify(input.triggerData),
       input.safetyFlags ?? [],
-      input.safetyWarnings ?? []
+      input.safetyWarnings ?? [],
+      input.tokenName ?? null,
+      input.tokenSymbol ?? null
     ]
   );
   return rows[0];
@@ -38,13 +42,13 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
       WHERE pattern_type = $1
         AND cluster_id IS NOT DISTINCT FROM $2::uuid
         AND token_mint IS NOT DISTINCT FROM $3::varchar
-        AND created_at > NOW() - make_interval(mins => $9::int)
+        AND created_at > NOW() - make_interval(mins => $11::int)
       ORDER BY created_at DESC
       LIMIT 1
     ),
     inserted AS (
-      INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings, expires_at)
-      SELECT $1, $2, $3, $4, $5, $6, $7, $8, NOW() + make_interval(mins => $9::int)
+      INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol, expires_at)
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + make_interval(mins => $11::int)
       WHERE NOT EXISTS (SELECT 1 FROM existing)
       RETURNING *
     )
@@ -60,6 +64,8 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
       JSON.stringify(input.triggerData),
       input.safetyFlags ?? [],
       input.safetyWarnings ?? [],
+      input.tokenName ?? null,
+      input.tokenSymbol ?? null,
       dedupeMinutes
     ]
   );
@@ -69,7 +75,7 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
 
 export async function listSignals(limit = 100) {
   return query(
-    `SELECT id, pattern_type, cluster_id, token_mint, confidence, signal_score, status, created_at, expires_at
+    `SELECT id, pattern_type, cluster_id, token_mint, confidence, signal_score, status, created_at, expires_at, token_name, token_symbol
      FROM signals
      ORDER BY created_at DESC, id DESC
      LIMIT $1`,

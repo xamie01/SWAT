@@ -72,9 +72,14 @@ export default async function HomePage() {
                   >
                     {signal.pattern_type}
                   </span>
-                  <code style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>
-                    {signal.token_mint?.slice(0, 8)}...
+                  <code style={{ fontSize: '0.8rem', color: 'var(--accent)', marginRight: '0.5rem' }}>
+                    {signal.token_symbol ? `$${signal.token_symbol}` : `${signal.token_mint?.slice(0, 8)}...`}
                   </code>
+                  {signal.token_symbol && (
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      ({signal.token_name})
+                    </span>
+                  )}
                   <span style={{ float: 'right', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
                     Score: {signal.signal_score} · {new Date(signal.created_at).toLocaleTimeString()}
                   </span>

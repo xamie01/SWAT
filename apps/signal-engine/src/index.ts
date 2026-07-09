@@ -1,8 +1,10 @@
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import { insertSignalWithDedupe, query } from '@swat/db';
-import { REDIS_CHANNELS, scoreToTier } from '@swat/shared';
+import { REDIS_CHANNELS, scoreToTier, fetchTokenMetadata, initLogger } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
+
+initLogger('signal-engine');
 
 /**
  * Resolve a cluster's tier from its average composite score (same thresholds as
@@ -38,6 +40,41 @@ async function enqueueSignal(opts: {
   dedupeMinutes?: number;
   suppressTrade?: boolean;
 }) {
+  // 1. Check Blacklist config setting
+  try {
+    const blacklistRows = await query<{ value: string }>(`SELECT value FROM config WHERE key = 'blacklist'`);
+    if (blacklistRows[0]?.value) {
+      const blacklist = JSON.parse(blacklistRows[0].value) as string[];
+      if (Array.isArray(blacklist) && blacklist.includes(opts.tokenMint)) {
+        console.log(`[signal-engine] SKIPPED: token ${opts.tokenMint} is in the blacklist.`);
+        return;
+      }
+    }
+  } catch (e: any) {
+    console.error(`[signal-engine] failed to read blacklist config:`, e.message);
+  }
+
+  // 2. Fetch token metadata (Name & Symbol) from Helius / DexScreener
+  let tokenName = 'Unknown';
+  let tokenSymbol = 'UNKNOWN';
+  try {
+    const meta = await fetchTokenMetadata(opts.tokenMint);
+    if (meta?.name && meta?.symbol) {
+      tokenName = meta.name;
+      tokenSymbol = meta.symbol;
+      
+      // Upsert into the tokens table so other parts of the database have the metadata
+      await query(
+        `INSERT INTO tokens (mint, name, symbol)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (mint) DO UPDATE SET name = EXCLUDED.name, symbol = EXCLUDED.symbol`,
+        [opts.tokenMint, tokenName, tokenSymbol]
+      );
+    }
+  } catch (e: any) {
+    console.error(`[signal-engine] failed to fetch metadata for ${opts.tokenMint}:`, e.message);
+  }
+
   const safety = await checkTokenSafety(opts.tokenMint);
 
   const signal = await insertSignalWithDedupe(
@@ -49,7 +86,9 @@ async function enqueueSignal(opts: {
       signalScore:    opts.signalScore,
       triggerData:    opts.triggerData,
       safetyFlags:    safety.flags,
-      safetyWarnings: safety.warnings
+      safetyWarnings: safety.warnings,
+      tokenName,
+      tokenSymbol
     },
     opts.dedupeMinutes ?? 10
   );

@@ -4,3 +4,4 @@ export * from './validation.js';
 export * from './constants.js';
 export * from './prices.js';
 export * from './jupiter.js';
+export * from './logger.js';

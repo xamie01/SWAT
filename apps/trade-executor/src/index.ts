@@ -1,8 +1,10 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd, getJupiterSimulatedFill } from '@swat/shared';
+import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd, getJupiterSimulatedFill, initLogger } from '@swat/shared';
 import type { JupiterSimulatedFill } from '@swat/shared';
 import { insertTrade, markSignalExecuted, claimSignalForExecution, releaseSignalClaim, hasRecentBuy } from '@swat/db';
+
+initLogger('trade-executor');
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });

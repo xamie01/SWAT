@@ -1,6 +1,9 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { query } from '@swat/db';
+import { initLogger } from '@swat/shared';
+
+initLogger('alert-service');
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });

@@ -87,3 +87,50 @@ export async function fetchTokenPriceUsd(tokenMint: string): Promise<number | nu
 
   return null;
 }
+
+export async function fetchTokenMetadata(tokenMint: string): Promise<{ name: string; symbol: string } | null> {
+  // 1. Try Helius DAS API getAsset
+  const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+  if (HELIUS_API_KEY) {
+    try {
+      const rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'token-metadata',
+          method: 'getAsset',
+          params: { id: tokenMint }
+        })
+      });
+      if (response.ok) {
+        const json = await response.json() as any;
+        if (!json.error && json.result?.content?.metadata) {
+          const name = json.result.content.metadata.name || 'Unknown';
+          const symbol = json.result.content.metadata.symbol || 'UNKNOWN';
+          return { name, symbol };
+        }
+      }
+    } catch (error) {
+      console.error(`[prices] Helius getAsset error for ${tokenMint}:`, error);
+    }
+  }
+
+  // 2. Fallback to DexScreener
+  try {
+    const response = await fetchWithTimeout(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`);
+    if (response.ok) {
+      const data = await response.json() as any;
+      const base = data?.pairs?.[0]?.baseToken;
+      if (base?.name && base?.symbol) {
+        return { name: base.name, symbol: base.symbol };
+      }
+    }
+  } catch (error) {
+    console.error(`[prices] DexScreener metadata error for ${tokenMint}:`, error);
+  }
+
+  return null;
+}
+
