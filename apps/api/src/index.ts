@@ -492,6 +492,11 @@ app.get('/v1/config', async () => {
   return Object.fromEntries((rows as any[]).map((r) => [r.key, r.value]));
 });
 
+app.post('/v1/scorer/run', async () => {
+  await redis.publish(REDIS_CHANNELS.scorerRun, JSON.stringify({}));
+  return { queued: true };
+});
+
 // Only these config keys may be written through the API. Prevents an arbitrary
 // caller from creating junk rows or shadowing keys consumers don't expect.
 const ALLOWED_CONFIG_KEYS = new Set(['signals', 'trading', 'risk', 'discovery']);

@@ -131,22 +131,30 @@ const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const subscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
 let clusterRefreshing = false;
 
-function subscribeClusterRefresh() {
-  subscriber.subscribe(REDIS_CHANNELS.clusterRefresh, (err) => {
+function subscribeScorerEvents() {
+  subscriber.subscribe(REDIS_CHANNELS.clusterRefresh, REDIS_CHANNELS.scorerRun, (err) => {
     if (err) console.error('[scorer] subscribe failed', err);
-    else console.log('[scorer] subscribed to cluster-refresh channel.');
+    else console.log('[scorer] subscribed to cluster-refresh and scorer-run channels.');
   });
 }
-subscribeClusterRefresh();
-subscriber.on('ready', subscribeClusterRefresh); // resubscribe after reconnect
+subscribeScorerEvents();
+subscriber.on('ready', subscribeScorerEvents); // resubscribe after reconnect
 subscriber.on('error', (e) => console.error('[scorer] redis error', e.message));
 subscriber.on('message', (channel) => {
-  if (channel !== REDIS_CHANNELS.clusterRefresh) return;
-  if (clusterRefreshing) return;
-  clusterRefreshing = true;
-  regenerateClusters()
-    .catch((e) => console.error('[scorer] cluster refresh failed', e))
-    .finally(() => { clusterRefreshing = false; });
+  if (channel === REDIS_CHANNELS.clusterRefresh) {
+    if (clusterRefreshing) return;
+    clusterRefreshing = true;
+    regenerateClusters()
+      .catch((e) => console.error('[scorer] cluster refresh failed', e))
+      .finally(() => { clusterRefreshing = false; });
+  } else if (channel === REDIS_CHANNELS.scorerRun) {
+    if (clusterRefreshing) return;
+    clusterRefreshing = true;
+    console.log('[scorer] Manual scorer batch run triggered on-demand.');
+    runScoringBatchGuarded()
+      .catch((e) => console.error('[scorer] manual scoring batch failed', e))
+      .finally(() => { clusterRefreshing = false; });
+  }
 });
 
 console.log('[scorer] Service running. Scheduled at 02:00 UTC daily; mark-to-market every 5m; listening for cluster-refresh.');

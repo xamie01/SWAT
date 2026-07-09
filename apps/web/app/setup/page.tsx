@@ -14,9 +14,37 @@ const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 export default function SetupPage() {
   const [loading, setLoading] = useState(false);
+  const [scorerLoading, setScorerLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [tokenMint, setTokenMint] = useState('');
+
+  const triggerScorer = async () => {
+    setScorerLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await fetch(`${API_BASE}/v1/scorer/run`, {
+        method: 'POST',
+        headers: {
+          'X-Api-Key': API_KEY,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || data.message || 'Failed to trigger scorer');
+      }
+
+      setSuccess('Scorer batch run successfully triggered in the background. Calculating wallet metrics, tiers, and generating clusters now.');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setScorerLoading(false);
+    }
+  };
 
   const triggerDiscovery = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,17 +111,23 @@ export default function SetupPage() {
             The scorer computes wallet metrics, assigns tiers, and generates clusters from tracked wallets.
             By default it runs at <strong>02:00 UTC</strong> daily.
           </p>
-          <div style={{
-            padding: '1rem',
-            background: 'rgba(245, 158, 11, 0.1)',
-            border: '1px solid var(--warning)',
-            borderRadius: '8px',
-            marginTop: '1rem'
-          }}>
-            <p style={{ color: 'var(--warning)', margin: 0, fontSize: '0.9rem' }}>
-              <strong>Manual Trigger:</strong> Set <code>RUN_ON_STARTUP=true</code> in <code>.env</code> and restart the scorer service.
-            </p>
-          </div>
+          <button
+            onClick={triggerScorer}
+            disabled={scorerLoading}
+            style={{
+              padding: '0.75rem 1.5rem',
+              background: 'var(--warning)',
+              color: 'black',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 600,
+              cursor: scorerLoading ? 'not-allowed' : 'pointer',
+              opacity: scorerLoading ? 0.5 : 1,
+              marginTop: '1rem'
+            }}
+          >
+            {scorerLoading ? 'Running Scorer...' : 'Run Scorer Batch Now'}
+          </button>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '1rem' }}>
             After the scorer runs, check <a href="/clusters" style={{ color: 'var(--accent)' }}>Clusters</a> to verify clusters were generated.
           </p>

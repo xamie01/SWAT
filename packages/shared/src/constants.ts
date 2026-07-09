@@ -8,7 +8,8 @@ export const REDIS_CHANNELS = {
   // channel names can't drift.
   discoveryRun: 'swat:discovery:run',
   discoverySeedToken: 'swat:discovery:seed-token',
-  clusterRefresh: 'swat:cluster:refresh'
+  clusterRefresh: 'swat:cluster:refresh',
+  scorerRun: 'swat:scorer:run'
 } as const;
 
 // BullMQ queue names shared between producers (API) and consumers (indexer),
