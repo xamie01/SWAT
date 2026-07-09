@@ -487,6 +487,16 @@ app.get('/v1/trading/performance', async () => {
   return perf ?? { win_rate: 0, total_pnl_usd: 0, total_signals: 0 };
 });
 
+app.get('/v1/trading/trades', async () => {
+  const items = await query(`
+    SELECT id, signal_id, token_mint, direction, amount_sol, amount_usd, token_amount, price_usd, slippage_bps, signature, execution_mode, executor, status, price_impact_pct, quote_slot, min_token_amount, executed_at
+    FROM trades
+    ORDER BY executed_at DESC, id DESC
+    LIMIT 50
+  `);
+  return { items };
+});
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 app.get('/v1/config', async () => {

@@ -6,20 +6,63 @@
    ▲ Next.js 15.5.18
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 35.0s
+ ✓ Compiled successfully in 33.2s
    Linting and checking validity of types     ✓ Linting and checking validity of types 
    Collecting page data     ✓ Collecting page data 
- ✓ Generating static pages (9/9)
+API fetch error for /v1/trading/performance: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used revalidate: 0 fetch http://localhost:3001/v1/trading/performance /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
+    at r (.next/server/chunks/206.js:24:42619)
+    at <unknown> (.next/server/chunks/206.js:19:166958)
+    at <unknown> (.next/server/chunks/206.js:19:188242)
+    at e.with (.next/server/chunks/206.js:19:47947)
+    at i.with (.next/server/chunks/206.js:19:42194)
+    at i.startActiveSpan (.next/server/chunks/206.js:19:57160)
+    at e.startActiveSpan (.next/server/chunks/206.js:19:57694)
+    at <unknown> (.next/server/chunks/206.js:19:187770)
+    at e.with (.next/server/chunks/206.js:19:47947)
+    at i.with (.next/server/chunks/206.js:19:42194) {
+  description: "Route /performance couldn't be rendered statically because it used revalidate: 0 fetch http://localhost:3001/v1/trading/performance /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
+  digest: 'DYNAMIC_SERVER_USAGE'
+}
+API fetch error for /v1/trading/portfolio: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/portfolio /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
+    at r (.next/server/chunks/206.js:24:42619)
+    at <unknown> (.next/server/chunks/206.js:19:169855)
+    at <unknown> (.next/server/chunks/206.js:19:188242)
+    at e.with (.next/server/chunks/206.js:19:47947)
+    at i.with (.next/server/chunks/206.js:19:42194)
+    at i.startActiveSpan (.next/server/chunks/206.js:19:57160)
+    at e.startActiveSpan (.next/server/chunks/206.js:19:57694)
+    at <unknown> (.next/server/chunks/206.js:19:187770)
+    at e.with (.next/server/chunks/206.js:19:47947)
+    at i.with (.next/server/chunks/206.js:19:42194) {
+  description: "Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/portfolio /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
+  digest: 'DYNAMIC_SERVER_USAGE'
+}
+API fetch error for /v1/trading/trades: Error: Dynamic server usage: Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/trades /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
+    at r (.next/server/chunks/206.js:24:42619)
+    at <unknown> (.next/server/chunks/206.js:19:169855)
+    at <unknown> (.next/server/chunks/206.js:19:188242)
+    at e.with (.next/server/chunks/206.js:19:47947)
+    at i.with (.next/server/chunks/206.js:19:42194)
+    at i.startActiveSpan (.next/server/chunks/206.js:19:57160)
+    at e.startActiveSpan (.next/server/chunks/206.js:19:57694)
+    at <unknown> (.next/server/chunks/206.js:19:187770)
+    at e.with (.next/server/chunks/206.js:19:47947)
+    at i.with (.next/server/chunks/206.js:19:42194) {
+  description: "Route /performance couldn't be rendered statically because it used no-store fetch http://localhost:3001/v1/trading/trades /performance. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
+  digest: 'DYNAMIC_SERVER_USAGE'
+}
+ ✓ Generating static pages (10/10)
    Collecting build traces     ✓ Collecting build traces 
    Finalizing page optimization     ✓ Finalizing page optimization 
 
 Route (app)                                 Size  First Load JS
-┌ ƒ /                                      127 B         102 kB
+┌ ƒ /                                      131 B         102 kB
 ├ ○ /_not-found                            992 B         103 kB
 ├ ○ /clusters                            1.76 kB         104 kB
 ├ ○ /logs                                2.45 kB         104 kB
+├ ƒ /performance                           131 B         102 kB
 ├ ○ /setup                                3.1 kB         105 kB
-├ ƒ /signals                               127 B         102 kB
+├ ƒ /signals                               131 B         102 kB
 └ ○ /wallets                             2.21 kB         104 kB
 + First Load JS shared by all             102 kB
   ├ chunks/1403cfaa-6db8521358bcd91a.js  54.2 kB
