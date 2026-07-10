@@ -40,7 +40,14 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
       SELECT *
       FROM signals
       WHERE pattern_type = $1
-        AND cluster_id IS NOT DISTINCT FROM $2::uuid
+        -- Dedupe on (pattern_type, token_mint) only — NOT cluster_id. Clustering
+        -- is not a partition: a wallet can appear in several cluster_memberships
+        -- rows (e.g. a behavioral cluster is anchored per lexicographic pair, so
+        -- one wallet can be the anchor of several distinct clusters). The same
+        -- real-world coordinated buy on one token can therefore be detected via
+        -- multiple cluster_ids, and keying dedupe on cluster_id let each of those
+        -- fire its own "duplicate" signal for the same coin. The user only cares
+        -- about not re-alerting the same token/pattern within the window.
         AND token_mint IS NOT DISTINCT FROM $3::varchar
         AND created_at > NOW() - make_interval(mins => $11::int)
       ORDER BY created_at DESC

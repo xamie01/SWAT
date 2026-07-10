@@ -245,8 +245,10 @@ pm2 start "pnpm dev:api"       --name swat-api
 pm2 start "pnpm dev:indexer"   --name swat-indexer
 pm2 start "pnpm dev:signals"   --name swat-signals
 pm2 start "pnpm dev:alerts"    --name swat-alerts
+pm2 start "pnpm dev:trade"     --name swat-trade
 pm2 start "pnpm dev:scorer"    --name swat-scorer
 pm2 start "pnpm dev:discovery" --name swat-discovery
+pm2 start "pnpm dev:web"       --name swat-web
 
 # Auto-restart on server reboot
 pm2 startup
