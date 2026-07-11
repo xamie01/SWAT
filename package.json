@@ -16,7 +16,8 @@
     "dev:web": "pnpm --filter @swat/web dev",
     "dev:trade": "pnpm --filter @swat/trade-executor dev",
     "dev:scorer": "pnpm --filter @swat/scorer dev",
-    "dev:discovery": "pnpm --filter @swat/discovery dev"
+    "dev:discovery": "pnpm --filter @swat/discovery dev",
+    "dev:mcp": "pnpm --filter @swat/mcp-server dev"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",
