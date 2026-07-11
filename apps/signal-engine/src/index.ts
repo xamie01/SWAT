@@ -151,6 +151,7 @@ async function enqueueSignal(opts: {
 
   if (!opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
     const clusterTier = await getClusterTier(opts.clusterId);
+    console.log(`[signal-engine] ✅ TRADE QUEUED: ${opts.tokenMint} | score: ${opts.signalScore} | tier: ${clusterTier}`);
     await tradeQueue.add('signal-trade', {
       signalId:    signal.id,
       score:       opts.signalScore,
@@ -158,7 +159,11 @@ async function enqueueSignal(opts: {
       clusterTier // resolved from the cluster's avg composite score
     }, { removeOnComplete: true });
   } else if (!safety.isSafe) {
-    console.log(`[signal-engine] trade blocked — safety flags: ${safety.flags.join(', ')}`);
+    console.log(`[signal-engine] ❌ trade blocked — safety flags: ${safety.flags.join(', ')} | token: ${opts.tokenMint}`);
+  } else if (opts.suppressTrade) {
+    console.log(`[signal-engine] ⏭️ trade suppressed (exit signal) | token: ${opts.tokenMint}`);
+  } else {
+    console.log(`[signal-engine] ⏭️ trade skipped — score ${opts.signalScore} < 80 | token: ${opts.tokenMint}`);
   }
 }
 
@@ -382,7 +387,10 @@ async function detectExitPattern() {
 
 // ─── Tick ─────────────────────────────────────────────────────────────────────
 
+let tickRunning = false;
 async function tick() {
+  if (tickRunning) return;
+  tickRunning = true;
   try {
     await Promise.all([
       detectSnipePattern(),
@@ -392,6 +400,8 @@ async function tick() {
     ]);
   } catch (error) {
     console.error('[signal-engine] tick failed', error);
+  } finally {
+    tickRunning = false;
   }
 }
 

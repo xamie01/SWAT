@@ -150,12 +150,9 @@ subscriber.on('message', (channel) => {
       .catch((e) => console.error('[scorer] cluster refresh failed', e))
       .finally(() => { clusterRefreshing = false; });
   } else if (channel === REDIS_CHANNELS.scorerRun) {
-    if (clusterRefreshing) return;
-    clusterRefreshing = true;
     console.log('[scorer] Manual scorer batch run triggered on-demand.');
     runScoringBatchGuarded()
-      .catch((e) => console.error('[scorer] manual scoring batch failed', e))
-      .finally(() => { clusterRefreshing = false; });
+      .catch((e) => console.error('[scorer] manual scoring batch failed', e));
   }
 });
 

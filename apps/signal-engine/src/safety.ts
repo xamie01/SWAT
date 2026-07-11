@@ -166,7 +166,7 @@ export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult>
 
   // 3. Liquidity check via DexScreener
   const liquidity = await getDexScreenerLiquidity(tokenMint);
-  if (liquidity !== null && liquidity < 50_000) {
+  if (liquidity !== null && liquidity < 25_000) {
     flags.push(`LOW_LIQUIDITY_${Math.round(liquidity / 1000)}K`);
   } else if (liquidity === null) {
     warnings.push('LIQUIDITY_UNVERIFIED');

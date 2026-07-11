@@ -20,7 +20,7 @@ const BASE_POSITION_SOL = parseFloat(process.env.BASE_POSITION_SOL ?? '0.5');
 // computed size (defends against misconfiguration sending a huge live buy).
 const MAX_POSITION_SOL = parseFloat(process.env.MAX_POSITION_SOL ?? '5');
 const AUTO_EXECUTE = process.env.AUTO_EXECUTE === 'true';
-const AUTO_EXECUTE_MIN_SCORE = Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 90);
+const AUTO_EXECUTE_MIN_SCORE = Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 85);
 // Don't re-buy the same token within this window (a held position keeps
 // re-triggering snipe signals). 0 disables the cooldown.
 const REBUY_COOLDOWN_MINUTES = Number(process.env.REBUY_COOLDOWN_MINUTES ?? 60);
@@ -35,6 +35,8 @@ if (!Number.isFinite(MAX_POSITION_SOL) || MAX_POSITION_SOL <= 0) {
 }
 
 let consecutiveFailures = 0;
+let circuitBreakerTrippedAt: number | null = null;
+const CIRCUIT_BREAKER_RESET_MS = 5 * 60 * 1000; // 5 minutes
 
 // ─── Price helpers ─────────────────────────────────────────────────────────────
 
@@ -185,6 +187,7 @@ async function handleJob(job: { data: unknown }) {
 
   // Auto-execute only fires above the configured threshold unless manually triggered
   if (!payload.manual && (!AUTO_EXECUTE || payload.score < AUTO_EXECUTE_MIN_SCORE)) {
+    console.log(`[trade-executor] ⏭️ SKIPPED: auto-execute=${AUTO_EXECUTE}, score=${payload.score}, threshold=${AUTO_EXECUTE_MIN_SCORE} | token: ${payload.tokenMint}`);
     return {
       status: 'skipped',
       reason: `Auto-execute disabled or score ${payload.score} < threshold ${AUTO_EXECUTE_MIN_SCORE}`
@@ -194,12 +197,14 @@ async function handleJob(job: { data: unknown }) {
   const sizeSol = calculatePositionSize(payload.score, payload.clusterTier ?? 'promising');
 
   if (!Number.isFinite(sizeSol) || sizeSol <= 0) {
+    console.log(`[trade-executor] ⏭️ SKIPPED: position size = 0 | token: ${payload.tokenMint}`);
     return { status: 'skipped', reason: 'Position size calculated to 0' };
   }
 
   // Re-buy cooldown: skip if we already bought this token recently (a held
   // position keeps producing fresh snipe signals after the dedupe window).
   if (REBUY_COOLDOWN_MINUTES > 0 && await hasRecentBuy(payload.tokenMint, REBUY_COOLDOWN_MINUTES)) {
+    console.log(`[trade-executor] ⏭️ SKIPPED: re-buy cooldown (${REBUY_COOLDOWN_MINUTES}min) active | token: ${payload.tokenMint}`);
     return { status: 'skipped', reason: `Re-buy cooldown active for ${payload.tokenMint}` };
   }
 
@@ -208,6 +213,7 @@ async function handleJob(job: { data: unknown }) {
   // the claim and is skipped — preventing a second (live) buy.
   const claimed = await claimSignalForExecution(payload.signalId);
   if (!claimed) {
+    console.log(`[trade-executor] ⏭️ SKIPPED: signal already claimed | signalId: ${payload.signalId}`);
     return { status: 'skipped', reason: 'Signal already executing or executed' };
   }
 
@@ -297,7 +303,14 @@ new Worker(
     // concurrency 1) so a burst of jobs can't all read 0 before the async
     // 'failed' handler fires.
     if (consecutiveFailures >= DEFAULT_RISK_CONFIG.maxConsecutiveFailures) {
-      throw new Error('[trade-executor] Circuit breaker active: too many consecutive failures');
+      if (circuitBreakerTrippedAt === null) circuitBreakerTrippedAt = Date.now();
+      if (Date.now() - circuitBreakerTrippedAt < CIRCUIT_BREAKER_RESET_MS) {
+        console.log(`[trade-executor] ⛔ Circuit breaker active — resets in ${Math.round((CIRCUIT_BREAKER_RESET_MS - (Date.now() - circuitBreakerTrippedAt)) / 1000)}s`);
+        throw new Error('[trade-executor] Circuit breaker active: too many consecutive failures');
+      }
+      console.log('[trade-executor] ✅ Circuit breaker auto-reset after cooldown');
+      consecutiveFailures = 0;
+      circuitBreakerTrippedAt = null;
     }
     try {
       const result = await handleJob(job);
