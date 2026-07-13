@@ -99,6 +99,17 @@ This runs all SQL migrations in order:
 - `001_init.sql` — base schema (wallets, tokens, transactions, signals, trades)
 - `002_schema_alignment.sql` — adds enrichment columns (execution_mode, amount_sol, safety_flags)
 - `003_fix_clustering.sql` — UNIQUE index on cluster names + aligns config thresholds to spec
+- `004_trades_persistence.sql` — token_amount representation update and trades indexes
+- `005_tx_dedup_null_target.sql` — unique indexing to handle transaction deduplication
+- `006_wallet_discovery_method.sql` — tracks discovery_method for wallets
+- `007_jupiter_simulation.sql` — jupiter routing/slippage columns for trades
+- `008_token_metadata.sql` — stores token_name/token_symbol in signals
+- `009_signals_dedupe_index.sql` — index for signal deduplication lookup
+- `010_chain_discriminator.sql` — chain columns for wallets, tokens, transactions
+- `011_widen_address_columns.sql` — widen address columns to VARCHAR(100)
+- `012_polymarket_markets.sql` — Polymarket prediction markets metadata
+- `013_widen_remaining_columns.sql` — widen remaining VARCHAR(44) columns to VARCHAR(100) and add chain to signals/trades
+- `014_missing_indexes.sql` — create cooldown index, Polymarket lookups, and tx token_in index
 
 ---
 
