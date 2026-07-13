@@ -7,7 +7,9 @@
     "dev": "tsx --env-file=../../.env src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"console.log('No tests in @swat/scorer')\""
   },
   "dependencies": {
     "@swat/db": "workspace:*",

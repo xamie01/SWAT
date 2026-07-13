@@ -1,19 +1,20 @@
-# SWAT: Solana Wallet Analysis & Tracking
+# SWAT: Smart Wallet Analysis & Tracking
 
-**Autonomous intelligence layer for Solana trading** — tracks elite wallets, detects coordinated activity patterns, generates execution-ready signals, and (optionally) auto-executes trades via integrated bots.
+**Autonomous intelligence layer for multi-chain wallet tracking (Solana, Polymarket/Polygon, Robinhood Chain)** — tracks elite wallets, detects coordinated activity patterns, generates execution-ready signals, and (optionally) auto-executes trades via integrated executors (Trojan for Solana, Uniswap V3 for Robinhood Chain, CLOB V2 for Polymarket).
 
 ---
 
 ## Architecture
 
-SWAT is a **monorepo of microservices** that work together to form an intelligence → execution pipeline:
+SWAT is a **monorepo of microservices** that work together to form a multi-chain intelligence → execution pipeline:
 
 ```
 ┌─────────────┐
-│   Indexer   │  Ingests wallet transactions from Helius RPC
-│             │  - Backfills tx history (token swaps + SOL transfers)
-│             │  - Enriches with USD prices (DexScreener/Jupiter)
-│             │  - Publishes swap events to Redis
+│   Indexer   │  Ingests wallet transactions from Helius RPC (Solana),
+│             │  viem RPC logs (EVM/Robinhood), and Data API (Polymarket)
+│             │  - Backfills tx history (swaps + native transfers)
+│             │  - Enrich with USD prices (DexScreener/Jupiter/CoinGecko)
+│             │  - Publishes swap events to Redis (standardized schema)
 └──────┬──────┘
        │
        ├──────────────────────────────────────────────┐
@@ -37,27 +38,26 @@ SWAT is a **monorepo of microservices** that work together to form an intelligen
                  │ Alert Service│                          │Trade Executor │
                  │              │                          │               │
                  │ Sends rich   │                          │ Paper / Live  │
-                 │ Telegram     │                          │ - Trojan bot  │
-                 │ alerts       │                          │ - Position    │
-                 └──────────────┘                          │   sizing      │
-                                                           │ - Circuit     │
-                                                           │   breaker     │
-                                                           └───────────────┘
+                 │ Telegram     │                          │ - Solana: Trojan
+                 │ alerts with  │                          │ - Polymarket: CLOB
+                 │ chain-spec   │                          │ - Robinhood: UniV3
+                 │ details      │                          └───────────────┘
+                 └──────────────┘
 ```
 
 ### Services
 
 | Service | Purpose | Key Features |
 |---------|---------|--------------|
-| **`apps/indexer`** | Transaction ingestion | Helius RPC polling + webhook support, USD enrichment, SOL funding-edge extraction |
+| **`apps/indexer`** | Transaction ingestion | Multi-chain polling + webhooks, Polymarket Data API parser, EVM L2 logs filter, USD/metadata enrichment |
 | **`apps/scorer`** | Wallet performance scoring | Composite score (win rate, ROI, early-entry, consistency), clustering (funding + behavioral), mark-to-market P&L |
-| **`apps/signal-engine`** | Pattern detection | 4 patterns (snipe/accumulation/rotation/exit), safety checks (mint/freeze/liquidity), deduplication |
-| **`apps/trade-executor`** | Trade execution | Paper-trade logging, Trojan integration, position sizing by tier + score, circuit breaker |
-| **`apps/alert-service`** | Telegram notifications | Rich execution-ready alerts with CA, safety, cluster ROI, suggested entry |
-| **`apps/api`** | REST API | Wallet CRUD, signal/cluster/trade endpoints, discovery triggers, stats |
-| **`apps/web`** | Web Dashboard | Interactive UI for wallet management, cluster exploration, discovery triggers, and signal monitoring |
-| **`packages/db`** | Database layer | PostgreSQL schema + query helpers |
-| **`packages/shared`** | Shared utilities | Types, scoring, validation, price fetchers |
+| **`apps/signal-engine`** | Pattern detection | 4 patterns (snipe/accumulation/rotation/exit), safety checks (mint/freeze/EVM ownership/liquidity), deduplication |
+| **`apps/trade-executor`** | Trade execution | Paper-trade logging, Trojan integration, Robinhood Uniswap V3 swapper (viem), Polymarket CLOB V2 order placer, circuit breaker |
+| **`apps/alert-service`** | Telegram notifications | Rich execution-ready alerts with chain-specific details, token safety, cluster ROI, suggested entry |
+| **`apps/api`** | REST API | Wallet CRUD (chain-aware), signal/cluster/trade endpoints, discovery triggers, stats |
+| **`apps/web`** | Web Dashboard | Interactive UI for wallet management (network selection), cluster exploration, discovery triggers, and signal monitoring |
+| **`packages/db`** | Database layer | PostgreSQL schema (14 migrations, auto-prefixed addresses/mints) + query helpers |
+| **`packages/shared`** | Shared utilities | Types, scoring, validation, multi-chain price fetchers |
 
 ---
 

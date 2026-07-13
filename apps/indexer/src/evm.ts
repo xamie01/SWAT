@@ -366,11 +366,12 @@ export async function backfillEvmWallet(address: string, chain: 'polygon' | 'rob
           await redis.publish(
             REDIS_CHANNELS.walletSwap,
             JSON.stringify({
-              walletAddress: address,
+              chain,
+              walletAddress: `${chain}:${address}`,
               signature: hash,
+              tokenMint: `${chain}:${targetToken}`,
               direction,
-              targetToken,
-              amountInUsd,
+              amountUsd: amountInUsd,
               timestamp: timestamp.toISOString()
             })
           );

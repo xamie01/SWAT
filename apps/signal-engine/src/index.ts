@@ -90,11 +90,12 @@ async function enqueueSignal(opts: {
       tokenSymbol = meta.symbol;
       
       // Upsert into the tokens table so other parts of the database have the metadata
+      const chain = opts.tokenMint.includes(':') ? opts.tokenMint.split(':')[0] : 'solana';
       await query(
-        `INSERT INTO tokens (mint, name, symbol)
-         VALUES ($1, $2, $3)
+        `INSERT INTO tokens (mint, name, symbol, chain)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (mint) DO UPDATE SET name = EXCLUDED.name, symbol = EXCLUDED.symbol`,
-        [opts.tokenMint, tokenName, tokenSymbol]
+        [opts.tokenMint, tokenName, tokenSymbol, chain]
       );
     }
   } catch (e: any) {

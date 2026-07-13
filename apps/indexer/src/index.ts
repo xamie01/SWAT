@@ -283,11 +283,12 @@ export async function processTransaction(tx: HeliusParsedTransaction, address: s
     await redis.publish(
       REDIS_CHANNELS.walletSwap,
       JSON.stringify({
-        walletAddress: address,
+        chain: 'solana',
+        walletAddress: `solana:${address}`,
         signature,
+        tokenMint: `solana:${parsed.targetToken}`,
         direction: parsed.direction,
-        targetToken: parsed.targetToken,
-        amountInUsd,
+        amountUsd: amountInUsd,
         timestamp: timestamp.toISOString()
       })
     );
