@@ -10,7 +10,7 @@ import {
   upsertWallet,
   query
 } from '@swat/db';
-import { walletAddressSchema, walletInputSchema, REDIS_CHANNELS, QUEUES, initLogger } from '@swat/shared';
+import { chainSchema, isValidAddressForChain, walletAddressSchema, walletInputSchema, REDIS_CHANNELS, QUEUES, initLogger } from '@swat/shared';
 
 initLogger('api');
 
@@ -26,12 +26,19 @@ const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new R
 // Enqueue a backfill so the indexer fetches a wallet's transaction history.
 // jobId is keyed by address; `backfillQueue.add` is a no-op if an identical
 // job is already pending, so callers can fire this freely.
-async function enqueueBackfill(address: string) {
+type WalletChain = 'solana' | 'polygon' | 'robinhood-chain';
+
+async function enqueueBackfill(address: string, chain: WalletChain = 'solana') {
   await backfillQueue.add(
     'backfill-wallet',
-    { address },
-    { jobId: `backfill-${address}`, removeOnComplete: true, removeOnFail: 1000 }
+    { address, chain },
+    { jobId: `backfill-${chain}-${address}`, removeOnComplete: true, removeOnFail: 1000 }
   );
+}
+
+function parseChain(raw: unknown, fallback: WalletChain = 'solana'): WalletChain {
+  const parsed = chainSchema.safeParse(raw);
+  return parsed.success ? parsed.data : fallback;
 }
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
@@ -143,12 +150,17 @@ app.get('/v1/stats', async () => {
 
 // ─── Wallets ──────────────────────────────────────────────────────────────────
 
-app.get('/v1/wallets', async () => listWallets());
+app.get('/v1/wallets', async (req) => {
+  const q = req.query as { chain?: string };
+  return listWallets(q.chain ? parseChain(q.chain) : undefined);
+});
 
 app.get('/v1/wallets/:address', async (req, reply) => {
-  const parsed = walletAddressSchema.safeParse((req.params as { address: string }).address);
-  if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid wallet' });
-  const wallet = await getWallet(parsed.data);
+  const address = (req.params as { address: string }).address;
+  const q = req.query as { chain?: string };
+  const chain = parseChain(q.chain);
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet' });
+  const wallet = await getWallet(address, chain);
   if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
   return wallet;
 });
@@ -161,7 +173,7 @@ app.post('/v1/wallets', async (req, reply) => {
   if (invalid.length > 0) return reply.code(400).send({ error: 'Invalid wallet payload' });
   const inserted = await Promise.all(parsed.map((r) => upsertWallet((r as any).data)));
   // Kick off indexing so wallets added via the UI actually get their history.
-  await Promise.all(inserted.map((w: any) => enqueueBackfill(w.address)));
+  await Promise.all(inserted.map((w: any) => enqueueBackfill(w.address, w.chain ?? 'solana')));
   return { inserted: inserted.length, wallets: inserted, backfillQueued: inserted.length };
 });
 
@@ -169,35 +181,40 @@ app.post('/v1/wallets', async (req, reply) => {
 // "Start indexer" button in the web UI.
 app.post('/v1/wallets/reindex', async () => {
   const wallets = await listWallets();
-  await Promise.all(wallets.map((w: any) => enqueueBackfill(w.address)));
+  await Promise.all(wallets.map((w: any) => enqueueBackfill(w.address, w.chain ?? 'solana')));
   return { queued: wallets.length };
 });
 
 app.delete('/v1/wallets/:address', async (req, reply) => {
-  const parsed = walletAddressSchema.safeParse((req.params as { address: string }).address);
-  if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid wallet' });
-  await deleteWallet(parsed.data);
+  const q = req.query as { chain?: string };
+  const address = (req.params as { address: string }).address;
+  const chain = parseChain(q.chain);
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet' });
+  const wallet = await getWallet(address, chain);
+  if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
+  await deleteWallet(address);
   return reply.code(204).send();
 });
 
 app.get('/v1/wallets/:address/history', async (req, reply) => {
   const address = (req.params as { address: string }).address;
-  const q = req.query as { limit?: string; before?: string };
+  const q = req.query as { limit?: string; before?: string; chain?: string };
+  const chain = parseChain(q.chain);
   const limit = clampLimit(q.limit, 50, 200);
   const before = q.before;
 
-  const parsed = walletAddressSchema.safeParse(address);
-  if (!parsed.success) return reply.code(400).send({ error: 'Invalid wallet address' });
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet address' });
 
   const rows = await query(`
     SELECT id, signature, direction, target_token, amount_in, amount_out,
            amount_in_usd, amount_out_usd, program_id, timestamp
     FROM transactions
     WHERE wallet_address = $1
-      ${before ? `AND timestamp < $3` : ''}
+      AND chain = $2
+      ${before ? `AND timestamp < $4` : ''}
     ORDER BY timestamp DESC
-    LIMIT $2
-  `, before ? [address, limit, before] : [address, limit]);
+    LIMIT $3
+  `, before ? [address, chain, limit, before] : [address, chain, limit]);
 
   const nextCursor = rows.length === limit
     ? (rows[rows.length - 1] as any).timestamp
@@ -208,8 +225,9 @@ app.get('/v1/wallets/:address/history', async (req, reply) => {
 
 app.get('/v1/wallets/:address/holdings', async (req, reply) => {
   const address = (req.params as { address: string }).address;
-  const parsed = walletAddressSchema.safeParse(address);
-  if (!parsed.success) return reply.code(400).send({ error: 'Invalid wallet address' });
+  const q = req.query as { chain?: string };
+  const chain = parseChain(q.chain);
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet address' });
 
   // Calculate net token positions (bought - sold)
   const rows = await query(`
@@ -222,13 +240,14 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
       SUM(CASE WHEN direction = 'buy'  THEN amount_in_usd  ELSE 0 END) AS cost_basis_usd,
       SUM(CASE WHEN direction = 'sell' THEN amount_out_usd ELSE 0 END) AS realized_usd
     FROM transactions t
-    LEFT JOIN tokens tok ON t.target_token = tok.mint
+    LEFT JOIN tokens tok ON t.target_token = tok.mint AND tok.chain = $2
     WHERE t.wallet_address = $1
+      AND t.chain = $2
     GROUP BY t.target_token, tok.symbol, tok.name
     HAVING SUM(CASE WHEN direction = 'buy' THEN amount_out ELSE 0 END)
          > SUM(CASE WHEN direction = 'sell' THEN amount_in  ELSE 0 END)
     ORDER BY cost_basis_usd DESC NULLS LAST
-  `, [address]);
+  `, [address, chain]);
 
   return { items: rows };
 });
@@ -236,7 +255,8 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
 // ─── Discovery ────────────────────────────────────────────────────────────────
 
 app.post('/v1/discovery/from-token', async (req, reply) => {
-  const { tokenMint } = (req.body ?? {}) as { tokenMint?: string };
+  const { tokenMint, chain = 'solana' } = (req.body ?? {}) as { tokenMint?: string; chain?: WalletChain };
+  if (chain !== 'solana') return reply.code(400).send({ error: 'Discovery from token currently supports only solana' });
   // A token mint is a Solana address; reuse the address schema to reject garbage
   // before it pollutes discovery_log / Redis.
   const parsedMint = walletAddressSchema.safeParse(tokenMint);
@@ -250,20 +270,21 @@ app.post('/v1/discovery/from-token', async (req, reply) => {
     SELECT wallet_address
     FROM transactions
     WHERE target_token = $1
+      AND chain = $2
       AND direction = 'buy'
       AND timestamp < (
         SELECT MIN(timestamp) + INTERVAL '10 minutes'
-        FROM transactions WHERE target_token = $1
+        FROM transactions WHERE target_token = $1 AND chain = $2
       )
     GROUP BY wallet_address
     HAVING SUM(amount_in::bigint) > 500000000
     ORDER BY MIN(timestamp) ASC
     LIMIT 50
-  `, [tokenMint]);
+  `, [tokenMint, chain]);
 
   let ingested = 0;
   for (const row of earlyBuyers) {
-    await upsertWallet({ address: row.wallet_address, source: 'discovered' });
+    await upsertWallet({ address: row.wallet_address, chain, source: 'discovered' });
     ingested++;
   }
 
@@ -279,8 +300,8 @@ app.post('/v1/discovery/from-token', async (req, reply) => {
   // keyed by mint dedupes concurrent requests for the same token.
   await tokenDiscoveryQueue.add(
     'token-discovery',
-    { tokenMint },
-    { jobId: `token-discovery-${tokenMint}`, removeOnComplete: true, removeOnFail: 1000 }
+    { tokenMint, chain },
+    { jobId: `token-discovery-${chain}-${tokenMint}`, removeOnComplete: true, removeOnFail: 1000 }
   );
 
   return { ingested, queued: true, tokenMint };

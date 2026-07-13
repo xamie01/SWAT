@@ -1,4 +1,5 @@
 export type WalletTier = 'elite' | 'pro' | 'promising' | 'speculative';
+export type Chain = 'solana' | 'polygon' | 'robinhood-chain';
 
 export interface WalletScoreInput {
   winRate: number;
@@ -9,6 +10,7 @@ export interface WalletScoreInput {
 
 export interface WalletRecord {
   address: string;
+  chain: Chain;
   nickname?: string | null;
   source: 'shiller' | 'manual' | 'discovered';
   status: 'active' | 'paused' | 'blacklisted';
