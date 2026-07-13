@@ -465,7 +465,7 @@ async function backfillWallet(address: string) {
   const sigLimit = Number(process.env.BACKFILL_SIGNATURE_LIMIT ?? 1000);
   const signatures = await heliusRpc<HeliusSignature[]>('getSignaturesForAddress', [address, { limit: sigLimit }]);
   if (signatures.length === 0) {
-    await refreshWalletActivity(address, null, 0);
+    await refreshWalletActivity(address.includes(':') ? address : `solana:${address}`, null, 0);
     return { fetched: 0, inserted: 0, skipped: 0 };
   }
 
@@ -511,7 +511,7 @@ async function backfillWallet(address: string) {
     }
   }
 
-  await refreshWalletActivity(address, latestBlockTime ? new Date(latestBlockTime * 1000) : null, inserted);
+  await refreshWalletActivity(address.includes(':') ? address : `solana:${address}`, latestBlockTime ? new Date(latestBlockTime * 1000) : null, inserted);
   return { fetched: signatureList.length, inserted, skipped };
 }
 

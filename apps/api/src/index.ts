@@ -192,7 +192,7 @@ app.delete('/v1/wallets/:address', async (req, reply) => {
   if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet' });
   const wallet = await getWallet(address, chain);
   if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
-  await deleteWallet(address);
+  await deleteWallet(wallet.address);
   return reply.code(204).send();
 });
 

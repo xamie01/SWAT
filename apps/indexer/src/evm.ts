@@ -384,6 +384,6 @@ export async function backfillEvmWallet(address: string, chain: 'polygon' | 'rob
     }));
   }
 
-  await refreshWalletActivity(address, latestBlockTime ? new Date(latestBlockTime * 1000) : null, inserted);
+  await refreshWalletActivity(`${chain}:${address}`, latestBlockTime ? new Date(latestBlockTime * 1000) : null, inserted);
   return { fetched: txHashes.length, inserted, skipped };
 }

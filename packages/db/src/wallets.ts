@@ -59,8 +59,23 @@ export async function upsertWallet(wallet: WalletInsert) {
   return rows[0];
 }
 
+export async function resolvePrefixedAddress(address: string): Promise<string> {
+  if (address.includes(':')) return address;
+  const rows = await query<{ address: string }>(
+    `SELECT address FROM wallets 
+     WHERE address = $1 
+        OR address = 'solana:' || $1 
+        OR address = 'polygon:' || $1 
+        OR address = 'robinhood-chain:' || $1 
+     LIMIT 1`,
+    [address]
+  );
+  return rows[0]?.address ?? `solana:${address}`;
+}
+
 export async function deleteWallet(address: string) {
-  await query('DELETE FROM wallets WHERE address = $1', [address]);
+  const prefixed = await resolvePrefixedAddress(address);
+  await query('DELETE FROM wallets WHERE address = $1', [prefixed]);
 }
 
 /**
@@ -69,14 +84,15 @@ export async function deleteWallet(address: string) {
  * funding edges, so remove children first, inside a transaction.
  */
 export async function deleteWalletCascade(address: string) {
+  const prefixed = await resolvePrefixedAddress(address);
   // A single pooled client so BEGIN/COMMIT actually form one transaction.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM cluster_memberships WHERE wallet_address = $1', [address]);
-    await client.query('DELETE FROM transactions WHERE wallet_address = $1', [address]);
-    await client.query('DELETE FROM wallet_relationships WHERE wallet_a = $1 OR wallet_b = $1', [address]);
-    await client.query('DELETE FROM wallets WHERE address = $1', [address]);
+    await client.query('DELETE FROM cluster_memberships WHERE wallet_address = $1', [prefixed]);
+    await client.query('DELETE FROM transactions WHERE wallet_address = $1', [prefixed]);
+    await client.query('DELETE FROM wallet_relationships WHERE wallet_a = $1 OR wallet_b = $1', [prefixed]);
+    await client.query('DELETE FROM wallets WHERE address = $1', [prefixed]);
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');

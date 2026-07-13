@@ -1,7 +1,8 @@
 import { query } from '@swat/db';
 import {
   insertParsedTransaction,
-  upsertToken
+  upsertToken,
+  refreshWalletActivity
 } from '@swat/db';
 import { Redis } from 'ioredis';
 import { REDIS_CHANNELS } from '@swat/shared';
@@ -174,6 +175,7 @@ export async function backfillPolymarketWallet(address: string) {
 
     let processed = 0;
     let newTrades = 0;
+    let latestTimestamp: Date | null = null;
 
     for (const act of activities) {
       if (act.type !== 'TRADE' && act.type !== 'REDEEM') continue;
@@ -210,6 +212,9 @@ export async function backfillPolymarketWallet(address: string) {
       processed++;
       if (inserted) {
         newTrades++;
+        if (!latestTimestamp || timestamp > latestTimestamp) {
+          latestTimestamp = timestamp;
+        }
         
         // Notify signal-engine of swap
         await redis.publish(
@@ -227,6 +232,7 @@ export async function backfillPolymarketWallet(address: string) {
       }
     }
 
+    await refreshWalletActivity(`polygon:${cleanAddr}`, latestTimestamp, newTrades);
     return { processed, newTrades };
   } catch (err: any) {
     console.error(`[polymarket] backfill failed for ${cleanAddr}:`, err);

@@ -4,6 +4,7 @@ type SignalInput = {
   patternType: string;
   clusterId?: string | null;
   tokenMint?: string | null;
+  chain?: string | null;
   confidence: number;
   signalScore: number;
   triggerData: Record<string, unknown>;
@@ -14,14 +15,16 @@ type SignalInput = {
 };
 
 export async function insertSignal(input: SignalInput) {
+  const chain = input.chain ?? (input.tokenMint && input.tokenMint.includes(':') ? input.tokenMint.split(':')[0] : 'solana');
   const rows = await query(
-    `INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO signals (pattern_type, cluster_id, token_mint, chain, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       input.patternType,
       input.clusterId ?? null,
       input.tokenMint ?? null,
+      chain,
       input.confidence,
       input.signalScore,
       JSON.stringify(input.triggerData),
@@ -52,12 +55,14 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
     return { inserted: false, id: existing[0].id };
   }
 
+  const chain = input.chain ?? (input.tokenMint && input.tokenMint.includes(':') ? input.tokenMint.split(':')[0] : 'solana');
+
   // Insert with ON CONFLICT to handle the race condition atomically.
   // If two concurrent inserts race past the SELECT above, the unique index
   // (pattern_type, token_mint) WHERE status='pending' catches the duplicate.
   const rows = await query<{ id: string }>(
-    `INSERT INTO signals (pattern_type, cluster_id, token_mint, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + make_interval(mins => $11::int))
+    `INSERT INTO signals (pattern_type, cluster_id, token_mint, chain, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW() + make_interval(mins => $12::int))
      ON CONFLICT (pattern_type, token_mint) WHERE status = 'pending' AND token_mint IS NOT NULL
      DO NOTHING
      RETURNING id`,
@@ -65,6 +70,7 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
       input.patternType,
       input.clusterId ?? null,
       input.tokenMint ?? null,
+      chain,
       input.confidence,
       input.signalScore,
       JSON.stringify(input.triggerData),

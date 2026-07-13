@@ -4,6 +4,7 @@ export type TradeInsert = {
   signalId?: string | null;
   walletAddress?: string | null;
   tokenMint: string;
+  chain?: string | null;
   direction: 'buy' | 'sell';
   /** Size of the position in SOL. */
   amountSol?: number | null;
@@ -39,11 +40,13 @@ export type TradeInsert = {
  * `pnl = token_amount * current_price - amount_usd`.
  */
 export async function insertTrade(input: TradeInsert) {
+  const chain = input.chain ?? (input.tokenMint.includes(':') ? input.tokenMint.split(':')[0] : 'solana');
   const rows = await query<{ id: string }>(
     `INSERT INTO trades (
        signal_id,
        wallet_address,
        token_mint,
+       chain,
        direction,
        amount_sol,
        amount_usd,
@@ -59,12 +62,13 @@ export async function insertTrade(input: TradeInsert) {
        quote_slot,
        min_token_amount
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING id`,
     [
       input.signalId ?? null,
       input.walletAddress ?? null,
       input.tokenMint,
+      chain,
       input.direction,
       input.amountSol ?? null,
       input.amountUsd ?? null,
