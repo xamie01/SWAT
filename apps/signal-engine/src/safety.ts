@@ -1,3 +1,5 @@
+import { createPublicClient, http } from 'viem';
+import { polygon } from 'viem/chains';
 import { query } from '@swat/db';
 
 export type SafetyResult = {
@@ -9,12 +11,39 @@ export type SafetyResult = {
   top10HolderPct?: number | null;
 };
 
+// Define Robinhood Chain custom definition
+const robinhoodChain = {
+  id: 4663,
+  name: 'Robinhood Chain',
+  network: 'robinhood-chain',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Ether',
+    symbol: 'ETH',
+  },
+  rpcUrls: {
+    default: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
+    public: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
+  },
+} as const;
+
+function getPublicClient(chain: string) {
+  if (chain === 'polygon') {
+    const url = process.env.POLYGON_RPC_URL ?? 'https://polygon-rpc.com';
+    return createPublicClient({ chain: polygon, transport: http(url) });
+  } else if (chain === 'robinhood-chain') {
+    const url = process.env.ROBINHOOD_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com';
+    return createPublicClient({ chain: robinhoodChain, transport: http(url) });
+  }
+  throw new Error(`Unsupported chain: ${chain}`);
+}
+
 const heliusApiKey = process.env.HELIUS_API_KEY;
 const heliusRpcUrl = heliusApiKey
   ? `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}`
   : null;
 
-// ─── Live On-Chain Mint Info ──────────────────────────────────────────────────
+// ─── Live On-Chain Solana Mint Info ───────────────────────────────────────────
 
 type MintInfo = {
   mintAuthority: string | null;
@@ -50,7 +79,7 @@ async function getMintInfoFromChain(tokenMint: string): Promise<MintInfo | null>
   }
 }
 
-// ─── Top Holder Concentration ─────────────────────────────────────────────────
+// ─── Solana Top Holder Concentration ──────────────────────────────────────────
 
 async function getTop10HolderPct(tokenMint: string): Promise<number | null> {
   if (!heliusRpcUrl) return null;
@@ -80,7 +109,7 @@ async function getTop10HolderPct(tokenMint: string): Promise<number | null> {
   }
 }
 
-// ─── DexScreener Liquidity ────────────────────────────────────────────────────
+// ─── DexScreener Liquidity (Cross-chain) ──────────────────────────────────────
 
 async function getDexScreenerLiquidity(tokenMint: string): Promise<number | null> {
   try {
@@ -97,75 +126,127 @@ async function getDexScreenerLiquidity(tokenMint: string): Promise<number | null
   }
 }
 
+// ─── EVM Contract Owner Read ──────────────────────────────────────────────────
+
+async function getEvmContractOwner(client: any, address: `0x${string}`) {
+  try {
+    const owner = await client.readContract({
+      address,
+      abi: [{ name: 'owner', type: 'function', inputs: [], outputs: [{ type: 'address' }] }],
+      functionName: 'owner'
+    });
+    return String(owner);
+  } catch {
+    return null;
+  }
+}
+
 // ─── Main Safety Check ────────────────────────────────────────────────────────
 
 export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult> {
   const flags: string[] = [];
   const warnings: string[] = [];
 
-  // 1. Fetch live mint info from chain
-  const mintInfo = await getMintInfoFromChain(tokenMint);
+  // Determine token chain from DB
+  const tokenRows = await query<{ chain: string }>(`SELECT chain FROM tokens WHERE mint = $1`, [tokenMint]);
+  const chain = tokenRows[0]?.chain ?? 'solana';
 
-  if (!mintInfo) {
-    // Helius not configured — fall back to DB values and warn
-    const rows = await query<{ mint_authority_disabled: boolean; freeze_authority_disabled: boolean }>(
-      `SELECT mint_authority_disabled, freeze_authority_disabled FROM tokens WHERE mint = $1`,
-      [tokenMint]
-    );
-    const token = rows[0];
-    if (!token) {
-      return {
-        isSafe: false,
-        passed: false,
-        flags: ['unverified_token'],
-        warnings: ['Token not indexed — cannot verify safety'],
-        liquidity: null,
-        top10HolderPct: null
-      };
+  let top10Pct: number | null = null;
+  let liquidity: number | null = null;
+
+  if (chain === 'solana') {
+    // ─── SOLANA SAFETY FLOW ───────────────────
+    const mintInfo = await getMintInfoFromChain(tokenMint);
+
+    if (!mintInfo) {
+      // Helius not configured — fall back to DB values and warn
+      const rows = await query<{ mint_authority_disabled: boolean; freeze_authority_disabled: boolean }>(
+        `SELECT mint_authority_disabled, freeze_authority_disabled FROM tokens WHERE mint = $1`,
+        [tokenMint]
+      );
+      const token = rows[0];
+      if (!token) {
+        return {
+          isSafe: false,
+          passed: false,
+          flags: ['unverified_token'],
+          warnings: ['Token not indexed — cannot verify safety'],
+          liquidity: null,
+          top10HolderPct: null
+        };
+      }
+      if (!token.mint_authority_disabled) {
+        flags.push('MINT_AUTHORITY_ACTIVE');
+      }
+      if (!token.freeze_authority_disabled) {
+        warnings.push('FREEZE_AUTHORITY_SET');
+      }
+    } else {
+      // Live on-chain check
+      if (mintInfo.mintAuthority !== null) {
+        flags.push('MINT_AUTHORITY_ACTIVE');
+      }
+      if (mintInfo.freezeAuthority !== null) {
+        warnings.push('FREEZE_AUTHORITY_SET');
+      }
+
+      // Persist results back to DB so they're cached
+      await query(
+        `UPDATE tokens SET
+           mint_authority_disabled = $1,
+           freeze_authority_disabled = $2,
+           decimals = $3
+         WHERE mint = $4`,
+        [
+          mintInfo.mintAuthority === null,
+          mintInfo.freezeAuthority === null,
+          mintInfo.decimals,
+          tokenMint
+        ]
+      );
     }
-    if (!token.mint_authority_disabled) {
-      flags.push('MINT_AUTHORITY_ACTIVE');
+
+    // Top holder concentration check (Solana largest accounts via Helius)
+    top10Pct = await getTop10HolderPct(tokenMint);
+    if (top10Pct !== null) {
+      if (top10Pct > 60) {
+        flags.push(`TOP_10_HOLD_${top10Pct}PCT`);
+      } else if (top10Pct > 35) {
+        warnings.push(`TOP_10_HOLD_${top10Pct}PCT`);
+      }
     }
-    if (!token.freeze_authority_disabled) {
-      warnings.push('FREEZE_AUTHORITY_SET');
-    }
+
   } else {
-    // Live on-chain check
-    if (mintInfo.mintAuthority !== null) {
-      flags.push('MINT_AUTHORITY_ACTIVE');
-    }
-    if (mintInfo.freezeAuthority !== null) {
-      warnings.push('FREEZE_AUTHORITY_SET');
-    }
+    // ─── EVM / EVM L2 SAFETY FLOW ───────────────
+    try {
+      const client = getPublicClient(chain);
+      const owner = await getEvmContractOwner(client, tokenMint as `0x${string}`);
 
-    // Persist results back to DB so they're cached
-    await query(
-      `UPDATE tokens SET
-         mint_authority_disabled = $1,
-         freeze_authority_disabled = $2,
-         decimals = $3
-       WHERE mint = $4`,
-      [
-        mintInfo.mintAuthority === null,
-        mintInfo.freezeAuthority === null,
-        mintInfo.decimals,
-        tokenMint
-      ]
-    );
-  }
+      if (owner !== null) {
+        const isRenounced = owner === '0x0000000000000000000000000000000000000000';
+        if (!isRenounced) {
+          flags.push('OWNER_ACTIVE');
+        }
 
-  // 2. Top holder concentration check
-  const top10Pct = await getTop10HolderPct(tokenMint);
-  if (top10Pct !== null) {
-    if (top10Pct > 60) {
-      flags.push(`TOP_10_HOLD_${top10Pct}PCT`);
-    } else if (top10Pct > 35) {
-      warnings.push(`TOP_10_HOLD_${top10Pct}PCT`);
+        // Cache in existing DB columns to avoid schema bloat
+        await query(
+          `UPDATE tokens SET
+             mint_authority_disabled = $1,
+             freeze_authority_disabled = true
+           WHERE mint = $2`,
+          [isRenounced, tokenMint]
+        );
+      } else {
+        warnings.push('CONTRACT_OWNER_UNVERIFIED');
+      }
+    } catch (err) {
+      console.warn(`[safety] EVM contract owner query failed for ${tokenMint}:`, err);
+      warnings.push('CHAIN_RPC_UNREACHABLE');
     }
   }
 
-  // 3. Liquidity check via DexScreener
-  const liquidity = await getDexScreenerLiquidity(tokenMint);
+  // DexScreener liquidity check (works for all chains)
+  liquidity = await getDexScreenerLiquidity(tokenMint);
   if (liquidity !== null && liquidity < 25_000) {
     flags.push(`LOW_LIQUIDITY_${Math.round(liquidity / 1000)}K`);
   } else if (liquidity === null) {
