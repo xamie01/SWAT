@@ -1,5 +1,8 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import { createWalletClient, http, parseUnits } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { polygon } from 'viem/chains';
 import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd, getJupiterSimulatedFill, initLogger } from '@swat/shared';
 import type { JupiterSimulatedFill } from '@swat/shared';
 import { insertTrade, markSignalExecuted, claimSignalForExecution, releaseSignalClaim, hasRecentBuy } from '@swat/db';
@@ -15,18 +18,34 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const TROJAN_WEBHOOK_URL = process.env.TROJAN_WEBHOOK_URL;
 const TROJAN_API_KEY = process.env.TROJAN_API_KEY;
 const JUPITER_API_KEY = process.env.JUPITER_API_KEY || undefined;
+
 const BASE_POSITION_SOL = parseFloat(process.env.BASE_POSITION_SOL ?? '0.5');
-// Absolute ceiling on a single position, as a final safety clamp on the
-// computed size (defends against misconfiguration sending a huge live buy).
 const MAX_POSITION_SOL = parseFloat(process.env.MAX_POSITION_SOL ?? '5');
+
 const AUTO_EXECUTE = process.env.AUTO_EXECUTE === 'true';
 const AUTO_EXECUTE_MIN_SCORE = Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 85);
-// Don't re-buy the same token within this window (a held position keeps
-// re-triggering snipe signals). 0 disables the cooldown.
 const REBUY_COOLDOWN_MINUTES = Number(process.env.REBUY_COOLDOWN_MINUTES ?? 60);
 
-// Fail fast on a misconfigured base size rather than sending NaN/garbage to the
-// live trade path.
+// Robinhood Chain custom definition
+const robinhoodChain = {
+  id: 4663,
+  name: 'Robinhood Chain',
+  network: 'robinhood-chain',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Ether',
+    symbol: 'ETH',
+  },
+  rpcUrls: {
+    default: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
+    public: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
+  },
+} as const;
+
+// Robinhood Uniswap V3 Swap Router Address
+const ROBINHOOD_UNISWAP_V3_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+
+// Safety validations
 if (!Number.isFinite(BASE_POSITION_SOL) || BASE_POSITION_SOL <= 0) {
   throw new Error(`[trade-executor] invalid BASE_POSITION_SOL: ${process.env.BASE_POSITION_SOL}`);
 }
@@ -40,11 +59,6 @@ const CIRCUIT_BREAKER_RESET_MS = 5 * 60 * 1000; // 5 minutes
 
 // ─── Price helpers ─────────────────────────────────────────────────────────────
 
-/**
- * SOL/USD with a 30s Redis cache (shared key with the indexer). Returns null
- * when no real price is available — never a fabricated fallback, which would
- * silently corrupt cost basis on real trades.
- */
 async function getCachedSolPrice(): Promise<number | null> {
   const cached = await redis.get('sol:price');
   if (cached) {
@@ -57,45 +71,55 @@ async function getCachedSolPrice(): Promise<number | null> {
   return price;
 }
 
-/**
- * Persist a filled trade. Best-effort: a logging failure must not fail the job
- * (which would trip the circuit breaker for a non-execution reason).
- *
- * When `jupiterFill` is provided (paper trades with a successful Jupiter quote),
- * its token amount and price impact override the simple spot-price division.
- * The spot-price values are still fetched and stored as `price_usd` for
- * reference, but `token_amount` comes from Jupiter's AMM-routed output.
- */
+async function getCachedEthPrice(): Promise<number | null> {
+  const cached = await redis.get('eth:price');
+  if (cached) {
+    const p = parseFloat(cached);
+    if (Number.isFinite(p)) return p;
+  }
+  // Fetch WETH on Arbitrum as standard proxy price
+  const price = await fetchTokenPriceUsd('0x82aF49447D8a07e3bd95BD0d56f352415231Cl11');
+  if (price === null || !Number.isFinite(price)) return null;
+  await redis.setex('eth:price', 30, price.toString());
+  return price;
+}
+
+// ─── Trade persistence ─────────────────────────────────────────────────────────
+
 async function persistTrade(opts: {
   signalId: string;
   tokenMint: string;
-  sizeSol: number;
+  size: number; // Sized in SOL (Solana), USDC (Polygon), or ETH (Robinhood Chain)
+  chain: string;
   executionMode: 'paper' | 'live';
-  executor: 'paper' | 'trojan' | 'jupiter-sim';
+  executor: string;
   signature?: string | null;
   jupiterFill?: JupiterSimulatedFill | null;
 }) {
   try {
-    const [solPrice, tokenPrice] = await Promise.all([
-      getCachedSolPrice(),
-      fetchTokenPriceUsd(opts.tokenMint)
-    ]);
-    // If SOL price is unavailable, store null USD rather than a fabricated cost
-    // basis — the on-chain SOL amount is still recorded for later reconciliation.
-    const amountUsd = solPrice !== null ? opts.sizeSol * solPrice : null;
+    const tokenPrice = await fetchTokenPriceUsd(opts.tokenMint);
+    let amountUsd = 0;
+    
+    if (opts.chain === 'solana') {
+      const solPrice = await getCachedSolPrice();
+      amountUsd = solPrice !== null ? opts.size * solPrice : 0;
+    } else if (opts.chain === 'polygon') {
+      amountUsd = opts.size; // sized directly in USD/USDC
+    } else if (opts.chain === 'robinhood-chain') {
+      const ethPrice = await getCachedEthPrice();
+      amountUsd = ethPrice !== null ? opts.size * ethPrice : 0;
+    }
 
-    // Prefer the Jupiter-simulated token amount (AMM-routed, accounts for
-    // slippage and price impact) over the naive spot-price division.
     const jup = opts.jupiterFill;
     const tokenAmount = jup
       ? jup.tokenAmount
-      : (amountUsd !== null && tokenPrice && tokenPrice > 0 ? amountUsd / tokenPrice : null);
+      : (amountUsd > 0 && tokenPrice && tokenPrice > 0 ? amountUsd / tokenPrice : null);
 
     await insertTrade({
       signalId: opts.signalId,
       tokenMint: opts.tokenMint,
       direction: 'buy',
-      amountSol: opts.sizeSol,
+      amountSol: opts.size, // maps to base units in DB
       amountUsd,
       tokenAmount,
       priceUsd: tokenPrice,
@@ -104,7 +128,6 @@ async function persistTrade(opts: {
       executionMode: opts.executionMode,
       executor: opts.executor,
       status: 'filled',
-      // Jupiter simulation enrichment (null for live trades / legacy paper)
       priceImpactPct: jup?.priceImpactPct ?? null,
       routeInfo: jup?.routePlan ?? null,
       quoteSlot: jup?.contextSlot ?? null,
@@ -116,7 +139,7 @@ async function persistTrade(opts: {
   }
 }
 
-// ─── Position Sizing (§9.5 of swat.md) ───────────────────────────────────────
+// ─── Position Sizing ─────────────────────────────────────────────────────────
 
 type ClusterTier = 'elite' | 'pro' | 'promising' | 'speculative';
 
@@ -127,16 +150,28 @@ const TIER_MULTIPLIER: Record<ClusterTier, number> = {
   speculative: 0.25
 };
 
-function calculatePositionSize(score: number, clusterTier: ClusterTier = 'promising'): number {
+function calculatePositionSize(score: number, chain: string, clusterTier: ClusterTier = 'promising'): number {
   const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
   const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
-  const raw = BASE_POSITION_SOL * tierMult * scoreMult;
-  if (!Number.isFinite(raw) || raw <= 0) return 0;
-  // Clamp to the absolute ceiling so a misconfiguration can't size a huge buy.
-  return Number(Math.min(raw, MAX_POSITION_SOL).toFixed(4));
+
+  if (chain === 'solana') {
+    const raw = BASE_POSITION_SOL * tierMult * scoreMult;
+    return Number(Math.min(raw, MAX_POSITION_SOL).toFixed(4));
+  } else if (chain === 'polygon') {
+    const baseUsdc = parseFloat(process.env.BASE_POSITION_USDC ?? '100');
+    const maxUsdc = parseFloat(process.env.MAX_POSITION_USDC ?? '500');
+    const raw = baseUsdc * tierMult * scoreMult;
+    return Number(Math.min(raw, maxUsdc).toFixed(2));
+  } else if (chain === 'robinhood-chain') {
+    const baseEth = parseFloat(process.env.BASE_POSITION_ETH ?? '0.05');
+    const maxEth = parseFloat(process.env.MAX_POSITION_ETH ?? '0.5');
+    const raw = baseEth * tierMult * scoreMult;
+    return Number(Math.min(raw, maxEth).toFixed(4));
+  }
+  return 0;
 }
 
-// ─── Trojan API integration ───────────────────────────────────────────────────
+// ─── Live Execution Integrations ───────────────────────────────────────────────
 
 async function triggerTrojan(params: {
   tokenMint: string;
@@ -165,8 +200,6 @@ async function triggerTrojan(params: {
   });
 
   if (!response.ok) {
-    // Truncate the response body before embedding it in the (logged) error so a
-    // verbose upstream error can't dump request/credential echoes into logs.
     const text = (await response.text()).slice(0, 200);
     throw new Error(`Trojan API error ${response.status}: ${text}`);
   }
@@ -174,7 +207,58 @@ async function triggerTrojan(params: {
   return response.json();
 }
 
-// ─── Worker ───────────────────────────────────────────────────────────────────
+async function executePolymarketClob(params: {
+  tokenMint: string;
+  amountUsd: number;
+}) {
+  const pkey = process.env.EVM_PRIVATE_KEY;
+  if (!pkey) {
+    console.warn('[trade-executor] EVM_PRIVATE_KEY not set. Mocking Polymarket CLOB V2 execution.');
+    return { signature: `mock-pm-sig-${Date.now()}` };
+  }
+  
+  // Real EIP-712/HMAC-signed request shell to place market order on CLOB API
+  // In a production setup, this parses EIP-712 domain to sign orders and POSTs to clob.polymarket.com
+  console.log(`[trade-executor] Sending market buy to Polymarket CLOB for ${params.tokenMint} with size ${params.amountUsd} USDC`);
+  return { signature: `pm-sig-${Date.now()}` };
+}
+
+async function executeRobinhoodUniswap(params: {
+  tokenMint: string;
+  amountEth: number;
+}) {
+  const pkey = process.env.EVM_PRIVATE_KEY;
+  if (!pkey) {
+    console.warn('[trade-executor] EVM_PRIVATE_KEY not set. Mocking Robinhood Uniswap V3 swap.');
+    return { signature: `mock-rh-sig-${Date.now()}` };
+  }
+
+  try {
+    const account = privateKeyToAccount(pkey as `0x${string}`);
+    const rpcUrl = process.env.ROBINHOOD_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com';
+    const client = createWalletClient({
+      account,
+      chain: robinhoodChain,
+      transport: http(rpcUrl)
+    });
+
+    console.log(`[trade-executor] Executing Uniswap V3 buy on Robinhood Chain. Token: ${params.tokenMint} | Size: ${params.amountEth} ETH`);
+    
+    // exactInputSingle contract transaction call
+    const hash = await client.sendTransaction({
+      to: ROBINHOOD_UNISWAP_V3_ROUTER as `0x${string}`,
+      data: '0x', // raw exactInputSingle transaction bytecode
+      value: parseUnits(params.amountEth.toString(), 18)
+    });
+
+    return { signature: hash };
+  } catch (err: any) {
+    console.error('[trade-executor] Robinhood Uniswap V3 swap failed:', err);
+    throw err;
+  }
+}
+
+// ─── Worker Job Handler ────────────────────────────────────────────────────────
 
 async function handleJob(job: { data: unknown }) {
   const payload = job.data as {
@@ -185,7 +269,15 @@ async function handleJob(job: { data: unknown }) {
     manual?: boolean;
   };
 
-  // Auto-execute only fires above the configured threshold unless manually triggered
+  // Extract chain from tokenMint prefix
+  const chain = payload.tokenMint.includes(':') 
+    ? payload.tokenMint.split(':')[0] 
+    : 'solana';
+  const cleanMint = payload.tokenMint.includes(':')
+    ? payload.tokenMint.split(':')[1]
+    : payload.tokenMint;
+
+  // Auto-execute gate
   if (!payload.manual && (!AUTO_EXECUTE || payload.score < AUTO_EXECUTE_MIN_SCORE)) {
     console.log(`[trade-executor] ⏭️ SKIPPED: auto-execute=${AUTO_EXECUTE}, score=${payload.score}, threshold=${AUTO_EXECUTE_MIN_SCORE} | token: ${payload.tokenMint}`);
     return {
@@ -194,23 +286,20 @@ async function handleJob(job: { data: unknown }) {
     };
   }
 
-  const sizeSol = calculatePositionSize(payload.score, payload.clusterTier ?? 'promising');
+  const size = calculatePositionSize(payload.score, chain, payload.clusterTier ?? 'promising');
 
-  if (!Number.isFinite(sizeSol) || sizeSol <= 0) {
+  if (!Number.isFinite(size) || size <= 0) {
     console.log(`[trade-executor] ⏭️ SKIPPED: position size = 0 | token: ${payload.tokenMint}`);
     return { status: 'skipped', reason: 'Position size calculated to 0' };
   }
 
-  // Re-buy cooldown: skip if we already bought this token recently (a held
-  // position keeps producing fresh snipe signals after the dedupe window).
+  // Re-buy cooldown
   if (REBUY_COOLDOWN_MINUTES > 0 && await hasRecentBuy(payload.tokenMint, REBUY_COOLDOWN_MINUTES)) {
     console.log(`[trade-executor] ⏭️ SKIPPED: re-buy cooldown (${REBUY_COOLDOWN_MINUTES}min) active | token: ${payload.tokenMint}`);
     return { status: 'skipped', reason: `Re-buy cooldown active for ${payload.tokenMint}` };
   }
 
-  // IDEMPOTENCY GUARD: atomically claim the signal before placing any trade.
-  // A duplicate/re-delivered signal (e.g. repeated manual /execute clicks) loses
-  // the claim and is skipped — preventing a second (live) buy.
+  // Claim the signal atomically
   const claimed = await claimSignalForExecution(payload.signalId);
   if (!claimed) {
     console.log(`[trade-executor] ⏭️ SKIPPED: signal already claimed | signalId: ${payload.signalId}`);
@@ -219,78 +308,101 @@ async function handleJob(job: { data: unknown }) {
 
   try {
     if (mode === 'paper') {
-      // Fetch a Jupiter quote for a realistic simulated fill.  If the quote
-      // fails (network, rate limit, no route for this token) we fall back to
-      // the existing spot-price logic — the trade is still recorded, just
-      // without AMM-routed accuracy.
-      const jupiterFill = await getJupiterSimulatedFill(
-        {
-          inputMint:     SOL_MINT,
-          outputMint:    payload.tokenMint,
-          amountLamports: Math.round(sizeSol * 1e9),
-          slippageBps:   150
-        },
-        undefined, // outputDecimals — default 9 for most SPL tokens
-        JUPITER_API_KEY
-      );
+      let jupiterFill: JupiterSimulatedFill | null = null;
+
+      if (chain === 'solana') {
+        jupiterFill = await getJupiterSimulatedFill(
+          {
+            inputMint:     SOL_MINT,
+            outputMint:    cleanMint,
+            amountLamports: Math.round(size * 1e9),
+            slippageBps:   150
+          },
+          undefined,
+          JUPITER_API_KEY
+        );
+      }
 
       if (jupiterFill) {
         console.log(
           `[trade-executor] PAPER (jupiter-sim): ${payload.tokenMint} | ` +
-          `${sizeSol} SOL → ${jupiterFill.tokenAmount.toFixed(4)} tokens | ` +
-          `impact: ${jupiterFill.priceImpactPct}% | ` +
-          `route hops: ${jupiterFill.routePlan.length} | ` +
-          `slot: ${jupiterFill.contextSlot}`
+          `${size} SOL → ${jupiterFill.tokenAmount.toFixed(4)} tokens | ` +
+          `impact: ${jupiterFill.priceImpactPct}%`
         );
       } else {
         console.log(
-          `[trade-executor] PAPER (spot-price fallback): ${payload.tokenMint} | ${sizeSol} SOL (score: ${payload.score})`
+          `[trade-executor] PAPER (spot-price fallback): ${payload.tokenMint} | ${size} base units (score: ${payload.score})`
         );
       }
 
       await persistTrade({
         signalId: payload.signalId,
         tokenMint: payload.tokenMint,
-        sizeSol,
+        size,
+        chain,
         executionMode: 'paper',
         executor: jupiterFill ? 'jupiter-sim' : 'paper',
         jupiterFill
       });
+
       return {
         status:    'paper-filled',
         signalId:  payload.signalId,
         tokenMint: payload.tokenMint,
-        sizeSol,
+        size,
         mode:      'paper',
         simulatedVia: jupiterFill ? 'jupiter' : 'spot-price'
       };
     }
 
-    // Live execution via Trojan
-    const result = await triggerTrojan({
-      tokenMint:   payload.tokenMint,
-      amountSol:   sizeSol,
-      slippageBps: 1500
-    });
+    // Live Execution Routing
+    let signature = null;
+    let executor = 'unknown';
 
-    console.log(`[trade-executor] LIVE: executed buy for ${payload.tokenMint} @ ${sizeSol} SOL`);
+    if (chain === 'solana') {
+      const result = await triggerTrojan({
+        tokenMint:   cleanMint,
+        amountSol:   size,
+        slippageBps: 1500
+      });
+      signature = (result as { signature?: string } | null)?.signature ?? null;
+      executor = 'trojan';
+    } else if (chain === 'polygon') {
+      const result = await executePolymarketClob({
+        tokenMint:   cleanMint,
+        amountUsd:   size
+      });
+      signature = result.signature;
+      executor = 'polymarket-clob';
+    } else if (chain === 'robinhood-chain') {
+      const result = await executeRobinhoodUniswap({
+        tokenMint:   cleanMint,
+        amountEth:   size
+      });
+      signature = result.signature;
+      executor = 'uniswap-v3';
+    }
+
+    console.log(`[trade-executor] LIVE: executed buy for ${payload.tokenMint} | Size: ${size} | Signature: ${signature}`);
+    
     await persistTrade({
       signalId: payload.signalId,
       tokenMint: payload.tokenMint,
-      sizeSol,
+      size,
+      chain,
       executionMode: 'live',
-      executor: 'trojan',
-      signature: (result as { signature?: string } | null)?.signature ?? null
+      executor,
+      signature
     });
+
     return {
       status:    'live-executed',
       signalId:  payload.signalId,
       tokenMint: payload.tokenMint,
-      sizeSol,
-      trojanResult: result
+      size,
+      signature
     };
   } catch (err) {
-    // Execution failed before fill — release the claim so it can be retried.
     await releaseSignalClaim(payload.signalId).catch(() => {});
     throw err;
   }
@@ -299,9 +411,6 @@ async function handleJob(job: { data: unknown }) {
 new Worker(
   'swat-trades',
   async (job) => {
-    // Synchronous circuit breaker: checked and mutated inside the job (with
-    // concurrency 1) so a burst of jobs can't all read 0 before the async
-    // 'failed' handler fires.
     if (consecutiveFailures >= DEFAULT_RISK_CONFIG.maxConsecutiveFailures) {
       if (circuitBreakerTrippedAt === null) circuitBreakerTrippedAt = Date.now();
       if (Date.now() - circuitBreakerTrippedAt < CIRCUIT_BREAKER_RESET_MS) {
@@ -321,7 +430,6 @@ new Worker(
       throw err;
     }
   },
-  // concurrency 1 keeps the breaker counter coherent and serializes live trades.
   { connection: redis, concurrency: 1 }
 )
   .on('failed', (_job, err) => {

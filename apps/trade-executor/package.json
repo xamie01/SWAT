@@ -15,6 +15,7 @@
     "@swat/db": "workspace:*",
     "@swat/shared": "workspace:*",
     "bullmq": "^5.52.1",
-    "ioredis": "^5.6.1"
+    "ioredis": "^5.6.1",
+    "viem": "^2.55.1"
   }
 }
