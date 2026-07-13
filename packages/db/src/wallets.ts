@@ -1,36 +1,44 @@
 import { query, pool } from './client.js';
 
+export type WalletChain = 'solana' | 'polygon' | 'robinhood-chain';
+
 type WalletInsert = {
   address: string;
+  chain?: WalletChain;
   source: 'shiller' | 'manual' | 'discovered';
   nickname?: string;
   /** How the wallet was found, e.g. 'token-early' | 'token-big' (optional). */
   discoveryMethod?: string;
 };
 
-export async function listWallets() {
+export async function listWallets(chain?: WalletChain) {
   return query(
-    `SELECT address, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
+    `SELECT address, chain, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
      FROM wallets
+     ${chain ? 'WHERE chain = $1' : ''}
      ORDER BY composite_score DESC NULLS LAST, created_at DESC`
+    ,
+    chain ? [chain] : []
   );
 }
 
-export async function getWallet(address: string) {
+export async function getWallet(address: string, chain: WalletChain = 'solana') {
   const rows = await query(
-    `SELECT address, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
+    `SELECT address, chain, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
      FROM wallets
-     WHERE address = $1`,
-    [address]
+     WHERE address = $1
+       AND chain = $2`,
+    [address, chain]
   );
   return rows[0] ?? null;
 }
 
 export async function upsertWallet(wallet: WalletInsert) {
   const rows = await query(
-    `INSERT INTO wallets (address, source, nickname, discovery_method)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO wallets (address, chain, source, nickname, discovery_method)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (address) DO UPDATE SET
+       chain = COALESCE(EXCLUDED.chain, wallets.chain),
        nickname = COALESCE(EXCLUDED.nickname, wallets.nickname),
        source = CASE
          WHEN wallets.source IN ('manual', 'shiller') THEN wallets.source
@@ -40,7 +48,7 @@ export async function upsertWallet(wallet: WalletInsert) {
        discovery_method = COALESCE(EXCLUDED.discovery_method, wallets.discovery_method),
        updated_at = NOW()
      RETURNING *`,
-    [wallet.address, wallet.source, wallet.nickname ?? null, wallet.discoveryMethod ?? null]
+    [wallet.address, wallet.chain ?? 'solana', wallet.source, wallet.nickname ?? null, wallet.discoveryMethod ?? null]
   );
   return rows[0];
 }

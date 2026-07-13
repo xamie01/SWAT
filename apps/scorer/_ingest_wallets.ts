@@ -16,6 +16,7 @@ import * as path from 'path';
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const backfillQueue = new Queue('swat-backfill-wallet', { connection });
+const walletChain = (process.env.WALLET_CHAIN as 'solana' | 'polygon' | 'robinhood-chain' | undefined) ?? 'solana';
 
 async function run() {
   // Look for starter pack in the project root (two levels up from apps/scorer)
@@ -36,15 +37,16 @@ async function run() {
     try {
       await upsertWallet({
         address,
+        chain: walletChain,
         source: 'discovered'
       });
       
       // Enqueue a backfill job
       await backfillQueue.add(
         'backfill-wallet',
-        { address },
+        { address, chain: walletChain },
         { 
-          jobId: `backfill-${address}`, 
+          jobId: `backfill-${walletChain}-${address}`, 
           removeOnComplete: true, 
           removeOnFail: 1000 
         }

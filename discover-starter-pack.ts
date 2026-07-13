@@ -35,6 +35,7 @@ const CONFIG = {
   // 2. Token Selection limits
   TARGET_TOKEN_COUNT: 8,       // How many high-volume tokens to analyze in total
   TOKEN_MAX_AGE_DAYS: 30,      // Max age of the token (ignores tokens older than this)
+  DEX_CHAIN_ID: process.env.DEX_CHAIN_ID ?? 'solana', // e.g. 'solana' | 'robinhood-chain'
 
   // 3. Scan limits per token (Higher values gather more data but use more RPC requests)
   LAUNCH_WINDOW_TXS: 50,       // How many transactions to scan from the token's block launch
@@ -142,7 +143,7 @@ async function getRecentHighVolumeTokens() {
       const data = await res.json() as any;
       const pairs = data.pairs || [];
       for (const p of pairs) {
-        if (p.chainId !== 'solana') continue;
+        if (p.chainId !== CONFIG.DEX_CHAIN_ID) continue;
         if (p.pairCreatedAt && p.pairCreatedAt < cutoffTime) continue;
         const base = p.baseToken;
         if (!base?.address) continue;
