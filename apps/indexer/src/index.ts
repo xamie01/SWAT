@@ -20,6 +20,7 @@ import {
   type HeliusParsedTransaction
 } from './parse.js';
 import { backfillEvmWallet, WalletChain } from './evm.js';
+import { backfillPolymarketWallet } from './polymarket.js';
 
 initLogger('indexer');
 
@@ -525,6 +526,8 @@ new Worker(
     let result;
     if (chain === 'solana') {
       result = await backfillWallet(address);
+    } else if (chain === 'polygon') {
+      result = await backfillPolymarketWallet(address);
     } else {
       result = await backfillEvmWallet(address, chain);
     }
