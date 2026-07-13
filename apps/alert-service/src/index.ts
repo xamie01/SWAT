@@ -38,6 +38,20 @@ async function getTokenMeta(mint: string) {
   return rows[0] ?? { symbol: null, name: null };
 }
 
+async function getPolymarketMarketDetails(mint: string) {
+  const rows = await query<{
+    question: string | null;
+    outcome_count: number | null;
+    outcome_name: string | null;
+  }>(`
+    SELECT m.question, m.outcome_count, t.symbol AS outcome_name
+    FROM tokens t
+    LEFT JOIN polymarket_markets m ON t.polymarket_condition_id = m.condition_id
+    WHERE t.mint = $1
+  `, [mint]);
+  return rows[0] ?? null;
+}
+
 async function getClusterMeta(clusterId: string) {
   const rows = await query<{
     name: string | null;
@@ -108,12 +122,22 @@ function patternHeader(pattern: string, score: number | undefined): string {
 
 async function formatSignalAlert(payload: AlertPayload): Promise<string> {
   const ca = payload.tokenMint ?? 'N/A';
+  const chain = payload.tokenMint?.includes(':') ? payload.tokenMint.split(':')[0] : 'solana';
+  const rawCa = payload.tokenMint?.includes(':') ? payload.tokenMint.split(':')[1] : ca;
+
   const token = payload.tokenMint ? await getTokenMeta(payload.tokenMint) : null;
   const cluster = payload.clusterId ? await getClusterMeta(payload.clusterId) : null;
 
+  let polymarketDetails = null;
+  if (chain === 'polygon' && payload.tokenMint) {
+    polymarketDetails = await getPolymarketMarketDetails(payload.tokenMint);
+  }
+
   const isExit = payload.pattern === 'exit';
-  const tokenLabel = token?.symbol ? `$${token.symbol}` : 'Unknown Token';
-  const tokenName = token?.name ?? '';
+  const tokenLabel = polymarketDetails?.outcome_name 
+    ? `$${polymarketDetails.outcome_name}` 
+    : (token?.symbol ? `$${token.symbol}` : 'Unknown Token');
+  const tokenName = polymarketDetails?.question ?? (token?.name ?? '');
 
   const lines: string[] = [
     `<b>${patternHeader(payload.pattern, payload.score)}</b>`,
@@ -122,13 +146,25 @@ async function formatSignalAlert(payload: AlertPayload): Promise<string> {
 
   // ── CA block (most important) ──
   if (!isExit) {
-    lines.push(`📋 <b>CA:</b> <code>${ca}</code>`);
-    if (tokenLabel !== 'Unknown Token') {
-      lines.push(`Token: ${tokenLabel}${tokenName ? ` (${tokenName})` : ''}`);
+    if (chain === 'polygon') {
+      lines.push(`📋 <b>Token ID:</b> <code>${rawCa}</code>`);
+      lines.push(`🏆 <b>Polymarket Market:</b> ${polymarketDetails?.question ?? 'Unknown Market'}`);
+      lines.push(`🎯 <b>Traded Outcome:</b> ${polymarketDetails?.outcome_name ?? 'Unknown Outcome'}`);
+      lines.push(`📊 <b>Outcomes Count:</b> ${polymarketDetails?.outcome_count ?? 2}`);
+    } else {
+      lines.push(`📋 <b>CA:</b> <code>${ca}</code>`);
+      if (tokenLabel !== 'Unknown Token') {
+        lines.push(`Token: ${tokenLabel}${tokenName ? ` (${tokenName})` : ''}`);
+      }
     }
     lines.push('');
   } else {
-    lines.push(`Token: ${tokenLabel} — <code>${ca}</code>`);
+    if (chain === 'polygon') {
+      lines.push(`🏆 <b>Market:</b> ${polymarketDetails?.question ?? 'Unknown Market'}`);
+      lines.push(`🎯 <b>Outcome:</b> ${polymarketDetails?.outcome_name ?? 'Unknown Outcome'} — <code>${rawCa}</code>`);
+    } else {
+      lines.push(`Token: ${tokenLabel} — <code>${ca}</code>`);
+    }
     lines.push('');
   }
 
@@ -171,11 +207,25 @@ async function formatSignalAlert(payload: AlertPayload): Promise<string> {
 
   // ── Suggested execution ──
   if (!isExit && payload.isSafe) {
-    const baseSol = parseFloat(process.env.BASE_POSITION_SOL ?? '0.5');
+    const chain = payload.tokenMint?.includes(':') ? payload.tokenMint.split(':')[0] : 'solana';
+    let sizeStr = '';
+    if (chain === 'solana') {
+      const baseSol = parseFloat(process.env.BASE_POSITION_SOL ?? '0.5');
+      sizeStr = `${baseSol} SOL`;
+    } else if (chain === 'polygon') {
+      const baseUsdc = parseFloat(process.env.BASE_POSITION_USDC ?? '100');
+      sizeStr = `${baseUsdc} USDC`;
+    } else if (chain === 'robinhood-chain') {
+      const baseEth = parseFloat(process.env.BASE_POSITION_ETH ?? '0.05');
+      sizeStr = `${baseEth} ETH`;
+    } else {
+      sizeStr = '0.5 SOL';
+    }
+
     lines.push('━━━━━━━━━━━━━━━━━━━━');
     lines.push('<b>⚡ SUGGESTED EXECUTION</b>');
     lines.push('━━━━━━━━━━━━━━━━━━━━');
-    lines.push(`Size: ${baseSol} SOL`);
+    lines.push(`Size: ${sizeStr}`);
     lines.push(`Slippage: 15%`);
     lines.push(`TP1: 2x → sell 50%`);
     lines.push(`TP2: 3x → sell 25%`);
