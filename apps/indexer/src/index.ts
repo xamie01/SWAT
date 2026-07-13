@@ -19,6 +19,7 @@ import {
   SOL_MINT,
   type HeliusParsedTransaction
 } from './parse.js';
+import { backfillEvmWallet, WalletChain } from './evm.js';
 
 initLogger('indexer');
 
@@ -40,13 +41,17 @@ const heliusRpcUrl = heliusApiKey ? `https://mainnet.helius-rpc.com/?api-key=${h
 
 const backfillQueue = new Queue('swat-backfill-wallet', { connection: redis });
 
-export async function ingestWallets(input: Array<{ address: string; source?: 'shiller' | 'manual' | 'discovered'; nickname?: string }>) {
+export async function ingestWallets(input: Array<{ address: string; chain?: WalletChain; source?: 'shiller' | 'manual' | 'discovered'; nickname?: string }>) {
   const parsed = input.map((wallet) => walletInputSchema.safeParse(wallet));
-  const valid = parsed.filter((p): p is { success: true; data: { address: string; source: 'shiller' | 'manual' | 'discovered'; nickname?: string } } => p.success).map((p) => p.data);
+  const valid = parsed.filter((p): p is { success: true; data: { address: string; chain: WalletChain; source: 'shiller' | 'manual' | 'discovered'; nickname?: string } } => p.success).map((p) => p.data);
 
   for (const wallet of valid) {
     await upsertWallet(wallet);
-    await backfillQueue.add('backfill-wallet', { address: wallet.address }, { jobId: `backfill-${wallet.address}`, removeOnComplete: true, removeOnFail: 1000 });
+    await backfillQueue.add(
+      'backfill-wallet',
+      { address: wallet.address, chain: wallet.chain },
+      { jobId: `backfill-${wallet.chain}-${wallet.address}`, removeOnComplete: true, removeOnFail: 1000 }
+    );
   }
 
   return { accepted: valid.length, rejected: parsed.length - valid.length };
@@ -431,12 +436,12 @@ export async function discoverFromToken(mint: string) {
 
   // ── 4. Seed wallets + enqueue history backfill ───────────────────────────────
   for (const owner of early) {
-    await upsertWallet({ address: owner, source: 'discovered', discoveryMethod: 'token-early' });
-    await backfillQueue.add('backfill-wallet', { address: owner }, { jobId: `backfill-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
+    await upsertWallet({ address: owner, chain: 'solana', source: 'discovered', discoveryMethod: 'token-early' });
+    await backfillQueue.add('backfill-wallet', { address: owner, chain: 'solana' }, { jobId: `backfill-solana-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
   }
   for (const owner of big) {
-    await upsertWallet({ address: owner, source: 'discovered', discoveryMethod: 'token-big' });
-    await backfillQueue.add('backfill-wallet', { address: owner }, { jobId: `backfill-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
+    await upsertWallet({ address: owner, chain: 'solana', source: 'discovered', discoveryMethod: 'token-big' });
+    await backfillQueue.add('backfill-wallet', { address: owner, chain: 'solana' }, { jobId: `backfill-solana-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
   }
 
   await logDiscoveryRun('token', mint, early.length + big.length);
@@ -514,14 +519,21 @@ async function backfillWallet(address: string) {
 new Worker(
   'swat-backfill-wallet',
   async (job) => {
-    const address = (job.data as { address: string }).address;
-    console.log(`[indexer] backfill started for ${address}`);
-    const result = await backfillWallet(address);
-    console.log(`[indexer] backfill complete for ${address}:`, result);
-    return { address, ...result };
+    const { address, chain = 'solana' } = job.data as { address: string; chain?: WalletChain };
+    console.log(`[indexer] backfill started for ${address} (${chain})`);
+
+    let result;
+    if (chain === 'solana') {
+      result = await backfillWallet(address);
+    } else {
+      result = await backfillEvmWallet(address, chain);
+    }
+
+    console.log(`[indexer] backfill complete for ${address} (${chain}):`, result);
+    return { address, chain, ...result };
   },
   // Concurrency 1: backfill one wallet at a time so we don't fan out hundreds of
-  // concurrent Helius requests and trip the rate limiter.
+  // concurrent RPC requests and trip the rate limiter.
   { connection: redis, concurrency: Number(process.env.BACKFILL_CONCURRENCY ?? 1) }
 );
 
