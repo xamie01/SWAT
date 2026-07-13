@@ -35,6 +35,9 @@ export type TokenMintInfo = {
  */
 export async function upsertToken(mint: string, info?: TokenMintInfo) {
   const chain = info?.chain ?? 'solana';
+  const prefix = `${chain}:`;
+  const prefixedMint = mint.startsWith(prefix) ? mint : `${prefix}${mint}`;
+
   if (info) {
     await query(
       `INSERT INTO tokens (mint, chain, decimals, mint_authority_disabled, freeze_authority_disabled, symbol, name)
@@ -47,7 +50,7 @@ export async function upsertToken(mint: string, info?: TokenMintInfo) {
          symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
          name = COALESCE(EXCLUDED.name, tokens.name)`,
       [
-        mint,
+        prefixedMint,
         chain,
         info.decimals ?? null,
         info.mintAuthorityDisabled ?? null,
@@ -59,15 +62,18 @@ export async function upsertToken(mint: string, info?: TokenMintInfo) {
   } else {
     await query(
       `INSERT INTO tokens (mint, chain) VALUES ($1, $2) ON CONFLICT (mint) DO NOTHING`,
-      [mint, chain]
+      [prefixedMint, chain]
     );
   }
 }
 
 export async function getTokenDecimals(mint: string, chain: TransactionChain = 'solana'): Promise<number | null> {
+  const prefix = `${chain}:`;
+  const prefixedMint = mint.startsWith(prefix) ? mint : `${prefix}${mint}`;
+
   const rows = await query<{ decimals: number | null }>(
     `SELECT decimals FROM tokens WHERE mint = $1 AND chain = $2`,
-    [mint, chain]
+    [prefixedMint, chain]
   );
   return rows[0]?.decimals ?? null;
 }
@@ -80,16 +86,26 @@ export async function getTokenDecimals(mint: string, chain: TransactionChain = '
  * This powers the early-entry component of the wallet composite score.
  */
 export async function updateTokenLaunchTimestamp(mint: string, observedAt: Date, chain: TransactionChain = 'solana') {
+  const prefix = `${chain}:`;
+  const prefixedMint = mint.startsWith(prefix) ? mint : `${prefix}${mint}`;
+
   await query(
     `UPDATE tokens
        SET launch_timestamp = LEAST(COALESCE(launch_timestamp, $2::timestamp), $2::timestamp)
      WHERE mint = $1
        AND chain = $3`,
-    [mint, observedAt, chain]
+    [prefixedMint, observedAt, chain]
   );
 }
 
 export async function insertParsedTransaction(input: ParsedTransactionInsert) {
+  const chain = input.chain ?? 'solana';
+  const prefix = `${chain}:`;
+  const walletAddress = input.walletAddress.startsWith(prefix) ? input.walletAddress : `${prefix}${input.walletAddress}`;
+  const tokenIn = input.tokenIn.startsWith(prefix) ? input.tokenIn : `${prefix}${input.tokenIn}`;
+  const tokenOut = input.tokenOut.startsWith(prefix) ? input.tokenOut : `${prefix}${input.tokenOut}`;
+  const targetToken = input.targetToken ? (input.targetToken.startsWith(prefix) ? input.targetToken : `${prefix}${input.targetToken}`) : null;
+
   const rows = await query(
     `INSERT INTO transactions (
       signature,
@@ -115,16 +131,16 @@ export async function insertParsedTransaction(input: ParsedTransactionInsert) {
     RETURNING id`,
     [
       input.signature,
-      input.chain ?? 'solana',
-      input.walletAddress,
-      input.tokenIn,
-      input.tokenOut,
+      chain,
+      walletAddress,
+      tokenIn,
+      tokenOut,
       input.amountIn,
       input.amountOut,
       input.amountInUsd ?? null,
       input.amountOutUsd ?? null,
       input.direction,
-      input.targetToken,
+      targetToken,
       input.programId ?? null,
       input.slot ?? null,
       input.timestamp,

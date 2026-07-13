@@ -23,17 +23,23 @@ export async function listWallets(chain?: WalletChain) {
 }
 
 export async function getWallet(address: string, chain: WalletChain = 'solana') {
+  const prefix = `${chain}:`;
+  const prefixedAddress = address.startsWith(prefix) ? address : `${prefix}${address}`;
   const rows = await query(
     `SELECT address, chain, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
      FROM wallets
      WHERE address = $1
        AND chain = $2`,
-    [address, chain]
+    [prefixedAddress, chain]
   );
   return rows[0] ?? null;
 }
-
+ 
 export async function upsertWallet(wallet: WalletInsert) {
+  const chain = wallet.chain ?? 'solana';
+  const prefix = `${chain}:`;
+  const address = wallet.address.startsWith(prefix) ? wallet.address : `${prefix}${wallet.address}`;
+
   const rows = await query(
     `INSERT INTO wallets (address, chain, source, nickname, discovery_method)
      VALUES ($1, $2, $3, $4, $5)
@@ -48,7 +54,7 @@ export async function upsertWallet(wallet: WalletInsert) {
        discovery_method = COALESCE(EXCLUDED.discovery_method, wallets.discovery_method),
        updated_at = NOW()
      RETURNING *`,
-    [wallet.address, wallet.chain ?? 'solana', wallet.source, wallet.nickname ?? null, wallet.discoveryMethod ?? null]
+    [address, chain, wallet.source, wallet.nickname ?? null, wallet.discoveryMethod ?? null]
   );
   return rows[0];
 }
