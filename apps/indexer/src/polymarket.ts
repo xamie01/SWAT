@@ -164,19 +164,20 @@ export async function backfillPolymarketWallet(address: string) {
   });
 
   try {
-    const response = await fetch(`https://data-api.polymarket.com/activity?user=${cleanAddr}&type=TRADE&limit=100`);
+    const response = await fetch(`https://data-api.polymarket.com/activity?user=${cleanAddr}&limit=100`);
     if (!response.ok) {
       throw new Error(`Polymarket Data API returned status ${response.status}`);
     }
 
     const activities = await response.json() as PolymarketTradeActivity[];
-    console.log(`[polymarket] Fetched ${activities.length} trades for ${cleanAddr}`);
+    console.log(`[polymarket] Fetched ${activities.length} activities for ${cleanAddr}`);
 
     let processed = 0;
     let newTrades = 0;
 
     for (const act of activities) {
-      if (act.type !== 'TRADE' || !act.conditionId) continue;
+      if (act.type !== 'TRADE' && act.type !== 'REDEEM') continue;
+      if (!act.conditionId) continue;
 
       const clobTokenId = await ensurePolymarketMarketAndTokens(act.conditionId, act.outcome, act.title);
 
@@ -185,18 +186,19 @@ export async function backfillPolymarketWallet(address: string) {
 
       // Value of USDC transacted
       const usdVal = Number(act.usdcSize);
+      const side = act.type === 'REDEEM' ? 'SELL' : act.side;
       
       const insertPayload = {
         chain: 'polygon' as const,
         signature: act.transactionHash,
         walletAddress: cleanAddr,
-        tokenIn: act.side === 'BUY' ? POLYMARKET_USDC : clobTokenId,
-        tokenOut: act.side === 'BUY' ? clobTokenId : POLYMARKET_USDC,
-        amountIn: act.side === 'BUY' ? String(Math.round(usdVal * 1e6)) : String(Math.round(act.size * 1e6)),
-        amountOut: act.side === 'BUY' ? String(Math.round(act.size * 1e6)) : String(Math.round(usdVal * 1e6)),
+        tokenIn: side === 'BUY' ? POLYMARKET_USDC : clobTokenId,
+        tokenOut: side === 'BUY' ? clobTokenId : POLYMARKET_USDC,
+        amountIn: side === 'BUY' ? String(Math.round(usdVal * 1e6)) : String(Math.round(act.size * 1e6)),
+        amountOut: side === 'BUY' ? String(Math.round(act.size * 1e6)) : String(Math.round(usdVal * 1e6)),
         amountInUsd: usdVal,
         amountOutUsd: usdVal,
-        direction: act.side === 'BUY' ? ('buy' as const) : ('sell' as const),
+        direction: side === 'BUY' ? ('buy' as const) : ('sell' as const),
         targetToken: clobTokenId,
         programId: 'polymarket',
         slot: null,
@@ -217,7 +219,7 @@ export async function backfillPolymarketWallet(address: string) {
             walletAddress: `polygon:${cleanAddr}`,
             signature: act.transactionHash,
             tokenMint: `polygon:${clobTokenId}`,
-            direction: act.side === 'BUY' ? 'buy' : 'sell',
+            direction: side === 'BUY' ? 'buy' : 'sell',
             amountUsd: usdVal,
             timestamp: timestamp.toISOString()
           })
