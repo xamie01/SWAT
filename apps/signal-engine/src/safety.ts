@@ -22,8 +22,8 @@ const robinhoodChain = {
     symbol: 'ETH',
   },
   rpcUrls: {
-    default: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
-    public: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
+    default: { http: [process.env.ROBINHOOD_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'] },
+    public: { http: [process.env.ROBINHOOD_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'] },
   },
 } as const;
 

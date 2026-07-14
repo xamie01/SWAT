@@ -483,8 +483,13 @@ app.get('/v1/tokens/trending', async () => {
 app.get('/v1/trading/status', async () => ({
   mode: process.env.TRADING_MODE ?? 'paper',
   autoExecute: process.env.AUTO_EXECUTE === 'true',
-  minScore: Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 90),
-  basePositionSol: Number(process.env.BASE_POSITION_SOL ?? 0.5)
+  minScore: Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 85),
+  basePositionSol: Number(process.env.BASE_POSITION_SOL ?? 0.5),
+  basePositionUsdc: Number(process.env.BASE_POSITION_USDC ?? 100),
+  basePositionEth: Number(process.env.BASE_POSITION_ETH ?? 0.05),
+  useDynamicBalanceSizing: process.env.USE_DYNAMIC_BALANCE_SIZING === 'true',
+  usdcBalanceRiskPct: Number(process.env.USDC_BALANCE_RISK_PCT ?? 2.0),
+  ethBalanceRiskPct: Number(process.env.ETH_BALANCE_RISK_PCT ?? 2.0)
 }));
 
 app.get('/v1/trading/portfolio', async () => {

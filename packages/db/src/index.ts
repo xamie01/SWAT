@@ -8,3 +8,4 @@ export * from './pnl-queries.js';
 export * from './scoring-queries.js';
 export * from './discovery-queries.js';
 export * from './clustering-queries.js';
+export * from './polymarket.js';
