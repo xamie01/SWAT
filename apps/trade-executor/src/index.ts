@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { createWalletClient, http, parseUnits } from 'viem';
+import { createPublicClient, createWalletClient, http, parseUnits, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon } from 'viem/chains';
 import { DEFAULT_RISK_CONFIG, fetchTokenPriceUsd, getJupiterSimulatedFill, initLogger } from '@swat/shared';
@@ -44,6 +44,25 @@ const robinhoodChain = {
 
 // Robinhood Uniswap V3 Swap Router Address
 const ROBINHOOD_UNISWAP_V3_ROUTER = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+
+// Polymarket USDC token address
+const POLYMARKET_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+
+// Public Clients for fetching on-chain balances
+const polygonPublicClient = createPublicClient({
+  chain: polygon,
+  transport: http(process.env.POLYGON_RPC_URL ?? 'https://polygon-rpc.com')
+});
+
+const robinhoodPublicClient = createPublicClient({
+  chain: robinhoodChain,
+  transport: http(process.env.ROBINHOOD_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com')
+});
+
+// Sizing settings
+const USE_DYNAMIC_BALANCE_SIZING = process.env.USE_DYNAMIC_BALANCE_SIZING === 'true';
+const USDC_BALANCE_RISK_PCT = parseFloat(process.env.USDC_BALANCE_RISK_PCT ?? '2.0');
+const ETH_BALANCE_RISK_PCT = parseFloat(process.env.ETH_BALANCE_RISK_PCT ?? '2.0');
 
 // Safety validations
 if (!Number.isFinite(BASE_POSITION_SOL) || BASE_POSITION_SOL <= 0) {
@@ -171,6 +190,60 @@ function calculatePositionSize(score: number, chain: string, clusterTier: Cluste
   return 0;
 }
 
+async function getDynamicPositionSize(
+  score: number,
+  chain: string,
+  clusterTier: ClusterTier = 'promising'
+): Promise<number> {
+  if (!USE_DYNAMIC_BALANCE_SIZING) {
+    return calculatePositionSize(score, chain, clusterTier);
+  }
+
+  const pkey = process.env.EVM_PRIVATE_KEY;
+  if (!pkey) {
+    console.warn('[trade-executor] EVM_PRIVATE_KEY not set for dynamic balance sizing. Falling back to static sizing.');
+    return calculatePositionSize(score, chain, clusterTier);
+  }
+
+  const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
+  const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
+
+  try {
+    const account = privateKeyToAccount(pkey as `0x${string}`);
+    
+    if (chain === 'polygon') {
+      const erc20Abi = parseAbi(['function balanceOf(address account) view returns (uint256)']);
+      const balanceRaw = await polygonPublicClient.readContract({
+        address: POLYMARKET_USDC as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [account.address]
+      });
+      const balanceUsdc = Number(balanceRaw) / 1e6;
+      const computedSize = balanceUsdc * (USDC_BALANCE_RISK_PCT / 100) * tierMult * scoreMult;
+      
+      const baseUsdc = parseFloat(process.env.BASE_POSITION_USDC ?? '100');
+      const maxUsdc = parseFloat(process.env.MAX_POSITION_USDC ?? '500');
+      return Number(Math.max(baseUsdc, Math.min(computedSize, maxUsdc)).toFixed(2));
+
+    } else if (chain === 'robinhood-chain') {
+      const balanceRaw = await robinhoodPublicClient.getBalance({
+        address: account.address
+      });
+      const balanceEth = Number(balanceRaw) / 1e18;
+      const computedSize = balanceEth * (ETH_BALANCE_RISK_PCT / 100) * tierMult * scoreMult;
+      
+      const baseEth = parseFloat(process.env.BASE_POSITION_ETH ?? '0.05');
+      const maxEth = parseFloat(process.env.MAX_POSITION_ETH ?? '0.5');
+      return Number(Math.max(baseEth, Math.min(computedSize, maxEth)).toFixed(4));
+    }
+  } catch (err: any) {
+    console.error(`[trade-executor] failed to calculate dynamic size for ${chain}:`, err.message);
+  }
+
+  return calculatePositionSize(score, chain, clusterTier);
+}
+
 // ─── Live Execution Integrations ───────────────────────────────────────────────
 
 async function triggerTrojan(params: {
@@ -286,7 +359,7 @@ async function handleJob(job: { data: unknown }) {
     };
   }
 
-  const size = calculatePositionSize(payload.score, chain, payload.clusterTier ?? 'promising');
+  const size = await getDynamicPositionSize(payload.score, chain, payload.clusterTier ?? 'promising');
 
   if (!Number.isFinite(size) || size <= 0) {
     console.log(`[trade-executor] ⏭️ SKIPPED: position size = 0 | token: ${payload.tokenMint}`);
