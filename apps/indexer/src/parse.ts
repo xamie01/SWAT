@@ -78,6 +78,9 @@ export function baseUnitsToFloat(amountStr: string, decimals: number): number {
 export const MIN_SOL_LEG_LAMPORTS = 1_000_000;
 
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
+export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+const QUOTE_MINTS = new Set([SOL_MINT, USDC_MINT, USDT_MINT]);
 export const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 // Ignore dust / fee-sized transfers when inferring funding (0.05 SOL).
 export const MIN_FUNDING_LAMPORTS = 50_000_000;
@@ -187,8 +190,13 @@ export function getWalletTokenDeltas(tx: HeliusParsedTransaction, walletAddress:
   const tokenOut = positives.reduce((max, cur) => (cur.delta > max.delta ? cur : max));
   if (!tokenIn || !tokenOut) return null;
 
-  const direction: 'buy' | 'sell' =
-    tokenIn.mint === SOL_MINT ? 'buy' : tokenOut.mint === SOL_MINT ? 'sell' : 'buy';
+  const inputIsQuote = QUOTE_MINTS.has(tokenIn.mint);
+  const outputIsQuote = QUOTE_MINTS.has(tokenOut.mint);
+  // Quote-to-quote conversions do not establish or exit a tracked position.
+  if (inputIsQuote && outputIsQuote) return null;
+  // Without an explicit target-token hint, a supported non-quote route is the
+  // disposal of tokenIn. This fails safer than fabricating an entry in tokenOut.
+  const direction: 'buy' | 'sell' = inputIsQuote ? 'buy' : 'sell';
   const targetToken = direction === 'buy' ? tokenOut.mint : tokenIn.mint;
 
   return {
@@ -198,6 +206,57 @@ export function getWalletTokenDeltas(tx: HeliusParsedTransaction, walletAddress:
     amountOut: tokenOut.delta.toString(),
     direction,
     targetToken
+  };
+}
+
+export type CanonicalSolanaSwapEvent = {
+  chain: 'solana';
+  transactionIdentity: string;
+  slot: number | null;
+  walletAddress: string;
+  occurredAt: Date;
+  direction: 'buy' | 'sell';
+  targetToken: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string;
+  amountOut: string;
+};
+
+/**
+ * Produce the source-independent swap event consumed by Solana ingestion.
+ *
+ * Helius enhanced webhooks are first converted to a
+ * {@link HeliusParsedTransaction}; JSON-RPC backfills already have that shape.
+ * Keeping source labels out of this value makes parity directly testable and
+ * prevents the two ingestion paths from drifting on direction or quantities.
+ */
+export function parseCanonicalSolanaSwapEvent(
+  tx: HeliusParsedTransaction,
+  walletAddress: string
+): CanonicalSolanaSwapEvent | null {
+  const transactionIdentity = tx.transaction?.signatures?.[0];
+  const blockTime = tx.blockTime;
+  if (
+    typeof transactionIdentity !== 'string'
+    || transactionIdentity.length === 0
+    || typeof blockTime !== 'number'
+    || !Number.isInteger(blockTime)
+    || blockTime <= 0
+  ) {
+    return null;
+  }
+
+  const swap = getWalletTokenDeltas(tx, walletAddress);
+  if (!swap) return null;
+
+  return {
+    chain: 'solana',
+    transactionIdentity,
+    slot: Number.isInteger(tx.slot) && (tx.slot ?? -1) >= 0 ? tx.slot! : null,
+    walletAddress,
+    occurredAt: new Date(blockTime * 1000),
+    ...swap
   };
 }
 

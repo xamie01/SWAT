@@ -7,15 +7,13 @@ export const REDIS_CHANNELS = {
   // discovery service + scorer). Use these constants on both ends so the
   // channel names can't drift.
   discoveryRun: 'swat:discovery:run',
-  discoverySeedToken: 'swat:discovery:seed-token',
   clusterRefresh: 'swat:cluster:refresh',
   scorerRun: 'swat:scorer:run'
 } as const;
 
-// BullMQ queue names shared between producers (API) and consumers (indexer),
-// so they can't drift. (The backfill queue name 'swat-backfill-wallet' predates
-// this and is still inlined in the indexer/API.)
+// BullMQ queue names shared between producers and consumers.
 export const QUEUES = {
+  walletBackfill: 'swat-backfill-wallet',
   tokenDiscovery: 'swat-token-discovery'
 } as const;
 

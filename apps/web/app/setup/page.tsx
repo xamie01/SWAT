@@ -166,11 +166,9 @@ export default function SetupPage() {
       }
 
       const data = await res.json();
-      // The API returns `ingested` (from existing data) and `queued` (the deeper
-      // on-chain scan has been kicked off in the background).
       setSuccess(
-        `Found ${data.ingested || 0} wallets from existing data. ` +
-        `Now scanning the chain for this token's early & biggest buyers — they'll be backfilled, scored, and clustered automatically.`
+        `Token discovery queued for ${data.tokenMint}. ` +
+        `Early and biggest buyers will be backfilled, scored, and clustered automatically.`
       );
       setTokenMint('');
     } catch (err: any) {

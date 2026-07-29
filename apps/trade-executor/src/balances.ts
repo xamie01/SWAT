@@ -1,0 +1,69 @@
+import { resolveChainAddress } from '@swat/shared';
+
+type FetchLike = typeof fetch;
+
+type SolanaBalanceResponse = {
+  error?: { message?: unknown };
+  result?: { value?: unknown };
+};
+
+export function capBaseUnitSpend(
+  requested: bigint,
+  balance: bigint,
+  reserve: bigint
+): bigint {
+  if (requested < 0n || balance < 0n || reserve < 0n) {
+    throw new Error('Base-unit balance inputs must be non-negative');
+  }
+  const spendable = balance > reserve ? balance - reserve : 0n;
+  return requested < spendable ? requested : spendable;
+}
+
+export async function fetchSolanaBalanceSol(opts: {
+  walletAddress: string;
+  heliusApiKey: string;
+  timeoutMs: number;
+  fetchFn?: FetchLike;
+}): Promise<number> {
+  const walletAddress = resolveChainAddress(opts.walletAddress, 'solana').raw;
+  if (!opts.heliusApiKey) {
+    throw new Error('HELIUS_API_KEY is required to verify the Trojan wallet balance');
+  }
+  if (!Number.isSafeInteger(opts.timeoutMs) || opts.timeoutMs <= 0) {
+    throw new Error('Solana balance timeout must be a positive integer');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+  try {
+    const response = await (opts.fetchFn ?? fetch)(
+      `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(opts.heliusApiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'swat-trade-balance',
+          method: 'getBalance',
+          params: [walletAddress, { commitment: 'confirmed' }]
+        })
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Solana balance RPC returned HTTP ${response.status}`);
+    }
+
+    const body = await response.json() as SolanaBalanceResponse;
+    if (body.error) {
+      throw new Error(`Solana balance RPC error: ${String(body.error.message ?? 'unknown error')}`);
+    }
+    const lamports = body.result?.value;
+    if (typeof lamports !== 'number' || !Number.isSafeInteger(lamports) || lamports < 0) {
+      throw new Error('Solana balance RPC returned an invalid lamport balance');
+    }
+    return lamports / 1_000_000_000;
+  } finally {
+    clearTimeout(timer);
+  }
+}

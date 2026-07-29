@@ -1,78 +1,132 @@
 import { fetchTokenPriceUsd } from '@swat/shared';
 import { query } from './client.js';
-import { markToMarketPnl } from './pnl-math.js';
+import { calculateAverageCostPnl } from './pnl-math.js';
 
-export { markToMarketPnl } from './pnl-math.js';
+export { calculateAverageCostPnl, markToMarketPnl } from './pnl-math.js';
 
-type OpenPosition = {
+type PositionTrade = {
   signal_id: string;
   token_mint: string;
-  cost_basis_usd: number | null;
-  entry_price_usd: number | null;
+  direction: 'buy' | 'sell';
+  token_amount: number | string | null;
+  amount_usd: number | string | null;
+  price_usd: number | string | null;
+  fee_usd: number | string | null;
 };
 
 /**
- * Recompute unrealised P&L for every signal that has at least one buy trade
- * but is not yet closed, writing the result to signals.pnl_usd.
- *
- * This powers /v1/trading/performance. It is a mark-to-market estimate, not a
- * realised-P&L engine (the executor has no sell path yet).
- *
- * Token prices are fetched once per distinct mint to limit API calls.
+ * Recompute realized and unrealized average-cost P&L from ordered filled trades.
+ * Token prices are fetched once per distinct mint and only for open positions.
  */
-export async function markToMarketOpenPositions(): Promise<{ updated: number; skipped: number }> {
-  const positions = await query<OpenPosition>(`
+export async function markToMarketOpenPositions(
+  signalId?: string
+): Promise<{ updated: number; skipped: number }> {
+  const trades = await query<PositionTrade>(`
     SELECT
       t.signal_id,
       t.token_mint,
-      -- Cost basis / entry price only from rows that actually have both USD and
-      -- token amount, so a row missing token_amount can't skew the weighted
-      -- average. Fall back to AVG(price_usd) when no priced rows exist.
-      SUM(t.amount_usd) FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0) AS cost_basis_usd,
-      CASE
-        WHEN SUM(t.token_amount) FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0) > 0
-          THEN SUM(t.amount_usd)     FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0)
-             / SUM(t.token_amount)   FILTER (WHERE t.amount_usd IS NOT NULL AND t.token_amount > 0)
-        ELSE AVG(t.price_usd)
-      END                                                 AS entry_price_usd
+      t.direction,
+      t.token_amount,
+      t.amount_usd,
+      t.price_usd,
+      t.fee_usd
     FROM trades t
     WHERE t.signal_id IS NOT NULL
-      AND t.direction = 'buy'
-      AND t.status = 'filled'
-      -- Exclude positions that have already been closed by a sell.
-      AND NOT EXISTS (
-        SELECT 1 FROM trades s
-        WHERE s.signal_id = t.signal_id
-          AND s.token_mint = t.token_mint
-          AND s.direction = 'sell'
-      )
-    GROUP BY t.signal_id, t.token_mint
-  `);
+      AND t.status IN ('filled', 'partial')
+      AND t.direction IN ('buy', 'sell')
+      AND (t.execution_mode IS NULL OR t.execution_mode != 'shadow')
+      AND ($1::uuid IS NULL OR t.signal_id = $1)
+    ORDER BY t.signal_id, t.executed_at, t.id
+  `, [signalId ?? null]);
+
+  const grouped = new Map<string, PositionTrade[]>();
+  for (const trade of trades) {
+    const group = grouped.get(trade.signal_id) ?? [];
+    group.push(trade);
+    grouped.set(trade.signal_id, group);
+  }
 
   const priceCache = new Map<string, number | null>();
   let updated = 0;
   let skipped = 0;
 
-  for (const pos of positions) {
-    let currentPrice = priceCache.get(pos.token_mint);
-    if (currentPrice === undefined) {
-      const fetched = await fetchTokenPriceUsd(pos.token_mint);
-      priceCache.set(pos.token_mint, fetched);
-      currentPrice = fetched;
+  for (const [signalId, signalTrades] of grouped) {
+    const tokenMint = signalTrades[0]?.token_mint;
+    if (!tokenMint) {
+      skipped++;
+      continue;
+    }
+    if (signalTrades.some((trade) => trade.token_mint !== tokenMint)) {
+      skipped++;
+      continue;
     }
 
-    const pnl = markToMarketPnl(
-      pos.cost_basis_usd != null ? Number(pos.cost_basis_usd) : null,
-      pos.entry_price_usd != null ? Number(pos.entry_price_usd) : null,
-      currentPrice
-    );
+    const ledgerTrades = signalTrades.map((trade) => {
+      const tokenAmount = Number(trade.token_amount);
+      const explicitAmountUsd = trade.amount_usd == null ? null : Number(trade.amount_usd);
+      const priceUsd = trade.price_usd == null ? null : Number(trade.price_usd);
+      const feeUsd = trade.fee_usd == null ? 0 : Number(trade.fee_usd);
+      const amountUsd = explicitAmountUsd ?? (
+        priceUsd !== null && Number.isFinite(priceUsd) ? tokenAmount * priceUsd : Number.NaN
+      );
+      return { direction: trade.direction, tokenAmount, amountUsd, feeUsd };
+    });
 
+    let openQuantity = 0;
+    let ledgerValid = true;
+    for (const trade of ledgerTrades) {
+      if (!Number.isFinite(trade.tokenAmount) || trade.tokenAmount <= 0) {
+        ledgerValid = false;
+        break;
+      }
+      openQuantity += trade.direction === 'buy' ? trade.tokenAmount : -trade.tokenAmount;
+      if (openQuantity < -1e-12) {
+        ledgerValid = false;
+        break;
+      }
+    }
+    if (!ledgerValid) {
+      skipped++;
+      continue;
+    }
+
+    let currentPrice: number | null = null;
+    if (openQuantity > 1e-12) {
+      const cached = priceCache.get(tokenMint);
+      if (cached !== undefined) {
+        currentPrice = cached;
+      } else {
+        currentPrice = await fetchTokenPriceUsd(tokenMint);
+        priceCache.set(tokenMint, currentPrice);
+
+        if (currentPrice !== null) {
+          const sep = tokenMint.indexOf(':');
+          const chain = sep >= 0 ? tokenMint.slice(0, sep) : 'solana';
+          await query(`
+            INSERT INTO price_snapshots (token_mint, chain, price_usd, snapshot_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (token_mint, chain, snapshot_at) DO NOTHING
+          `, [tokenMint, chain, currentPrice]).catch((error) => {
+            console.error('[db] failed to save price snapshot', error);
+          });
+        }
+      }
+    }
+
+    const pnl = calculateAverageCostPnl(ledgerTrades, currentPrice);
     if (pnl === null) {
       skipped++;
       continue;
     }
 
-    await query(`UPDATE signals SET pnl_usd = $1 WHERE id = $2`, [pnl, pos.signal_id]);
+    await query(
+      `UPDATE signals
+          SET pnl_usd = $1,
+              realized_pnl_usd = $2,
+              unrealized_pnl_usd = $3
+        WHERE id = $4`,
+      [pnl.totalPnlUsd, pnl.realizedPnlUsd, pnl.unrealizedPnlUsd, signalId]
+    );
     updated++;
   }
 

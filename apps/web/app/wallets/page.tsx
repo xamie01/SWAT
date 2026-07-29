@@ -20,10 +20,13 @@ export default function WalletsPage() {
 
   // Form states
   const [singleAddress, setSingleAddress] = useState('');
+  const [singleChain, setSingleChain] = useState<'solana' | 'polygon' | 'robinhood-chain'>('solana');
   const [bulkAddresses, setBulkAddresses] = useState('');
+  const [bulkChain, setBulkChain] = useState<'solana' | 'polygon' | 'robinhood-chain'>('solana');
 
   const fetchWallets = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await fetch(`${API_BASE}/v1/wallets`, {
         headers: { 'X-Api-Key': API_KEY }
@@ -75,7 +78,7 @@ export default function WalletsPage() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          wallets: [{ address: singleAddress.trim(), source: 'manual' }]
+          wallets: [{ address: singleAddress.trim(), chain: singleChain, source: 'manual' }]
         })
       });
 
@@ -112,7 +115,7 @@ export default function WalletsPage() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          wallets: addresses.map(address => ({ address, source: 'manual' }))
+          wallets: addresses.map(address => ({ address, chain: bulkChain, source: 'manual' }))
         })
       });
 
@@ -157,9 +160,41 @@ export default function WalletsPage() {
         <div className="card">
           <h3>Add Single Wallet</h3>
           <form onSubmit={addSingleWallet}>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', marginBottom: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="singleChain"
+                  value="solana"
+                  checked={singleChain === 'solana'}
+                  onChange={() => setSingleChain('solana')}
+                />
+                Solana
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="singleChain"
+                  value="polygon"
+                  checked={singleChain === 'polygon'}
+                  onChange={() => setSingleChain('polygon')}
+                />
+                Polymarket (Polygon)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="singleChain"
+                  value="robinhood-chain"
+                  checked={singleChain === 'robinhood-chain'}
+                  onChange={() => setSingleChain('robinhood-chain')}
+                />
+                Robinhood
+              </label>
+            </div>
             <input
               type="text"
-              placeholder="Solana wallet address"
+              placeholder={singleChain === 'solana' ? "Solana wallet address" : "EVM wallet address (0x...)"}
               value={singleAddress}
               onChange={(e) => setSingleAddress(e.target.value)}
               style={{
@@ -170,7 +205,7 @@ export default function WalletsPage() {
                 borderRadius: '8px',
                 color: 'var(--text-primary)',
                 fontSize: '0.9rem',
-                marginTop: '1rem'
+                marginTop: '0.5rem'
               }}
             />
             <button
@@ -197,6 +232,38 @@ export default function WalletsPage() {
         <div className="card">
           <h3>Add Multiple Wallets</h3>
           <form onSubmit={addBulkWallets}>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', marginBottom: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="bulkChain"
+                  value="solana"
+                  checked={bulkChain === 'solana'}
+                  onChange={() => setBulkChain('solana')}
+                />
+                Solana
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="bulkChain"
+                  value="polygon"
+                  checked={bulkChain === 'polygon'}
+                  onChange={() => setBulkChain('polygon')}
+                />
+                Polymarket (Polygon)
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="bulkChain"
+                  value="robinhood-chain"
+                  checked={bulkChain === 'robinhood-chain'}
+                  onChange={() => setBulkChain('robinhood-chain')}
+                />
+                Robinhood
+              </label>
+            </div>
             <textarea
               placeholder="Paste wallet addresses (one per line)"
               value={bulkAddresses}
@@ -210,7 +277,7 @@ export default function WalletsPage() {
                 borderRadius: '8px',
                 color: 'var(--text-primary)',
                 fontSize: '0.9rem',
-                marginTop: '1rem',
+                marginTop: '0.5rem',
                 resize: 'vertical',
                 fontFamily: 'monospace'
               }}
@@ -288,8 +355,18 @@ export default function WalletsPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1 }}>
                     <code style={{ fontSize: '0.9rem', color: 'var(--accent)' }}>
-                      {wallet.address}
+                      {wallet.address.includes(':') ? wallet.address.split(':')[1] : wallet.address}
                     </code>
+                    <span className="badge" style={{
+                      marginLeft: '0.75rem',
+                      background: wallet.chain === 'solana' ? 'rgba(167, 139, 250, 0.1)' : wallet.chain === 'polygon' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                      color: wallet.chain === 'solana' ? '#a78bfa' : wallet.chain === 'polygon' ? '#60a5fa' : '#34d399',
+                      border: 'none',
+                      fontSize: '0.75rem',
+                      verticalAlign: 'middle'
+                    }}>
+                      {wallet.chain === 'solana' ? 'Solana' : wallet.chain === 'polygon' ? 'Polymarket' : 'Robinhood'}
+                    </span>
                     <div style={{ marginTop: '0.75rem' }}>
                       <span className={`badge ${
                         wallet.tier === 'elite' ? 'success' :
@@ -297,16 +374,16 @@ export default function WalletsPage() {
                       }`} style={{ marginRight: '0.5rem' }}>
                         {wallet.tier || 'unscored'}
                       </span>
-                      {wallet.wallet_score != null && (
+                      {wallet.composite_score != null && (
                         <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
-                          Score: {wallet.wallet_score}
+                          Score: {wallet.composite_score}
                         </span>
                       )}
                     </div>
                     <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                       {wallet.win_rate != null && `Win Rate: ${(wallet.win_rate * 100).toFixed(1)}% · `}
-                      {wallet.total_roi != null && `ROI: ${(wallet.total_roi * 100).toFixed(0)}%`}
-                      {wallet.last_active && ` · Last active: ${new Date(wallet.last_active).toLocaleDateString()}`}
+                      {wallet.realized_roi != null && `ROI: ${(wallet.realized_roi * 100).toFixed(0)}%`}
+                      {wallet.updated_at && ` · Last active: ${new Date(wallet.updated_at).toLocaleDateString()}`}
                     </div>
                   </div>
                   <div>

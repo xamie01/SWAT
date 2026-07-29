@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: swat_integration
+          POSTGRES_USER: swat
+          POSTGRES_PASSWORD: swat
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U swat -d swat_integration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://swat:swat@127.0.0.1:5432/swat_integration
+      INTEGRATION_DATABASE_URL: postgresql://swat:swat@127.0.0.1:5432/swat_integration
+      REDIS_URL: redis://127.0.0.1:6379
+      TRADING_MODE: paper
+      AUTO_EXECUTE: 'false'
+      API_KEY: swat-ci-key
+      NEXT_PUBLIC_API_KEY: swat-ci-key
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.2.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare local environment file
+        run: cp .env.example .env
+
+      - name: Migrate integration database
+        run: pnpm db:migrate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Integration tests
+        run: pnpm test:integration

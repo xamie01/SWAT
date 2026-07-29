@@ -4,6 +4,7 @@ import {
   extractTokenBuyers,
   getWalletTokenDeltas,
   SOL_MINT,
+  USDC_MINT,
   SYSTEM_PROGRAM_ID,
   type HeliusParsedTransaction
 } from './parse.js';
@@ -11,6 +12,7 @@ import {
 const WALLET = 'Wa11etAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const FUNDER = 'Funderxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 const TOKEN = 'Tokenyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy';
+const TOKEN_TWO = 'Tokenzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
 
 describe('extractFundingTransfers', () => {
   it('extracts a top-level SystemProgram transfer above the threshold', () => {
@@ -162,6 +164,85 @@ describe('getWalletTokenDeltas', () => {
     };
     const result = getWalletTokenDeltas(tx, WALLET);
     expect(result).toMatchObject({ direction: 'sell', targetToken: TOKEN });
+  });
+
+  it('detects a token-to-USDC sell', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [
+          { owner: WALLET, mint: TOKEN, uiTokenAmount: { amount: '5000000' } },
+          { owner: WALLET, mint: USDC_MINT, uiTokenAmount: { amount: '0' } }
+        ],
+        postTokenBalances: [
+          { owner: WALLET, mint: TOKEN, uiTokenAmount: { amount: '0' } },
+          { owner: WALLET, mint: USDC_MINT, uiTokenAmount: { amount: '25000000' } }
+        ]
+      }
+    };
+    expect(getWalletTokenDeltas(tx, WALLET)).toMatchObject({
+      direction: 'sell',
+      targetToken: TOKEN,
+      tokenOut: USDC_MINT
+    });
+  });
+
+  it('detects a USDC-to-token buy', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [
+          { owner: WALLET, mint: USDC_MINT, uiTokenAmount: { amount: '25000000' } },
+          { owner: WALLET, mint: TOKEN, uiTokenAmount: { amount: '0' } }
+        ],
+        postTokenBalances: [
+          { owner: WALLET, mint: USDC_MINT, uiTokenAmount: { amount: '0' } },
+          { owner: WALLET, mint: TOKEN, uiTokenAmount: { amount: '5000000' } }
+        ]
+      }
+    };
+    expect(getWalletTokenDeltas(tx, WALLET)).toMatchObject({
+      direction: 'buy',
+      targetToken: TOKEN,
+      tokenIn: USDC_MINT
+    });
+  });
+
+  it('treats a supported non-quote token-to-token route as an exit', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [
+          { owner: WALLET, mint: TOKEN, uiTokenAmount: { amount: '5000000' } },
+          { owner: WALLET, mint: TOKEN_TWO, uiTokenAmount: { amount: '0' } }
+        ],
+        postTokenBalances: [
+          { owner: WALLET, mint: TOKEN, uiTokenAmount: { amount: '0' } },
+          { owner: WALLET, mint: TOKEN_TWO, uiTokenAmount: { amount: '2000000' } }
+        ]
+      }
+    };
+
+    expect(getWalletTokenDeltas(tx, WALLET)).toMatchObject({
+      direction: 'sell',
+      targetToken: TOKEN,
+      tokenIn: TOKEN,
+      tokenOut: TOKEN_TWO
+    });
+  });
+
+  it('ignores quote-to-quote conversions that do not change a tracked position', () => {
+    const tx: HeliusParsedTransaction = {
+      meta: {
+        preTokenBalances: [
+          { owner: WALLET, mint: SOL_MINT, uiTokenAmount: { amount: '1000000000' } },
+          { owner: WALLET, mint: USDC_MINT, uiTokenAmount: { amount: '0' } }
+        ],
+        postTokenBalances: [
+          { owner: WALLET, mint: SOL_MINT, uiTokenAmount: { amount: '0' } },
+          { owner: WALLET, mint: USDC_MINT, uiTokenAmount: { amount: '150000000' } }
+        ]
+      }
+    };
+
+    expect(getWalletTokenDeltas(tx, WALLET)).toBeNull();
   });
 
   it('ignores balances owned by other wallets', () => {

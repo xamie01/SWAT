@@ -1,19 +1,20 @@
-# SWAT: Solana Wallet Analysis & Tracking
+# SWAT: Smart Wallet Analysis & Tracking
 
-**Autonomous intelligence layer for Solana trading** — tracks elite wallets, detects coordinated activity patterns, generates execution-ready signals, and (optionally) auto-executes trades via integrated bots.
+**Autonomous intelligence layer for multi-chain wallet tracking (Solana, Polymarket/Polygon, Robinhood Chain)** — tracks elite wallets, detects coordinated activity patterns, generates execution-ready signals, and (optionally) auto-executes trades via integrated executors (Trojan for Solana, Uniswap V3 for Robinhood Chain, CLOB V2 for Polymarket).
 
 ---
 
 ## Architecture
 
-SWAT is a **monorepo of microservices** that work together to form an intelligence → execution pipeline:
+SWAT is a **monorepo of microservices** that work together to form a multi-chain intelligence → execution pipeline:
 
 ```
 ┌─────────────┐
-│   Indexer   │  Ingests wallet transactions from Helius RPC
-│             │  - Backfills tx history (token swaps + SOL transfers)
-│             │  - Enriches with USD prices (DexScreener/Jupiter)
-│             │  - Publishes swap events to Redis
+│   Indexer   │  Ingests wallet transactions from Helius RPC (Solana),
+│             │  viem RPC logs (EVM/Robinhood), and Data API (Polymarket)
+│             │  - Backfills tx history (swaps + native transfers)
+│             │  - Enrich with USD prices (DexScreener/Jupiter/CoinGecko)
+│             │  - Publishes swap events to Redis (standardized schema)
 └──────┬──────┘
        │
        ├──────────────────────────────────────────────┐
@@ -37,33 +38,33 @@ SWAT is a **monorepo of microservices** that work together to form an intelligen
                  │ Alert Service│                          │Trade Executor │
                  │              │                          │               │
                  │ Sends rich   │                          │ Paper / Live  │
-                 │ Telegram     │                          │ - Trojan bot  │
-                 │ alerts       │                          │ - Position    │
-                 └──────────────┘                          │   sizing      │
-                                                           │ - Circuit     │
-                                                           │   breaker     │
-                                                           └───────────────┘
+                 │ Telegram     │                          │ - Solana: Trojan
+                 │ alerts with  │                          │ - Polymarket: CLOB
+                 │ chain-spec   │                          │ - Robinhood: UniV3
+                 │ details      │                          └───────────────┘
+                 └──────────────┘
 ```
 
 ### Services
 
 | Service | Purpose | Key Features |
 |---------|---------|--------------|
-| **`apps/indexer`** | Transaction ingestion | Helius RPC polling + webhook support, USD enrichment, SOL funding-edge extraction |
+| **`apps/indexer`** | Transaction ingestion | Multi-chain polling + webhooks, Polymarket Data API parser, EVM L2 logs filter, USD/metadata enrichment |
 | **`apps/scorer`** | Wallet performance scoring | Composite score (win rate, ROI, early-entry, consistency), clustering (funding + behavioral), mark-to-market P&L |
-| **`apps/signal-engine`** | Pattern detection | 4 patterns (snipe/accumulation/rotation/exit), safety checks (mint/freeze/liquidity), deduplication |
-| **`apps/trade-executor`** | Trade execution | Paper-trade logging, Trojan integration, position sizing by tier + score, circuit breaker |
-| **`apps/alert-service`** | Telegram notifications | Rich execution-ready alerts with CA, safety, cluster ROI, suggested entry |
-| **`apps/api`** | REST API | Wallet CRUD, signal/cluster/trade endpoints, discovery triggers, stats |
-| **`apps/web`** | Web Dashboard | Interactive UI for wallet management, cluster exploration, discovery triggers, and signal monitoring |
-| **`packages/db`** | Database layer | PostgreSQL schema + query helpers |
-| **`packages/shared`** | Shared utilities | Types, scoring, validation, price fetchers |
+| **`apps/signal-engine`** | Pattern detection | 4 patterns (snipe/accumulation/rotation/exit), safety checks (mint/freeze/EVM ownership/liquidity), deduplication |
+| **`apps/trade-executor`** | Trade execution | Paper-trade logging, Trojan integration, Robinhood Uniswap V3 swapper (viem), Polymarket CLOB V2 order placer, circuit breaker |
+| **`apps/alert-service`** | Telegram notifications | Rich execution-ready alerts with chain-specific details, token safety, cluster ROI, suggested entry |
+| **`apps/api`** | REST API | Wallet CRUD (chain-aware), signal/cluster/trade endpoints, discovery triggers, stats |
+| **`apps/web`** | Web Dashboard | Interactive UI for wallet management (network selection), cluster exploration, discovery triggers, and signal monitoring |
+| **`packages/db`** | Database layer | PostgreSQL schema (14 migrations, auto-prefixed addresses/mints) + query helpers |
+| **`packages/shared`** | Shared utilities | Types, scoring, validation, multi-chain price fetchers |
 
 ---
 
 ## Prerequisites
 
-- **Node.js 22+** (run `node -v` — if < 22, see [`DEPLOYMENT.md`](./DEPLOYMENT.md))
+- **Node.js 22+** for the monorepo; **Node.js 24+** is required for Polymarket live execution
+  by `@polymarket/client` (run `node -v`; see [`DEPLOYMENT.md`](./DEPLOYMENT.md))
 - **pnpm 9+** (`npm install -g pnpm`)
 - **Docker** (for PostgreSQL + Redis)
 
@@ -94,10 +95,10 @@ cp .env.example .env
 | Variable | Required? | Purpose |
 |----------|-----------|---------|
 | `HELIUS_API_KEY` | ✅ **Required** | Transaction data (get free tier at [helius.dev](https://helius.dev)) |
-| `TELEGRAM_BOT_TOKEN` | ✅ **Required** | Alert delivery (get from [@BotFather](https://t.me/BotFather)) |
-| `TELEGRAM_CHAT_ID` | ✅ **Required** | Your chat ID (message [@userinfobot](https://t.me/userinfobot)) |
-| `API_KEY` | Optional | Auth for API routes (default: `swat-dev-key`) |
-| `TRADING_MODE` | Optional | `paper` (default) or `live` |
+| `TELEGRAM_BOT_TOKEN` | Required for alerts | Alert delivery (get from [@BotFather](https://t.me/BotFather)) |
+| `TELEGRAM_CHAT_ID` | Required for alerts | Your chat ID (message [@userinfobot](https://t.me/userinfobot)) |
+| `API_KEY` | Required in production | Auth for API routes; replace the local `swat-dev-key` value |
+| `TRADING_MODE` | Optional | Exact `off`, `paper`, `live`, or `live+shadow`; defaults to `paper` |
 | `AUTO_EXECUTE` | Optional | `false` (default) — keep disabled until validated |
 
 See [`.env.example`](./.env.example) for the full reference.
@@ -157,16 +158,15 @@ SWAT comes with a standalone tool to automatically mine profitable wallets from 
 
 **1. Generate the wallet starter pack:**
 ```bash
-npx tsx --env-file=.env discover-starter-pack.ts
+node --env-file=.env --import tsx discover-starter-pack.ts
 ```
-This scans active targets and outputs a list of profitable wallets to `wallet-starter-pack.json`. You can edit the search terms and target limits inside the script's `CONFIG` section.
+This scans Solana targets back to a verified launch boundary and outputs matched wallets to `wallet-starter-pack.json`. Signature caps are configurable in `.env`; a token is skipped rather than analyzed from a false newest-only "launch" window.
 
 **2. Ingest and enqueue the wallets:**
 ```bash
-cd apps/scorer
-npx tsx --env-file=../../.env _ingest_wallets.ts
+node --env-file=.env --import tsx apps/scorer/_ingest_wallets.ts
 ```
-This loads all wallets from the generated starter pack into your PostgreSQL database and enqueues them for on-chain indexing.
+This validates every entry, preserves explicit chain identity, loads the wallets into PostgreSQL, and enqueues normalized backfill jobs. `STARTER_PACK_PATH` can override the root file location.
 
 ---
 
@@ -239,7 +239,7 @@ The signal-engine polls every **15 seconds** and detects 4 patterns:
 1. Safety checks run (mint authority, freeze authority, top-holder %, liquidity)
 2. Signal inserted into DB with score + confidence
 3. Alert queued to Telegram (if score ≥ `MIN_SIGNAL_SCORE`, default 70)
-4. Trade queued (if `AUTO_EXECUTE=true` and score ≥ 90 and safety passes)
+4. Trade queued (if `AUTO_EXECUTE=true`, score ≥ `AUTO_EXECUTE_MIN_SCORE` (default 85), and safety passes)
 
 ---
 
@@ -341,26 +341,9 @@ See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for:
 
 ## Environment Variables Reference
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://swat:swat@localhost:5432/swat` | PostgreSQL connection string |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
-| `HELIUS_API_KEY` | *(required)* | Helius RPC API key |
-| `HELIUS_WEBHOOK_SECRET` | *(optional)* | HMAC secret for webhook verification |
-| `TELEGRAM_BOT_TOKEN` | *(required)* | Telegram bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | *(required)* | Your Telegram chat/group ID |
-| `API_KEY` | `swat-dev-key` | API auth key (sent as `X-Api-Key` header) |
-| `PORT` | `3001` | API server port |
-| `WEBHOOK_PORT` | `3002` | Indexer webhook port |
-| `TRADING_MODE` | `paper` | `paper` or `live` |
-| `AUTO_EXECUTE` | `false` | Enable auto-trade on high-score signals |
-| `AUTO_EXECUTE_MIN_SCORE` | `90` | Minimum score for auto-execution |
-| `BASE_POSITION_SOL` | `0.5` | Base trade size before tier/score multipliers |
-| `MIN_SIGNAL_SCORE` | `70` | Signals below this are logged but not alerted |
-| `RUN_ON_STARTUP` | `false` | Run scorer/discovery batch on service start (for testing) |
-| `WALLET_ADDRESSES` | *(optional)* | Comma-separated wallets to ingest on indexer start |
-| `TROJAN_WEBHOOK_URL` | *(optional)* | Trojan execution bot webhook URL |
-| `TROJAN_API_KEY` | *(optional)* | Trojan API auth key |
+The versioned [`.env.example`](./.env.example) is the authoritative list of runtime names, defaults, service ownership, and optional provider credentials. Copy it to `.env`; do not maintain a second variable list.
+
+Execution mode precedence is database `execution_config`, then `TRADING_MODE_SOLANA`, `TRADING_MODE_POLYGON`, or `TRADING_MODE_ROBINHOOD_CHAIN`, then global `TRADING_MODE`, then `paper`. Values are exact and case-sensitive. A requested `live` or `live+shadow` mode remains effectively `paper` until the chain is in `LIVE_ENABLED_CHAINS` and has a current reviewed record in `chain_certifications`. `AUTO_EXECUTE` is a separate queueing switch and does not bypass either gate.
 
 ---
 

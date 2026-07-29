@@ -1,33 +1,69 @@
 import { query } from './client.js';
 import { deleteWalletCascade } from './wallets.js';
-import type { WalletScoreInput, WalletTier } from '@swat/shared';
+import type { Chain, WalletScoreInput, WalletTier } from '@swat/shared';
 
-export async function getWalletMetrics(address: string): Promise<WalletScoreInput> {
+function finiteMetric(value: number | string | null | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export async function getWalletMetrics(address: string, chain: Chain): Promise<WalletScoreInput> {
   const rows = await query<{
-    win_rate: number | null;
-    realized_roi: number | null;
-    early_entry_score: number | null;
-    consistency_score: number | null;
+    win_rate: number | string | null;
+    realized_roi: number | string | null;
+    early_entry_score: number | string | null;
+    consistency_score: number | string | null;
   }>(`
     WITH
     -- All completed positions: tokens where the wallet both bought and sold
-    closed_positions AS (
+    raw_positions AS (
       SELECT
-        target_token,
-        SUM(CASE WHEN direction = 'buy' THEN amount_in_usd ELSE 0 END)   AS cost_basis,
-        SUM(CASE WHEN direction = 'sell' THEN amount_out_usd ELSE 0 END) AS realized_value
-      FROM transactions
-      WHERE wallet_address = $1
+        tx.target_token,
+        SUM(CASE WHEN tx.direction = 'buy' THEN tx.amount_in_usd ELSE 0 END)   AS total_cost_basis,
+        SUM(CASE WHEN tx.direction = 'sell' THEN tx.amount_out_usd ELSE 0 END) AS realized_value,
+        SUM(CASE WHEN tx.direction = 'buy' THEN tx.amount_out ELSE 0 END)      AS total_tokens_bought,
+        SUM(CASE WHEN tx.direction = 'sell' THEN tx.amount_in ELSE 0 END)      AS total_tokens_sold,
+        MAX(pm.status) AS pm_status,
+        MAX(pm.winning_token_id) AS pm_winning_token,
+        MAX(tk.decimals) AS token_decimals
+      FROM transactions tx
+      LEFT JOIN tokens tk ON tx.target_token = tk.mint AND tx.chain = tk.chain
+      LEFT JOIN polymarket_markets pm ON tk.polymarket_condition_id = pm.condition_id
+      WHERE tx.wallet_address = $1
+        AND tx.chain = $2
         -- A swap row populates only its own USD side (buys → amount_in_usd,
         -- sells → amount_out_usd). Requiring BOTH non-null dropped almost every
         -- real row; filter per-side instead.
         AND (
-          (direction = 'buy'  AND amount_in_usd  IS NOT NULL) OR
-          (direction = 'sell' AND amount_out_usd IS NOT NULL)
+          (tx.direction = 'buy'  AND tx.amount_in_usd  IS NOT NULL) OR
+          (tx.direction = 'sell' AND tx.amount_out_usd IS NOT NULL)
         )
-      GROUP BY target_token
+      GROUP BY tx.target_token
       -- Only count positions where at least some selling occurred (closed)
-      HAVING SUM(CASE WHEN direction = 'sell' THEN 1 ELSE 0 END) > 0
+      -- OR the position is tied to a resolved Polymarket market
+      HAVING SUM(CASE WHEN tx.direction = 'sell' THEN 1 ELSE 0 END) > 0
+          OR MAX(pm.status) = 'closed'
+    ),
+    closed_positions AS (
+      SELECT
+        target_token,
+        CASE
+          WHEN pm_status = 'closed' THEN
+            realized_value
+              + GREATEST(total_tokens_bought - total_tokens_sold, 0)
+                / POWER(10::numeric, COALESCE(token_decimals, 0))
+                * CASE WHEN target_token = pm_winning_token THEN 1.0 ELSE 0.0 END
+          ELSE realized_value
+        END AS realized_value,
+        total_cost_basis * LEAST(
+          1.0,
+          CASE
+            WHEN pm_status = 'closed' THEN 1.0
+            WHEN total_tokens_bought > 0 THEN (total_tokens_sold / total_tokens_bought)::float
+            ELSE 1.0
+          END
+        ) AS cost_basis
+      FROM raw_positions
     ),
     -- Win rate: positions that returned more than their cost basis
     win_rate_calc AS (
@@ -50,10 +86,11 @@ export async function getWalletMetrics(address: string): Promise<WalletScoreInpu
             AND tok.launch_timestamp IS NOT NULL
             AND t.timestamp < tok.launch_timestamp + INTERVAL '10 minutes'
         )::float
-          / NULLIF(COUNT(*) FILTER (WHERE t.direction = 'buy'), 0) AS early_entry_score
+          / NULLIF(COUNT(*) FILTER (WHERE t.direction = 'buy' AND tok.launch_timestamp IS NOT NULL), 0) AS early_entry_score
       FROM transactions t
-      LEFT JOIN tokens tok ON t.target_token = tok.mint
+      LEFT JOIN tokens tok ON t.target_token = tok.mint AND t.chain = tok.chain
       WHERE t.wallet_address = $1
+        AND t.chain = $2
     ),
     -- Consistency Score: 1 - (std_dev / mean) of monthly ROI, capped at [0,1]
     monthly_roi AS (
@@ -63,6 +100,7 @@ export async function getWalletMetrics(address: string): Promise<WalletScoreInpu
         SUM(CASE WHEN t.direction = 'buy'  THEN t.amount_in_usd  ELSE 0 END) AS monthly_pnl
       FROM transactions t
       WHERE t.wallet_address = $1
+        AND t.chain = $2
         AND (
           (t.direction = 'buy'  AND t.amount_in_usd  IS NOT NULL) OR
           (t.direction = 'sell' AND t.amount_out_usd IS NOT NULL)
@@ -86,14 +124,15 @@ export async function getWalletMetrics(address: string): Promise<WalletScoreInpu
          roi_calc        r,
          early_entry_calc e,
          consistency_calc c
-  `, [address]);
+  `, [address, chain]);
 
   const row = rows[0];
   return {
-    winRate:          row?.win_rate           ?? 0,
-    realizedRoi:      row?.realized_roi       ?? 0,
-    earlyEntryScore:  row?.early_entry_score  ?? 0,
-    consistencyScore: row?.consistency_score  ?? 0,
+    chain,
+    winRate:          finiteMetric(row?.win_rate),
+    realizedRoi:      finiteMetric(row?.realized_roi),
+    earlyEntryScore:  finiteMetric(row?.early_entry_score),
+    consistencyScore: finiteMetric(row?.consistency_score),
   };
 }
 
@@ -108,7 +147,17 @@ export async function updateWalletScore(address: string, score: number, tier: Wa
       consistency_score  = $6,
       updated_at         = NOW()
     WHERE address = $7
-  `, [score, tier, metrics.winRate, metrics.realizedRoi, metrics.earlyEntryScore, metrics.consistencyScore, address]);
+      AND chain = $8
+  `, [
+    score,
+    tier,
+    metrics.winRate,
+    metrics.realizedRoi,
+    metrics.earlyEntryScore,
+    metrics.consistencyScore,
+    address,
+    metrics.chain
+  ]);
 }
 
 export async function pauseUnderperformingWallets() {
@@ -156,15 +205,25 @@ export async function reactivateDormantWallets() {
  *
  * Returns the addresses removed (the caller cascade-deletes each).
  */
-export async function findUnprofitableBigBuyers(minTrades = 5): Promise<string[]> {
-  const rows = await query<{ address: string }>(`
-    SELECT address
-    FROM wallets
-    WHERE discovery_method = 'token-big'
-      AND total_trades >= $1
-      AND NOT (realized_roi > 0 AND win_rate >= 0.5)
+export async function findUnprofitableBigBuyers(
+  minTrades = 5
+): Promise<Array<{ address: string; chain: Chain }>> {
+  return query<{ address: string; chain: Chain }>(`
+    SELECT w.address, w.chain
+    FROM wallets w
+    WHERE w.discovery_method = 'token-big'
+      AND w.total_trades >= $1
+      AND NOT (w.realized_roi > 0 AND w.win_rate >= 0.5)
+      AND EXISTS (
+        SELECT 1
+        FROM transactions t
+        WHERE t.wallet_address = w.address
+          AND t.chain = w.chain
+        GROUP BY t.target_token
+        HAVING COUNT(*) FILTER (WHERE t.direction = 'buy') > 0
+           AND COUNT(*) FILTER (WHERE t.direction = 'sell') > 0
+      )
   `, [minTrades]);
-  return rows.map(r => r.address);
 }
 
 /**
@@ -175,15 +234,17 @@ export async function findUnprofitableBigBuyers(minTrades = 5): Promise<string[]
  * the number removed.
  */
 export async function pruneUnprofitableBigBuyers(minTrades = 5): Promise<number> {
-  const addresses = await findUnprofitableBigBuyers(minTrades);
-  for (const address of addresses) {
-    await deleteWalletCascade(address);
+  const wallets = await findUnprofitableBigBuyers(minTrades);
+  for (const wallet of wallets) {
+    await deleteWalletCascade(wallet.address, wallet.chain);
   }
-  return addresses.length;
+  return wallets.length;
 }
 
 export async function getActiveWallets() {
-  return query<{ address: string }>(`SELECT address FROM wallets WHERE status = 'active'`);
+  return query<{ address: string; chain: Chain }>(
+    `SELECT address, chain FROM wallets WHERE status = 'active'`
+  );
 }
 
 export async function getWalletStats() {

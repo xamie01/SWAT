@@ -153,7 +153,7 @@ export default function ClustersPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                       {clusterMembers[cluster.id].map((member: any, idx: number) => (
                         <div
-                          key={idx}
+                          key={member.address || idx}
                           style={{
                             padding: '0.75rem',
                             background: 'rgba(0, 0, 0, 0.2)',

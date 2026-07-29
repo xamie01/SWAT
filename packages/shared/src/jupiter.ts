@@ -48,7 +48,7 @@ export interface JupiterQuote {
   inAmount: string;
   outAmount: string;
   otherAmountThreshold: string;
-  swapMode: string;
+  swapMode: 'ExactIn' | 'ExactOut';
   slippageBps: number;
   priceImpactPct: string;
   routePlan: JupiterRouteStep[];
@@ -59,7 +59,10 @@ export interface JupiterQuote {
 export interface JupiterQuoteParams {
   inputMint: string;
   outputMint: string;
-  /** Raw amount in the input token's smallest unit (lamports for SOL). */
+  /**
+   * Raw amount in the specified side's smallest unit: input for ExactIn,
+   * output for ExactOut. The legacy name is retained for caller compatibility.
+   */
   amountLamports: number;
   /** Slippage tolerance in basis points.  Defaults to 150 (1.5 %). */
   slippageBps?: number;
@@ -71,12 +74,23 @@ export interface JupiterQuoteParams {
  * Contains human-friendly numbers ready to persist into the `trades` table.
  */
 export interface JupiterSimulatedFill {
+  /** This is quote evidence, not a confirmed or submitted chain fill. */
+  status: 'quoted';
+  swapMode: 'ExactIn' | 'ExactOut';
+  /** Raw input amount returned by Jupiter (smallest input-token unit). */
+  inAmountRaw: string;
   /** Raw output amount as returned by Jupiter (smallest token unit). */
   outAmountRaw: string;
   /** Output amount converted to human units using `outputDecimals`. */
   tokenAmount: number;
-  /** Minimum tokens after slippage, in human units. */
-  minTokenAmount: number;
+  /** Minimum output after slippage for ExactIn; null for ExactOut. */
+  minTokenAmount: number | null;
+  /** Maximum input after slippage for ExactOut; null for ExactIn. */
+  maxInputAmount: number | null;
+  /** Direction-aware interpretation of Jupiter's otherAmountThreshold. */
+  threshold:
+    | { kind: 'minimum-output'; rawAmount: string; amount: number; decimals: number }
+    | { kind: 'maximum-input'; rawAmount: string; amount: number; decimals: number };
   /** Price impact as a number (e.g. 0.12 means 0.12 %). */
   priceImpactPct: number;
   /** The full route plan for informational logging / storage. */
@@ -84,6 +98,11 @@ export interface JupiterSimulatedFill {
   /** Solana slot the quote was computed at. */
   contextSlot: number;
 }
+
+export type JupiterQuoteDecimals = {
+  inputDecimals: number;
+  outputDecimals: number;
+};
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -99,6 +118,37 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function assertTokenDecimals(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 30) {
+    throw new Error(`Invalid ${label} token decimals: ${value}`);
+  }
+}
+
+function parsePositiveRawAmount(value: unknown): bigint | null {
+  if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) return null;
+  try {
+    const parsed = BigInt(value);
+    return parsed > 0n ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function rawAmountToNumber(rawAmount: string, decimals: number): number | null {
+  const parsed = parsePositiveRawAmount(rawAmount);
+  if (parsed === null) return null;
+  if (decimals === 0) {
+    const value = Number(parsed);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const divisor = 10n ** BigInt(decimals);
+  const whole = parsed / divisor;
+  const fraction = (parsed % divisor).toString().padStart(decimals, '0');
+  const value = Number(`${whole.toString()}.${fraction}`);
+  return Number.isFinite(value) ? value : null;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -117,6 +167,10 @@ export async function getJupiterQuote(
   params: JupiterQuoteParams,
   apiKey?: string
 ): Promise<JupiterQuote | null> {
+  if (!Number.isSafeInteger(params.amountLamports) || params.amountLamports <= 0) {
+    throw new Error(`Invalid Jupiter raw quote amount: ${params.amountLamports}`);
+  }
+  const requestedSwapMode = params.swapMode ?? 'ExactIn';
   const url = new URL(`${JUPITER_API_BASE}/quote`);
   url.searchParams.set('inputMint', params.inputMint);
   url.searchParams.set('outputMint', params.outputMint);
@@ -125,9 +179,7 @@ export async function getJupiterQuote(
     'slippageBps',
     (params.slippageBps ?? 150).toString()
   );
-  if (params.swapMode) {
-    url.searchParams.set('swapMode', params.swapMode);
-  }
+  url.searchParams.set('swapMode', requestedSwapMode);
 
   const headers: Record<string, string> = {};
   if (apiKey) {
@@ -150,7 +202,12 @@ export async function getJupiterQuote(
 
     // Minimal shape validation — reject clearly malformed payloads rather than
     // letting a broken upstream silently produce NaN token amounts downstream.
-    if (!data.outAmount || !data.inAmount) {
+    if (
+      parsePositiveRawAmount(data.outAmount) === null
+      || parsePositiveRawAmount(data.inAmount) === null
+      || parsePositiveRawAmount(data.otherAmountThreshold) === null
+      || data.swapMode !== requestedSwapMode
+    ) {
       console.error('[jupiter] malformed quote response — missing amounts');
       return null;
     }
@@ -171,38 +228,75 @@ export async function getJupiterQuote(
  * the paper-fill path can fall back to the existing spot-price logic.
  *
  * @param params         Same as {@link getJupiterQuote}.
- * @param outputDecimals The output token's decimal places (default 9 for most
- *                       SPL tokens).  Used to convert raw amounts to human
- *                       units.  When unknown, pass `undefined` to use 9.
+ * @param decimals       Resolved token decimals. ExactOut requires both input
+ *                       and output decimals because its threshold is max-input.
+ *                       ExactIn temporarily accepts an output-decimals number
+ *                       for existing callers, with no guessed fallback.
  * @param apiKey         Jupiter API key (optional, but recommended).
  */
 export async function getJupiterSimulatedFill(
   params: JupiterQuoteParams,
-  outputDecimals?: number,
+  decimals: number | JupiterQuoteDecimals,
   apiKey?: string
 ): Promise<JupiterSimulatedFill | null> {
+  const requestedSwapMode = params.swapMode ?? 'ExactIn';
+  const outputDecimals = typeof decimals === 'number'
+    ? decimals
+    : decimals.outputDecimals;
+  const inputDecimals = typeof decimals === 'number'
+    ? null
+    : decimals.inputDecimals;
+
+  assertTokenDecimals(outputDecimals, 'output');
+  if (inputDecimals !== null) assertTokenDecimals(inputDecimals, 'input');
+  if (requestedSwapMode === 'ExactOut' && inputDecimals === null) {
+    throw new Error('ExactOut Jupiter quotes require resolved input token decimals');
+  }
+
   const quote = await getJupiterQuote(params, apiKey);
   if (!quote) return null;
 
-  const decimals = outputDecimals ?? 9;
-  const divisor = 10 ** decimals;
-
-  const outRaw = Number(quote.outAmount);
-  const minRaw = Number(quote.otherAmountThreshold);
+  const tokenAmount = rawAmountToNumber(quote.outAmount, outputDecimals);
   const priceImpact = parseFloat(quote.priceImpactPct);
+  const thresholdDecimals = quote.swapMode === 'ExactIn'
+    ? outputDecimals
+    : inputDecimals!;
+  const thresholdAmount = rawAmountToNumber(
+    quote.otherAmountThreshold,
+    thresholdDecimals
+  );
 
   // Guard against NaN leaking into the DB.
-  if (!Number.isFinite(outRaw) || outRaw <= 0) {
+  if (tokenAmount === null || tokenAmount <= 0 || thresholdAmount === null) {
     console.error(
-      `[jupiter] non-finite outAmount: ${quote.outAmount}`
+      `[jupiter] non-finite quote amounts: ${quote.inAmount}/${quote.outAmount}/${quote.otherAmountThreshold}`
     );
     return null;
   }
 
+  const threshold = quote.swapMode === 'ExactIn'
+    ? {
+        kind: 'minimum-output' as const,
+        rawAmount: quote.otherAmountThreshold,
+        amount: thresholdAmount,
+        decimals: thresholdDecimals
+      }
+    : {
+        kind: 'maximum-input' as const,
+        rawAmount: quote.otherAmountThreshold,
+        amount: thresholdAmount,
+        decimals: thresholdDecimals
+      };
+
   return {
+    status: 'quoted',
+    swapMode: quote.swapMode,
+    inAmountRaw: quote.inAmount,
     outAmountRaw: quote.outAmount,
-    tokenAmount: outRaw / divisor,
-    minTokenAmount: Number.isFinite(minRaw) ? minRaw / divisor : outRaw / divisor,
+    tokenAmount,
+    minTokenAmount: quote.swapMode === 'ExactIn' ? thresholdAmount : null,
+    maxInputAmount: quote.swapMode === 'ExactOut' ? thresholdAmount : null,
+    threshold,
     priceImpactPct: Number.isFinite(priceImpact) ? priceImpact : 0,
     routePlan: quote.routePlan ?? [],
     contextSlot: quote.contextSlot ?? 0

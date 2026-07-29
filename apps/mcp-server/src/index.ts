@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import { Redis } from "ioredis";
-import { query } from "@swat/db";
+import { query, resolvePrefixedAddress, pool } from "@swat/db";
 import { initLogger, REDIS_CHANNELS } from "@swat/shared";
 import { z } from "zod";
 
@@ -126,7 +126,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       case "get_recent_signals": {
-        const limit = Number(args?.limit ?? 10);
+        // Validate MCP limit: clamp to prevent extreme queries
+        const limit = Math.max(1, Math.min(50, Number(args?.limit ?? 10)));
         const rows = await query(
           `SELECT id, pattern_type, cluster_id, token_mint, token_name, token_symbol, confidence, signal_score, status, created_at
            FROM signals
@@ -144,12 +145,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           .object({ walletAddress: z.string() })
           .parse(args);
 
+        const resolvedWalletAddress = await resolvePrefixedAddress(walletAddress);
+
         // Fetch wallet details from scoring tables
         const walletRows = await query(
-          `SELECT w.address, w.tier, w.composite_score, w.confidence, w.avg_realized_roi, w.total_trades, w.win_rate
+          `SELECT w.address, w.tier, w.composite_score, w.realized_roi, w.total_trades, w.win_rate
            FROM wallets w
            WHERE w.address = $1`,
-          [walletAddress]
+          [resolvedWalletAddress]
         );
 
         if (walletRows.length === 0) {
@@ -163,7 +166,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
            FROM wallet_clusters c
            JOIN cluster_memberships m ON c.id = m.cluster_id
            WHERE m.wallet_address = $1`,
-          [walletAddress]
+          [resolvedWalletAddress]
         );
 
         return {
@@ -198,19 +201,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           WHERE status = 'executed' AND pnl_usd IS NOT NULL
         `);
 
-        // Open positions
+        // Open positions (from trades)
         const openRows = await query(`
-          SELECT token_mint, token_name, token_symbol, direction, entry_price_usd, cost_basis_usd, created_at
-          FROM signals
-          WHERE status = 'executed' AND pnl_usd IS NULL
-          ORDER BY created_at DESC
+          SELECT token_mint, SUM(amount_sol) AS total_sol, SUM(amount_usd) AS total_usd, direction
+          FROM trades
+          WHERE execution_mode IS NULL OR execution_mode != 'shadow'
+          GROUP BY token_mint, direction
         `);
 
         // Executed fills
         const fillRows = await query(`
-          SELECT id, token_mint, direction, amount_sol, amount_usd, token_amount, price_usd, executor, status, created_at
+          SELECT id, token_mint, direction, amount_sol, amount_usd, token_amount, price_usd, executor, status, executed_at
           FROM trades
-          ORDER BY created_at DESC
+          WHERE execution_mode IS NULL OR execution_mode != 'shadow'
+          ORDER BY executed_at DESC
           LIMIT 20
         `);
 
@@ -220,7 +224,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify(
                 {
-                  summary: summaryRows[0] || { net_pnl_usd: 0, win_rate: 0, total_trades: 0 },
+                  summary: {
+                    net_pnl_usd: summaryRows[0]?.net_pnl_usd ?? 0,
+                    win_rate: summaryRows[0]?.win_rate ?? 0,
+                    total_trades: summaryRows[0]?.total_trades ?? 0
+                  },
                   openPositions: openRows,
                   recentFills: fillRows,
                 },
@@ -256,31 +264,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "add_to_blacklist": {
         const { tokenMint } = z.object({ tokenMint: z.string() }).parse(args);
 
-        const rows = await query(`SELECT value FROM config WHERE key = 'blacklist'`);
-        const value = rows[0]?.value;
-        let blacklist: string[] = [];
-        if (value) {
-          if (Array.isArray(value)) {
-            blacklist = value;
-          } else if (typeof value === "string") {
-            try {
-              const parsed = JSON.parse(value);
-              blacklist = Array.isArray(parsed) ? parsed : [parsed];
-            } catch {
-              blacklist = value.split(",").map((s) => s.trim());
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const res = await client.query(`SELECT value FROM config WHERE key = 'blacklist' FOR UPDATE`);
+          const value = res.rows[0]?.value;
+          let blacklist: string[] = [];
+          if (value) {
+            if (Array.isArray(value)) {
+              blacklist = value;
+            } else if (typeof value === "string") {
+              try {
+                const parsed = JSON.parse(value);
+                blacklist = Array.isArray(parsed) ? parsed : [parsed];
+              } catch {
+                blacklist = value.split(",").map((s) => s.trim());
+              }
             }
           }
-        }
 
-        if (!blacklist.includes(tokenMint)) {
-          blacklist.push(tokenMint);
-        }
+          if (!blacklist.includes(tokenMint)) {
+            if (blacklist.length >= 100) {
+              await client.query("ROLLBACK");
+              return {
+                content: [{ type: "text", text: "Blacklist limit reached. Please remove items first." }],
+              };
+            }
+            blacklist.push(tokenMint);
+          }
 
-        await query(
-          `INSERT INTO config (key, value) VALUES ('blacklist', $1)
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          [JSON.stringify(blacklist)]
-        );
+          await client.query(
+            `INSERT INTO config (key, value) VALUES ('blacklist', $1)
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+            [JSON.stringify(blacklist)]
+          );
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw err;
+        } finally {
+          client.release();
+        }
 
         return {
           content: [{ type: "text", text: `Successfully added ${tokenMint} to the blacklist.` }],
@@ -290,29 +314,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "remove_from_blacklist": {
         const { tokenMint } = z.object({ tokenMint: z.string() }).parse(args);
 
-        const rows = await query(`SELECT value FROM config WHERE key = 'blacklist'`);
-        const value = rows[0]?.value;
-        let blacklist: string[] = [];
-        if (value) {
-          if (Array.isArray(value)) {
-            blacklist = value;
-          } else if (typeof value === "string") {
-            try {
-              const parsed = JSON.parse(value);
-              blacklist = Array.isArray(parsed) ? parsed : [parsed];
-            } catch {
-              blacklist = value.split(",").map((s) => s.trim());
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          const res = await client.query(`SELECT value FROM config WHERE key = 'blacklist' FOR UPDATE`);
+          const value = res.rows[0]?.value;
+          let blacklist: string[] = [];
+          if (value) {
+            if (Array.isArray(value)) {
+              blacklist = value;
+            } else if (typeof value === "string") {
+              try {
+                const parsed = JSON.parse(value);
+                blacklist = Array.isArray(parsed) ? parsed : [parsed];
+              } catch {
+                blacklist = value.split(",").map((s) => s.trim());
+              }
             }
           }
+
+          const filtered = blacklist.filter((m) => m !== tokenMint);
+
+          await client.query(
+            `UPDATE config SET value = $1, updated_at = NOW() WHERE key = 'blacklist'`,
+            [JSON.stringify(filtered)]
+          );
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw err;
+        } finally {
+          client.release();
         }
-
-        blacklist = blacklist.filter((mint) => mint !== tokenMint);
-
-        await query(
-          `INSERT INTO config (key, value) VALUES ('blacklist', $1)
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-          [JSON.stringify(blacklist)]
-        );
 
         return {
           content: [{ type: "text", text: `Successfully removed ${tokenMint} from the blacklist.` }],
@@ -340,20 +373,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Setup Express server with SSE Transport
 const app = express();
-let transport: SSEServerTransport | null = null;
+const transports = new Map<string, SSEServerTransport>();
 
-app.get("/sse", async (req, res) => {
-  console.log("[mcp-server] New SSE client connected");
-  transport = new SSEServerTransport("/messages", res);
-  await server.connect(transport);
+app.get("/sse", async (req, res, next) => {
+  try {
+    const sessionId = crypto.randomUUID();
+    console.log(`[mcp-server] New SSE client connected: ${sessionId}`);
+    const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
+    transports.set(sessionId, transport);
+
+    res.on("close", () => {
+      console.log(`[mcp-server] SSE client disconnected: ${sessionId}`);
+      transports.delete(sessionId);
+    });
+
+    await server.connect(transport);
+  } catch (err) {
+    next(err);
+  }
 });
 
-app.post("/messages", async (req, res) => {
-  console.log("[mcp-server] Received POST message");
-  if (transport) {
-    await transport.handlePostMessage(req, res);
-  } else {
-    res.status(400).send("No active SSE transport connection");
+app.post("/messages", async (req, res, next) => {
+  try {
+    const sessionId = req.query.sessionId as string;
+    const transport = transports.get(sessionId);
+    if (transport) {
+      await transport.handlePostMessage(req, res);
+    } else {
+      res.status(404).send("Session not found");
+    }
+  } catch (err) {
+    next(err);
   }
 });
 

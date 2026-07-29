@@ -1,8 +1,23 @@
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
-import { insertSignalWithDedupe, query } from '@swat/db';
-import { REDIS_CHANNELS, scoreToTier, fetchTokenMetadata, initLogger } from '@swat/shared';
+import {
+  getPolymarketOutcomeContext,
+  insertSignalWithDedupe,
+  insertSourceTradeSignal,
+  listSourceTradeSignalCandidates,
+  markSourceTradeSignalDispatched,
+  query,
+  type SourceTradeSignalCandidate
+} from '@swat/db';
+import {
+  REDIS_CHANNELS,
+  scoreToTier,
+  fetchTokenMetadata,
+  initLogger,
+  stripChainPrefix
+} from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
+import { requirePolymarketSignalContext } from './polymarket-context.js';
 
 initLogger('signal-engine');
 
@@ -27,18 +42,33 @@ const alertQueue = new Queue('swat-alerts', { connection: redis });
 const tradeQueue = new Queue('swat-trades', { connection: redis });
 
 const MIN_SIGNAL_SCORE = Number(process.env.MIN_SIGNAL_SCORE ?? 70);
+const SOURCE_COPY_MAX_EVENT_AGE_MS = Number(
+  process.env.SOURCE_COPY_MAX_EVENT_AGE_MS ?? 10 * 60_000
+);
+const SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS = Number(
+  process.env.SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS ?? 10 * 60_000
+);
+
+for (const [name, value] of [
+  ['MIN_SIGNAL_SCORE', MIN_SIGNAL_SCORE],
+  ['SOURCE_COPY_MAX_EVENT_AGE_MS', SOURCE_COPY_MAX_EVENT_AGE_MS],
+  ['SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS', SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS]
+] as const) {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
+}
 
 // ─── Shared helper ─────────────────────────────────────────────────────────────
 
 async function enqueueSignal(opts: {
   patternType: string;
-  clusterId: string;
+  clusterId: string | null;
   tokenMint: string;
   confidence: number;
   signalScore: number;
   triggerData: Record<string, unknown>;
   dedupeMinutes?: number;
   suppressTrade?: boolean;
+  sourceTrade?: SourceTradeSignalCandidate;
 }) {
   // 1. Check Blacklist config setting
   try {
@@ -71,7 +101,8 @@ async function enqueueSignal(opts: {
         blacklist = Object.values(rawValue).filter(v => typeof v === 'string') as string[];
       }
       
-      if (blacklist.includes(opts.tokenMint)) {
+      const tokenKey = stripChainPrefix(opts.tokenMint);
+      if (blacklist.some((entry) => stripChainPrefix(entry) === tokenKey)) {
         console.log(`[signal-engine] SKIPPED: token ${opts.tokenMint} is in the blacklist.`);
         return;
       }
@@ -83,6 +114,8 @@ async function enqueueSignal(opts: {
   // 2. Fetch token metadata (Name & Symbol) from Helius / DexScreener
   let tokenName = 'Unknown';
   let tokenSymbol = 'UNKNOWN';
+  let chain = opts.tokenMint.includes(':') ? opts.tokenMint.split(':')[0] : 'solana';
+
   try {
     const meta = await fetchTokenMetadata(opts.tokenMint);
     if (meta?.name && meta?.symbol) {
@@ -91,41 +124,66 @@ async function enqueueSignal(opts: {
       
       // Upsert into the tokens table so other parts of the database have the metadata
       await query(
-        `INSERT INTO tokens (mint, name, symbol)
-         VALUES ($1, $2, $3)
+        `INSERT INTO tokens (mint, name, symbol, chain)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (mint) DO UPDATE SET name = EXCLUDED.name, symbol = EXCLUDED.symbol`,
-        [opts.tokenMint, tokenName, tokenSymbol]
+        [opts.tokenMint, tokenName, tokenSymbol, chain]
       );
     }
   } catch (e: any) {
     console.error(`[signal-engine] failed to fetch metadata for ${opts.tokenMint}:`, e.message);
   }
 
+  if (chain === 'polygon') {
+    const context = requirePolymarketSignalContext(
+      await getPolymarketOutcomeContext(opts.tokenMint),
+      opts.tokenMint
+    );
+    tokenName = context.tokenName;
+    tokenSymbol = context.tokenSymbol;
+    Object.assign(opts.triggerData, context.triggerData);
+  }
+
   const safety = await checkTokenSafety(opts.tokenMint);
 
-  const signal = await insertSignalWithDedupe(
-    {
-      patternType:    opts.patternType,
-      clusterId:      opts.clusterId,
-      tokenMint:      opts.tokenMint,
-      confidence:     opts.confidence,
-      signalScore:    opts.signalScore,
-      triggerData:    opts.triggerData,
-      safetyFlags:    safety.flags,
-      safetyWarnings: safety.warnings,
-      tokenName,
-      tokenSymbol
-    },
-    opts.dedupeMinutes ?? 10
-  );
+  const signal = opts.sourceTrade
+    ? await insertSourceTradeSignal({
+        sourceTradeId: opts.sourceTrade.sourceTradeId,
+        clusterId: opts.clusterId,
+        confidence: opts.confidence,
+        signalScore: opts.signalScore,
+        triggerData: opts.triggerData,
+        safetyFlags: safety.flags,
+        safetyWarnings: safety.warnings,
+        tokenName,
+        tokenSymbol,
+        maxEventAgeMs: SOURCE_COPY_MAX_EVENT_AGE_MS,
+        maxPositionEvidenceAgeMs: SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS
+      })
+    : await insertSignalWithDedupe(
+        {
+          patternType:    opts.patternType,
+          clusterId:      opts.clusterId,
+          tokenMint:      opts.tokenMint,
+          confidence:     opts.confidence,
+          signalScore:    opts.signalScore,
+          triggerData:    opts.triggerData,
+          safetyFlags:    safety.flags,
+          safetyWarnings: safety.warnings,
+          tokenName,
+          tokenSymbol
+        },
+        opts.dedupeMinutes ?? 10
+      );
 
-  if (!signal || !signal.inserted) {
+  if (!signal || (!signal.inserted && !opts.sourceTrade)) {
     if (signal) console.log(`[signal-engine] duplicate skipped: ${signal.id}`);
     return;
   }
 
   if (opts.signalScore < MIN_SIGNAL_SCORE) {
     console.log(`[signal-engine] signal score ${opts.signalScore} below threshold ${MIN_SIGNAL_SCORE} — logged only`);
+    if (opts.sourceTrade) await markSourceTradeSignalDispatched(signal.id);
     return;
   }
 
@@ -140,8 +198,11 @@ async function enqueueSignal(opts: {
     warnings:     safety.warnings,
     liquidity:    safety.liquidity,
     top10HolderPct: safety.top10HolderPct,
-    ...opts.triggerData
+    ...opts.triggerData,
+    sourceTradeId: opts.sourceTrade?.sourceTradeId,
+    direction: opts.sourceTrade?.side
   }, {
+    ...(opts.sourceTrade ? { jobId: `source-alert-${signal.id}` } : {}),
     removeOnComplete: true,
     // Retry transient Telegram failures (429/5xx) with backoff; the alert
     // worker is idempotent via signals.alerted_at so retries can't double-send.
@@ -150,20 +211,64 @@ async function enqueueSignal(opts: {
   });
 
   if (!opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
-    const clusterTier = await getClusterTier(opts.clusterId);
+    const clusterTier = opts.clusterId
+      ? await getClusterTier(opts.clusterId)
+      : scoreToTier(opts.signalScore);
     console.log(`[signal-engine] ✅ TRADE QUEUED: ${opts.tokenMint} | score: ${opts.signalScore} | tier: ${clusterTier}`);
     await tradeQueue.add('signal-trade', {
       signalId:    signal.id,
       score:       opts.signalScore,
       tokenMint:   opts.tokenMint,
-      clusterTier // resolved from the cluster's avg composite score
-    }, { removeOnComplete: true });
+      clusterTier,
+      sourceTradeId: opts.sourceTrade?.sourceTradeId,
+      direction: opts.sourceTrade?.side
+    }, {
+      ...(opts.sourceTrade ? { jobId: `source-trade-${signal.id}` } : {}),
+      removeOnComplete: true,
+      attempts: 4,
+      backoff: { type: 'exponential', delay: 5000 }
+    });
   } else if (!safety.isSafe) {
     console.log(`[signal-engine] ❌ trade blocked — safety flags: ${safety.flags.join(', ')} | token: ${opts.tokenMint}`);
   } else if (opts.suppressTrade) {
     console.log(`[signal-engine] ⏭️ trade suppressed (exit signal) | token: ${opts.tokenMint}`);
   } else {
     console.log(`[signal-engine] ⏭️ trade skipped — score ${opts.signalScore} < 80 | token: ${opts.tokenMint}`);
+  }
+
+  if (opts.sourceTrade) {
+    await markSourceTradeSignalDispatched(signal.id);
+  }
+}
+
+export async function processSourceTradeSignals(sourceTradeId?: string): Promise<void> {
+  const candidates = await listSourceTradeSignalCandidates({
+    sourceTradeId,
+    maxEventAgeMs: SOURCE_COPY_MAX_EVENT_AGE_MS,
+    limit: sourceTradeId ? 1 : 100
+  });
+  for (const candidate of candidates) {
+    await enqueueSignal({
+      patternType: 'source_trade',
+      clusterId: candidate.clusterId,
+      tokenMint: candidate.tokenMint,
+      confidence: candidate.clusterConfidence,
+      signalScore: candidate.walletScore,
+      sourceTrade: candidate,
+      triggerData: {
+        sourceWallet: candidate.walletAddress,
+        sourceQuantity: candidate.quantity,
+        sourceAmountUsd: candidate.amountUsd,
+        sourcePriceUsd: candidate.priceUsd,
+        sourceEventAt: candidate.eventAt.toISOString(),
+        sourceWalletTier: candidate.walletTier
+      }
+    }).catch((error) => {
+      console.error(
+        `[signal-engine] failed to derive source signal ${candidate.sourceTradeId}`,
+        error
+      );
+    });
   }
 }
 
@@ -181,7 +286,7 @@ async function detectSnipePattern() {
     SELECT
       t.target_token              AS token_mint,
       cm.cluster_id,
-      COUNT(*)::int               AS buyer_count,
+      COUNT(DISTINCT t.wallet_address)::int AS buyer_count,
       wc.confidence               AS cluster_confidence,
       COALESCE(wc.total_realized_roi, 0) AS cluster_roi
     FROM transactions t
@@ -189,8 +294,9 @@ async function detectSnipePattern() {
     JOIN wallet_clusters wc ON cm.cluster_id = wc.id
     WHERE t.direction = 'buy'
       AND t.timestamp > NOW() - INTERVAL '5 minutes'
+      AND t.target_token IS NOT NULL
     GROUP BY t.target_token, cm.cluster_id, wc.confidence, wc.total_realized_roi
-    HAVING COUNT(*) >= 3
+    HAVING COUNT(DISTINCT t.wallet_address) >= 3
   `);
 
   for (const row of rows) {
@@ -206,6 +312,8 @@ async function detectSnipePattern() {
       confidence:  row.cluster_confidence,
       signalScore,
       triggerData: { buyerCount: row.buyer_count, window: '5m', clusterRoi: row.cluster_roi }
+    }).catch((error) => {
+      console.error(`[signal-engine] failed to enqueue snipe for ${row.token_mint}`, error);
     });
   }
 }
@@ -233,6 +341,7 @@ async function detectAccumulationPattern() {
     WHERE t.direction = 'buy'
       AND t.timestamp > NOW() - INTERVAL '7 days'
       AND t.amount_in_usd IS NOT NULL
+      AND t.target_token IS NOT NULL
     GROUP BY t.target_token, cm.cluster_id, wc.confidence
     HAVING COUNT(DISTINCT DATE(t.timestamp)) >= 3
        AND SUM(t.amount_in_usd) > 50000
@@ -247,12 +356,14 @@ async function detectAccumulationPattern() {
       tokenMint:     row.token_mint,
       confidence:    row.cluster_confidence,
       signalScore,
-      dedupeMinutes: 60,
+      dedupeMinutes: 7 * 24 * 60,
       triggerData:   {
         buyVolume:    row.buy_volume,
         buySessions:  row.buy_sessions,
         window:       '7d'
       }
+    }).catch((error) => {
+      console.error(`[signal-engine] failed to enqueue accumulation for ${row.token_mint}`, error);
     });
   }
 }
@@ -314,6 +425,8 @@ async function detectRotationPattern() {
         actorCount:  row.actor_count,
         window:      '1h'
       }
+    }).catch((error) => {
+      console.error(`[signal-engine] failed to enqueue rotation for ${row.token_in}`, error);
     });
   }
 }
@@ -381,6 +494,8 @@ async function detectExitPattern() {
         exitVolume:    row.exit_volume,
         window:        '1h'
       }
+    }).catch((error) => {
+      console.error(`[signal-engine] failed to enqueue exit for ${row.token_mint}`, error);
     });
   }
 }
@@ -392,14 +507,19 @@ async function tick() {
   if (tickRunning) return;
   tickRunning = true;
   try {
-    await Promise.all([
+    const results = await Promise.allSettled([
+      processSourceTradeSignals(),
       detectSnipePattern(),
       detectAccumulationPattern(),
       detectRotationPattern(),
       detectExitPattern()
     ]);
-  } catch (error) {
-    console.error('[signal-engine] tick failed', error);
+    const detectorNames = ['source-trade', 'snipe', 'accumulation', 'rotation', 'exit'];
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.error(`[signal-engine] ${detectorNames[index]} detector failed`, result.reason);
+      }
+    });
   } finally {
     tickRunning = false;
   }
@@ -422,9 +542,19 @@ function subscribeSwaps() {
 subscribeSwaps();
 subscriber.on('ready', subscribeSwaps);
 subscriber.on('error', (e) => console.error('[signal-engine] redis error', e.message));
-subscriber.on('message', () => {
+subscriber.on('message', (_channel, message) => {
   // Trigger an immediate detection cycle on any new swap. Don't log the full
   // payload (high-volume; avoids leaking wallet-activity detail into logs).
+  try {
+    const payload = JSON.parse(message) as { sourceTradeId?: unknown };
+    if (typeof payload.sourceTradeId === 'string' && payload.sourceTradeId.trim()) {
+      void processSourceTradeSignals(payload.sourceTradeId).catch((error) => {
+        console.error('[signal-engine] source-trade event processing failed', error);
+      });
+    }
+  } catch {
+    console.error('[signal-engine] ignored malformed wallet-swap event');
+  }
   void tick();
 });
 

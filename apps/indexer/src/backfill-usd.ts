@@ -1,5 +1,5 @@
 import { query } from '@swat/db';
-import { fetchTokenPriceUsd } from '@swat/shared';
+import { fetchTokenPriceUsd, stripChainPrefix } from '@swat/shared';
 import { baseUnitsToFloat } from './parse.js';
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -31,8 +31,8 @@ async function run() {
     let amountInUsd: number | null = null;
     let amountOutUsd: number | null = null;
 
-    const tokenIn = tx.token_in;
-    const tokenOut = tx.token_out;
+    const tokenIn = stripChainPrefix(tx.token_in);
+    const tokenOut = stripChainPrefix(tx.token_out);
 
     if (tokenIn === SOL_MINT || tokenOut === SOL_MINT) {
       if (solPrice === null) { skippedNoPrice++; continue; }

@@ -6,13 +6,53 @@
  * and sent to Redis to be streamed on the dashboard live log panel.
  */
 import { Redis } from 'ioredis';
+import { inspect } from 'node:util';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const MAX_LOG_MESSAGE_LENGTH = 20_000;
 let redis: Redis | null = null;
 let currentService = 'unknown';
 
 const originalLog = console.log;
 const originalError = console.error;
+
+export function serializeLogArgument(value: unknown): string {
+  try {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'bigint') return `${value}n`;
+    if (
+      (typeof value === 'object' && value !== null)
+      || typeof value === 'function'
+    ) {
+      return inspect(value, {
+        breakLength: Infinity,
+        compact: true,
+        customInspect: false,
+        depth: 6,
+        getters: false,
+        maxArrayLength: 100,
+        maxStringLength: 10_000
+      });
+    }
+    return String(value);
+  } catch {
+    try {
+      return `[Unserializable ${Object.prototype.toString.call(value)}]`;
+    } catch {
+      return '[Unserializable value]';
+    }
+  }
+}
+
+export function serializeLogArguments(args: unknown[]): string {
+  try {
+    const message = args.map(serializeLogArgument).join(' ');
+    if (message.length <= MAX_LOG_MESSAGE_LENGTH) return message;
+    return `${message.slice(0, MAX_LOG_MESSAGE_LENGTH)}...[truncated]`;
+  } catch {
+    return '[Log serialization failed]';
+  }
+}
 
 function getRedisInstance(): Redis {
   if (!redis) {
@@ -56,7 +96,7 @@ export function initLogger(serviceName: string) {
 
   console.log = (...args: any[]) => {
     originalLog(...args);
-    const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    const message = serializeLogArguments(args);
     // Avoid double logging redis errors or our own internal hooks
     if (message.startsWith('[logger-internal]')) return;
     publishToRedis('info', message);
@@ -64,7 +104,7 @@ export function initLogger(serviceName: string) {
 
   console.error = (...args: any[]) => {
     originalError(...args);
-    const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    const message = serializeLogArguments(args);
     if (message.startsWith('[logger-internal]')) return;
     publishToRedis('error', message);
   };

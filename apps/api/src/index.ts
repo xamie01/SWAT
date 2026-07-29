@@ -4,13 +4,36 @@ import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
-  deleteWallet,
+  deleteWalletCascade,
+  getIngestionHealth24h,
   getWallet,
   listWallets,
   upsertWallet,
-  query
+  query,
+  getAttributionDashboard,
+  getAttributionLatencyReport,
+  getLatestExpectancyReport,
+  getLiveShadowCostReport
 } from '@swat/db';
-import { walletAddressSchema, walletInputSchema, REDIS_CHANNELS, QUEUES, initLogger } from '@swat/shared';
+import {
+  buildIngestionHealthSnapshots,
+  chainSchema,
+  createWalletBackfillJob,
+  initLogger,
+  isValidAddressForChain,
+  prefixChainValue,
+  QUEUES,
+  REDIS_CHANNELS,
+  walletAddressSchema,
+  walletInputSchema
+} from '@swat/shared';
+import {
+  emergencyOff,
+  executionModeUpdateSchema,
+  getTradingControlStatus,
+  updateTradingMode
+} from './trading-control.js';
+import { registerAttributionRoutes } from './attribution-routes.js';
 
 initLogger('api');
 
@@ -18,20 +41,23 @@ const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const tradeQueue = new Queue('swat-trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
-// Same queue/job contract the indexer worker consumes (see apps/indexer/src/index.ts).
-const backfillQueue = new Queue('swat-backfill-wallet', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+const backfillQueue = new Queue(QUEUES.walletBackfill, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
 // On-chain token discovery: the indexer's tokenDiscovery worker consumes this.
 const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
 
 // Enqueue a backfill so the indexer fetches a wallet's transaction history.
 // jobId is keyed by address; `backfillQueue.add` is a no-op if an identical
 // job is already pending, so callers can fire this freely.
-async function enqueueBackfill(address: string) {
-  await backfillQueue.add(
-    'backfill-wallet',
-    { address },
-    { jobId: `backfill-${address}`, removeOnComplete: true, removeOnFail: 1000 }
-  );
+type WalletChain = 'solana' | 'polygon' | 'robinhood-chain';
+
+async function enqueueBackfill(address: string, chain: WalletChain = 'solana') {
+  const job = createWalletBackfillJob(address, chain);
+  await backfillQueue.add(job.name, job.data, job.options);
+}
+
+function parseChain(raw: unknown, fallback: WalletChain = 'solana'): WalletChain {
+  const parsed = chainSchema.safeParse(raw);
+  return parsed.success ? parsed.data : fallback;
 }
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
@@ -61,13 +87,49 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
   return timingSafeEqual(providedHash, API_KEY_HASH);
 }
 
+import { randomBytes } from 'node:crypto';
+
 app.addHook('onRequest', async (request, reply) => {
   // Let CORS preflight requests through untouched.
   if (request.method === 'OPTIONS') return;
   if (request.url === '/v1/health') return;
+
+  // Allow ticket-based auth for SSE without leaking the API key in the URL.
+  if (request.url.startsWith('/v1/logs/stream')) {
+    const ticket = (request.query as any).ticket;
+    if (ticket && typeof ticket === 'string') {
+      // Validate and consume the one-time ticket
+      const valid = await redis.del(`swat:ticket:${ticket}`);
+      if (valid === 1) return;
+    }
+  }
+
   if (!isValidApiKey(request.headers['x-api-key'])) {
     return reply.code(401).send({ error: 'Unauthorized' });
   }
+});
+
+app.setErrorHandler((error, request, reply) => {
+  request.log.error(error);
+  // If it's a validation error or known client error, you can let it through.
+  // Fastify validation errors have a validation property.
+  const err = error as any;
+  if (err.validation) {
+    return reply.code(400).send({ error: 'Bad Request', message: err.message });
+  }
+  // PostgreSQL invalid uuid error (22P02) or similar can be mapped to 400
+  if (err.code === '22P02') {
+    return reply.code(400).send({ error: 'Bad Request', message: 'Invalid parameter format' });
+  }
+  // Return stable public error for anything else to prevent leaking DB details
+  reply.code(500).send({ error: 'Internal Server Error' });
+});
+
+app.post('/v1/auth/ticket', async () => {
+  const ticket = randomBytes(16).toString('hex');
+  // Ticket expires in 60 seconds
+  await redis.set(`swat:ticket:${ticket}`, '1', 'EX', 60);
+  return { ticket };
 });
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
@@ -92,6 +154,15 @@ app.get('/v1/health', async () => ({
   service: 'api',
   ts: new Date().toISOString()
 }));
+
+app.get('/v1/health/ingestion', async () => {
+  const generatedAt = new Date();
+  const rows = await getIngestionHealth24h();
+  return {
+    generatedAt: generatedAt.toISOString(),
+    items: buildIngestionHealthSnapshots(rows, generatedAt)
+  };
+});
 
 // ─── Stats (real data) ────────────────────────────────────────────────────────
 
@@ -122,6 +193,7 @@ app.get('/v1/stats', async () => {
       COUNT(*)                                                  AS trades,
       COUNT(*) FILTER (WHERE execution_mode = 'paper') AS paper
     FROM trades
+    WHERE execution_mode IS NULL OR execution_mode != 'shadow'
   `);
 
   const [clusterStats] = await query<{ clusters: number }>(`
@@ -143,12 +215,17 @@ app.get('/v1/stats', async () => {
 
 // ─── Wallets ──────────────────────────────────────────────────────────────────
 
-app.get('/v1/wallets', async () => listWallets());
+app.get('/v1/wallets', async (req) => {
+  const q = req.query as { chain?: string };
+  return listWallets(q.chain ? parseChain(q.chain) : undefined);
+});
 
 app.get('/v1/wallets/:address', async (req, reply) => {
-  const parsed = walletAddressSchema.safeParse((req.params as { address: string }).address);
-  if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid wallet' });
-  const wallet = await getWallet(parsed.data);
+  const address = (req.params as { address: string }).address;
+  const q = req.query as { chain?: string };
+  const chain = parseChain(q.chain);
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet' });
+  const wallet = await getWallet(address, chain);
   if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
   return wallet;
 });
@@ -161,7 +238,7 @@ app.post('/v1/wallets', async (req, reply) => {
   if (invalid.length > 0) return reply.code(400).send({ error: 'Invalid wallet payload' });
   const inserted = await Promise.all(parsed.map((r) => upsertWallet((r as any).data)));
   // Kick off indexing so wallets added via the UI actually get their history.
-  await Promise.all(inserted.map((w: any) => enqueueBackfill(w.address)));
+  await Promise.all(inserted.map((w: any) => enqueueBackfill(w.address, w.chain ?? 'solana')));
   return { inserted: inserted.length, wallets: inserted, backfillQueued: inserted.length };
 });
 
@@ -169,35 +246,41 @@ app.post('/v1/wallets', async (req, reply) => {
 // "Start indexer" button in the web UI.
 app.post('/v1/wallets/reindex', async () => {
   const wallets = await listWallets();
-  await Promise.all(wallets.map((w: any) => enqueueBackfill(w.address)));
+  await Promise.all(wallets.map((w: any) => enqueueBackfill(w.address, w.chain ?? 'solana')));
   return { queued: wallets.length };
 });
 
 app.delete('/v1/wallets/:address', async (req, reply) => {
-  const parsed = walletAddressSchema.safeParse((req.params as { address: string }).address);
-  if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid wallet' });
-  await deleteWallet(parsed.data);
+  const q = req.query as { chain?: string };
+  const address = (req.params as { address: string }).address;
+  const chain = parseChain(q.chain);
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet' });
+  const wallet = await getWallet(address, chain);
+  if (!wallet) return reply.code(404).send({ error: 'Wallet not found' });
+  await deleteWalletCascade(wallet.address, chain);
   return reply.code(204).send();
 });
 
 app.get('/v1/wallets/:address/history', async (req, reply) => {
   const address = (req.params as { address: string }).address;
-  const q = req.query as { limit?: string; before?: string };
+  const q = req.query as { limit?: string; before?: string; chain?: string };
+  const chain = parseChain(q.chain);
   const limit = clampLimit(q.limit, 50, 200);
   const before = q.before;
 
-  const parsed = walletAddressSchema.safeParse(address);
-  if (!parsed.success) return reply.code(400).send({ error: 'Invalid wallet address' });
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet address' });
+  const prefixedAddress = prefixChainValue(address, chain);
 
   const rows = await query(`
     SELECT id, signature, direction, target_token, amount_in, amount_out,
            amount_in_usd, amount_out_usd, program_id, timestamp
     FROM transactions
     WHERE wallet_address = $1
-      ${before ? `AND timestamp < $3` : ''}
+      AND chain = $2
+      ${before ? `AND timestamp < $4` : ''}
     ORDER BY timestamp DESC
-    LIMIT $2
-  `, before ? [address, limit, before] : [address, limit]);
+    LIMIT $3
+  `, before ? [prefixedAddress, chain, limit, before] : [prefixedAddress, chain, limit]);
 
   const nextCursor = rows.length === limit
     ? (rows[rows.length - 1] as any).timestamp
@@ -208,8 +291,10 @@ app.get('/v1/wallets/:address/history', async (req, reply) => {
 
 app.get('/v1/wallets/:address/holdings', async (req, reply) => {
   const address = (req.params as { address: string }).address;
-  const parsed = walletAddressSchema.safeParse(address);
-  if (!parsed.success) return reply.code(400).send({ error: 'Invalid wallet address' });
+  const q = req.query as { chain?: string };
+  const chain = parseChain(q.chain);
+  if (!isValidAddressForChain(address, chain)) return reply.code(400).send({ error: 'Invalid wallet address' });
+  const prefixedAddress = prefixChainValue(address, chain);
 
   // Calculate net token positions (bought - sold)
   const rows = await query(`
@@ -222,13 +307,14 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
       SUM(CASE WHEN direction = 'buy'  THEN amount_in_usd  ELSE 0 END) AS cost_basis_usd,
       SUM(CASE WHEN direction = 'sell' THEN amount_out_usd ELSE 0 END) AS realized_usd
     FROM transactions t
-    LEFT JOIN tokens tok ON t.target_token = tok.mint
+    LEFT JOIN tokens tok ON t.target_token = tok.mint AND tok.chain = $2
     WHERE t.wallet_address = $1
+      AND t.chain = $2
     GROUP BY t.target_token, tok.symbol, tok.name
     HAVING SUM(CASE WHEN direction = 'buy' THEN amount_out ELSE 0 END)
          > SUM(CASE WHEN direction = 'sell' THEN amount_in  ELSE 0 END)
     ORDER BY cost_basis_usd DESC NULLS LAST
-  `, [address]);
+  `, [prefixedAddress, chain]);
 
   return { items: rows };
 });
@@ -236,54 +322,26 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
 // ─── Discovery ────────────────────────────────────────────────────────────────
 
 app.post('/v1/discovery/from-token', async (req, reply) => {
-  const { tokenMint } = (req.body ?? {}) as { tokenMint?: string };
+  const { tokenMint, chain = 'solana' } = (req.body ?? {}) as { tokenMint?: string; chain?: WalletChain };
+  if (chain !== 'solana') return reply.code(400).send({ error: 'Discovery from token currently supports only solana' });
   // A token mint is a Solana address; reuse the address schema to reject garbage
   // before it pollutes discovery_log / Redis.
   const parsedMint = walletAddressSchema.safeParse(tokenMint);
   if (!parsedMint.success) return reply.code(400).send({ error: 'Valid tokenMint required' });
 
-  // Publish to Redis so the discovery service picks it up
-  await redis.publish(REDIS_CHANNELS.discoverySeedToken, JSON.stringify({ tokenMint }));
-
-  // Also run inline early-buyer extraction
-  const earlyBuyers = await query<{ wallet_address: string }>(`
-    SELECT wallet_address
-    FROM transactions
-    WHERE target_token = $1
-      AND direction = 'buy'
-      AND timestamp < (
-        SELECT MIN(timestamp) + INTERVAL '10 minutes'
-        FROM transactions WHERE target_token = $1
-      )
-    GROUP BY wallet_address
-    HAVING SUM(amount_in::bigint) > 500000000
-    ORDER BY MIN(timestamp) ASC
-    LIMIT 50
-  `, [tokenMint]);
-
-  let ingested = 0;
-  for (const row of earlyBuyers) {
-    await upsertWallet({ address: row.wallet_address, source: 'discovered' });
-    ingested++;
-  }
-
-  await query(
-    `INSERT INTO discovery_log (source, seed_value, wallets_discovered) VALUES ($1, $2, $3)`,
-    ['token', tokenMint, ingested]
-  );
-
-  // Additionally kick off the deeper ON-CHAIN scan: the indexer pages the token's
-  // history back to launch and seeds its early + biggest buyers (then backfills
-  // and scores them). This is async — the immediate `ingested` count above comes
-  // from data we already had; `queued` signals the chain scan has started. jobId
-  // keyed by mint dedupes concurrent requests for the same token.
+  // The indexer owns token-seeded discovery. Queue exactly one canonical scan;
+  // its deterministic job ID deduplicates concurrent requests for the same mint.
   await tokenDiscoveryQueue.add(
     'token-discovery',
-    { tokenMint },
-    { jobId: `token-discovery-${tokenMint}`, removeOnComplete: true, removeOnFail: 1000 }
+    { tokenMint: parsedMint.data, chain },
+    {
+      jobId: `token-discovery-${chain}-${parsedMint.data}`,
+      removeOnComplete: true,
+      removeOnFail: 1000
+    }
   );
 
-  return { ingested, queued: true, tokenMint };
+  return { queued: true, tokenMint: parsedMint.data, chain };
 });
 
 app.post('/v1/discovery/run', async () => {
@@ -410,35 +468,52 @@ app.get('/v1/signals/:id', async (req, reply) => {
 
 app.post('/v1/signals/:id/ignore', async (req, reply) => {
   const { id } = req.params as { id: string };
-  await query(`UPDATE signals SET status = 'ignored' WHERE id = $1`, [id]);
+  await query(`UPDATE signals SET status = 'rejected' WHERE id = $1`, [id]);
   return { ignored: true };
 });
 
 app.post('/v1/signals/:id/execute', async (req, reply) => {
   const { id } = req.params as { id: string };
-  const [signal] = await query<{ token_mint: string; signal_score: number }>(
-    `SELECT token_mint, signal_score FROM signals WHERE id = $1`, [id]
+  const [signal] = await query<{
+    token_mint: string | null;
+    signal_score: number;
+    cluster_tier: 'elite' | 'pro' | 'promising' | 'speculative';
+  }>(
+    `SELECT s.token_mint,
+            s.signal_score,
+            CASE
+              WHEN wc.avg_composite_score >= 90 THEN 'elite'
+              WHEN wc.avg_composite_score >= 75 THEN 'pro'
+              WHEN wc.avg_composite_score >= 60 THEN 'promising'
+              ELSE 'speculative'
+            END AS cluster_tier
+       FROM signals s
+       LEFT JOIN wallet_clusters wc ON wc.id = s.cluster_id
+      WHERE s.id = $1`,
+    [id]
   );
   if (!signal) return reply.code(404).send({ error: 'Signal not found' });
+  if (!signal.token_mint) {
+    return reply.code(409).send({ error: 'Signal has no executable token' });
+  }
 
   // Enqueue to trade executor via BullMQ (not redis pubsub)
   await tradeQueue.add('signal-trade', {
     signalId: id,
     score: signal.signal_score,
     tokenMint: signal.token_mint,
+    clusterTier: signal.cluster_tier,
     manual: true
-  }, { removeOnComplete: true });
+  }, {
+    removeOnComplete: true,
+    attempts: 4,
+    backoff: { type: 'exponential', delay: 5000 }
+  });
   return { queued: true };
 });
 
 // ─── Tokens ───────────────────────────────────────────────────────────────────
 
-app.get('/v1/tokens/:mint', async (req, reply) => {
-  const { mint } = req.params as { mint: string };
-  const [token] = await query(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
-  if (!token) return reply.code(404).send({ error: 'Token not found' });
-  return { item: token };
-});
 
 app.get('/v1/tokens/trending', async () => {
   const rows = await query(`
@@ -457,19 +532,54 @@ app.get('/v1/tokens/trending', async () => {
   return { items: rows };
 });
 
+app.get('/v1/tokens/:mint', async (req, reply) => {
+  const { mint } = req.params as { mint: string };
+  const q = req.query as { chain?: string };
+  const chain = parseChain(q.chain);
+  const prefixedMint = prefixChainValue(mint, chain);
+  const [token] = await query(`SELECT * FROM tokens WHERE mint = $1`, [prefixedMint]);
+  if (!token) return reply.code(404).send({ error: 'Token not found' });
+  return { item: token };
+});
+
 // ─── Trading ──────────────────────────────────────────────────────────────────
 
-app.get('/v1/trading/status', async () => ({
-  mode: process.env.TRADING_MODE ?? 'paper',
-  autoExecute: process.env.AUTO_EXECUTE === 'true',
-  minScore: Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 90),
-  basePositionSol: Number(process.env.BASE_POSITION_SOL ?? 0.5)
-}));
+app.get('/v1/trading/status', async () => {
+  const control = await getTradingControlStatus();
+
+  return {
+    ...control,
+    autoExecute: process.env.AUTO_EXECUTE === 'true',
+    minScore: Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 85),
+    basePositionSol: Number(process.env.BASE_POSITION_SOL ?? 0.5),
+    basePositionUsdc: Number(process.env.BASE_POSITION_USDC ?? 100),
+    basePositionEth: Number(process.env.BASE_POSITION_ETH ?? 0.05),
+    useDynamicBalanceSizing: process.env.USE_DYNAMIC_BALANCE_SIZING === 'true',
+    usdcBalanceRiskPct: Number(process.env.USDC_BALANCE_RISK_PCT ?? 2.0),
+    ethBalanceRiskPct: Number(process.env.ETH_BALANCE_RISK_PCT ?? 2.0)
+  };
+});
+
+app.post('/v1/trading/mode', async (req, reply) => {
+  const parsed = executionModeUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return reply.code(400).send({
+      error: 'Body must contain exactly one valid chain and execution mode'
+    });
+  }
+
+  return updateTradingMode(parsed.data);
+});
+
+app.post('/v1/trading/emergency-off', async () => {
+  return emergencyOff();
+});
 
 app.get('/v1/trading/portfolio', async () => {
   const positions = await query(`
     SELECT token_mint, SUM(amount_sol) AS total_sol, SUM(amount_usd) AS total_usd, direction
     FROM trades
+    WHERE execution_mode IS NULL OR execution_mode != 'shadow'
     GROUP BY token_mint, direction
   `);
   return { positions };
@@ -484,17 +594,29 @@ app.get('/v1/trading/performance', async () => {
     FROM signals
     WHERE pnl_usd IS NOT NULL
   `);
-  return perf ?? { win_rate: 0, total_pnl_usd: 0, total_signals: 0 };
+  return {
+    win_rate: perf?.win_rate ?? 0,
+    total_pnl_usd: perf?.total_pnl_usd ?? 0,
+    total_signals: perf?.total_signals ?? 0
+  };
 });
 
 app.get('/v1/trading/trades', async () => {
   const items = await query(`
     SELECT id, signal_id, token_mint, direction, amount_sol, amount_usd, token_amount, price_usd, slippage_bps, signature, execution_mode, executor, status, price_impact_pct, quote_slot, min_token_amount, executed_at
     FROM trades
+    WHERE execution_mode IS NULL OR execution_mode != 'shadow'
     ORDER BY executed_at DESC, id DESC
     LIMIT 50
   `);
   return { items };
+});
+
+registerAttributionRoutes(app, {
+  getDashboard: getAttributionDashboard,
+  getExpectancy: getLatestExpectancyReport,
+  getLatency: getAttributionLatencyReport,
+  getShadowCost: getLiveShadowCostReport
 });
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -511,7 +633,15 @@ app.post('/v1/scorer/run', async () => {
 
 app.get('/v1/logs', async () => {
   const logs = await redis.lrange('swat:logs:list', 0, -1);
-  return { items: logs.map(l => JSON.parse(l)) };
+  return {
+    items: logs.map(l => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return { timestamp: new Date().toISOString(), service: 'unknown', level: 'error', message: l };
+      }
+    })
+  };
 });
 
 app.get('/v1/logs/stream', async (req, reply) => {
@@ -521,7 +651,7 @@ app.get('/v1/logs/stream', async (req, reply) => {
     'Connection': 'keep-alive',
     'Access-Control-Allow-Origin': '*'
   });
-  reply.sent = true;
+  reply.hijack();
   
   const sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
   await sub.subscribe('swat:logs:stream');

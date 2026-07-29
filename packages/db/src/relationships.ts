@@ -1,4 +1,6 @@
 import { query } from './client.js';
+import { resolveChainAddress } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 
 /**
  * Record (or reinforce) a funding relationship: `funder` sent SOL to `funded`.
@@ -7,8 +9,15 @@ import { query } from './client.js';
  * evidence; a multi-SOL transfer is strong). Repeated transfers accumulate
  * total lamports and transfer count in `evidence`.
  */
-export async function recordFundingEdge(funder: string, funded: string, lamports: number) {
-  if (funder === funded) return;
+export async function recordFundingEdge(
+  funder: string,
+  funded: string,
+  lamports: number,
+  chain: Chain = 'solana'
+) {
+  const prefixedFunder = resolveChainAddress(funder, chain).prefixed;
+  const prefixedFunded = resolveChainAddress(funded, chain).prefixed;
+  if (prefixedFunder === prefixedFunded) return;
   if (!Number.isFinite(lamports) || lamports <= 0) return;
 
   // Map 0–10 SOL onto roughly 0.5–0.95 confidence; clamp.
@@ -27,6 +36,6 @@ export async function recordFundingEdge(funder: string, funded: string, lamports
          COALESCE((wallet_relationships.evidence->>'transfers')::int, 0) + 1
        ),
        updated_at = NOW()`,
-    [funder, funded, confidence, Math.round(lamports)]
+    [prefixedFunder, prefixedFunded, confidence, Math.round(lamports)]
   );
 }

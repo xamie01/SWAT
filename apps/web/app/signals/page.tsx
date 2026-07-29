@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 // configured base URL (not a hardcoded localhost, which breaks non-local
 // deployments and would 401 once auth is enforced).
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = process.env.API_KEY ?? 'swat-dev-key';
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 async function getSignals() {
   try {
@@ -43,8 +43,8 @@ export default async function SignalsPage() {
               <div>
                 <h3 style={{ marginBottom: '0.5rem', color: 'var(--accent)' }}>{(signal.pattern_type ?? 'unknown').toUpperCase()} SIGNAL</h3>
                 <p style={{ margin: '0 0 0.5rem 0' }}>
-                  <strong>Token:</strong> {signal.token_symbol ? `$${signal.token_symbol} (${signal.token_name})` : signal.token_mint} <br/>
-                  {signal.token_symbol && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', margin: '0.1rem 0' }}>CA: <code>{signal.token_mint}</code></span>}
+                  <strong>Token:</strong> {signal.token_symbol ? `$${signal.token_symbol} (${signal.token_name})` : (signal.token_mint?.includes(':') ? signal.token_mint.split(':')[1] : signal.token_mint)} <br/>
+                  {signal.token_symbol && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'block', margin: '0.1rem 0' }}>CA: <code>{signal.token_mint?.includes(':') ? signal.token_mint.split(':')[1] : signal.token_mint}</code></span>}
                   <strong>Cluster:</strong> {signal.cluster_id}
                 </p>
                 <div>

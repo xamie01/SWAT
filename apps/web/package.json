@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "dev": "next dev -H 0.0.0.0",
+    "dev": "node --env-file=../../.env ../../scripts/run-web-dev.mjs",
     "lint": "next lint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node -e \"console.log('No tests in @swat/web')\""
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "^15.3.1",
@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.1.2",
-    "@types/react-dom": "^19.1.2"
+    "@types/react-dom": "^19.1.2",
+    "vitest": "^3.0.5"
   }
 }

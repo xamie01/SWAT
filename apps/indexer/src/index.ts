@@ -8,17 +8,41 @@ import {
   getTokenDecimals,
   updateTokenLaunchTimestamp,
   recordFundingEdge,
+  recordIngestionBatch,
   logDiscoveryRun
 } from '@swat/db';
-import { REDIS_CHANNELS, QUEUES, walletInputSchema, fetchTokenPriceUsd, initLogger } from '@swat/shared';
+import {
+  createWalletBackfillJob,
+  clampInteger,
+  REDIS_CHANNELS,
+  QUEUES,
+  walletInputSchema,
+  fetchTokenPriceUsd,
+  initLogger,
+  prefixChainValue,
+  stripChainPrefix
+} from '@swat/shared';
 import {
   extractFundingTransfers,
   extractTokenBuyers,
-  getWalletTokenDeltas,
+  parseCanonicalSolanaSwapEvent,
   baseUnitsToFloat,
   SOL_MINT,
   type HeliusParsedTransaction
 } from './parse.js';
+import { backfillEvmWallet, WalletChain } from './evm.js';
+import { backfillPolymarketWallet, pollPolymarketResolutions } from './polymarket.js';
+import {
+  IngestionBatchError,
+  type IngestionBatchResult
+} from './ingestion-health.js';
+import { parseSeedWalletAddresses } from './seed-wallets.js';
+import { createWalletBackfillProcessor } from './backfill-worker.js';
+import {
+  persistSolanaSourceTrade,
+  SourceTradePersistenceError,
+  type SolanaIngestionSource
+} from './source-trade-lifecycle.js';
 
 initLogger('indexer');
 
@@ -38,15 +62,16 @@ const SWAP_PROGRAM_IDS = new Set([
 const heliusApiKey = process.env.HELIUS_API_KEY;
 const heliusRpcUrl = heliusApiKey ? `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}` : null;
 
-const backfillQueue = new Queue('swat-backfill-wallet', { connection: redis });
+const backfillQueue = new Queue(QUEUES.walletBackfill, { connection: redis });
 
-export async function ingestWallets(input: Array<{ address: string; source?: 'shiller' | 'manual' | 'discovered'; nickname?: string }>) {
+export async function ingestWallets(input: Array<{ address: string; chain?: WalletChain; source?: 'shiller' | 'manual' | 'discovered'; nickname?: string }>) {
   const parsed = input.map((wallet) => walletInputSchema.safeParse(wallet));
-  const valid = parsed.filter((p): p is { success: true; data: { address: string; source: 'shiller' | 'manual' | 'discovered'; nickname?: string } } => p.success).map((p) => p.data);
+  const valid = parsed.filter((p): p is { success: true; data: { address: string; chain: WalletChain; source: 'shiller' | 'manual' | 'discovered'; nickname?: string } } => p.success).map((p) => p.data);
 
   for (const wallet of valid) {
     await upsertWallet(wallet);
-    await backfillQueue.add('backfill-wallet', { address: wallet.address }, { jobId: `backfill-${wallet.address}`, removeOnComplete: true, removeOnFail: 1000 });
+    const job = createWalletBackfillJob(wallet.address, wallet.chain);
+    await backfillQueue.add(job.name, job.data, job.options);
   }
 
   return { accepted: valid.length, rejected: parsed.length - valid.length };
@@ -221,16 +246,20 @@ async function enrichTransactionUsd(
 
 // ─── Process Single Transaction (shared by backfill + webhook) ────────────────
 
-export async function processTransaction(tx: HeliusParsedTransaction, address: string): Promise<'inserted' | 'skipped'> {
-  const parsed = getWalletTokenDeltas(tx, address);
-  if (!parsed) return 'skipped';
-
-  const signature = tx.transaction?.signatures?.[0];
-  if (!signature || !tx.blockTime) return 'skipped';
+export async function processTransaction(
+  tx: HeliusParsedTransaction,
+  address: string,
+  source: SolanaIngestionSource = 'solana-backfill'
+): Promise<'inserted' | 'skipped'> {
+  const canonicalEvent = parseCanonicalSolanaSwapEvent(tx, address);
+  if (!canonicalEvent) return 'skipped';
+  const parsed = canonicalEvent;
+  const signature = canonicalEvent.transactionIdentity;
 
   // Upsert both tokens — fetch mint info for target token to populate safety data
-  const [, targetMintInfo] = await Promise.all([
+  const [, , targetMintInfo] = await Promise.all([
     upsertToken(parsed.tokenIn),
+    upsertToken(parsed.tokenOut),
     fetchTokenMintInfo(parsed.targetToken)
   ]);
 
@@ -240,8 +269,8 @@ export async function processTransaction(tx: HeliusParsedTransaction, address: s
     freezeAuthorityDisabled: targetMintInfo.freezeAuthorityDisabled
   } : undefined);
 
-  const blockTime = tx.blockTime;
-  const timestamp = new Date(blockTime * 1000);
+  const blockTime = tx.blockTime!;
+  const timestamp = canonicalEvent.occurredAt;
 
   const { amountInUsd, amountOutUsd } = await enrichTransactionUsd(
     parsed.tokenIn,
@@ -268,6 +297,11 @@ export async function processTransaction(tx: HeliusParsedTransaction, address: s
     blockTime
   });
 
+  const sourceTrade = await persistSolanaSourceTrade({
+    event: canonicalEvent,
+    source
+  });
+
   if (persisted) {
     // Record earliest-seen time for the traded token (powers early-entry score)
     // and any SOL-funding edges observed in this transaction.
@@ -277,11 +311,13 @@ export async function processTransaction(tx: HeliusParsedTransaction, address: s
     await redis.publish(
       REDIS_CHANNELS.walletSwap,
       JSON.stringify({
-        walletAddress: address,
+        chain: 'solana',
+        walletAddress: prefixChainValue(address, 'solana'),
         signature,
+        sourceTradeId: sourceTrade.event.id,
+        tokenMint: prefixChainValue(parsed.targetToken, 'solana'),
         direction: parsed.direction,
-        targetToken: parsed.targetToken,
-        amountInUsd,
+        amountUsd: amountInUsd,
         timestamp: timestamp.toISOString()
       })
     );
@@ -372,9 +408,15 @@ export async function discoverFromToken(mint: string) {
   }
 
   // Oldest-first. getSignaturesForAddress returns newest→oldest within a page and
-  // we paged from newest→oldest, so the global ordering is already newest→oldest;
-  // sort ascending by (blockTime, then reversed index) to get launch-forward.
-  all.sort((a, b) => (a.blockTime ?? 0) - (b.blockTime ?? 0));
+  // we paged from newest→oldest, so the global ordering is already newest→oldest.
+  // Reversing ensures intra-slot order is oldest→newest.
+  all.reverse();
+  all.sort((a, b) => {
+    if (a.blockTime != null && b.blockTime != null && a.blockTime !== b.blockTime) {
+      return a.blockTime - b.blockTime;
+    }
+    return a.slot - b.slot;
+  });
   const window = all.slice(0, TOKEN_DISCOVERY_WINDOW);
   const launchBlockTime = window[0]?.blockTime;
 
@@ -431,12 +473,14 @@ export async function discoverFromToken(mint: string) {
 
   // ── 4. Seed wallets + enqueue history backfill ───────────────────────────────
   for (const owner of early) {
-    await upsertWallet({ address: owner, source: 'discovered', discoveryMethod: 'token-early' });
-    await backfillQueue.add('backfill-wallet', { address: owner }, { jobId: `backfill-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
+    await upsertWallet({ address: owner, chain: 'solana', source: 'discovered', discoveryMethod: 'token-early' });
+    const job = createWalletBackfillJob(owner, 'solana');
+    await backfillQueue.add(job.name, job.data, job.options);
   }
   for (const owner of big) {
-    await upsertWallet({ address: owner, source: 'discovered', discoveryMethod: 'token-big' });
-    await backfillQueue.add('backfill-wallet', { address: owner }, { jobId: `backfill-${owner}`, removeOnComplete: true, removeOnFail: 1000 });
+    await upsertWallet({ address: owner, chain: 'solana', source: 'discovered', discoveryMethod: 'token-big' });
+    const job = createWalletBackfillJob(owner, 'solana');
+    await backfillQueue.add(job.name, job.data, job.options);
   }
 
   await logDiscoveryRun('token', mint, early.length + big.length);
@@ -450,17 +494,27 @@ export async function discoverFromToken(mint: string) {
 
 // ─── Backfill ─────────────────────────────────────────────────────────────────
 
-async function backfillWallet(address: string) {
+export async function backfillWallet(address: string): Promise<IngestionBatchResult> {
   if (!heliusRpcUrl) {
-    console.warn('[indexer] skipping backfill: HELIUS_API_KEY is not set');
-    return { fetched: 0, inserted: 0, skipped: 0 };
+    throw new Error('HELIUS_API_KEY is not set');
   }
 
-  const sigLimit = Number(process.env.BACKFILL_SIGNATURE_LIMIT ?? 1000);
+  const sigLimit = clampInteger(
+    process.env.BACKFILL_SIGNATURE_LIMIT,
+    1000,
+    1,
+    1000
+  );
   const signatures = await heliusRpc<HeliusSignature[]>('getSignaturesForAddress', [address, { limit: sigLimit }]);
   if (signatures.length === 0) {
-    await refreshWalletActivity(address, null, 0);
-    return { fetched: 0, inserted: 0, skipped: 0 };
+    await refreshWalletActivity(address.includes(':') ? address : `solana:${address}`, null, 0);
+    return {
+      fetched: 0,
+      inserted: 0,
+      skipped: 0,
+      failed: 0,
+      lastEventAt: null
+    };
   }
 
   const signatureList = signatures.map((s) => s.signature);
@@ -468,7 +522,8 @@ async function backfillWallet(address: string) {
   // Solana JSON-RPC has no `getParsedTransactions` (plural) method — Helius
   // replies "Method not found". Fetch each signature with `getTransaction`
   // (jsonParsed), in bounded-concurrency batches to respect rate limits.
-  const txs: Array<HeliusParsedTransaction | null> = [];
+  const txs: Array<HeliusParsedTransaction | null | undefined> = [];
+  let failed = 0;
   const BATCH = Number(process.env.BACKFILL_BATCH_SIZE ?? 5);
   for (let i = 0; i < signatureList.length; i += BATCH) {
     if (i > 0) await sleep(150); // gentle pacing to stay under rate limits
@@ -480,7 +535,8 @@ async function backfillWallet(address: string) {
           { maxSupportedTransactionVersion: 0, commitment: 'confirmed', encoding: 'jsonParsed' }
         ]).catch((err) => {
           console.warn(`[indexer] getTransaction failed for ${sig}:`, err instanceof Error ? err.message : err);
-          return null;
+          failed++;
+          return undefined;
         })
       )
     );
@@ -491,39 +547,87 @@ async function backfillWallet(address: string) {
   let inserted = 0;
   let skipped = 0;
   let latestBlockTime: number | null = null;
+  let lastEventAt: Date | null = null;
+  let sourceTradeFailure: SourceTradePersistenceError | null = null;
 
   for (const tx of txs) {
-    if (!tx) continue;
-    const result = await processTransaction(tx, address);
-    if (result === 'inserted') {
-      inserted++;
-      if (tx.blockTime && (!latestBlockTime || tx.blockTime > latestBlockTime)) {
-        latestBlockTime = tx.blockTime;
-      }
-    } else {
+    if (tx === undefined) continue;
+    if (tx === null) {
       skipped++;
+      continue;
+    }
+    if (tx.blockTime) {
+      const eventAt = new Date(tx.blockTime * 1000);
+      if (!lastEventAt || eventAt > lastEventAt) lastEventAt = eventAt;
+    }
+
+    try {
+      const result = await processTransaction(tx, address);
+      if (result === 'inserted') {
+        inserted++;
+        if (tx.blockTime && (!latestBlockTime || tx.blockTime > latestBlockTime)) {
+          latestBlockTime = tx.blockTime;
+        }
+      } else {
+        skipped++;
+      }
+    } catch (error) {
+      failed++;
+      if (error instanceof SourceTradePersistenceError) {
+        sourceTradeFailure ??= error;
+      }
+      console.warn(
+        `[indexer] failed to process Solana transaction ${tx.transaction?.signatures?.[0] ?? 'unknown'}:`,
+        error
+      );
     }
   }
 
-  await refreshWalletActivity(address, latestBlockTime ? new Date(latestBlockTime * 1000) : null, inserted);
-  return { fetched: signatureList.length, inserted, skipped };
+  const result = {
+    fetched: signatureList.length,
+    inserted,
+    skipped,
+    failed,
+    lastEventAt
+  };
+
+  try {
+    await refreshWalletActivity(
+      address.includes(':') ? address : `solana:${address}`,
+      latestBlockTime ? new Date(latestBlockTime * 1000) : null,
+      inserted
+    );
+  } catch (error) {
+    throw new IngestionBatchError(
+      `Failed to refresh Solana wallet activity for ${address}`,
+      { ...result, failed: result.failed + 1 },
+      { cause: error }
+    );
+  }
+  if (sourceTradeFailure) {
+    throw new IngestionBatchError(
+      `Canonical Solana source-trade persistence failed for ${address}`,
+      result,
+      { cause: sourceTradeFailure }
+    );
+  }
+  return result;
 }
 
 // ─── BullMQ Worker ────────────────────────────────────────────────────────────
 
 new Worker(
-  'swat-backfill-wallet',
-  async (job) => {
-    const address = (job.data as { address: string }).address;
-    console.log(`[indexer] backfill started for ${address}`);
-    const result = await backfillWallet(address);
-    console.log(`[indexer] backfill complete for ${address}:`, result);
-    return { address, ...result };
-  },
+  QUEUES.walletBackfill,
+  createWalletBackfillProcessor({
+    backfillSolana: backfillWallet,
+    backfillPolygon: backfillPolymarketWallet,
+    backfillRobinhood: (address) => backfillEvmWallet(address, 'robinhood-chain'),
+    recordBatch: recordIngestionBatch
+  }),
   // Concurrency 1: backfill one wallet at a time so we don't fan out hundreds of
-  // concurrent Helius requests and trip the rate limiter.
+  // concurrent RPC requests and trip the rate limiter.
   { connection: redis, concurrency: Number(process.env.BACKFILL_CONCURRENCY ?? 1) }
-);
+).on('error', (err) => console.error('[indexer] backfill worker error', err));
 
 // Token-discovery worker: heavy on-chain scan that seeds early/big buyers.
 new Worker(
@@ -538,15 +642,11 @@ new Worker(
   // Concurrency 1: a single discovery already pages thousands of Helius requests;
   // running several in parallel would trip the rate limiter.
   { connection: redis, concurrency: 1 }
-);
+).on('error', (err) => console.error('[indexer] discovery worker error', err));
 
 // ─── Startup seed from env ────────────────────────────────────────────────────
 
-const fromEnv = (process.env.WALLET_ADDRESSES ?? '')
-  .split(',')
-  .map((v) => v.trim())
-  .filter(Boolean)
-  .map((address) => ({ address, source: 'manual' as const }));
+const fromEnv = parseSeedWalletAddresses(process.env.WALLET_ADDRESSES);
 
 if (fromEnv.length > 0) {
   ingestWallets(fromEnv)
@@ -556,5 +656,13 @@ if (fromEnv.length > 0) {
       process.exit(1);
     });
 }
+
+// ─── Polymarket resolution polling ────────────────────────────────────────────
+
+// Check active markets every 15 minutes for resolution.
+setInterval(() => {
+  pollPolymarketResolutions().catch(console.error);
+}, 15 * 60 * 1000);
+pollPolymarketResolutions().catch(console.error);
 
 console.log('[indexer] service running');

@@ -20,3 +20,76 @@ export function markToMarketPnl(
   if (currentPriceUsd == null || !Number.isFinite(currentPriceUsd) || currentPriceUsd < 0) return null;
   return costBasisUsd * (currentPriceUsd / entryPriceUsd - 1);
 }
+
+export interface PositionLedgerTrade {
+  direction: 'buy' | 'sell';
+  tokenAmount: number;
+  amountUsd: number;
+  feeUsd?: number;
+}
+
+export interface PositionPnl {
+  openQuantity: number;
+  openCostBasisUsd: number;
+  realizedPnlUsd: number;
+  unrealizedPnlUsd: number;
+  totalPnlUsd: number;
+}
+
+/** Calculate chronological average-cost P&L, including partial reductions. */
+export function calculateAverageCostPnl(
+  trades: PositionLedgerTrade[],
+  currentPriceUsd: number | null
+): PositionPnl | null {
+  let openQuantity = 0;
+  let openCostBasisUsd = 0;
+  let realizedPnlUsd = 0;
+
+  for (const trade of trades) {
+    const feeUsd = trade.feeUsd ?? 0;
+    if (
+      !Number.isFinite(trade.tokenAmount)
+      || trade.tokenAmount <= 0
+      || !Number.isFinite(trade.amountUsd)
+      || trade.amountUsd < 0
+      || !Number.isFinite(feeUsd)
+      || feeUsd < 0
+    ) {
+      return null;
+    }
+
+    if (trade.direction === 'buy') {
+      openQuantity += trade.tokenAmount;
+      openCostBasisUsd += trade.amountUsd + feeUsd;
+      continue;
+    }
+
+    if (trade.tokenAmount > openQuantity) return null;
+    const averageUnitCost = openCostBasisUsd / openQuantity;
+    const removedCostBasis = averageUnitCost * trade.tokenAmount;
+    realizedPnlUsd += trade.amountUsd - feeUsd - removedCostBasis;
+    openQuantity -= trade.tokenAmount;
+    openCostBasisUsd -= removedCostBasis;
+
+    if (openQuantity < 1e-12) {
+      openQuantity = 0;
+      openCostBasisUsd = 0;
+    }
+  }
+
+  let unrealizedPnlUsd = 0;
+  if (openQuantity > 0) {
+    if (currentPriceUsd === null || !Number.isFinite(currentPriceUsd) || currentPriceUsd < 0) {
+      return null;
+    }
+    unrealizedPnlUsd = openQuantity * currentPriceUsd - openCostBasisUsd;
+  }
+
+  return {
+    openQuantity,
+    openCostBasisUsd,
+    realizedPnlUsd,
+    unrealizedPnlUsd,
+    totalPnlUsd: realizedPnlUsd + unrealizedPnlUsd
+  };
+}

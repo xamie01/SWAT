@@ -9,6 +9,8 @@ type LogItem = {
   message: string;
 };
 
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ??
   (typeof window !== 'undefined'
@@ -40,7 +42,7 @@ export default function LogsPage() {
     async function fetchLogs() {
       try {
         const res = await fetch(`${API_BASE}/v1/logs`, {
-          headers: { 'x-api-key': 'swat-dev-key' }
+          headers: { 'x-api-key': API_KEY }
         });
         if (res.ok) {
           const data = await res.json();
@@ -61,9 +63,27 @@ export default function LogsPage() {
     let eventSource: EventSource | null = null;
     let reconnectTimeout: any = null;
 
-    function connectStream() {
+    async function connectStream() {
       setStatus('connecting');
-      eventSource = new EventSource(`${API_BASE}/v1/logs/stream`);
+      let ticket = '';
+      try {
+        // Fetch a one-time ticket for SSE authentication
+        const res = await fetch(`${API_BASE}/v1/auth/ticket`, {
+          method: 'POST',
+          headers: { 'x-api-key': API_KEY }
+        });
+        if (!res.ok) throw new Error('Failed to get SSE ticket');
+        const data = await res.json();
+        ticket = data.ticket;
+      } catch (err) {
+        console.error('SSE Ticket Error:', err);
+        setStatus('disconnected');
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(connectStream, 3000);
+        return;
+      }
+      
+      eventSource = new EventSource(`${API_BASE}/v1/logs/stream?ticket=${ticket}`);
 
       eventSource.onopen = () => {
         setStatus('connected');
@@ -72,6 +92,10 @@ export default function LogsPage() {
       eventSource.onmessage = (event) => {
         try {
           const newLog = JSON.parse(event.data) as LogItem;
+          // Malformed log handling: skip if not an object or missing required fields
+          if (!newLog || typeof newLog !== 'object' || !newLog.timestamp || !newLog.message) {
+            return;
+          }
           setLogs((prev) => {
             const updated = [...prev, newLog];
             // Cap at 1000 items in browser memory to avoid leakage
@@ -90,7 +114,7 @@ export default function LogsPage() {
         setStatus('disconnected');
         eventSource?.close();
         
-        // Retry connection after 3 seconds
+        // Retry cleanup: ensure we clear before setting to prevent multiple loops
         clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(connectStream, 3000);
       };
@@ -273,7 +297,7 @@ export default function LogsPage() {
             const isError = log.level === 'error';
             return (
               <div
-                key={index}
+                key={`${log.timestamp}-${log.service}-${index}`}
                 style={{
                   display: 'flex',
                   gap: '0.75rem',

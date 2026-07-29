@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WAKE | Risk &amp; Execution</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/geist@1.3.0/dist/fonts/geist.min.css" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-primary": "#c8c6c5",
+                        "primary-container": "#1c1b1b",
+                        "primary": "#000000",
+                        "on-error-container": "#93000a",
+                        "secondary": "#5c5f60",
+                        "on-surface": "#1c1b1b",
+                        "polymarket-violet": "#8B5CF6",
+                        "on-error": "#ffffff",
+                        "on-primary-fixed": "#1c1b1b",
+                        "surface-container-highest": "#e5e2e1",
+                        "secondary-fixed-dim": "#c5c7c8",
+                        "on-secondary-fixed": "#191c1d",
+                        "primary-fixed-dim": "#c8c6c5",
+                        "primary-fixed": "#e5e2e1",
+                        "surface-container-lowest": "#ffffff",
+                        "tertiary-fixed": "#e6e1df",
+                        "tertiary": "#000000",
+                        "robinhood-amber": "#FFB800",
+                        "on-tertiary-fixed": "#1c1b1a",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-fixed-variant": "#454748",
+                        "on-background": "#1c1b1b",
+                        "on-primary-fixed-variant": "#474646",
+                        "inverse-on-surface": "#f4f0ef",
+                        "status-success": "#10B981",
+                        "tertiary-fixed-dim": "#cac6c3",
+                        "error-container": "#ffdad6",
+                        "surface-container-high": "#ebe7e6",
+                        "status-neutral": "#64748B",
+                        "on-secondary-container": "#626566",
+                        "surface-tint": "#5f5e5e",
+                        "error": "#ba1a1a",
+                        "solana-teal": "#14F195",
+                        "secondary-container": "#e1e3e4",
+                        "outline-variant": "#c4c7c7",
+                        "border-subtle": "#E2E8F0",
+                        "outline": "#747878",
+                        "on-tertiary-container": "#868381",
+                        "background": "#fdf8f8",
+                        "on-secondary": "#ffffff",
+                        "on-primary-container": "#858383",
+                        "secondary-fixed": "#e1e3e4",
+                        "surface-dim": "#ddd9d8",
+                        "status-warning": "#F59E0B",
+                        "surface-variant": "#e5e2e1",
+                        "surface": "#fdf8f8",
+                        "inverse-surface": "#313030",
+                        "surface-bright": "#fdf8f8",
+                        "tertiary-container": "#1c1b1a",
+                        "surface-container": "#f1edec",
+                        "on-tertiary-fixed-variant": "#484645",
+                        "on-primary": "#ffffff",
+                        "status-error": "#EF4444",
+                        "on-surface-variant": "#444748",
+                        "surface-container-low": "#f7f3f2"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "stack-xs": "4px",
+                        "stack-sm": "8px",
+                        "data-row-height": "40px",
+                        "container-max": "1440px",
+                        "margin-mobile": "16px",
+                        "gutter": "16px",
+                        "stack-md": "16px",
+                        "margin-desktop": "24px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["Geist"],
+                        "headline-md": ["Geist"],
+                        "mono-data": ["Geist"],
+                        "headline-lg": ["Geist"],
+                        "body-sm": ["Geist"],
+                        "body-md": ["Geist"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-md": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "mono-data": ["13px", {"lineHeight": "20px", "letterSpacing": "-0.01em", "fontWeight": "500"}],
+                        "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Geist', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e5e2e1; border-radius: 10px; }
+        
+        .segmented-control input:checked + label {
+            background-color: #121212;
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface flex min-h-screen overflow-hidden">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full flex flex-col z-50 bg-surface dark:bg-inverse-surface border-r border-outline-variant dark:border-outline w-[240px]">
+<div class="px-6 py-8 flex flex-col items-center border-b border-outline-variant/30">
+<div class="w-12 h-12 bg-primary rounded flex items-center justify-center mb-3"><img alt="WAKE Logo" class="w-8 h-8 object-contain invert" src="https://lh3.googleusercontent.com/aida/AP1WRLtWod_shvYwZo04JI9qz9KbCkE4ccfvLt5YPoZfWK9_5IWgDMRxVww6XBAGkZRs0T-1jmcBXgmhsCcR8eu3dkshLlD6BnHpBiyrEunns1F0WH2lTlznG7mzTzzj4AeokEA0E_YMu73Zl7jCGS4uT0bRbBz2ViYg97kcTe_MBHntKuHo1vbl-A-yjjaHUil_JfO9AItouKrQCMCDBsCiM7mFfBKz_TwWyqrffxRbNdYPgyTdQ2oShfFx3O4"/></div>
+<h1 class="text-headline-md font-headline-md font-bold text-primary dark:text-on-primary-fixed">WAKE</h1>
+<p class="text-label-caps font-label-caps text-secondary uppercase tracking-widest mt-1">Operational Intel</p>
+</div>
+<nav class="flex-1 mt-4 px-3 space-y-1">
+<a class="flex items-center px-4 py-3 text-secondary dark:text-on-secondary-container hover:text-primary dark:hover:text-on-primary-fixed hover:bg-surface-container-low transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined mr-3">grid_view</span>
+<span class="text-label-caps font-label-caps uppercase">Workspace</span>
+</a>
+<a class="flex items-center px-4 py-3 text-secondary dark:text-on-secondary-container hover:text-primary dark:hover:text-on-primary-fixed hover:bg-surface-container-low transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined mr-3">terminal</span>
+<span class="text-label-caps font-label-caps uppercase">Command Center</span>
+</a>
+<a class="flex items-center px-4 py-3 text-secondary dark:text-on-secondary-container hover:text-primary dark:hover:text-on-primary-fixed hover:bg-surface-container-low transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined mr-3">sensors</span>
+<span class="text-label-caps font-label-caps uppercase">Signals</span>
+</a>
+<a class="flex items-center px-4 py-3 text-secondary dark:text-on-secondary-container hover:text-primary dark:hover:text-on-primary-fixed hover:bg-surface-container-low transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined mr-3">account_balance_wallet</span>
+<span class="text-label-caps font-label-caps uppercase">Wallet Intel</span>
+</a>
+<a class="flex items-center px-4 py-3 text-secondary dark:text-on-secondary-container hover:text-primary dark:hover:text-on-primary-fixed hover:bg-surface-container-low transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined mr-3">monitor_heart</span>
+<span class="text-label-caps font-label-caps uppercase">Health</span>
+</a>
+<a class="flex items-center px-4 py-3 text-primary dark:text-on-primary-fixed font-bold border-l-2 border-primary dark:border-on-primary-fixed bg-surface-container dark:bg-surface-container-highest rounded-r-lg" href="#">
+<span class="material-symbols-outlined mr-3">security</span>
+<span class="text-label-caps font-label-caps uppercase">Risk/Execution</span>
+</a>
+<a class="flex items-center px-4 py-3 text-secondary dark:text-on-secondary-container hover:text-primary dark:hover:text-on-primary-fixed hover:bg-surface-container-low transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined mr-3">assessment</span>
+<span class="text-label-caps font-label-caps uppercase">Attribution</span>
+</a>
+</nav>
+<div class="p-4 border-t border-outline-variant/30">
+<div class="flex items-center space-x-3 p-2">
+<div class="w-8 h-8 rounded-full bg-surface-container-highest overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A clean professional profile photo of a technical crypto operator, shot in high-definition with soft architectural lighting, embodying a serious and focused tone suitable for a high-stakes financial SaaS interface. The background is a minimalist, neutral studio environment with a cool, modern aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDGzlFJMAZKPJwdsGyUIwSuNA0aKeX4pfk2AXGOr5olAgMCClqpuZwRqDWUto4YPmuhHHteyojSh-UJJyKSeHEDn_B68yViXK6-rEX6AvpDHKho-jTgmbjnk9YD3OXBCAgPFMTnzmo6wdLmGNbZf0wulwaASP7EMKjjbzo9iDQ7ydl0SdOhAG3qYX63DyxhLRq8Yr8wuUOPZ6dwUPh9uMA1nsri-SCzvxDd2GWFAuBnRNRAwXSO9png"/>
+</div>
+<div class="flex-1">
+<p class="text-body-sm font-bold truncate">Operator 072</p>
+<p class="text-label-caps text-secondary text-[10px]">AUTH_LEVEL_4</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 ml-[240px] flex flex-col h-screen overflow-hidden">
+<!-- TopNavBar -->
+<header class="h-16 flex justify-between items-center px-margin-desktop bg-surface dark:bg-inverse-surface border-b border-outline-variant dark:border-outline z-40 sticky top-0">
+<div class="flex items-center space-x-6">
+<h2 class="text-headline-md font-headline-md font-bold text-primary">WAKE Intelligence</h2>
+<div class="relative w-64 group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-secondary text-sm">search</span>
+<input class="w-full bg-surface-container-low border border-outline-variant rounded px-10 py-1.5 text-body-sm focus:ring-1 focus:ring-primary outline-none transition-all" placeholder="Command Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center space-x-6">
+<div class="flex space-x-4 items-center">
+<span class="text-label-caps text-on-surface-variant cursor-pointer hover:text-primary transition-colors">Sandbox</span>
+<span class="text-label-caps font-mono text-on-surface-variant">00:00 UTC</span>
+<div class="px-2 py-0.5 bg-surface-container-highest rounded text-label-caps font-bold">All Chains</div>
+</div>
+<div class="flex items-center space-x-3 border-l border-outline-variant pl-6">
+<button class="material-symbols-outlined text-secondary hover:text-primary transition-colors">notifications</button>
+<button class="material-symbols-outlined text-secondary hover:text-primary transition-colors">settings</button>
+</div>
+</div>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 max-w-[1440px] mx-auto w-full">
+<!-- Global Circuit Breaker Section -->
+<section class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+<div class="md:col-span-8 bg-surface-container-lowest border border-outline-variant p-5 rounded-lg flex items-center justify-between">
+<div class="flex items-center space-x-4">
+<div class="w-10 h-10 bg-error/10 text-error rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined">bolt</span>
+</div>
+<div>
+<h3 class="text-headline-md font-bold">Global Safety Systems</h3>
+<p class="text-body-sm text-secondary">Instantly halt all execution and liquidate neutral positions across all linked accounts.</p>
+</div>
+</div>
+<button class="bg-error text-white px-8 py-3 rounded font-bold text-label-caps uppercase hover:bg-error/90 transition-all flex items-center gap-2 active:scale-95">
+<span class="material-symbols-outlined text-sm">gavel</span>
+                        KILL SWITCH
+                    </button>
+</div>
+<div class="md:col-span-4 flex flex-col justify-center h-full">
+<div class="bg-surface-container-low p-4 border border-outline-variant rounded flex justify-between items-center">
+<div>
+<p class="text-label-caps text-secondary mb-1">SYSTEM STATUS</p>
+<p class="text-status-success font-bold text-body-md flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-status-success"></span>
+                                NOMINAL - VIGILANCE ACTIVE
+                            </p>
+</div>
+<span class="material-symbols-outlined text-secondary">info</span>
+</div>
+</div>
+</section>
+<!-- Execution Mode Matrix -->
+<section class="space-y-4">
+<h3 class="text-label-caps font-bold text-secondary uppercase tracking-widest px-1">Execution Matrix</h3>
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="p-4 text-label-caps text-secondary font-bold">NETWORK / ENTITY</th>
+<th class="p-4 text-label-caps text-secondary font-bold">STATUS</th>
+<th class="p-4 text-label-caps text-secondary font-bold">REQUESTED MODE</th>
+<th class="p-4 text-label-caps text-secondary font-bold">EFFECTIVE MODE</th>
+<th class="p-4 text-label-caps text-secondary font-bold">LATENCY</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Solana Row -->
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="p-4">
+<div class="flex items-center space-x-3">
+<div class="w-1 h-6 bg-solana-teal rounded"></div>
+<div>
+<p class="text-body-md font-bold">Solana Mainnet-Beta</p>
+<p class="text-[10px] text-secondary font-mono">0x77...9f12</p>
+</div>
+</div>
+</td>
+<td class="p-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded bg-solana-teal/10 text-solana-teal text-[10px] font-bold">HEALTHY</span>
+</td>
+<td class="p-4">
+<div class="flex bg-surface-container-low p-0.5 rounded w-fit segmented-control">
+<input class="hidden" id="sol-off" name="solana-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="sol-off">OFF</label>
+<input class="hidden" id="sol-paper" name="solana-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="sol-paper">PAPER</label>
+<input checked="" class="hidden" id="sol-live" name="solana-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="sol-live">LIVE</label>
+<input class="hidden" id="sol-shadow" name="solana-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="sol-shadow">LIVE + S</label>
+</div>
+</td>
+<td class="p-4">
+<span class="text-body-md font-bold text-primary flex items-center gap-1">
+<span class="material-symbols-outlined text-sm text-status-success">check_circle</span>
+                                        LIVE
+                                    </span>
+</td>
+<td class="p-4 font-mono text-body-sm text-secondary">24ms</td>
+</tr>
+<!-- Polygon Row -->
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="p-4">
+<div class="flex items-center space-x-3">
+<div class="w-1 h-6 bg-polymarket-violet rounded"></div>
+<div>
+<p class="text-body-md font-bold">Polygon PoS</p>
+<p class="text-[10px] text-secondary font-mono">0x42...a3e1</p>
+</div>
+</div>
+</td>
+<td class="p-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded bg-solana-teal/10 text-solana-teal text-[10px] font-bold">HEALTHY</span>
+</td>
+<td class="p-4">
+<div class="flex bg-surface-container-low p-0.5 rounded w-fit segmented-control">
+<input class="hidden" id="poly-off" name="poly-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="poly-off">OFF</label>
+<input checked="" class="hidden" id="poly-paper" name="poly-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="poly-paper">PAPER</label>
+<input class="hidden" id="poly-live" name="poly-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="poly-live">LIVE</label>
+<input class="hidden" id="poly-shadow" name="poly-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="poly-shadow">LIVE + S</label>
+</div>
+</td>
+<td class="p-4">
+<span class="text-body-md font-bold text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">visibility</span>
+                                        PAPER
+                                    </span>
+</td>
+<td class="p-4 font-mono text-body-sm text-secondary">48ms</td>
+</tr>
+<!-- Robinhood Row -->
+<tr class="hover:bg-surface-container-low/50 transition-colors bg-error/5">
+<td class="p-4">
+<div class="flex items-center space-x-3">
+<div class="w-1 h-6 bg-robinhood-amber rounded"></div>
+<div>
+<p class="text-body-md font-bold">Robinhood Chain (Beta)</p>
+<p class="text-[10px] text-secondary font-mono">0xRH...5502</p>
+</div>
+</div>
+</td>
+<td class="p-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded bg-status-warning/10 text-status-warning text-[10px] font-bold">UNCERTIFIED</span>
+</td>
+<td class="p-4">
+<div class="flex bg-surface-container-low p-0.5 rounded w-fit segmented-control">
+<input class="hidden" id="rh-off" name="rh-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="rh-off">OFF</label>
+<input class="hidden" id="rh-paper" name="rh-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="rh-paper">PAPER</label>
+<input checked="" class="hidden" id="rh-live" name="rh-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="rh-live">LIVE</label>
+<input class="hidden" id="rh-shadow" name="rh-mode" type="radio"/><label class="px-3 py-1 text-[10px] font-bold rounded cursor-pointer transition-all" for="rh-shadow">LIVE + S</label>
+</div>
+</td>
+<td class="p-4">
+<div class="flex flex-col">
+<span class="text-body-md font-bold text-error flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">block</span>
+                                            BLOCKED
+                                        </span>
+<span class="text-[10px] font-mono text-secondary">Clamped to Paper Only</span>
+</div>
+</td>
+<td class="p-4 font-mono text-body-sm text-secondary">--ms</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Bottom Bento Grid: Certification & Risk Controls -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Certification Gates -->
+<div class="lg:col-span-1 space-y-4">
+<h3 class="text-label-caps font-bold text-secondary uppercase tracking-widest px-1">Certification Gates</h3>
+<div class="bg-surface-container-lowest border border-outline-variant p-4 rounded-lg space-y-4">
+<div class="p-3 border border-outline-variant rounded bg-surface-container-low">
+<div class="flex justify-between items-center mb-3">
+<span class="text-body-sm font-bold flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-robinhood-amber"></span>
+                                    Robinhood Chain
+                                </span>
+<span class="text-[10px] font-bold text-error bg-error/10 px-2 py-0.5 rounded">RESTRICTED</span>
+</div>
+<div class="space-y-2">
+<div class="flex items-center justify-between text-[11px]">
+<span class="text-secondary">Small-value trade</span>
+<span class="material-symbols-outlined text-status-success text-sm">check_circle</span>
+</div>
+<div class="flex items-center justify-between text-[11px]">
+<span class="text-secondary">Forced-failure response</span>
+<span class="material-symbols-outlined text-error text-sm">cancel</span>
+</div>
+<div class="flex items-center justify-between text-[11px]">
+<span class="text-secondary">Reconciliation loop</span>
+<span class="material-symbols-outlined text-status-neutral text-sm">pending</span>
+</div>
+</div>
+<button class="w-full mt-4 py-2 border border-primary text-primary text-label-caps font-bold rounded hover:bg-primary hover:text-white transition-all uppercase">Run Missing Tests</button>
+</div>
+<div class="p-3 border border-outline-variant rounded">
+<div class="flex justify-between items-center">
+<span class="text-body-sm font-bold flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-solana-teal"></span>
+                                    Solana Mainnet
+                                </span>
+<span class="text-[10px] font-bold text-status-success bg-status-success/10 px-2 py-0.5 rounded">CERTIFIED</span>
+</div>
+</div>
+<div class="p-3 border border-outline-variant rounded">
+<div class="flex justify-between items-center">
+<span class="text-body-sm font-bold flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-polymarket-violet"></span>
+                                    Polygon PoS
+                                </span>
+<span class="text-[10px] font-bold text-status-success bg-status-success/10 px-2 py-0.5 rounded">CERTIFIED</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Risk Controls -->
+<div class="lg:col-span-2 space-y-4">
+<h3 class="text-label-caps font-bold text-secondary uppercase tracking-widest px-1">Risk Configuration Matrix</h3>
+<div class="bg-surface-container-lowest border border-outline-variant p-6 rounded-lg grid grid-cols-1 md:grid-cols-2 gap-8">
+<div class="space-y-6">
+<div>
+<label class="text-label-caps text-secondary block mb-2">GLOBAL POSITION CAP (USD)</label>
+<div class="flex items-center gap-2">
+<div class="flex-1 relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-secondary font-mono text-body-sm">$</span>
+<input class="w-full pl-8 pr-12 py-2 border border-outline-variant rounded bg-surface font-mono text-body-md focus:border-primary outline-none" type="text" value="25,000,000"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 text-secondary font-mono text-[10px]">USD</span>
+</div>
+</div>
+<p class="text-[10px] text-secondary mt-1 italic">Total exposure aggregate across all active chain entities.</p>
+</div>
+<div>
+<label class="text-label-caps text-secondary block mb-2">CHAIN BALANCE PROTECTION</label>
+<div class="space-y-2">
+<div class="flex items-center justify-between p-2 border border-outline-variant rounded bg-surface-container-low">
+<span class="text-[11px] font-bold">SOL MIN THRESHOLD</span>
+<span class="text-[11px] font-mono">500.00 SOL</span>
+</div>
+<div class="flex items-center justify-between p-2 border border-outline-variant rounded bg-surface-container-low">
+<span class="text-[11px] font-bold">MATIC MIN THRESHOLD</span>
+<span class="text-[11px] font-mono">10,000 MATIC</span>
+</div>
+</div>
+</div>
+<div>
+<label class="text-label-caps text-secondary block mb-2">MINIMUM SIGNAL SCORE FLOOR</label>
+<div class="flex items-center gap-4">
+<input class="flex-1 h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary" max="100" min="0" type="range" value="78"/>
+<span class="text-body-sm font-mono font-bold w-8 text-right">78</span>
+</div>
+<p class="text-[10px] text-status-warning mt-1">Note: High floors may limit execution frequency during low-vol periods.</p>
+</div>
+</div>
+<div class="space-y-6">
+<div>
+<label class="text-label-caps text-secondary block mb-2">LIQUIDITY FLOOR (PER SWAP)</label>
+<div class="relative">
+<input class="w-full px-3 py-2 border border-outline-variant rounded bg-surface font-mono text-body-md focus:border-primary outline-none" type="text" value="5,000"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 text-secondary font-mono text-[10px]">BPS AVAIL</span>
+</div>
+</div>
+<div>
+<label class="text-label-caps text-secondary block mb-2">MAX SLIPPAGE TOLERANCE</label>
+<div class="grid grid-cols-3 gap-2">
+<button class="py-2 border border-outline-variant rounded text-[11px] font-bold hover:bg-primary-container hover:text-white transition-all">5 BPS</button>
+<button class="py-2 border border-primary bg-primary text-white rounded text-[11px] font-bold">15 BPS</button>
+<button class="py-2 border border-outline-variant rounded text-[11px] font-bold hover:bg-primary-container hover:text-white transition-all">30 BPS</button>
+</div>
+</div>
+<div>
+<label class="text-label-caps text-secondary block mb-2">DAILY EXPOSURE LIMIT</label>
+<div class="bg-surface-container-low p-4 rounded border border-outline-variant">
+<div class="flex justify-between text-[11px] mb-2">
+<span class="text-secondary uppercase">Current Usage</span>
+<span class="font-mono">$8,421,902 / $10M</span>
+</div>
+<div class="w-full bg-surface-container-highest h-2 rounded-full overflow-hidden">
+<div class="bg-primary h-full" style="width: 84%"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="md:col-span-2 border-t border-outline-variant pt-4 flex justify-end gap-3">
+<button class="px-6 py-2 border border-outline-variant text-label-caps font-bold rounded hover:bg-surface-container-low transition-all">REVERT CHANGES</button>
+<button class="px-6 py-2 bg-primary text-white text-label-caps font-bold rounded active:scale-95 transition-all">APPLY RISK PROFILE</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Warning Callouts -->
+<section class="bg-status-warning/5 border border-status-warning/30 p-4 rounded-lg flex items-start space-x-4">
+<span class="material-symbols-outlined text-status-warning mt-1">warning</span>
+<div class="flex-1">
+<h4 class="text-body-md font-bold text-status-warning">Operational Warning: Execution Clamping Active</h4>
+<p class="text-body-sm text-secondary leading-relaxed">
+                        Robinhood Chain execution is currently <span class="font-bold text-primary">clamped to Paper Mode</span> despite requested Live status. 
+                        WAKE Risk Engine detected 2 incomplete Certification Gates: "Forced-failure response" and "Reconciliation loop". 
+                        Live execution will be automatically unlocked upon successful completion of the certification protocol.
+                    </p>
+</div>
+<button class="text-label-caps font-bold border-b border-primary text-primary hover:border-transparent transition-all">DISMISS</button>
+</section>
+</div>
+</main>
+<script>
+        // Micro-interactions and state handling
+        document.querySelectorAll('.segmented-control input').forEach(input => {
+            input.addEventListener('change', (e) => {
+                // Here logic for handling mode change would go
+                console.log(`Mode changed for ${e.target.name}: ${e.target.id}`);
+            });
+        });
+
+        // Kill Switch Interaction
+        const killSwitch = document.querySelector('button:contains("KILL SWITCH")') || document.querySelector('.bg-error');
+        if(killSwitch) {
+            killSwitch.addEventListener('click', () => {
+                if(confirm("CONFIRM GLOBAL EMERGENCY HALT: This will close all open positions and disable all execution bots across ALL chains immediately.")) {
+                    document.body.classList.add('grayscale');
+                    setTimeout(() => {
+                        alert("GLOBAL HALT EXECUTED. SYSTEM ENTERED EMERGENCY STATE.");
+                    }, 100);
+                }
+            });
+        }
+    </script>
+</body></html>
