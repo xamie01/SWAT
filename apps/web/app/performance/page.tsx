@@ -3,7 +3,7 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = process.env.API_KEY ?? 'swat-dev-key';
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 async function apiFetch(path: string) {
   try {
@@ -90,11 +90,13 @@ export default async function PerformancePage() {
                 </thead>
                 <tbody>
                   {positions.map((pos: any, idx: number) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    <tr key={`${pos.token_mint || 'unknown'}-${idx}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                       <td style={{ padding: '0.75rem 0.5rem', fontFamily: 'monospace' }}>
-                        <a href={`https://dexscreener.com/solana/${pos.token_mint}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                          {pos.token_mint}
-                        </a>
+                        {pos.token_mint ? (
+                          <a href={`https://dexscreener.com/${pos.token_mint.includes(':') ? pos.token_mint.split(':')[0] : 'solana'}/${pos.token_mint.includes(':') ? pos.token_mint.split(':')[1] : pos.token_mint}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                            {pos.token_mint.includes(':') ? pos.token_mint.split(':')[1] : pos.token_mint}
+                          </a>
+                        ) : 'N/A'}
                       </td>
                       <td style={{ padding: '0.75rem 0.5rem', fontWeight: 600 }}>{parseFloat(pos.total_sol).toFixed(3)} SOL</td>
                       <td style={{ padding: '0.75rem 0.5rem' }}>${parseFloat(pos.total_usd || 0).toFixed(2)}</td>
@@ -144,9 +146,11 @@ export default async function PerformancePage() {
                         {new Date(trade.executed_at).toLocaleTimeString()}
                       </td>
                       <td style={{ padding: '0.75rem 0.5rem', fontFamily: 'monospace' }}>
-                        <a href={`https://dexscreener.com/solana/${trade.token_mint}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                          {trade.token_mint.slice(0, 8)}...
-                        </a>
+                        {trade.token_mint ? (
+                          <a href={`https://dexscreener.com/${trade.token_mint.includes(':') ? trade.token_mint.split(':')[0] : 'solana'}/${trade.token_mint.includes(':') ? trade.token_mint.split(':')[1] : trade.token_mint}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                            {(trade.token_mint.includes(':') ? trade.token_mint.split(':')[1] : trade.token_mint).slice(0, 8)}...
+                          </a>
+                        ) : 'N/A'}
                       </td>
                       <td style={{ padding: '0.75rem 0.5rem' }}>
                         <span className={`badge ${trade.direction === 'buy' ? 'success' : 'danger'}`}>

@@ -1,67 +1,86 @@
 /**
  * SWAT Wallet Ingestion Tool
- * 
- * Reads the generated `wallet-starter-pack.json` from the project root,
- * upserts the wallets into the PostgreSQL database, and enqueues them
- * for on-chain indexing via BullMQ.
- * 
+ *
+ * Reads the generated `wallet-starter-pack.json` from the repository root,
+ * validates the chain-aware input, upserts the wallets, and enqueues them for
+ * on-chain indexing via BullMQ.
+ *
  * Run: npx tsx --env-file=../../.env _ingest_wallets.ts
  */
-import { upsertWallet } from '@swat/db';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
-import * as fs from 'fs';
-import * as path from 'path';
+import { readFile } from 'node:fs/promises';
+import { upsertWallet } from '@swat/db';
+import {
+  createWalletBackfillJob,
+  QUEUES
+} from '@swat/shared';
+import {
+  parseStarterPackWallets,
+  parseWalletChain,
+  resolveStarterPackPath
+} from './src/starter-pack.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const backfillQueue = new Queue('swat-backfill-wallet', { connection });
-const walletChain = (process.env.WALLET_CHAIN as 'solana' | 'polygon' | 'robinhood-chain' | undefined) ?? 'solana';
+const backfillQueue = new Queue(QUEUES.walletBackfill, { connection });
 
 async function run() {
-  // Look for starter pack in the project root (two levels up from apps/scorer)
-  const jsonPath = path.resolve(process.cwd(), '../../wallet-starter-pack.json');
-  
-  if (!fs.existsSync(jsonPath)) {
-    console.error(`\n❌ ERROR: ${jsonPath} not found.`);
-    console.error('Please run the discoverer first to generate it:');
-    console.error('npx tsx --env-file=.env discover-starter-pack.ts\n');
-    process.exit(1);
+  const walletChain = parseWalletChain(process.env.WALLET_CHAIN);
+  const jsonPath = resolveStarterPackPath(
+    import.meta.url,
+    process.env.STARTER_PACK_PATH
+  );
+
+  let wallets;
+  try {
+    wallets = parseStarterPackWallets(
+      await readFile(jsonPath, 'utf8'),
+      walletChain
+    );
+  } catch (error) {
+    throw new Error(
+      `Unable to load starter pack at ${jsonPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 
-  const wallets = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as string[];
   console.log(`Starting ingestion of ${wallets.length} wallets from ${jsonPath}...`);
-  
+
   let inserted = 0;
-  for (const address of wallets) {
+  for (const wallet of wallets) {
     try {
       await upsertWallet({
-        address,
-        chain: walletChain,
+        address: wallet.address,
+        chain: wallet.chain,
         source: 'discovered'
       });
-      
-      // Enqueue a backfill job
-      await backfillQueue.add(
-        'backfill-wallet',
-        { address, chain: walletChain },
-        { 
-          jobId: `backfill-${walletChain}-${address}`, 
-          removeOnComplete: true, 
-          removeOnFail: 1000 
-        }
-      );
-      
-      console.log(`  Processed & enqueued: ${address}`);
+
+      const job = createWalletBackfillJob(wallet.address, wallet.chain);
+      await backfillQueue.add(job.name, job.data, job.options);
+
+      console.log(`  Processed & enqueued: ${wallet.chain}:${wallet.address}`);
       inserted++;
-    } catch (e: any) {
-      console.error(`  Failed to process ${address}:`, e.message);
+    } catch (error) {
+      console.error(
+        `  Failed to process ${wallet.chain}:${wallet.address}:`,
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 
-  console.log(`\nSuccessfully ingested and enqueued ${inserted}/${wallets.length} wallets for indexing.`);
-  await connection.quit();
-  process.exit(0);
+  console.log(
+    `\nSuccessfully ingested and enqueued ${inserted}/${wallets.length} wallets for indexing.`
+  );
 }
 
-run().catch(console.error);
+run()
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await backfillQueue.close();
+    await connection.quit();
+  });

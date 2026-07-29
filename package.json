@@ -7,8 +7,11 @@
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && pnpm typecheck:tools",
+    "typecheck:tools": "tsc -p tsconfig.tools.json",
     "db:migrate": "pnpm --filter @swat/db migrate",
+    "acceptance:g0-d11": "pnpm --filter @swat/indexer acceptance:g0-d11",
+    "acceptance:polymarket-context": "pnpm --filter @swat/indexer acceptance:polymarket-context",
     "dev:api": "pnpm --filter @swat/api dev",
     "dev:indexer": "pnpm --filter @swat/indexer dev",
     "dev:signals": "pnpm --filter @swat/signal-engine dev",
@@ -17,10 +20,13 @@
     "dev:trade": "pnpm --filter @swat/trade-executor dev",
     "dev:scorer": "pnpm --filter @swat/scorer dev",
     "dev:discovery": "pnpm --filter @swat/discovery dev",
-    "dev:mcp": "pnpm --filter @swat/mcp-server dev"
+    "dev:mcp": "pnpm --filter @swat/mcp-server dev",
+    "test:integration": "vitest run -c vitest.integration.config.ts"
   },
   "devDependencies": {
+    "@swat/shared": "workspace:*",
     "@types/node": "^22.15.17",
+    "dotenv": "^17.4.2",
     "tsx": "^4.19.3",
     "turbo": "^2.5.0",
     "typescript": "^5.8.3",

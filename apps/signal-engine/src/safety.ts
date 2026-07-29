@@ -1,6 +1,13 @@
 import { createPublicClient, http } from 'viem';
 import { polygon } from 'viem/chains';
 import { query } from '@swat/db';
+import {
+  fetchDexScreenerLiquidity,
+  getChainPrefix,
+  prefixChainValue,
+  stripChainPrefix
+} from '@swat/shared';
+import type { Chain } from '@swat/shared';
 
 export type SafetyResult = {
   isSafe: boolean;
@@ -29,7 +36,7 @@ const robinhoodChain = {
 
 function getPublicClient(chain: string) {
   if (chain === 'polygon') {
-    const url = process.env.POLYGON_RPC_URL ?? 'https://polygon-rpc.com';
+    const url = process.env.POLYGON_RPC_URL ?? 'https://polygon-bor-rpc.publicnode.com';
     return createPublicClient({ chain: polygon, transport: http(url) });
   } else if (chain === 'robinhood-chain') {
     const url = process.env.ROBINHOOD_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com';
@@ -84,44 +91,46 @@ async function getMintInfoFromChain(tokenMint: string): Promise<MintInfo | null>
 async function getTop10HolderPct(tokenMint: string): Promise<number | null> {
   if (!heliusRpcUrl) return null;
   try {
-    const response = await fetch(heliusRpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'getTopHolders',
-        method: 'getTokenLargestAccounts',
-        params: [tokenMint, { commitment: 'finalized' }]
+    const [accountsResponse, supplyResponse] = await Promise.all([
+      fetch(heliusRpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'getTopHolders',
+          method: 'getTokenLargestAccounts',
+          params: [tokenMint, { commitment: 'finalized' }]
+        })
+      }),
+      fetch(heliusRpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'getTokenSupply',
+          method: 'getTokenSupply',
+          params: [tokenMint, { commitment: 'finalized' }]
+        })
       })
-    });
-    if (!response.ok) return null;
-    const json = await response.json() as any;
-    const accounts = json.result?.value as Array<{ uiAmount: number }> | undefined;
-    if (!accounts || accounts.length === 0) return null;
+    ]);
+    if (!accountsResponse.ok || !supplyResponse.ok) return null;
 
-    const total = accounts.reduce((sum, a) => sum + (a.uiAmount ?? 0), 0);
-    if (total === 0) return null;
-    const top10 = accounts.slice(0, 10).reduce((sum, a) => sum + (a.uiAmount ?? 0), 0);
-    return Math.round((top10 / total) * 100);
+    const accountsJson = await accountsResponse.json() as any;
+    const supplyJson = await supplyResponse.json() as any;
+    const accounts = accountsJson.result?.value as Array<{ amount?: string }> | undefined;
+    const supplyAmount = supplyJson.result?.value?.amount;
+    if (!accounts || accounts.length === 0) return null;
+    if (typeof supplyAmount !== 'string') return null;
+
+    const totalSupply = BigInt(supplyAmount);
+    if (totalSupply <= 0n) return null;
+    const top10 = accounts.slice(0, 10).reduce(
+      (sum, account) => sum + BigInt(account.amount ?? '0'),
+      0n
+    );
+    return Number((top10 * 10_000n) / totalSupply) / 100;
   } catch (e) {
     console.error('[safety] getTopHolderPct error:', e);
-    return null;
-  }
-}
-
-// ─── DexScreener Liquidity (Cross-chain) ──────────────────────────────────────
-
-async function getDexScreenerLiquidity(tokenMint: string): Promise<number | null> {
-  try {
-    const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`);
-    if (!response.ok) return null;
-    const data = await response.json() as any;
-    const pairs = data.pairs || [];
-    if (pairs.length === 0) return null;
-    pairs.sort((a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-    return pairs[0]?.liquidity?.usd ?? null;
-  } catch (e) {
-    console.error('[safety] getDexScreenerLiquidity error:', e);
     return null;
   }
 }
@@ -147,22 +156,29 @@ export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult>
   const flags: string[] = [];
   const warnings: string[] = [];
 
-  // Determine token chain from DB
-  const tokenRows = await query<{ chain: string }>(`SELECT chain FROM tokens WHERE mint = $1`, [tokenMint]);
-  const chain = tokenRows[0]?.chain ?? 'solana';
+  const prefixChain = getChainPrefix(tokenMint);
+  const tokenRows = prefixChain
+    ? []
+    : await query<{ chain: Chain }>(
+        `SELECT chain FROM tokens WHERE mint LIKE '%:' || $1 LIMIT 1`,
+        [stripChainPrefix(tokenMint)]
+      );
+  const chain: Chain = prefixChain ?? tokenRows[0]?.chain ?? 'solana';
+  const storedMint = prefixChainValue(tokenMint, chain);
+  const rawMint = stripChainPrefix(storedMint);
 
   let top10Pct: number | null = null;
   let liquidity: number | null = null;
 
   if (chain === 'solana') {
     // ─── SOLANA SAFETY FLOW ───────────────────
-    const mintInfo = await getMintInfoFromChain(tokenMint);
+    const mintInfo = await getMintInfoFromChain(rawMint);
 
     if (!mintInfo) {
       // Helius not configured — fall back to DB values and warn
       const rows = await query<{ mint_authority_disabled: boolean; freeze_authority_disabled: boolean }>(
         `SELECT mint_authority_disabled, freeze_authority_disabled FROM tokens WHERE mint = $1`,
-        [tokenMint]
+        [storedMint]
       );
       const token = rows[0];
       if (!token) {
@@ -201,13 +217,13 @@ export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult>
           mintInfo.mintAuthority === null,
           mintInfo.freezeAuthority === null,
           mintInfo.decimals,
-          tokenMint
+          storedMint
         ]
       );
     }
 
     // Top holder concentration check (Solana largest accounts via Helius)
-    top10Pct = await getTop10HolderPct(tokenMint);
+    top10Pct = await getTop10HolderPct(rawMint);
     if (top10Pct !== null) {
       if (top10Pct > 60) {
         flags.push(`TOP_10_HOLD_${top10Pct}PCT`);
@@ -220,7 +236,7 @@ export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult>
     // ─── EVM / EVM L2 SAFETY FLOW ───────────────
     try {
       const client = getPublicClient(chain);
-      const owner = await getEvmContractOwner(client, tokenMint as `0x${string}`);
+      const owner = await getEvmContractOwner(client, rawMint as `0x${string}`);
 
       if (owner !== null) {
         const isRenounced = owner === '0x0000000000000000000000000000000000000000';
@@ -234,7 +250,7 @@ export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult>
              mint_authority_disabled = $1,
              freeze_authority_disabled = true
            WHERE mint = $2`,
-          [isRenounced, tokenMint]
+          [isRenounced, storedMint]
         );
       } else {
         warnings.push('CONTRACT_OWNER_UNVERIFIED');
@@ -246,7 +262,7 @@ export async function checkTokenSafety(tokenMint: string): Promise<SafetyResult>
   }
 
   // DexScreener liquidity check (works for all chains)
-  liquidity = await getDexScreenerLiquidity(tokenMint);
+  liquidity = await fetchDexScreenerLiquidity(rawMint, chain);
   if (liquidity !== null && liquidity < 25_000) {
     flags.push(`LOW_LIQUIDITY_${Math.round(liquidity / 1000)}K`);
   } else if (liquidity === null) {

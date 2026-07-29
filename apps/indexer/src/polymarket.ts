@@ -1,140 +1,146 @@
 import {
-  insertParsedTransaction,
-  upsertToken,
-  refreshWalletActivity,
   getPolymarketMarket,
-  upsertPolymarketMarket,
-  insertPolymarketMarketSkeleton,
-  linkTokenToPolymarketMarket,
-  getTokensByPolymarketCondition
+  getPolymarketOutcomeContext,
+  insertParsedTransaction,
+  query,
+  recordConfirmedPolymarketTrade,
+  refreshWalletActivity,
+  upsertPolymarketContext,
+  upsertToken,
+  upsertWallet
 } from '@swat/db';
 import { Redis } from 'ioredis';
-import { REDIS_CHANNELS } from '@swat/shared';
+import { REDIS_CHANNELS, stripChainPrefix } from '@swat/shared';
+import {
+  IngestionBatchError,
+  type IngestionBatchResult
+} from './ingestion-health.js';
+import {
+  parseConfirmedPolymarketTrade,
+  parsePolymarketMarketContext,
+  type ConfirmedPolymarketTrade
+} from './polymarket-helpers.js';
+import {
+  persistPolymarketSourceTrade,
+  SourceTradePersistenceError
+} from './source-trade-lifecycle.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-
-type PolymarketTradeActivity = {
-  proxyWallet: string;
-  timestamp: string;
-  type: 'TRADE' | string;
-  conditionId: string;
-  size: number; // Number of outcome tokens
-  usdcSize: number; // USD value
-  price: number; // Price per share (0-1)
-  side: 'BUY' | 'SELL';
-  transactionHash: string;
-  outcome: string; // "Yes" or "No" (or others)
-  title: string; // Market question title
-  asset?: string; // clobTokenId
-};
-
-type GammaMarket = {
-  id: string;
-  question: string;
-  slug: string;
-  endDate: string;
-  resolutionSource: string;
-  outcomes: string[];
-  clobTokenIds: string[];
-  active: boolean;
-  closed: boolean;
-};
-
-// Collateral token for Polymarket (pUSD / USDC)
 const POLYMARKET_USDC = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+let redis: Redis | null = null;
 
-async function fetchGammaMarket(conditionId: string): Promise<GammaMarket | null> {
-  try {
-    const response = await fetch(`https://gamma-api.polymarket.com/markets?condition_id=${conditionId}`);
-    if (!response.ok) return null;
-    const list = await response.json() as GammaMarket[];
-    if (!list || list.length === 0) return null;
-    return list[0];
-  } catch (e) {
-    console.error(`[polymarket] failed to fetch Gamma market for ${conditionId}:`, e);
-    return null;
-  }
+type FetchImplementation = typeof fetch;
+
+export type PolymarketBackfillDependencies = {
+  fetchImpl?: FetchImplementation;
+  publish?: (channel: string, message: string) => Promise<unknown>;
+};
+
+function getRedis(): Redis {
+  redis ??= new Redis(redisUrl, { maxRetriesPerRequest: null });
+  return redis;
 }
 
-async function ensurePolymarketMarketAndTokens(conditionId: string, tradeOutcome: string, tradeTitle: string): Promise<string> {
-  // Check cache first
-  const cached = await getPolymarketMarket(conditionId);
-
-  let clobTokenId = '';
-
-  if (!cached) {
-    // Fetch market metadata from Gamma API
-    const market = await fetchGammaMarket(conditionId);
-
-    if (market) {
-      // Save market definition
-      await upsertPolymarketMarket({
-        conditionId,
-        question: market.question,
-        slug: market.slug,
-        endDate: market.endDate ? new Date(market.endDate) : null,
-        resolutionSource: market.resolutionSource ?? null,
-        outcomeCount: market.outcomes.length,
-        clobTokenIds: market.clobTokenIds,
-        status: market.closed ? 'closed' : 'active'
-      });
-
-      // Create tokens for outcomes
-      for (let i = 0; i < market.outcomes.length; i++) {
-        const outcomeName = market.outcomes[i];
-        const tokenId = market.clobTokenIds[i];
-
-        if (tokenId) {
-          // Pre-register token record
-          await upsertToken(tokenId, {
-            chain: 'polygon',
-            decimals: 6,
-            symbol: outcomeName.toUpperCase().slice(0, 10),
-            name: `${market.question} (${outcomeName})`
-          });
-
-          // Update parent link
-          await linkTokenToPolymarketMarket(conditionId, tokenId);
-
-          if (outcomeName.toLowerCase() === tradeOutcome.toLowerCase()) {
-            clobTokenId = tokenId;
-          }
-        }
-      }
-    } else {
-      // Fallback: insert minimum skeleton
-      await insertPolymarketMarketSkeleton(conditionId, tradeTitle);
-    }
+async function fetchGammaMarket(
+  conditionId: string,
+  fetchImpl: FetchImplementation
+): Promise<Record<string, unknown>> {
+  const response = await fetchImpl(
+    `https://gamma-api.polymarket.com/markets?condition_id=${encodeURIComponent(conditionId)}`
+  );
+  if (!response.ok) {
+    throw new Error(`Polymarket Gamma API returned status ${response.status}`);
   }
-
-  // If clobTokenId not found from Gamma, query tokens matching the conditionId
-  if (!clobTokenId) {
-    const tokens = await getTokensByPolymarketCondition(conditionId);
-    const matched = tokens.find(t => t.symbol.toLowerCase() === tradeOutcome.toLowerCase());
-    if (matched) {
-      clobTokenId = matched.mint.includes(':') ? matched.mint.split(':')[1] : matched.mint;
-    } else {
-      // Create a fallback tokenId derived from conditionId
-      clobTokenId = `${conditionId}-${tradeOutcome.toLowerCase()}`;
-      await upsertToken(clobTokenId, {
-        chain: 'polygon',
-        decimals: 6,
-        symbol: tradeOutcome.toUpperCase().slice(0, 10),
-        name: `${tradeTitle} (${tradeOutcome})`
-      });
-      await linkTokenToPolymarketMarket(conditionId, clobTokenId);
-    }
+  const payload = await response.json() as unknown;
+  if (!Array.isArray(payload) || !payload[0] || typeof payload[0] !== 'object') {
+    throw new Error(`Polymarket market context not found for ${conditionId}`);
   }
-
-  return clobTokenId;
+  return payload[0] as Record<string, unknown>;
 }
 
-export async function backfillPolymarketWallet(address: string) {
-  const cleanAddr = address.includes(':') ? address.split(':')[1] : address;
-  console.log(`[polymarket] Backfilling wallet ${cleanAddr}`);
+async function fetchTickSize(asset: string, fetchImpl: FetchImplementation): Promise<unknown> {
+  const response = await fetchImpl(
+    `https://clob.polymarket.com/tick-size?token_id=${encodeURIComponent(asset)}`
+  );
+  if (!response.ok) {
+    throw new Error(`Polymarket CLOB tick-size endpoint returned status ${response.status}`);
+  }
+  const payload = await response.json() as Record<string, unknown>;
+  return payload.minimum_tick_size ?? payload.minimumTickSize;
+}
 
-  // Ensure collateral token exists
+async function ensurePolymarketContext(
+  trade: ConfirmedPolymarketTrade,
+  fetchImpl: FetchImplementation
+) {
+  const cached = await getPolymarketOutcomeContext(trade.asset);
+  if (cached) {
+    if (
+      cached.conditionId !== trade.conditionId
+      || cached.outcome.toLowerCase() !== trade.outcome.toLowerCase()
+    ) {
+      throw new Error(`Cached Polymarket outcome mapping conflicts with trade ${trade.transactionHash}`);
+    }
+    return cached;
+  }
+
+  const rawMarket = await fetchGammaMarket(trade.conditionId, fetchImpl);
+  const hasTickSize = rawMarket.orderPriceMinTickSize !== undefined
+    || rawMarket.minimumTickSize !== undefined;
+  const fallbackTickSize = hasTickSize ? undefined : await fetchTickSize(trade.asset, fetchImpl);
+  const market = parsePolymarketMarketContext(rawMarket, trade.conditionId, fallbackTickSize);
+  const tradedOutcome = market.outcomes.find((outcome) => outcome.tokenId === trade.asset);
+  if (!tradedOutcome) {
+    throw new Error(`Trade asset ${trade.asset} is not mapped by market ${trade.conditionId}`);
+  }
+  if (tradedOutcome.outcome.toLowerCase() !== trade.outcome.toLowerCase()) {
+    throw new Error(`Trade outcome does not match asset ${trade.asset}`);
+  }
+
+  await upsertPolymarketContext({
+    conditionId: market.conditionId,
+    question: market.question,
+    slug: market.slug,
+    endDate: market.endDate,
+    resolutionSource: market.resolutionSource,
+    outcomeCount: market.outcomes.length,
+    clobTokenIds: market.outcomes.map((outcome) => outcome.tokenId),
+    status: market.status,
+    tickSize: market.tickSize,
+    negRisk: market.negRisk,
+    acceptingOrders: market.acceptingOrders,
+    resolutionStatus: market.resolutionStatus,
+    outcomes: market.outcomes
+  });
+
+  const persisted = await getPolymarketOutcomeContext(trade.asset);
+  if (!persisted) {
+    throw new Error(`Polymarket context was not persisted for asset ${trade.asset}`);
+  }
+  return persisted;
+}
+
+function toSixDecimalUnits(value: number, field: string): string {
+  const units = Math.round(value * 1_000_000);
+  if (!Number.isSafeInteger(units) || units < 0) {
+    throw new Error(`Invalid ${field} amount for 6-decimal persistence`);
+  }
+  return String(units);
+}
+
+export async function backfillPolymarketWallet(
+  address: string,
+  dependencies: PolymarketBackfillDependencies = {}
+): Promise<IngestionBatchResult> {
+  const cleanAddr = stripChainPrefix(address).trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(cleanAddr)) {
+    throw new Error(`Invalid Polygon wallet for Polymarket backfill: ${address}`);
+  }
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const publish = dependencies.publish
+    ?? ((channel: string, message: string) => getRedis().publish(channel, message));
+  console.log(`[polymarket] Backfilling confirmed trades for ${cleanAddr}`);
+
   await upsertToken(POLYMARKET_USDC, {
     chain: 'polygon',
     decimals: 6,
@@ -142,91 +148,208 @@ export async function backfillPolymarketWallet(address: string) {
     name: 'USD Coin'
   });
 
-  let processed = 0;
-  let newTrades = 0;
-  let latestTimestamp: Date | null = null;
+  let inserted = 0;
+  let skipped = 0;
+  let failed = 0;
+  let lastEventAt: Date | null = null;
+  let sourceTradeFailure: SourceTradePersistenceError | null = null;
   let offset = 0;
   const limit = 100;
+  const rawTrades: unknown[] = [];
 
-  try {
-    while (true) {
-      const response = await fetch(`https://data-api.polymarket.com/activity?user=${cleanAddr}&limit=${limit}&offset=${offset}`);
-      if (!response.ok) {
-        throw new Error(`Polymarket Data API returned status ${response.status}`);
-      }
+  while (true) {
+    const response = await fetchImpl(
+      `https://data-api.polymarket.com/trades?user=${encodeURIComponent(cleanAddr)}&limit=${limit}&offset=${offset}`
+    );
+    if (!response.ok) {
+      throw new Error(`Polymarket Data API returned status ${response.status}`);
+    }
+    const page = await response.json() as unknown;
+    if (!Array.isArray(page)) throw new Error('Polymarket Data API returned a non-array trade page');
+    if (page.length === 0) break;
+    console.log(`[polymarket] Fetched ${page.length} confirmed trades (offset: ${offset}) for ${cleanAddr}`);
+    rawTrades.push(...page);
+    if (page.length < limit) break;
+    offset += limit;
+  }
 
-      const activities = await response.json() as PolymarketTradeActivity[];
-      if (activities.length === 0) {
-        break;
-      }
+  const proxyActivity = new Map<string, { inserted: number; latestTimestamp: Date }>();
 
-      console.log(`[polymarket] Fetched ${activities.length} activities (offset: ${offset}) for ${cleanAddr}`);
-
-      for (const act of activities) {
-        if (act.type !== 'TRADE' && act.type !== 'REDEEM') continue;
-        if (!act.conditionId) continue;
-
-        const clobTokenId = await ensurePolymarketMarketAndTokens(act.conditionId, act.outcome, act.title);
-
-        const timestamp = new Date(act.timestamp);
-        const blockTime = Math.floor(timestamp.getTime() / 1000);
-
-        // Value of USDC transacted
-        const usdVal = Number(act.usdcSize);
-        const side = act.type === 'REDEEM' ? 'SELL' : act.side;
-        
-        const insertPayload = {
-          chain: 'polygon' as const,
-          signature: act.transactionHash,
-          walletAddress: cleanAddr,
-          tokenIn: side === 'BUY' ? POLYMARKET_USDC : clobTokenId,
-          tokenOut: side === 'BUY' ? clobTokenId : POLYMARKET_USDC,
-          amountIn: side === 'BUY' ? String(Math.round(usdVal * 1e6)) : String(Math.round(act.size * 1e6)),
-          amountOut: side === 'BUY' ? String(Math.round(act.size * 1e6)) : String(Math.round(usdVal * 1e6)),
-          amountInUsd: usdVal,
-          amountOutUsd: usdVal,
-          direction: side === 'BUY' ? ('buy' as const) : ('sell' as const),
-          targetToken: clobTokenId,
-          programId: 'polymarket',
-          slot: null,
-          timestamp,
-          blockTime
-        };
-
-        const inserted = await insertParsedTransaction(insertPayload);
-        processed++;
-        if (inserted) {
-          newTrades++;
-          if (!latestTimestamp || timestamp > latestTimestamp) {
-            latestTimestamp = timestamp;
-          }
-          
-          // Notify signal-engine of swap
-          await redis.publish(
-            REDIS_CHANNELS.walletSwap,
-            JSON.stringify({
-              chain: 'polygon',
-              walletAddress: `polygon:${cleanAddr}`,
-              signature: act.transactionHash,
-              tokenMint: `polygon:${clobTokenId}`,
-              direction: side === 'BUY' ? 'buy' : 'sell',
-              amountUsd: usdVal,
-              timestamp: timestamp.toISOString()
-            })
-          );
-        }
-      }
-
-      if (activities.length < limit) {
-        break;
-      }
-      offset += limit;
+  for (const rawTrade of rawTrades) {
+    let trade: ConfirmedPolymarketTrade;
+    try {
+      trade = parseConfirmedPolymarketTrade(rawTrade);
+    } catch (error) {
+      failed++;
+      console.warn('[polymarket] rejected invalid confirmed trade:', error);
+      continue;
     }
 
-    await refreshWalletActivity(`polygon:${cleanAddr}`, latestTimestamp, newTrades);
-    return { processed, newTrades };
-  } catch (err: any) {
-    console.error(`[polymarket] backfill failed for ${cleanAddr}:`, err);
-    throw err;
+    if (!lastEventAt || trade.timestamp > lastEventAt) lastEventAt = trade.timestamp;
+
+    try {
+      const context = await ensurePolymarketContext(trade, fetchImpl);
+      await upsertWallet({
+        address: trade.proxyWallet,
+        chain: 'polygon',
+        source: 'discovered',
+        discoveryMethod: 'polymarket-proxy'
+      });
+      await recordConfirmedPolymarketTrade({
+        transactionHash: trade.transactionHash,
+        proxyWallet: trade.proxyWallet,
+        asset: trade.asset,
+        conditionId: trade.conditionId,
+        side: trade.side,
+        size: trade.size,
+        price: trade.price,
+        timestamp: trade.timestamp
+      });
+
+      const usdValue = trade.size * trade.price;
+      const outcomeUnits = toSixDecimalUnits(trade.size, 'Polymarket outcome');
+      const collateralUnits = toSixDecimalUnits(usdValue, 'Polymarket collateral');
+      const persisted = await insertParsedTransaction({
+        chain: 'polygon',
+        signature: trade.transactionHash,
+        walletAddress: trade.proxyWallet,
+        tokenIn: trade.side === 'BUY' ? POLYMARKET_USDC : trade.asset,
+        tokenOut: trade.side === 'BUY' ? trade.asset : POLYMARKET_USDC,
+        amountIn: trade.side === 'BUY' ? collateralUnits : outcomeUnits,
+        amountOut: trade.side === 'BUY' ? outcomeUnits : collateralUnits,
+        amountInUsd: usdValue,
+        amountOutUsd: usdValue,
+        direction: trade.side === 'BUY' ? 'buy' : 'sell',
+        targetToken: trade.asset,
+        programId: 'polymarket-data-api',
+        slot: null,
+        timestamp: trade.timestamp,
+        blockTime: Math.floor(trade.timestamp.getTime() / 1000)
+      });
+      const sourceTrade = await persistPolymarketSourceTrade({
+        trade,
+        quantity: outcomeUnits,
+        amountUsd: usdValue
+      });
+
+      const activity = proxyActivity.get(trade.proxyWallet);
+      if (!activity || trade.timestamp > activity.latestTimestamp) {
+        proxyActivity.set(trade.proxyWallet, {
+          inserted: (activity?.inserted ?? 0) + (persisted ? 1 : 0),
+          latestTimestamp: trade.timestamp
+        });
+      } else if (persisted) {
+        activity.inserted++;
+      }
+
+      if (!persisted) {
+        skipped++;
+        continue;
+      }
+      inserted++;
+      await publish(
+        REDIS_CHANNELS.walletSwap,
+        JSON.stringify({
+          chain: 'polygon',
+          walletAddress: `polygon:${trade.proxyWallet}`,
+          signature: trade.transactionHash,
+          sourceTradeId: sourceTrade.event.id,
+          tokenMint: context.tokenId,
+          direction: trade.side === 'BUY' ? 'buy' : 'sell',
+          amountUsd: usdValue,
+          timestamp: trade.timestamp.toISOString(),
+          conditionId: context.conditionId,
+          marketQuestion: context.question,
+          outcome: context.outcome,
+          marketState: context.marketStatus,
+          endDate: context.endDate.toISOString()
+        })
+      );
+    } catch (error) {
+      failed++;
+      if (error instanceof SourceTradePersistenceError) {
+        sourceTradeFailure ??= error;
+      }
+      console.warn(
+        `[polymarket] failed to process confirmed trade ${trade.transactionHash}:`,
+        error
+      );
+    }
+  }
+
+  const result = {
+    fetched: rawTrades.length,
+    inserted,
+    skipped,
+    failed,
+    lastEventAt
+  };
+
+  try {
+    for (const [proxyWallet, activity] of proxyActivity) {
+      await refreshWalletActivity(
+        `polygon:${proxyWallet}`,
+        activity.latestTimestamp,
+        activity.inserted
+      );
+    }
+  } catch (error) {
+    throw new IngestionBatchError(
+      `Failed to refresh Polymarket proxy wallet activity for ${cleanAddr}`,
+      { ...result, failed: result.failed + 1 },
+      { cause: error }
+    );
+  }
+
+  if (sourceTradeFailure) {
+    throw new IngestionBatchError(
+      `Canonical Polymarket source-trade persistence failed for ${cleanAddr}`,
+      result,
+      { cause: sourceTradeFailure }
+    );
+  }
+
+  return result;
+}
+
+function parseOutcomePrices(value: unknown): number[] {
+  let parsed = value;
+  if (typeof value === 'string') parsed = JSON.parse(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(Number).filter(Number.isFinite);
+}
+
+export async function pollPolymarketResolutions() {
+  console.log('[polymarket] Polling for market resolutions...');
+  const activeMarkets = await query<{ condition_id: string }>(
+    `SELECT condition_id FROM polymarket_markets WHERE status = 'active' AND context_complete = TRUE`
+  );
+
+  for (const { condition_id } of activeMarkets) {
+    try {
+      const cached = await getPolymarketMarket(condition_id);
+      const rawMarket = await fetchGammaMarket(condition_id, fetch);
+      if (rawMarket.closed === true) {
+        const market = parsePolymarketMarketContext(rawMarket, condition_id, cached?.tick_size);
+        const prices = parseOutcomePrices(rawMarket.outcomePrices);
+        const winningIndex = prices.findIndex((price) => price >= 0.99);
+        const winningTokenId = winningIndex >= 0
+          ? `polygon:${market.outcomes[winningIndex]?.tokenId}`
+          : null;
+        await query(
+          `UPDATE polymarket_markets
+              SET status = 'closed',
+                  accepting_orders = FALSE,
+                  resolution_status = $1,
+                  winning_token_id = $2,
+                  updated_at = NOW()
+            WHERE condition_id = $3`,
+          [market.resolutionStatus, winningTokenId, condition_id]
+        );
+        console.log(`[polymarket] Market ${condition_id} closed; winning token: ${winningTokenId}`);
+      }
+    } catch (error) {
+      console.error(`[polymarket] failed to poll resolution for ${condition_id}`, error);
+    }
   }
 }

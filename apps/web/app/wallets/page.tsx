@@ -26,6 +26,7 @@ export default function WalletsPage() {
 
   const fetchWallets = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await fetch(`${API_BASE}/v1/wallets`, {
         headers: { 'X-Api-Key': API_KEY }
@@ -373,16 +374,16 @@ export default function WalletsPage() {
                       }`} style={{ marginRight: '0.5rem' }}>
                         {wallet.tier || 'unscored'}
                       </span>
-                      {wallet.wallet_score != null && (
+                      {wallet.composite_score != null && (
                         <span className="badge" style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
-                          Score: {wallet.wallet_score}
+                          Score: {wallet.composite_score}
                         </span>
                       )}
                     </div>
                     <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                       {wallet.win_rate != null && `Win Rate: ${(wallet.win_rate * 100).toFixed(1)}% · `}
-                      {wallet.total_roi != null && `ROI: ${(wallet.total_roi * 100).toFixed(0)}%`}
-                      {wallet.last_active && ` · Last active: ${new Date(wallet.last_active).toLocaleDateString()}`}
+                      {wallet.realized_roi != null && `ROI: ${(wallet.realized_roi * 100).toFixed(0)}%`}
+                      {wallet.updated_at && ` · Last active: ${new Date(wallet.updated_at).toLocaleDateString()}`}
                     </div>
                   </div>
                   <div>

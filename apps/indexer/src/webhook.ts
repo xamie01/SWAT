@@ -1,110 +1,129 @@
 import Fastify from 'fastify';
-import fastifyRawBody from 'fastify-raw-body';
-import crypto from 'node:crypto';
-import { upsertWallet, refreshWalletActivity } from '@swat/db';
+import {
+  query,
+  recordIngestionBatch,
+  refreshWalletActivity
+} from '@swat/db';
+import { prefixChainValue } from '@swat/shared';
 import { processTransaction } from './index.js';
+import {
+  enhancedEventToTransaction,
+  getEnhancedWalletCandidates,
+  isRawHeliusTransaction,
+  verifyStaticAuthorization,
+  type EnhancedWebhookEvent
+} from './webhook-helpers.js';
 
 const webhookSecret = process.env.HELIUS_WEBHOOK_SECRET;
 const webhookPort = Number(process.env.WEBHOOK_PORT ?? 3002);
 
 if (!webhookSecret) {
   console.warn(
-    '[webhook] HELIUS_WEBHOOK_SECRET is not set — the /webhook/helius endpoint ' +
-    'will REJECT all requests (fail closed). Set the secret to enable real-time ingestion.'
+    '[webhook] HELIUS_WEBHOOK_SECRET is not set — the /webhook/helius endpoint will reject all requests.'
   );
 }
 
-const app = Fastify({ logger: true });
+export const app = Fastify({ logger: true });
 
-// Register raw body plugin — needed to access the unparsed body for HMAC verification
-await app.register(fastifyRawBody, {
-  field: 'rawBody',
-  global: false,       // Only attach to routes that opt in
-  encoding: false,     // Return Buffer, not string
-  runFirst: true       // Run before JSON parser
-});
-
-/**
- * Helius sends a SHA-256 HMAC in the 'Authorization' header.
- * Verify it to ensure the request is authentic.
- */
-function verifyHeliusSignature(rawBody: Buffer | undefined, authHeader: string | undefined): boolean {
-  // FAIL CLOSED: if no secret is configured we cannot authenticate the caller,
-  // so reject. (Previously this returned true — a forgotten env var turned the
-  // endpoint into an unauthenticated public write path.) Startup also guards
-  // against running without a secret unless explicitly allowed.
-  if (!webhookSecret) return false;
-  if (!authHeader || !rawBody) return false;
-  const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
-  try {
-    return crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
-  } catch {
-    // timingSafeEqual throws if lengths differ
-    return false;
-  }
+async function getTrackedWallets(candidates: string[]): Promise<string[]> {
+  const raw = [...new Set(candidates)].filter(Boolean);
+  if (raw.length === 0) return [];
+  const prefixed = raw.map((address) => prefixChainValue(address, 'solana'));
+  const rows = await query<{ address: string }>(
+    `SELECT address FROM wallets WHERE chain = 'solana' AND address = ANY($1::text[])`,
+    [prefixed]
+  );
+  return rows.map((row) => row.address.slice('solana:'.length));
 }
 
-/**
- * POST /webhook/helius
- * Receives enhanced transaction webhooks from Helius.
- * Parses them exactly like the backfill path, but in real-time.
- */
-app.post('/webhook/helius', {
-  config: { rawBody: true }
-}, async (req, reply) => {
-  const rawBody = (req as any).rawBody as Buffer | undefined;
-  const authHeader = req.headers['authorization'] as string | undefined;
-
-  if (!verifyHeliusSignature(rawBody, authHeader)) {
-    return reply.code(401).send({ error: 'Invalid signature' });
+app.post('/webhook/helius', async (req, reply) => {
+  const authHeader = req.headers.authorization as string | undefined;
+  if (!verifyStaticAuthorization(authHeader, webhookSecret)) {
+    return reply.code(401).send({ error: 'Invalid authorization' });
   }
 
-  const events = req.body as any[];
-  if (!Array.isArray(events) || events.length === 0) {
-    return reply.code(200).send({ processed: 0 });
-  }
-
+  const events = Array.isArray(req.body) ? req.body : [req.body];
   let processed = 0;
+  let skipped = 0;
   let failed = 0;
+  let lastEventAt: Date | null = null;
 
   for (const event of events) {
-    // Helius enhanced webhook format has accountData + instructions
-    // The wallet that triggered the webhook is the fee payer
-    const walletAddress: string = event.feePayer ?? event.accountData?.[0]?.account;
-    if (!walletAddress) continue;
-
-    // Isolate each event: one bad event must not abort the whole batch and force
-    // Helius to retry (and re-process) the events that already succeeded.
     try {
-      // Ensure wallet exists in DB (it should since we only subscribe to tracked wallets)
-      await upsertWallet({ address: walletAddress, source: 'manual' });
-
-      // Re-use the same tx processing logic as backfill
-      const result = await processTransaction(event, walletAddress);
-      if (result === 'inserted') {
-        processed++;
-        // Use the transaction's own block time (not now()) so retries/replays
-        // don't push last_active to wall-clock time; refreshWalletActivity keeps
-        // it monotonic.
-        const blockTime: number | undefined = event.blockTime ?? event.timestamp;
-        const lastActive = blockTime ? new Date(blockTime * 1000) : null;
-        await refreshWalletActivity(walletAddress, lastActive, 1);
+      const candidates = isRawHeliusTransaction(event)
+        ? (event.transaction?.message?.accountKeys ?? [])
+            .map((key) => typeof key === 'string' ? key : key.pubkey)
+            .filter((key): key is string => Boolean(key))
+        : getEnhancedWalletCandidates(event as EnhancedWebhookEvent);
+      const wallets = await getTrackedWallets(candidates);
+      if (wallets.length === 0) {
+        skipped++;
+        continue;
       }
-    } catch (err) {
+
+      for (const walletAddress of wallets) {
+        try {
+          const transaction = isRawHeliusTransaction(event)
+            ? event
+            : enhancedEventToTransaction(event as EnhancedWebhookEvent, walletAddress);
+          const blockTime = transaction.blockTime;
+          if (blockTime) {
+            const eventAt = new Date(blockTime * 1000);
+            if (!lastEventAt || eventAt > lastEventAt) lastEventAt = eventAt;
+          }
+
+          const result = await processTransaction(transaction, walletAddress, 'solana-webhook');
+          if (result === 'inserted') {
+            processed++;
+            await refreshWalletActivity(
+              prefixChainValue(walletAddress, 'solana'),
+              blockTime ? new Date(blockTime * 1000) : null,
+              1
+            );
+          } else {
+            skipped++;
+          }
+        } catch (error) {
+          failed++;
+          req.log.error(
+            { error, walletAddress },
+            '[webhook] tracked wallet processing failed'
+          );
+        }
+      }
+    } catch (error) {
       failed++;
-      req.log.error({ err, walletAddress }, '[webhook] event processing failed');
+      req.log.error({ error }, '[webhook] event processing failed');
     }
   }
 
-  // Always ack with 200 — we've durably handled what we could; failures are
-  // logged rather than triggering a full-batch retry.
-  return reply.code(200).send({ processed, failed });
+  await recordIngestionBatch({
+    chain: 'solana',
+    source: 'solana-webhook',
+    lastEventAt,
+    inserted: processed,
+    skipped,
+    failed,
+    errorMessage: failed > 0 ? `${failed} webhook item(s) failed` : null
+  });
+
+  if (failed > 0) {
+    return reply.code(503).send({
+      processed,
+      skipped,
+      failed,
+      error: 'Webhook batch requires retry'
+    });
+  }
+  return reply.code(200).send({ processed, skipped, failed });
 });
 
 app.get('/webhook/health', async () => ({ status: 'ok', service: 'indexer-webhook' }));
 
-app.listen({ host: '0.0.0.0', port: webhookPort }).then(() => {
-  console.log(`[indexer] Helius webhook listening on port ${webhookPort}`);
-}).catch((err) => {
-  console.error('[indexer] webhook server failed to start', err);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen({ host: '0.0.0.0', port: webhookPort }).then(() => {
+    console.log(`[indexer] Helius webhook listening on port ${webhookPort}`);
+  }).catch((error) => {
+    console.error('[indexer] webhook server failed to start', error);
+  });
+}

@@ -1,0 +1,190 @@
+import { describe, expect, it } from 'vitest';
+import {
+  parseCanonicalSolanaSwapEvent,
+  SOL_MINT,
+  USDC_MINT,
+  type HeliusParsedTransaction
+} from './parse.js';
+import {
+  enhancedEventToTransaction,
+  type EnhancedWebhookEvent
+} from './webhook-helpers.js';
+
+const WALLET = 'Wa11etAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+const TOKEN = 'Tokenyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy';
+const TOKEN_TWO = 'Tokenzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+const BLOCK_TIME = 1_752_000_000;
+const SLOT = 351_000_000;
+const FEE_LAMPORTS = 5_000;
+
+type SwapFixture = {
+  name: string;
+  signature: string;
+  nativeBalanceChange?: number;
+  tokenDeltas: Record<string, bigint>;
+  expected: {
+    direction: 'buy' | 'sell';
+    targetToken: string;
+    tokenIn: string;
+    tokenOut: string;
+    amountIn: string;
+    amountOut: string;
+  };
+};
+
+function toRawBackfillTransaction(fixture: SwapFixture): HeliusParsedTransaction {
+  const nativeBalanceChange = fixture.nativeBalanceChange ?? 0;
+  return {
+    slot: SLOT,
+    blockTime: BLOCK_TIME,
+    transaction: {
+      signatures: [fixture.signature],
+      message: { accountKeys: [WALLET] }
+    },
+    meta: {
+      fee: FEE_LAMPORTS,
+      preBalances: [nativeBalanceChange < 0 ? Math.abs(nativeBalanceChange) : 0],
+      postBalances: [nativeBalanceChange > 0 ? nativeBalanceChange : 0],
+      preTokenBalances: Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+        owner: WALLET,
+        mint,
+        uiTokenAmount: { amount: delta < 0n ? (-delta).toString() : '0' }
+      })),
+      postTokenBalances: Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+        owner: WALLET,
+        mint,
+        uiTokenAmount: { amount: delta > 0n ? delta.toString() : '0' }
+      }))
+    }
+  };
+}
+
+function toEnhancedWebhookEvent(fixture: SwapFixture): EnhancedWebhookEvent {
+  return {
+    signature: fixture.signature,
+    slot: SLOT,
+    timestamp: BLOCK_TIME,
+    fee: FEE_LAMPORTS,
+    feePayer: WALLET,
+    accountData: [{
+      account: WALLET,
+      nativeBalanceChange: fixture.nativeBalanceChange ?? 0,
+      tokenBalanceChanges: Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+        userAccount: WALLET,
+        mint,
+        rawTokenAmount: { tokenAmount: delta.toString() }
+      }))
+    }]
+  };
+}
+
+const fixtures: SwapFixture[] = [
+  {
+    name: 'SOL entry BUY',
+    signature: 'sol-buy-signature',
+    nativeBalanceChange: -1_000_005_000,
+    tokenDeltas: { [TOKEN]: 5_000_000n },
+    expected: {
+      direction: 'buy',
+      targetToken: TOKEN,
+      tokenIn: SOL_MINT,
+      tokenOut: TOKEN,
+      amountIn: '1000000000',
+      amountOut: '5000000'
+    }
+  },
+  {
+    name: 'SOL exit SELL',
+    signature: 'sol-sell-signature',
+    nativeBalanceChange: 899_995_000,
+    tokenDeltas: { [TOKEN]: -5_000_000n },
+    expected: {
+      direction: 'sell',
+      targetToken: TOKEN,
+      tokenIn: TOKEN,
+      tokenOut: SOL_MINT,
+      amountIn: '5000000',
+      amountOut: '900000000'
+    }
+  },
+  {
+    name: 'USDC SPL token entry BUY',
+    signature: 'usdc-buy-signature',
+    tokenDeltas: { [USDC_MINT]: -25_000_000n, [TOKEN]: 5_000_000n },
+    expected: {
+      direction: 'buy',
+      targetToken: TOKEN,
+      tokenIn: USDC_MINT,
+      tokenOut: TOKEN,
+      amountIn: '25000000',
+      amountOut: '5000000'
+    }
+  },
+  {
+    name: 'USDC SPL token exit SELL',
+    signature: 'usdc-sell-signature',
+    tokenDeltas: { [TOKEN]: -5_000_000n, [USDC_MINT]: 25_000_000n },
+    expected: {
+      direction: 'sell',
+      targetToken: TOKEN,
+      tokenIn: TOKEN,
+      tokenOut: USDC_MINT,
+      amountIn: '5000000',
+      amountOut: '25000000'
+    }
+  },
+  {
+    name: 'supported non-quote token-to-token exit SELL',
+    signature: 'token-sell-signature',
+    tokenDeltas: { [TOKEN]: -5_000_000n, [TOKEN_TWO]: 2_000_000n },
+    expected: {
+      direction: 'sell',
+      targetToken: TOKEN,
+      tokenIn: TOKEN,
+      tokenOut: TOKEN_TWO,
+      amountIn: '5000000',
+      amountOut: '2000000'
+    }
+  }
+];
+
+describe('canonical Solana ingestion parity', () => {
+  it.each(fixtures)('$name is identical through webhook and backfill normalization', (fixture) => {
+    const backfillEvent = parseCanonicalSolanaSwapEvent(
+      toRawBackfillTransaction(fixture),
+      WALLET
+    );
+    const webhookEvent = parseCanonicalSolanaSwapEvent(
+      enhancedEventToTransaction(toEnhancedWebhookEvent(fixture), WALLET),
+      WALLET
+    );
+
+    expect(webhookEvent).toEqual(backfillEvent);
+    expect(backfillEvent).toMatchObject({
+      chain: 'solana',
+      transactionIdentity: fixture.signature,
+      walletAddress: WALLET,
+      occurredAt: new Date(BLOCK_TIME * 1000),
+      ...fixture.expected
+    });
+  });
+
+  it('replays a duplicate webhook as the exact same immutable source event', () => {
+    const fixture = fixtures[0];
+    const transaction = enhancedEventToTransaction(toEnhancedWebhookEvent(fixture), WALLET);
+
+    expect(parseCanonicalSolanaSwapEvent(transaction, WALLET)).toEqual(
+      parseCanonicalSolanaSwapEvent(transaction, WALLET)
+    );
+  });
+
+  it('refuses to fabricate an event without a transaction identity or event time', () => {
+    const transaction = toRawBackfillTransaction(fixtures[0]);
+    transaction.transaction!.signatures = [];
+    expect(parseCanonicalSolanaSwapEvent(transaction, WALLET)).toBeNull();
+
+    transaction.transaction!.signatures = ['restored-signature'];
+    delete transaction.blockTime;
+    expect(parseCanonicalSolanaSwapEvent(transaction, WALLET)).toBeNull();
+  });
+});

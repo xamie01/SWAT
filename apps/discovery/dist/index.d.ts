@@ -1,3 +1,2 @@
-export declare function runFundingGraphExpansion(): Promise<void>;
-export declare function runCounterpartyDiscovery(): Promise<void>;
+export {};
 //# sourceMappingURL=index.d.ts.map

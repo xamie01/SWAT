@@ -1,5 +1,4 @@
 
-
 > @swat/signal-engine@0.1.0 build /home/xahmie/Documents/SWAT/apps/signal-engine
 > tsc -p tsconfig.json
 

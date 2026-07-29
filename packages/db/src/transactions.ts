@@ -1,6 +1,8 @@
 import { query } from './client.js';
+import { resolveChainAddress, resolveChainValue } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 
-export type TransactionChain = 'solana' | 'polygon' | 'robinhood-chain';
+export type TransactionChain = Chain;
 
 export type ParsedTransactionInsert = {
   chain?: TransactionChain;
@@ -34,9 +36,8 @@ export type TokenMintInfo = {
  * On subsequent calls, only updates fields that are provided.
  */
 export async function upsertToken(mint: string, info?: TokenMintInfo) {
-  const chain = info?.chain ?? 'solana';
-  const prefix = `${chain}:`;
-  const prefixedMint = mint.startsWith(prefix) ? mint : `${prefix}${mint}`;
+  const resolved = resolveChainValue(mint, info?.chain);
+  const { chain, prefixed: prefixedMint } = resolved;
 
   if (info) {
     await query(
@@ -68,8 +69,7 @@ export async function upsertToken(mint: string, info?: TokenMintInfo) {
 }
 
 export async function getTokenDecimals(mint: string, chain: TransactionChain = 'solana'): Promise<number | null> {
-  const prefix = `${chain}:`;
-  const prefixedMint = mint.startsWith(prefix) ? mint : `${prefix}${mint}`;
+  const prefixedMint = resolveChainValue(mint, chain).prefixed;
 
   const rows = await query<{ decimals: number | null }>(
     `SELECT decimals FROM tokens WHERE mint = $1 AND chain = $2`,
@@ -86,8 +86,7 @@ export async function getTokenDecimals(mint: string, chain: TransactionChain = '
  * This powers the early-entry component of the wallet composite score.
  */
 export async function updateTokenLaunchTimestamp(mint: string, observedAt: Date, chain: TransactionChain = 'solana') {
-  const prefix = `${chain}:`;
-  const prefixedMint = mint.startsWith(prefix) ? mint : `${prefix}${mint}`;
+  const prefixedMint = resolveChainValue(mint, chain).prefixed;
 
   await query(
     `UPDATE tokens
@@ -99,12 +98,14 @@ export async function updateTokenLaunchTimestamp(mint: string, observedAt: Date,
 }
 
 export async function insertParsedTransaction(input: ParsedTransactionInsert) {
-  const chain = input.chain ?? 'solana';
-  const prefix = `${chain}:`;
-  const walletAddress = input.walletAddress.startsWith(prefix) ? input.walletAddress : `${prefix}${input.walletAddress}`;
-  const tokenIn = input.tokenIn.startsWith(prefix) ? input.tokenIn : `${prefix}${input.tokenIn}`;
-  const tokenOut = input.tokenOut.startsWith(prefix) ? input.tokenOut : `${prefix}${input.tokenOut}`;
-  const targetToken = input.targetToken ? (input.targetToken.startsWith(prefix) ? input.targetToken : `${prefix}${input.targetToken}`) : null;
+  const resolvedWallet = resolveChainAddress(input.walletAddress, input.chain);
+  const chain = resolvedWallet.chain;
+  const walletAddress = resolvedWallet.prefixed;
+  const tokenIn = resolveChainValue(input.tokenIn, chain).prefixed;
+  const tokenOut = resolveChainValue(input.tokenOut, chain).prefixed;
+  const targetToken = input.targetToken
+    ? resolveChainValue(input.targetToken, chain).prefixed
+    : null;
 
   const rows = await query(
     `INSERT INTO transactions (

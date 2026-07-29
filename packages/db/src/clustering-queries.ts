@@ -1,52 +1,100 @@
-import { query } from './client.js';
+import { pool, query } from './client.js';
 
 export async function generateFundingClusters() {
+  const client = await pool.connect();
+  const expectedMembershipsCte = `
+    WITH eligible_funders AS (
+      SELECT wr.wallet_a
+      FROM wallet_relationships wr
+      WHERE wr.relationship_type = 'funding'
+      GROUP BY wr.wallet_a
+      HAVING COUNT(DISTINCT wr.wallet_b) >= 2
+    ),
+    expected_memberships AS (
+      SELECT DISTINCT c.id AS cluster_id, edge.wallet_address
+      FROM eligible_funders ef
+      JOIN wallet_relationships wr
+        ON wr.wallet_a = ef.wallet_a
+       AND wr.relationship_type = 'funding'
+      JOIN wallet_clusters c
+        ON c.name = 'Funding Group ' || ef.wallet_a
+       AND c.cluster_type = 'funding'
+      CROSS JOIN LATERAL (VALUES (wr.wallet_a), (wr.wallet_b)) AS edge(wallet_address)
+      JOIN wallets w ON w.address = edge.wallet_address
+    )`;
+
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+
   // Create a cluster per funder that funded >= 2 distinct wallets (a hub — the
   // Sybil/coordination signal). A lone A→B funding pair is too weak to be a
   // "group" and previously produced a constant-0.85 cluster from a single dust
   // transfer. Confidence is now derived from the actual edge confidences
   // (which scale with transfer size) plus a small bonus per extra funded wallet.
-  await query(`
-    INSERT INTO wallet_clusters (name, cluster_type, confidence)
-    SELECT
-      'Funding Group ' || wr.wallet_a,
-      'funding',
-      LEAST(0.95, AVG(wr.confidence) + 0.05 * (COUNT(DISTINCT wr.wallet_b) - 1))
-    FROM wallet_relationships wr
-    WHERE wr.relationship_type = 'funding'
-    GROUP BY wr.wallet_a
-    HAVING COUNT(DISTINCT wr.wallet_b) >= 2
-    -- Refresh confidence on re-run so it tracks current evidence instead of
-    -- being frozen at first-creation (DO NOTHING).
-    ON CONFLICT (name) DO UPDATE SET confidence = EXCLUDED.confidence, updated_at = NOW()
-  `);
+    await client.query(`
+      INSERT INTO wallet_clusters (name, cluster_type, confidence, chain)
+      SELECT
+        'Funding Group ' || wr.wallet_a,
+        'funding',
+        LEAST(0.95, AVG(wr.confidence) + 0.05 * (COUNT(DISTINCT wr.wallet_b) - 1)),
+        MAX(w.chain)
+      FROM wallet_relationships wr
+      JOIN wallets w ON w.address = wr.wallet_a
+      WHERE wr.relationship_type = 'funding'
+      GROUP BY wr.wallet_a
+      HAVING COUNT(DISTINCT wr.wallet_b) >= 2
+      -- Refresh confidence on re-run so it tracks current evidence instead of
+      -- being frozen at first-creation (DO NOTHING).
+      ON CONFLICT (name) DO UPDATE SET confidence = EXCLUDED.confidence, updated_at = NOW()
+    `);
 
-  // Add members — NOTE: correct table is cluster_memberships (not cluster_members).
-  // Insert BOTH sides of each funding edge: the funder (wallet_a, after whom the
-  // cluster is named) and the funded wallet (wallet_b). Previously only wallet_b
-  // was inserted, so the funder was missing from its own cluster and
-  // wallet_count was undercounted.
-  await query(`
-    INSERT INTO cluster_memberships (cluster_id, wallet_address)
-    SELECT c.id, edge.wallet_address
-    FROM wallet_relationships wr
-    JOIN wallet_clusters c ON c.name = 'Funding Group ' || wr.wallet_a
-    CROSS JOIN LATERAL (VALUES (wr.wallet_a), (wr.wallet_b)) AS edge(wallet_address)
-    WHERE wr.relationship_type = 'funding'
-      AND edge.wallet_address IN (SELECT address FROM wallets)
-    ON CONFLICT (cluster_id, wallet_address) DO NOTHING
-  `);
+    // Remove members no longer implied by an eligible funding hub before
+    // inserting any newly expected members. Valid existing rows retain joined_at.
+    await client.query(`
+      ${expectedMembershipsCte}
+      DELETE FROM cluster_memberships cm
+      USING wallet_clusters c
+      WHERE cm.cluster_id = c.id
+        AND c.cluster_type = 'funding'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM expected_memberships expected
+          WHERE expected.cluster_id = cm.cluster_id
+            AND expected.wallet_address = cm.wallet_address
+        )
+    `);
 
-  // Update wallet_count on clusters
-  await query(`
-    UPDATE wallet_clusters SET
-      wallet_count = (
-        SELECT COUNT(*) FROM cluster_memberships cm
-        WHERE cm.cluster_id = wallet_clusters.id
-      ),
-      updated_at = NOW()
-    WHERE cluster_type = 'funding'
-  `);
+    // Insert BOTH sides of each current funding edge.
+    await client.query(`
+      ${expectedMembershipsCte}
+      INSERT INTO cluster_memberships (cluster_id, wallet_address)
+      SELECT cluster_id, wallet_address
+      FROM expected_memberships
+      ON CONFLICT (cluster_id, wallet_address) DO NOTHING
+    `);
+
+    await client.query(`
+      UPDATE wallet_clusters SET
+        wallet_count = (
+          SELECT COUNT(*) FROM cluster_memberships cm
+          WHERE cm.cluster_id = wallet_clusters.id
+        ),
+        updated_at = NOW()
+      WHERE cluster_type = 'funding'
+    `);
+
+    // Remove clusters that no longer have enough members
+    await client.query(`
+      DELETE FROM wallet_clusters
+      WHERE cluster_type = 'funding' AND wallet_count < 2
+    `);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function generateBehavioralClusters() {
@@ -68,54 +116,98 @@ export async function generateBehavioralClusters() {
       SELECT
         t1.wallet_address AS w_low,
         t2.wallet_address AS w_high,
-        COUNT(DISTINCT t1.id) AS sync_count
+        COUNT(DISTINCT t1.id) AS sync_count,
+        MAX(w1.chain) AS chain
       FROM transactions t1
       JOIN transactions t2
         ON t1.target_token = t2.target_token
         AND t1.wallet_address < t2.wallet_address
         AND ABS(EXTRACT(EPOCH FROM (t1.timestamp - t2.timestamp))) < 300
+      JOIN wallets w1 ON w1.address = t1.wallet_address
+      JOIN wallets w2 ON w2.address = t2.wallet_address
       WHERE t1.direction = 'buy' AND t2.direction = 'buy'
         AND t1.target_token IS NOT NULL
+        AND w1.chain = w2.chain
       GROUP BY t1.wallet_address, t2.wallet_address
       HAVING COUNT(DISTINCT t1.id) > 3
     )`;
+  const expectedMembershipsCte = `
+    ${syncPairsCte},
+    expected_memberships AS (
+      SELECT DISTINCT c.id AS cluster_id, edge.wallet_address
+      FROM sync_pairs sp
+      JOIN wallet_clusters c
+        ON c.name = 'Behavioral Group ' || sp.w_low
+       AND c.cluster_type = 'behavioral'
+      CROSS JOIN LATERAL (VALUES (sp.w_low), (sp.w_high)) AS edge(wallet_address)
+      JOIN wallets w ON w.address = edge.wallet_address
+    )`;
+  const client = await pool.connect();
 
-  // Step 1: create one cluster per anchor wallet (w_low).
-  await query(`
-    ${syncPairsCte}
-    INSERT INTO wallet_clusters (name, cluster_type, confidence)
-    SELECT
-      'Behavioral Group ' || w_low,
-      'behavioral',
-      LEAST(0.95, 0.50 + (MAX(sync_count)::float * 0.05))
-    FROM sync_pairs
-    GROUP BY w_low
-    ON CONFLICT (name) DO UPDATE SET confidence = EXCLUDED.confidence, updated_at = NOW()
-  `);
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
 
-  // Step 2: add BOTH wallets of each pair to the cluster (previously only w_high
-  // was inserted, so the anchor was missing from its own cluster).
-  await query(`
-    ${syncPairsCte}
-    INSERT INTO cluster_memberships (cluster_id, wallet_address)
-    SELECT c.id, edge.wallet_address
-    FROM sync_pairs sp
-    JOIN wallet_clusters c ON c.name = 'Behavioral Group ' || sp.w_low
-    CROSS JOIN LATERAL (VALUES (sp.w_low), (sp.w_high)) AS edge(wallet_address)
-    WHERE edge.wallet_address IN (SELECT address FROM wallets)
-    ON CONFLICT (cluster_id, wallet_address) DO NOTHING
-  `);
+    // Step 1: create one cluster per anchor wallet (w_low).
+    await client.query(`
+      ${syncPairsCte}
+      INSERT INTO wallet_clusters (name, cluster_type, confidence, chain)
+      SELECT
+        'Behavioral Group ' || w_low,
+        'behavioral',
+        LEAST(0.95, 0.50 + (MAX(sync_count)::float * 0.05)),
+        MAX(chain)
+      FROM sync_pairs
+      GROUP BY w_low
+      ON CONFLICT (name) DO UPDATE SET confidence = EXCLUDED.confidence, updated_at = NOW()
+    `);
 
-  // Step 3: Update wallet_count
-  await query(`
-    UPDATE wallet_clusters SET
-      wallet_count = (
-        SELECT COUNT(*) FROM cluster_memberships cm
-        WHERE cm.cluster_id = wallet_clusters.id
-      ),
-      updated_at = NOW()
-    WHERE cluster_type = 'behavioral'
-  `);
+    // Step 2: remove members no longer present in the current synchronized-buy
+    // graph, scoped strictly to behavioral clusters.
+    await client.query(`
+      ${expectedMembershipsCte}
+      DELETE FROM cluster_memberships cm
+      USING wallet_clusters c
+      WHERE cm.cluster_id = c.id
+        AND c.cluster_type = 'behavioral'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM expected_memberships expected
+          WHERE expected.cluster_id = cm.cluster_id
+            AND expected.wallet_address = cm.wallet_address
+        )
+    `);
+
+    // Step 3: add both wallets of every currently synchronized pair.
+    await client.query(`
+      ${expectedMembershipsCte}
+      INSERT INTO cluster_memberships (cluster_id, wallet_address)
+      SELECT cluster_id, wallet_address
+      FROM expected_memberships
+      ON CONFLICT (cluster_id, wallet_address) DO NOTHING
+    `);
+
+    await client.query(`
+      UPDATE wallet_clusters SET
+        wallet_count = (
+          SELECT COUNT(*) FROM cluster_memberships cm
+          WHERE cm.cluster_id = wallet_clusters.id
+        ),
+        updated_at = NOW()
+      WHERE cluster_type = 'behavioral'
+    `);
+
+    // Remove clusters that no longer have enough members
+    await client.query(`
+      DELETE FROM wallet_clusters
+      WHERE cluster_type = 'behavioral' AND wallet_count < 2
+    `);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateClusterPerformance(clusterId: string) {
@@ -141,7 +233,7 @@ export async function listClusters() {
   return query(`
     SELECT id, name, cluster_type, confidence, wallet_count, 
            total_realized_roi, avg_composite_score, status, 
-           last_active, created_at
+           last_active, created_at, chain
     FROM wallet_clusters
     WHERE status = 'active'
     ORDER BY confidence DESC, wallet_count DESC, id DESC

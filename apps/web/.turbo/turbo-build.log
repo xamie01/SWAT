@@ -1,31 +1,35 @@
 
-
 > @swat/web@0.1.0 build /home/xahmie/Documents/SWAT/apps/web
 > next build
 
    ▲ Next.js 15.5.18
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 13.5s
-   Linting and checking validity of types     ✓ Linting and checking validity of types 
-   Collecting page data     ✓ Collecting page data 
- ✓ Generating static pages (7/7)
-   Collecting build traces     ✓ Collecting build traces 
-   Finalizing page optimization     ✓ Finalizing page optimization 
+ ✓ Compiled successfully in 32.9s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/9) ...
+   Generating static pages (2/9) 
+   Generating static pages (4/9) 
+   Generating static pages (6/9) 
+ ✓ Generating static pages (9/9)
+   Finalizing page optimization ...
+   Collecting build traces ...
 
 Route (app)                                 Size  First Load JS
-┌ ƒ /                                      131 B         102 kB
+┌ ○ /                                    5.93 kB         111 kB
 ├ ○ /_not-found                            992 B         103 kB
 ├ ○ /clusters                            1.76 kB         104 kB
-├ ○ /logs                                2.45 kB         104 kB
-├ ƒ /performance                           131 B         102 kB
-├ ○ /setup                               3.21 kB         105 kB
-├ ƒ /signals                               131 B         102 kB
-└ ○ /wallets                             2.56 kB         104 kB
+├ ○ /logs                                 2.6 kB         104 kB
+├ ƒ /performance                           127 B         102 kB
+├ ○ /setup                               3.17 kB         105 kB
+├ ƒ /signals                               127 B         102 kB
+├ ○ /wallets                             2.57 kB         104 kB
+└ ○ /workspace                           21.4 kB         127 kB
 + First Load JS shared by all             102 kB
   ├ chunks/1403cfaa-6db8521358bcd91a.js  54.2 kB
   ├ chunks/159-562cdab042031441.js       45.7 kB
-  └ other shared chunks (total)           1.9 kB
+  └ other shared chunks (total)          1.92 kB
 
 
 ○  (Static)   prerendered as static content

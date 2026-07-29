@@ -64,6 +64,21 @@ ALTER TABLE transactions
 CREATE INDEX IF NOT EXISTS idx_tx_chain_wallet_ts
   ON transactions (chain, wallet_address, timestamp DESC);
 
-DROP INDEX IF EXISTS idx_tx_dedup;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_dedup
-  ON transactions (chain, signature, wallet_address, COALESCE(target_token, ''));
+DO $$
+DECLARE
+  current_definition TEXT;
+BEGIN
+  SELECT pg_get_indexdef(indexrelid)
+    INTO current_definition
+    FROM pg_index
+   WHERE indexrelid = to_regclass('idx_tx_dedup');
+
+  IF current_definition IS NULL THEN
+    CREATE UNIQUE INDEX idx_tx_dedup
+      ON transactions (chain, signature, wallet_address, COALESCE(target_token, ''));
+  ELSIF current_definition NOT LIKE '%chain, signature, wallet_address%' THEN
+    DROP INDEX idx_tx_dedup;
+    CREATE UNIQUE INDEX idx_tx_dedup
+      ON transactions (chain, signature, wallet_address, COALESCE(target_token, ''));
+  END IF;
+END $$;

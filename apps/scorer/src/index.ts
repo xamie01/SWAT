@@ -10,9 +10,17 @@ import {
   getActiveWallets,
   generateFundingClusters,
   generateBehavioralClusters,
-  markToMarketOpenPositions
+  listClusters,
+  updateClusterPerformance,
+  markToMarketOpenPositions,
+  runNightlyAttribution,
+  persistExpectancyReport
 } from '@swat/db';
 import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger } from '@swat/shared';
+import { runAttributionReporting } from './expectancy.js';
+
+const redisUrlForPublish = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const redisPublishClient = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
 
 initLogger('scorer');
 
@@ -21,7 +29,28 @@ async function regenerateClusters() {
   console.log('[scorer] Regenerating clusters on demand...');
   await generateFundingClusters();
   await generateBehavioralClusters();
+  await refreshClusterPerformance();
   console.log('[scorer] Cluster regeneration complete.');
+}
+
+async function runStage<T>(label: string, action: () => Promise<T>): Promise<T | null> {
+  try {
+    return await action();
+  } catch (error) {
+    console.error(`[scorer] ${label} failed`, error);
+    return null;
+  }
+}
+
+async function refreshClusterPerformance() {
+  const clusters = await listClusters();
+  const results = await Promise.allSettled(
+    clusters.map((cluster: any) => updateClusterPerformance(cluster.id))
+  );
+  const failures = results.filter((result) => result.status === 'rejected').length;
+  if (failures > 0) {
+    throw new Error(`${failures} cluster performance updates failed`);
+  }
 }
 
 async function runScoringBatch() {
@@ -36,7 +65,7 @@ async function runScoringBatch() {
 
   for (const wallet of wallets) {
     try {
-      const metrics = await getWalletMetrics(wallet.address);
+      const metrics = await getWalletMetrics(wallet.address, wallet.chain);
       const score = calculateCompositeScore(metrics);
       const tier = scoreToTier(score);
       await updateWalletScore(wallet.address, score, tier, metrics);
@@ -49,22 +78,39 @@ async function runScoringBatch() {
   console.log(`[scorer] Scored ${scored} wallets (${errors} errors)`);
 
   console.log('[scorer] Running pruning rules...');
-  await pauseUnderperformingWallets();
-  await promoteHighScoringDiscoveredWallets();
-  await reactivateDormantWallets();
+  await runStage('pause underperforming wallets', pauseUnderperformingWallets);
+  await runStage('promote discovered wallets', promoteHighScoringDiscoveredWallets);
+  await runStage('reactivate dormant wallets', reactivateDormantWallets);
 
   // Now that token-discovered 'token-big' wallets have been scored, drop the ones
   // that turned out unprofitable (ROI <= 0 OR win rate < 50%) before they enter
   // clustering. 'token-early' wallets are kept unconditionally.
-  const pruned = await pruneUnprofitableBigBuyers();
-  if (pruned > 0) console.log(`[scorer] Pruned ${pruned} unprofitable token-big wallets`);
+  const pruned = await runStage('prune unprofitable token-big wallets', pruneUnprofitableBigBuyers);
+  if (pruned !== null && pruned > 0) {
+    console.log(`[scorer] Pruned ${pruned} unprofitable token-big wallets`);
+  }
 
   console.log('[scorer] Running clustering engines...');
-  await generateFundingClusters();
-  await generateBehavioralClusters();
+  await runStage('funding clustering', generateFundingClusters);
+  await runStage('behavioral clustering', generateBehavioralClusters);
+  await runStage('cluster performance refresh', refreshClusterPerformance);
 
   console.log('[scorer] Marking open positions to market...');
-  await runMarkToMarketGuarded();
+  await runStage('mark-to-market', runMarkToMarketGuarded);
+
+  console.log('[scorer] Running nightly attribution and expectancy report...');
+  await runStage('nightly attribution and expectancy report', () => runAttributionReporting({
+    rebuildOutcomes: runNightlyAttribution,
+    persistReport: persistExpectancyReport,
+    publishDigest: (message) => redisPublishClient.publish(
+      REDIS_CHANNELS.alertQueue,
+      JSON.stringify({
+        type: 'NIGHTLY_EXPECTANCY',
+        title: 'Nightly Expectancy Report',
+        message
+      })
+    )
+  }));
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`[scorer] Batch complete in ${elapsed}s.`);

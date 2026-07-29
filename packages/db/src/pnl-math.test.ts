@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { markToMarketPnl } from './pnl-math.js';
+import { calculateAverageCostPnl, markToMarketPnl } from './pnl-math.js';
 
 describe('markToMarketPnl', () => {
   it('returns a positive P&L when price rose', () => {
@@ -40,5 +40,74 @@ describe('markToMarketPnl', () => {
     expect(markToMarketPnl(Number.NaN, 1, 2)).toBeNull();
     expect(markToMarketPnl(100, Number.POSITIVE_INFINITY, 2)).toBeNull();
     expect(markToMarketPnl(100, 1, Number.NaN)).toBeNull();
+  });
+});
+
+describe('calculateAverageCostPnl', () => {
+  it('separates realized and unrealized P&L after a partial sell', () => {
+    expect(calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 100, amountUsd: 100 },
+      { direction: 'sell', tokenAmount: 40, amountUsd: 80 }
+    ], 1.5)).toEqual({
+      openQuantity: 60,
+      openCostBasisUsd: 60,
+      realizedPnlUsd: 40,
+      unrealizedPnlUsd: 30,
+      totalPnlUsd: 70
+    });
+  });
+
+  it('uses the cost basis that existed at each chronological reduction', () => {
+    const pnl = calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 10, amountUsd: 100 },
+      { direction: 'sell', tokenAmount: 5, amountUsd: 75 },
+      { direction: 'buy', tokenAmount: 10, amountUsd: 200 }
+    ], 20);
+
+    expect(pnl?.realizedPnlUsd).toBeCloseTo(25, 8);
+    expect(pnl?.openQuantity).toBe(15);
+    expect(pnl?.openCostBasisUsd).toBeCloseTo(250, 8);
+    expect(pnl?.unrealizedPnlUsd).toBeCloseTo(50, 8);
+    expect(pnl?.totalPnlUsd).toBeCloseTo(75, 8);
+  });
+
+  it('calculates a fully closed position without a current market price', () => {
+    expect(calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 10, amountUsd: 100 },
+      { direction: 'sell', tokenAmount: 4, amountUsd: 60 },
+      { direction: 'sell', tokenAmount: 6, amountUsd: 72 }
+    ], null)).toEqual({
+      openQuantity: 0,
+      openCostBasisUsd: 0,
+      realizedPnlUsd: 32,
+      unrealizedPnlUsd: 0,
+      totalPnlUsd: 32
+    });
+  });
+
+  it('includes known entry and exit fees in realized P&L', () => {
+    expect(calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 10, amountUsd: 100, feeUsd: 1 },
+      { direction: 'sell', tokenAmount: 10, amountUsd: 130, feeUsd: 2 }
+    ], null)).toEqual({
+      openQuantity: 0,
+      openCostBasisUsd: 0,
+      realizedPnlUsd: 27,
+      unrealizedPnlUsd: 0,
+      totalPnlUsd: 27
+    });
+  });
+
+  it('fails closed for oversells and invalid monetary inputs', () => {
+    expect(calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 5, amountUsd: 50 },
+      { direction: 'sell', tokenAmount: 6, amountUsd: 60 }
+    ], 10)).toBeNull();
+    expect(calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 5, amountUsd: Number.NaN }
+    ], 10)).toBeNull();
+    expect(calculateAverageCostPnl([
+      { direction: 'buy', tokenAmount: 5, amountUsd: 50, feeUsd: -1 }
+    ], 10)).toBeNull();
   });
 });

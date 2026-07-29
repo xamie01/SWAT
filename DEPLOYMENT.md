@@ -16,6 +16,10 @@
 
 The pnpm workspace requires Node.js 22. The default Ubuntu apt repository ships v18 which is too old.
 
+Polymarket live execution additionally requires Node.js 24 or newer because the
+unified `@polymarket/client` SDK does not support Node.js 22. The executor fails
+closed and leaves Polygon in paper mode on an older runtime.
+
 ```bash
 # Download the NodeSource setup script for Node 22
 curl -fsSL https://deb.nodesource.com/setup_22.x -o setup_node22.sh
@@ -68,7 +72,7 @@ TELEGRAM_CHAT_ID=        # Required — your personal chat ID or group ID
 API_KEY=some-secret-key  # Required — change from the default 'swat-dev-key'
 ```
 
-> Everything else has safe defaults for local development.
+> Keep the remaining values from `.env.example`; it is the authoritative runtime reference. Blank credentials disable their optional integrations, while RPC URLs must retain valid non-empty values.
 
 ---
 
@@ -292,26 +296,9 @@ sudo systemctl reload caddy
 
 ## Environment Variables Reference
 
-| Variable | Default | Required | Used By |
-|---|---|---|---|
-| `DATABASE_URL` | `postgresql://swat:swat@...` | ✅ Always | All services |
-| `REDIS_URL` | `redis://localhost:6379` | ✅ Always | 5 services |
-| `HELIUS_API_KEY` | — | ✅ Always | Indexer backfill, Safety checks |
-| `TELEGRAM_BOT_TOKEN` | — | ✅ For alerts | alert-service |
-| `TELEGRAM_CHAT_ID` | — | ✅ For alerts | alert-service |
-| `API_KEY` | `swat-dev-key` | ✅ Change it | API auth header |
-| `HELIUS_WEBHOOK_SECRET` | — | Real-time mode | Webhook HMAC verification |
-| `TROJAN_WEBHOOK_URL` | — | Live trading | trade-executor |
-| `TROJAN_API_KEY` | — | Live trading | trade-executor |
-| `PORT` | `3001` | Optional | api |
-| `WEBHOOK_PORT` | `3002` | Optional | indexer webhook |
-| `TRADING_MODE` | `paper` | Optional | trade-executor |
-| `AUTO_EXECUTE` | `false` | Optional | trade-executor |
-| `AUTO_EXECUTE_MIN_SCORE` | `90` | Optional | trade-executor |
-| `BASE_POSITION_SOL` | `0.5` | Optional | trade-executor, alert-service |
-| `MIN_SIGNAL_SCORE` | `70` | Optional | signal-engine |
-| `RUN_ON_STARTUP` | `false` | Optional | scorer, discovery |
-| `WALLET_ADDRESSES` | — | Optional | indexer (startup seed only) |
+Use [`.env.example`](./.env.example) as the single variable and default reference. For production, set `NODE_ENV=production`, provide a non-development `API_KEY` and matching `NEXT_PUBLIC_API_KEY`, point `DATABASE_URL` and `REDIS_URL` at durable services, and configure only the provider credentials required by enabled integrations.
+
+Execution mode precedence is database `execution_config`, chain-specific `TRADING_MODE_*`, global `TRADING_MODE`, then `paper`. Accepted values are exact `off`, `paper`, `live`, and `live+shadow`. `LIVE_ENABLED_CHAINS` is only the operator allowlist: live requests stay in paper mode unless an active reviewed `chain_certifications` record also exists. `AUTO_EXECUTE=true` does not bypass mode resolution or certification.
 
 ---
 

@@ -14,6 +14,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+.swat-dev.pid
 
 # OS Files
 .DS_Store
@@ -22,3 +23,7 @@ Thumbs.db
 # Local backups
 *.bak
 *.tmp
+
+# Agent skills (installed locally via `npx skills add`)
+.agents/
+.claude/skills/

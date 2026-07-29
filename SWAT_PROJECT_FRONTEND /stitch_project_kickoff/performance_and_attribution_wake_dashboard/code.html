@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WAKE | Performance and Attribution</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap');
+        
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            font-size: 18px;
+        }
+        
+        body {
+            font-family: 'Geist', sans-serif;
+            background-color: #fdf8f8;
+            color: #1c1b1b;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .alpha-grid {
+            background-image: radial-gradient(#e5e2e1 0.5px, transparent 0.5px);
+            background-size: 12px 12px;
+        }
+
+        .shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite linear;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#ddd9d8",
+                        "surface-container-low": "#f7f3f2",
+                        "primary": "#000000",
+                        "outline": "#747878",
+                        "status-warning": "#F59E0B",
+                        "background": "#fdf8f8",
+                        "tertiary-fixed-dim": "#cac6c3",
+                        "secondary-container": "#e1e3e4",
+                        "inverse-surface": "#313030",
+                        "on-secondary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "surface-tint": "#5f5e5e",
+                        "on-secondary-fixed-variant": "#454748",
+                        "on-secondary-container": "#626566",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed-variant": "#474646",
+                        "tertiary-container": "#1c1b1a",
+                        "inverse-on-surface": "#f4f0ef",
+                        "primary-fixed": "#e5e2e1",
+                        "on-surface": "#1c1b1b",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-fixed-dim": "#c8c6c5",
+                        "outline-variant": "#c4c7c7",
+                        "error": "#ba1a1a",
+                        "status-error": "#EF4444",
+                        "on-surface-variant": "#444748",
+                        "status-neutral": "#64748B",
+                        "on-tertiary-fixed-variant": "#484645",
+                        "surface-container-high": "#ebe7e6",
+                        "solana-teal": "#14F195",
+                        "border-subtle": "#E2E8F0",
+                        "surface": "#fdf8f8",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-container": "#858383",
+                        "surface-variant": "#e5e2e1",
+                        "robinhood-amber": "#FFB800",
+                        "surface-container": "#f1edec",
+                        "on-error-container": "#93000a",
+                        "polymarket-violet": "#8B5CF6",
+                        "on-error": "#ffffff",
+                        "on-primary-fixed": "#1c1b1b",
+                        "tertiary-fixed": "#e6e1df",
+                        "on-tertiary-fixed": "#1c1b1a",
+                        "secondary": "#5c5f60",
+                        "secondary-fixed": "#e1e3e4",
+                        "surface-container-highest": "#e5e2e1",
+                        "on-secondary-fixed": "#191c1d",
+                        "inverse-primary": "#c8c6c5",
+                        "on-background": "#1c1b1b",
+                        "status-success": "#10B981",
+                        "primary-container": "#1c1b1b",
+                        "surface-bright": "#fdf8f8",
+                        "on-tertiary-container": "#868381",
+                        "tertiary": "#000000",
+                        "secondary-fixed-dim": "#c5c7c8"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "container-max": "1440px",
+                        "stack-xs": "4px",
+                        "stack-md": "16px",
+                        "margin-desktop": "24px",
+                        "gutter": "16px",
+                        "stack-sm": "8px",
+                        "margin-mobile": "16px",
+                        "data-row-height": "40px"
+                    },
+                    "fontFamily": {
+                        "mono-data": ["Geist"],
+                        "headline-lg": ["Geist"],
+                        "body-md": ["Geist"],
+                        "headline-md": ["Geist"],
+                        "body-sm": ["Geist"],
+                        "label-caps": ["Geist"]
+                    },
+                    "fontSize": {
+                        "mono-data": ["13px", {"lineHeight": "20px", "letterSpacing": "-0.01em", "fontWeight": "500"}],
+                        "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "headline-md": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface">
+<!-- Sidebar Navigation -->
+<aside class="h-screen w-64 fixed left-0 top-0 border-r border-border-subtle bg-surface flex flex-col py-6 z-50">
+<div class="px-6 mb-8 flex items-center gap-3">
+<img alt="WAKE" class="w-8 h-8 object-contain" src="https://lh3.googleusercontent.com/aida/AP1WRLtWod_shvYwZo04JI9qz9KbCkE4ccfvLt5YPoZfWK9_5IWgDMRxVww6XBAGkZRs0T-1jmcBXgmhsCcR8eu3dkshLlD6BnHpBiyrEunns1F0WH2lTlznG7mzTzzj4AeokEA0E_YMu73Zl7jCGS4uT0bRbBz2ViYg97kcTe_MBHntKuHo1vbl-A-yjjaHUil_JfO9AItouKrQCMCDBsCiM7mFfBKz_TwWyqrffxRbNdYPgyTdQ2oShfFx3O4"/>
+<div>
+<h1 class="text-headline-lg font-bold text-primary">WAKE</h1>
+<p class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Operational Center</p>
+</div>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container transition-colors rounded-sm" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-body-md">Workspace</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container transition-colors rounded-sm" href="#">
+<span class="material-symbols-outlined">terminal</span>
+<span class="text-body-md">Command Center</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container transition-colors rounded-sm" href="#">
+<span class="material-symbols-outlined">sensors</span>
+<span class="text-body-md">Signals</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container transition-colors rounded-sm" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span class="text-body-md">Wallet Intel</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container transition-colors rounded-sm" href="#">
+<span class="material-symbols-outlined">health_and_safety</span>
+<span class="text-body-md">Health</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container transition-colors rounded-sm" href="#">
+<span class="material-symbols-outlined">security</span>
+<span class="text-body-md">Risk/Execution</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-primary font-bold border-l-2 border-primary bg-surface-container-high" href="#">
+<span class="material-symbols-outlined">assessment</span>
+<span class="text-body-md">Attribution</span>
+</a>
+</nav>
+<div class="mt-auto px-6 space-y-4">
+<button class="w-full bg-primary text-on-primary py-2.5 rounded-sm text-body-sm font-bold flex items-center justify-center gap-2 active:opacity-80 transition-opacity">
+<span class="material-symbols-outlined text-[16px]">bolt</span>
+                Execute Trade
+            </button>
+<div class="pt-4 border-t border-border-subtle space-y-2">
+<a class="flex items-center gap-3 text-body-sm text-on-surface-variant hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[18px]">settings</span> Settings
+                </a>
+<a class="flex items-center gap-3 text-body-sm text-on-surface-variant hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[18px]">help</span> Support
+                </a>
+</div>
+</div>
+</aside>
+<!-- Top Navigation Bar -->
+<header class="h-14 fixed top-0 right-0 left-64 border-b border-border-subtle bg-surface-container-lowest flex justify-between items-center px-6 z-40">
+<div class="flex items-center gap-6">
+<h2 class="text-headline-md font-black tracking-tight text-primary">Performance and Attribution</h2>
+<div class="h-4 w-[1px] bg-outline-variant"></div>
+<div class="flex items-center gap-4 text-body-sm">
+<span class="text-status-success font-mono-data">ENV: LIVE</span>
+<span class="text-on-surface-variant">00:00 UTC</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex gap-2">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined">sync</span>
+</button>
+</div>
+<div class="flex items-center gap-2 pl-4 border-l border-border-subtle">
+<div class="text-right">
+<p class="text-body-sm font-bold leading-none">Operator Profile</p>
+<p class="text-[10px] text-on-surface-variant">ID: WAKE-7721</p>
+</div>
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a modern financial technology operator, clean lighting, minimalist background, wearing a dark navy technical jacket. High-end SaaS profile aesthetic, focused and sharp." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDZ_s7zQQW_1U7VW7Y5x_WT6_VPbOdbT6-i8CNHs29X-4N_X1_OfmLW2taZ4ayYBULa98wnsH9psohcSa6VSK9_4XdRo55Y07En4Dv_KX_qGFBI__--ofdWOs9FvibDjjOzJeuTgxttTXSGtBqtRu206TprkxkmgEVrM7v942KDO0FKjLF89tv6L5yunce6yerxVOizSKjJHolMctZ4I4W0a8k4t98CkhTZ157vIg3xjdvOlkjLdzC-"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="pl-64 pt-14 min-h-screen">
+<div class="max-w-[1440px] mx-auto p-6 space-y-6">
+<!-- High-Level Metrics Bento -->
+<section class="grid grid-cols-1 md:grid-cols-4 gap-6">
+<!-- Executions -->
+<div class="bg-surface border border-border-subtle p-5 relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+<span class="material-symbols-outlined text-4xl">bolt</span>
+</div>
+<p class="text-label-caps text-on-surface-variant mb-1">TOTAL EXECUTIONS (24H)</p>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-bold font-mono-data">1,248</span>
+<span class="text-status-success text-body-sm pb-1 font-bold">+12%</span>
+</div>
+<div class="mt-4 flex gap-1 h-1">
+<div class="flex-1 bg-solana-teal"></div>
+<div class="flex-[0.4] bg-polymarket-violet"></div>
+<div class="flex-[0.2] bg-robinhood-amber"></div>
+</div>
+</div>
+<!-- Latency -->
+<div class="bg-surface border border-border-subtle p-5">
+<p class="text-label-caps text-on-surface-variant mb-3">AVG EXECUTION LATENCY</p>
+<div class="space-y-3">
+<div class="flex justify-between items-center">
+<span class="text-body-sm flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-solana-teal"></span> Solana
+                            </span>
+<span class="text-body-sm font-mono-data font-bold">812ms</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-body-sm flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-polymarket-violet"></span> Polymarket
+                            </span>
+<span class="text-body-sm font-mono-data font-bold">5.24s</span>
+</div>
+</div>
+</div>
+<!-- Execution Quality -->
+<div class="bg-surface border border-border-subtle p-5">
+<p class="text-label-caps text-on-surface-variant mb-1">QUALITY (FILL VS SHADOW)</p>
+<div class="flex items-baseline gap-2">
+<span class="text-3xl font-bold font-mono-data">+3.4</span>
+<span class="text-body-sm font-bold text-on-surface-variant">BPS</span>
+</div>
+<p class="text-[11px] text-status-success mt-2 font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">trending_up</span> Superior to Shadow
+                    </p>
+</div>
+<!-- Realized P&L -->
+<div class="bg-surface border border-border-subtle p-5 bg-surface-container-low">
+<p class="text-label-caps text-on-surface-variant mb-3">REALIZED P&amp;L (SESSION)</p>
+<div class="space-y-2">
+<div class="flex justify-between items-center">
+<span class="text-[11px] font-bold text-outline">LIVE</span>
+<span class="text-body-sm font-mono-data font-bold text-status-success">+$14,204.00</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-[11px] font-bold text-outline">PAPER</span>
+<span class="text-body-sm font-mono-data font-bold text-on-surface-variant">+$2,110.45</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-[11px] font-bold text-outline">SHADOW</span>
+<span class="text-body-sm font-mono-data font-bold text-on-surface-variant">+$8,942.12</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Latency & Quality Detailed Analysis -->
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Signal-to-Fill Timeline -->
+<div class="lg:col-span-2 bg-surface border border-border-subtle p-6">
+<div class="flex justify-between items-center mb-6">
+<h3 class="text-headline-md font-bold">Signal-to-Fill Timeline</h3>
+<div class="flex items-center gap-4">
+<span class="text-body-sm text-on-surface-variant">Selected Trade: <span class="text-primary font-mono-data">SOL-88219</span></span>
+<button class="text-body-sm text-primary font-bold hover:underline">Full Trace</button>
+</div>
+</div>
+<div class="relative py-12 px-4">
+<div class="absolute left-0 right-0 top-1/2 h-[1px] bg-border-subtle"></div>
+<div class="flex justify-between relative">
+<!-- Step 1 -->
+<div class="flex flex-col items-center gap-3 relative">
+<div class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center z-10 shadow-sm">
+<span class="material-symbols-outlined text-[16px]">sensors</span>
+</div>
+<div class="text-center">
+<p class="text-[11px] font-bold">Source Event</p>
+<p class="text-[10px] font-mono-data text-on-surface-variant">T+0ms</p>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="flex flex-col items-center gap-3 relative">
+<div class="w-8 h-8 rounded-full bg-surface-container-highest border border-border-subtle flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-[16px]">lightbulb</span>
+</div>
+<div class="text-center">
+<p class="text-[11px] font-bold">Signal Gen</p>
+<p class="text-[10px] font-mono-data text-on-surface-variant">T+42ms</p>
+</div>
+</div>
+<!-- Step 3 -->
+<div class="flex flex-col items-center gap-3 relative">
+<div class="w-8 h-8 rounded-full bg-surface-container-highest border border-border-subtle flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-[16px]">notifications_active</span>
+</div>
+<div class="text-center">
+<p class="text-[11px] font-bold">Internal Alert</p>
+<p class="text-[10px] font-mono-data text-on-surface-variant">T+51ms</p>
+</div>
+</div>
+<!-- Step 4 -->
+<div class="flex flex-col items-center gap-3 relative">
+<div class="w-8 h-8 rounded-full bg-surface-container-highest border border-border-subtle flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-[16px]">shopping_cart</span>
+</div>
+<div class="text-center">
+<p class="text-[11px] font-bold">Order Sent</p>
+<p class="text-[10px] font-mono-data text-on-surface-variant">T+68ms</p>
+</div>
+</div>
+<!-- Step 5 -->
+<div class="flex flex-col items-center gap-3 relative">
+<div class="w-8 h-8 rounded-full bg-status-success text-on-primary flex items-center justify-center z-10 shadow-sm ring-4 ring-status-success/10">
+<span class="material-symbols-outlined text-[16px]">check_circle</span>
+</div>
+<div class="text-center">
+<p class="text-[11px] font-bold text-status-success">Confirmed Fill</p>
+<p class="text-[10px] font-mono-data text-on-surface-variant">T+812ms</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Live vs Shadow Cost -->
+<div class="bg-surface border border-border-subtle p-6 flex flex-col justify-between">
+<div>
+<h3 class="text-headline-md font-bold mb-1">Execution Cost</h3>
+<p class="text-body-sm text-on-surface-variant mb-6">Live vs Shadow slippage differential</p>
+<div class="space-y-6">
+<div class="relative h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
+<div class="absolute left-0 top-0 h-full bg-primary" style="width: 65%;"></div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div>
+<p class="text-label-caps text-on-surface-variant">LIVE SLIP</p>
+<p class="text-headline-md font-bold font-mono-data">1.2 <span class="text-body-sm font-normal">BPS</span></p>
+</div>
+<div>
+<p class="text-label-caps text-on-surface-variant">SHADOW SLIP</p>
+<p class="text-headline-md font-bold font-mono-data text-on-surface-variant">4.6 <span class="text-body-sm font-normal">BPS</span></p>
+</div>
+</div>
+</div>
+</div>
+<div class="p-3 bg-surface-container rounded-sm border border-border-subtle mt-6">
+<p class="text-[11px] leading-tight">
+<span class="font-bold">Observation:</span> Low-latency execution via direct validator RPCs on Solana is saving <span class="text-status-success font-bold">3.4bps</span> relative to public mempool execution (Shadow).
+                        </p>
+</div>
+</div>
+</section>
+<!-- Attribution Ledger -->
+<section class="bg-surface border border-border-subtle overflow-hidden">
+<div class="px-6 py-4 border-b border-border-subtle flex justify-between items-center bg-surface-container-lowest">
+<h3 class="text-headline-md font-bold">Attribution Ledger</h3>
+<div class="flex gap-2">
+<button class="px-3 py-1 text-body-sm border border-border-subtle bg-surface hover:bg-surface-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">filter_alt</span> Filter
+                        </button>
+<button class="px-3 py-1 text-body-sm border border-border-subtle bg-surface hover:bg-surface-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">download</span> Export
+                        </button>
+</div>
+</div>
+<div class="overflow-x-auto no-scrollbar">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low text-label-caps text-on-surface-variant border-b border-border-subtle">
+<th class="px-6 py-3 font-semibold">Time</th>
+<th class="px-6 py-3 font-semibold">Signal ID</th>
+<th class="px-6 py-3 font-semibold">Chain</th>
+<th class="px-6 py-3 font-semibold">Signal Type</th>
+<th class="px-6 py-3 font-semibold">Mode</th>
+<th class="px-6 py-3 font-semibold">Fill Latency</th>
+<th class="px-6 py-3 font-semibold">Slip (bps)</th>
+<th class="px-6 py-3 font-semibold">Outcome / P&amp;L</th>
+</tr>
+</thead>
+<tbody class="text-body-sm font-mono-data divide-y divide-border-subtle">
+<tr class="hover:bg-surface-container transition-colors group">
+<td class="px-6 py-3 text-on-surface-variant">22:14:02</td>
+<td class="px-6 py-3 text-primary font-bold">SOL-88219</td>
+<td class="px-6 py-3">
+<span class="flex items-center gap-2">
+<span class="w-1 h-3 bg-solana-teal"></span> Solana
+                                    </span>
+</td>
+<td class="px-6 py-3">Snipe (New Pool)</td>
+<td class="px-6 py-3"><span class="px-2 py-0.5 bg-primary text-on-primary text-[10px] font-bold rounded-sm">LIVE</span></td>
+<td class="px-6 py-3">812ms</td>
+<td class="px-6 py-3 text-status-success">-1.2</td>
+<td class="px-6 py-3 font-bold text-status-success">+12.4 BPS vs Shadow</td>
+</tr>
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-3 text-on-surface-variant">22:10:45</td>
+<td class="px-6 py-3 text-primary font-bold">POLY-9011</td>
+<td class="px-6 py-3">
+<span class="flex items-center gap-2">
+<span class="w-1 h-3 bg-polymarket-violet"></span> Polymarket
+                                    </span>
+</td>
+<td class="px-6 py-3">Accumulation</td>
+<td class="px-6 py-3"><span class="px-2 py-0.5 bg-surface-container-highest text-on-surface-variant text-[10px] font-bold rounded-sm">SHADOW</span></td>
+<td class="px-6 py-3">5,241ms</td>
+<td class="px-6 py-3">--</td>
+<td class="px-6 py-3 italic text-outline">Awaiting Resolution</td>
+</tr>
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-3 text-on-surface-variant">22:08:12</td>
+<td class="px-6 py-3 text-primary font-bold">RH-2283</td>
+<td class="px-6 py-3">
+<span class="flex items-center gap-2">
+<span class="w-1 h-3 bg-robinhood-amber"></span> Robinhood
+                                    </span>
+</td>
+<td class="px-6 py-3">Arbitrage (V3)</td>
+<td class="px-6 py-3"><span class="px-2 py-0.5 border border-border-subtle text-[10px] font-bold rounded-sm">PAPER</span></td>
+<td class="px-6 py-3">1,120ms</td>
+<td class="px-6 py-3 text-status-error">+2.8</td>
+<td class="px-6 py-3 text-status-success">+$442.10</td>
+</tr>
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-3 text-on-surface-variant">21:55:30</td>
+<td class="px-6 py-3 text-primary font-bold">SOL-88210</td>
+<td class="px-6 py-3">
+<span class="flex items-center gap-2">
+<span class="w-1 h-3 bg-solana-teal"></span> Solana
+                                    </span>
+</td>
+<td class="px-6 py-3">Liquidity Spike</td>
+<td class="px-6 py-3"><span class="px-2 py-0.5 bg-primary text-on-primary text-[10px] font-bold rounded-sm">LIVE</span></td>
+<td class="px-6 py-3">745ms</td>
+<td class="px-6 py-3 text-status-success">-0.8</td>
+<td class="px-6 py-3 text-status-success">+$2,410.88</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Protocol Performance Breakdown -->
+<section class="grid grid-cols-1 md:grid-cols-2 gap-6 pb-12">
+<!-- Polymarket Focus -->
+<div class="bg-surface border border-border-subtle p-6 flex flex-col">
+<div class="flex items-center gap-3 mb-6">
+<div class="w-10 h-10 rounded-sm bg-polymarket-violet flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary">query_stats</span>
+</div>
+<div>
+<h4 class="text-headline-md font-bold">Polymarket Resolution</h4>
+<p class="text-body-sm text-on-surface-variant">Predictive Outcome Attribution</p>
+</div>
+</div>
+<div class="flex-1 space-y-4">
+<div class="p-4 bg-surface-container-low border-l-4 border-polymarket-violet">
+<div class="flex justify-between items-start mb-2">
+<span class="text-body-sm font-bold">Market: US 2024 House Control</span>
+<span class="px-2 py-0.5 bg-status-warning/10 text-status-warning text-[10px] font-bold">PENDING</span>
+</div>
+<p class="text-body-sm mb-3">Position: <span class="font-mono-data font-bold">REPUBLICAN @ 0.52</span></p>
+<div class="flex justify-between text-[11px] text-outline font-bold">
+<span>MARK-TO-MARKET: +4.2%</span>
+<span>ORACLE STATUS: ACTIVE</span>
+</div>
+</div>
+<div class="p-4 bg-surface-container-low border-l-4 border-status-success">
+<div class="flex justify-between items-start mb-2">
+<span class="text-body-sm font-bold">Market: ETH ETF Approval (May)</span>
+<span class="px-2 py-0.5 bg-status-success/10 text-status-success text-[10px] font-bold">RESOLVED</span>
+</div>
+<p class="text-body-sm mb-3">Position: <span class="font-mono-data font-bold">YES @ 0.44</span></p>
+<div class="flex justify-between text-[11px] text-outline font-bold">
+<span>FINAL ALPHA: +122.4%</span>
+<span>DISBURSEMENT: COMPLETE</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Overall Chain Distribution -->
+<div class="bg-surface border border-border-subtle p-6">
+<h4 class="text-headline-md font-bold mb-6">Volume &amp; Performance Heatmap</h4>
+<div class="h-64 flex items-center justify-center relative alpha-grid border border-border-subtle">
+<div class="text-center space-y-4 z-10">
+<div class="flex gap-4">
+<div class="w-32 h-32 bg-primary border-4 border-solana-teal flex flex-col items-center justify-center">
+<span class="text-[10px] text-on-primary font-bold opacity-50">SOLANA</span>
+<span class="text-xl font-bold text-on-primary font-mono-data">62%</span>
+</div>
+<div class="w-24 h-24 bg-surface border-4 border-polymarket-violet flex flex-col items-center justify-center translate-y-4">
+<span class="text-[10px] text-on-surface-variant font-bold opacity-50">POLY</span>
+<span class="text-lg font-bold font-mono-data">24%</span>
+</div>
+<div class="w-16 h-16 bg-surface-container border-2 border-robinhood-amber flex flex-col items-center justify-center -translate-y-4">
+<span class="text-[8px] text-on-surface-variant font-bold opacity-50">RH</span>
+<span class="text-sm font-bold font-mono-data">14%</span>
+</div>
+</div>
+</div>
+<!-- Ambient Decorations -->
+<div class="absolute inset-0 pointer-events-none opacity-20">
+<div class="absolute top-4 left-4 text-[10px] font-mono-data">CLUSTER_A // STABLE</div>
+<div class="absolute bottom-4 right-4 text-[10px] font-mono-data">X-PROTOCOL // SYNC</div>
+</div>
+</div>
+<div class="mt-6 grid grid-cols-3 gap-2">
+<div class="text-center">
+<p class="text-[10px] font-bold text-on-surface-variant">SOL SR</p>
+<p class="text-body-sm font-mono-data text-status-success">0.92</p>
+</div>
+<div class="text-center border-x border-border-subtle">
+<p class="text-[10px] font-bold text-on-surface-variant">POLY SR</p>
+<p class="text-body-sm font-mono-data text-status-warning">0.74</p>
+</div>
+<div class="text-center">
+<p class="text-[10px] font-bold text-on-surface-variant">RH SR</p>
+<p class="text-body-sm font-mono-data text-status-success">0.88</p>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+<script>
+        // Micro-interaction for table rows
+        document.querySelectorAll('tbody tr').forEach(row => {
+            row.addEventListener('mouseenter', () => {
+                row.style.cursor = 'pointer';
+            });
+        });
+
+        // Dynamic timestamp update
+        function updateUTC() {
+            const now = new Date();
+            const timeString = now.toISOString().substr(11, 8) + ' UTC';
+            const utcElement = document.querySelector('header span:last-of-type');
+            if (utcElement) utcElement.textContent = timeString;
+        }
+        setInterval(updateUTC, 1000);
+        updateUTC();
+    </script>
+</body></html>

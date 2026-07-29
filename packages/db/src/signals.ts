@@ -1,10 +1,12 @@
 import { query } from './client.js';
+import { resolveChainValue } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 
 type SignalInput = {
   patternType: string;
   clusterId?: string | null;
   tokenMint?: string | null;
-  chain?: string | null;
+  chain?: Chain | null;
   confidence: number;
   signalScore: number;
   triggerData: Record<string, unknown>;
@@ -14,8 +16,14 @@ type SignalInput = {
   tokenSymbol?: string | null;
 };
 
+function resolveSignalTarget(input: SignalInput): { chain: Chain; tokenMint: string | null } {
+  if (!input.tokenMint) return { chain: input.chain ?? 'solana', tokenMint: null };
+  const resolved = resolveChainValue(input.tokenMint, input.chain ?? undefined);
+  return { chain: resolved.chain, tokenMint: resolved.prefixed };
+}
+
 export async function insertSignal(input: SignalInput) {
-  const chain = input.chain ?? (input.tokenMint && input.tokenMint.includes(':') ? input.tokenMint.split(':')[0] : 'solana');
+  const { chain, tokenMint } = resolveSignalTarget(input);
   const rows = await query(
     `INSERT INTO signals (pattern_type, cluster_id, token_mint, chain, confidence, signal_score, trigger_data, safety_flags, safety_warnings, token_name, token_symbol)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -23,7 +31,7 @@ export async function insertSignal(input: SignalInput) {
     [
       input.patternType,
       input.clusterId ?? null,
-      input.tokenMint ?? null,
+      tokenMint,
       chain,
       input.confidence,
       input.signalScore,
@@ -38,6 +46,7 @@ export async function insertSignal(input: SignalInput) {
 }
 
 export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes = 10) {
+  const { chain, tokenMint } = resolveSignalTarget(input);
   // First, check if a recent signal already exists within the dedupe window.
   // This filters out signals outside the time window that the unique index alone
   // cannot enforce (the index only covers status='pending').
@@ -46,16 +55,15 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
      WHERE pattern_type = $1
        AND token_mint IS NOT DISTINCT FROM $2::varchar
        AND created_at > NOW() - make_interval(mins => $3::int)
+       AND status IN ('pending', 'executing', 'executed')
      ORDER BY created_at DESC
      LIMIT 1`,
-    [input.patternType, input.tokenMint ?? null, dedupeMinutes]
+    [input.patternType, tokenMint, dedupeMinutes]
   );
 
   if (existing.length > 0) {
     return { inserted: false, id: existing[0].id };
   }
-
-  const chain = input.chain ?? (input.tokenMint && input.tokenMint.includes(':') ? input.tokenMint.split(':')[0] : 'solana');
 
   // Insert with ON CONFLICT to handle the race condition atomically.
   // If two concurrent inserts race past the SELECT above, the unique index
@@ -69,7 +77,7 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
     [
       input.patternType,
       input.clusterId ?? null,
-      input.tokenMint ?? null,
+      tokenMint,
       chain,
       input.confidence,
       input.signalScore,
@@ -86,7 +94,7 @@ export async function insertSignalWithDedupe(input: SignalInput, dedupeMinutes =
     // ON CONFLICT fired — a pending signal already exists for this token+pattern.
     const dup = await query<{ id: string }>(
       `SELECT id FROM signals WHERE pattern_type = $1 AND token_mint = $2 AND status = 'pending' LIMIT 1`,
-      [input.patternType, input.tokenMint]
+      [input.patternType, tokenMint]
     );
     return { inserted: false, id: dup[0]?.id ?? 'unknown' };
   }

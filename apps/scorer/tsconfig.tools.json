@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "_ingest_wallets.ts",
+    "src/starter-pack.ts"
+  ]
+}

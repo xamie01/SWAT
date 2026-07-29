@@ -1,4 +1,5 @@
 export * from './client.js';
+export * from './numeric.js';
 export * from './wallets.js';
 export * from './signals.js';
 export * from './transactions.js';
@@ -9,3 +10,9 @@ export * from './scoring-queries.js';
 export * from './discovery-queries.js';
 export * from './clustering-queries.js';
 export * from './polymarket.js';
+export * from './ingestion-health.js';
+export * from './execution-config.js';
+export * from './chain-certifications.js';
+export * from './attribution-queries.js';
+export * from './copy-trade-lifecycle.js';
+export * from './circuit-breaker.js';

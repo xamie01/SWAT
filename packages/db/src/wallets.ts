@@ -1,6 +1,12 @@
 import { query, pool } from './client.js';
+import {
+  getChainPrefix,
+  resolveChainAddress,
+  stripChainPrefix
+} from '@swat/shared';
+import type { Chain } from '@swat/shared';
 
-export type WalletChain = 'solana' | 'polygon' | 'robinhood-chain';
+export type WalletChain = Chain;
 
 type WalletInsert = {
   address: string;
@@ -23,8 +29,7 @@ export async function listWallets(chain?: WalletChain) {
 }
 
 export async function getWallet(address: string, chain: WalletChain = 'solana') {
-  const prefix = `${chain}:`;
-  const prefixedAddress = address.startsWith(prefix) ? address : `${prefix}${address}`;
+  const prefixedAddress = resolveChainAddress(address, chain).prefixed;
   const rows = await query(
     `SELECT address, chain, nickname, source, status, total_trades, win_rate, realized_roi, unrealized_roi, composite_score, tier, created_at, updated_at
      FROM wallets
@@ -36,9 +41,8 @@ export async function getWallet(address: string, chain: WalletChain = 'solana') 
 }
  
 export async function upsertWallet(wallet: WalletInsert) {
-  const chain = wallet.chain ?? 'solana';
-  const prefix = `${chain}:`;
-  const address = wallet.address.startsWith(prefix) ? wallet.address : `${prefix}${wallet.address}`;
+  const resolved = resolveChainAddress(wallet.address, wallet.chain);
+  const { chain, prefixed: address } = resolved;
 
   const rows = await query(
     `INSERT INTO wallets (address, chain, source, nickname, discovery_method)
@@ -59,8 +63,13 @@ export async function upsertWallet(wallet: WalletInsert) {
   return rows[0];
 }
 
-export async function resolvePrefixedAddress(address: string): Promise<string> {
-  if (address.includes(':')) return address;
+export async function resolvePrefixedAddress(address: string, chain?: WalletChain): Promise<string> {
+  const existingChain = getChainPrefix(address);
+  if (existingChain || chain) {
+    return resolveChainAddress(address, chain).prefixed;
+  }
+
+  const raw = stripChainPrefix(address);
   const rows = await query<{ address: string }>(
     `SELECT address FROM wallets 
      WHERE address = $1 
@@ -68,13 +77,17 @@ export async function resolvePrefixedAddress(address: string): Promise<string> {
         OR address = 'polygon:' || $1 
         OR address = 'robinhood-chain:' || $1 
      LIMIT 1`,
-    [address]
+    [raw]
   );
-  return rows[0]?.address ?? `solana:${address}`;
+  if (rows[0]?.address) return resolveChainAddress(rows[0].address).prefixed;
+  if (raw.toLowerCase().startsWith('0x')) {
+    throw new Error('Unable to resolve raw EVM address without an explicit chain');
+  }
+  return resolveChainAddress(raw, 'solana').prefixed;
 }
 
-export async function deleteWallet(address: string) {
-  const prefixed = await resolvePrefixedAddress(address);
+export async function deleteWallet(address: string, chain?: WalletChain) {
+  const prefixed = await resolvePrefixedAddress(address, chain);
   await query('DELETE FROM wallets WHERE address = $1', [prefixed]);
 }
 
@@ -83,8 +96,8 @@ export async function deleteWallet(address: string) {
  * a foreign-key violation once the wallet has transactions / cluster memberships /
  * funding edges, so remove children first, inside a transaction.
  */
-export async function deleteWalletCascade(address: string) {
-  const prefixed = await resolvePrefixedAddress(address);
+export async function deleteWalletCascade(address: string, chain?: WalletChain) {
+  const prefixed = await resolvePrefixedAddress(address, chain);
   // A single pooled client so BEGIN/COMMIT actually form one transaction.
   const client = await pool.connect();
   try {
@@ -103,6 +116,8 @@ export async function deleteWalletCascade(address: string) {
 }
 
 export async function refreshWalletActivity(address: string, lastActive?: Date | null, tradeIncrement = 0) {
+  const chain = getChainPrefix(address) ?? 'solana';
+  const prefixedAddress = resolveChainAddress(address, chain).prefixed;
   // last_active is kept MONOTONIC via GREATEST so a concurrent webhook (which
   // passes its own timestamp) can't clobber a newer value written by the bulk
   // backfill, and vice-versa. GREATEST ignores NULLs; COALESCE adds the NOW()
@@ -116,7 +131,7 @@ export async function refreshWalletActivity(address: string, lastActive?: Date |
        updated_at = NOW()
      WHERE w.address = $1
      RETURNING *`,
-    [address, lastActive ?? null, tradeIncrement]
+    [prefixedAddress, lastActive ?? null, tradeIncrement]
   );
 
   return rows[0] ?? null;
