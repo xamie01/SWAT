@@ -4,6 +4,7 @@ node_modules/
 .next/
 .turbo/
 dist/
+*.tsbuildinfo
 
 # Generated SWAT Starter Pack Outputs
 wallet-starter-pack.json
