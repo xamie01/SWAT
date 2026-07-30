@@ -14,6 +14,54 @@ This file is the single execution tracker. Audit IDs are retained for traceabili
 - `[ ] ... **NOT BUILT**` - no substantive implementation for the stated deliverable was found.
 - `[ ] ... **EXTERNAL EVIDENCE**` - code may be ready, but production credentials, measured canaries, operator review, or certification evidence is still required.
 
+## Verified State and Recommended Plan - 2026-07-30
+
+This section re-verified the repository against `docs/plans/BUILDER-GUIDE.md` and supersedes the 2026-07-27 ledger where they disagree. It exists to answer one question: **what to do next, in what order.** Audit IDs are preserved so work still checks off against the phases below.
+
+### Corrections to earlier claims
+
+Facts re-checked in the working tree on 2026-07-30. Each of these was asserted differently above:
+
+| Earlier claim | Verified reality |
+|---|---|
+| "`pnpm test` passes / prior gates recorded" | **`pnpm typecheck`, `pnpm test`, and `pnpm build` all failed from a clean checkout.** `packages/shared/tsconfig.tsbuildinfo` was committed while `dist/` is gitignored, so `tsc` read a stale incremental cache, emitted nothing, and exited 0; every consumer then failed to resolve `@swat/shared`. `turbo.json` also declared `test`/`typecheck` as `dependsOn: ["^test"]`/`["^typecheck"]` rather than `^build`. **Fixed 2026-07-30**: buildinfo untracked, `*.tsbuildinfo` ignored, `^build` added. Now green from a clean tree — typecheck 13/13, **439 tests across 13/13 packages**, build 11/11. |
+| CI exists and was reviewed (G7-T3 marked `[x]`) | The workflow exists and is correct, but **had never completed a run.** Every push failed at the Typecheck step with `Cannot find module '@swat/shared'`; the Test, build, and Integration steps never executed. G7-T3 cannot be considered evidenced until one GitHub-hosted run goes green. |
+| "`.env` currently allowlists `robinhood-chain` prematurely" (G2-R13, DoD item 7) | **Stale — already resolved.** `.env:128` is `LIVE_ENABLED_CHAINS=` (empty). No chain is allowlisted. Both items' remaining work is the certification document and canary, not an env removal. |
+| G5-R3 breaker "complete" | Implemented and durable, but keyed **`breaker:${chain}`** only (`packages/db/src/circuit-breaker.ts:33`). This satisfies the audit item and **violates Builder Guide Standing Rule 2**, which requires `(account, chain)`. See step S0.3. |
+| Generated artifacts "remain in the dirty worktree" | Worse than dirty — **they are committed.** `apps/discovery/dist/` (4 files) plus `.turbo/cache/*` and `apps/*/.turbo/turbo-build.log` are tracked in git, so `.gitignore` does not affect them. Requires `git rm --cached`. |
+
+### Ordering principle
+
+Builder Guide Standing Rule 2 (account-parameterization) is the load-bearing constraint. Any execution or risk code touched from here on must take an account/scope parameter with `'operator'` as today's only value. The schema already supports this — migration `028_copy_execution_lifecycle.sql` defines `target_account` with `UNIQUE (source_trade_id, target_account, execution_mode)` and `UNIQUE (chain, target_account, client_order_id)`. **Every hour spent writing single-account code now is an hour of rework plus a live-money migration later.** Steps are ordered so no step builds on something a later step must re-key.
+
+### Stage 0 - Engine hardening (do these in order)
+
+- [x] **S0.1 Restore the green gate.** Untrack `packages/shared/tsconfig.tsbuildinfo`, add `*.tsbuildinfo` to `.gitignore`, make `test`/`typecheck`/`lint` depend on `^build` in `turbo.json`. **Done 2026-07-30** (commit `ebbed82`): clean-tree typecheck 13/13, test 439 passing 13/13, build 11/11. Closes the `pnpm test` half of the Working Rules gate.
+- [ ] **S0.2 Prove CI green once.** Push S0.1 and confirm a GitHub-hosted run completes all five steps. Expect new failures in `pnpm test:integration`, which has never executed in CI and needs a `*_integration` database. Nothing downstream is trustworthy until one run is green end to end. **Evidences G7-T3**; unblocks every later stage gate.
+- [ ] **S0.3 Re-key the circuit breaker to `(account, chain)`.** Change the config key from `breaker:${chain}` to `breaker:${account}:${chain}`, thread an `account` parameter through `readCircuitBreakerState`, `recordCircuitBreakerFailure`, `recordCircuitBreakerSuccess`, and `claimCircuitBreakerProbe`, and add an idempotent migration that copies each existing `breaker:<chain>` row to `breaker:operator:<chain>` without dropping the old key in the same release (expand-and-contract, Standing Rule 4). Touch `packages/db/src/circuit-breaker.ts`, its callers in `apps/trade-executor/src/index.ts`, and add `packages/db/sql/033_*.sql`. **Do this before S0.4 and S0.5** — both consume breaker state. Reopens and re-closes **G5-R3** under Standing Rule 2.
+- [ ] **S0.4 Add the DB-resolved risk policy (`G5-R1`).** No `resolveRiskPolicy` exists anywhere in the repo. The DB value `trading.max_position_pct` is currently read only by `apps/api/src/attribution-routes.ts:43` for reporting; the executor sizes from env (`USDC_BALANCE_RISK_PCT`, `BASE_POSITION_*`, `PAPER_MAX_POSITION_PCT` at `apps/trade-executor/src/index.ts:341-370`). Introduce `resolveRiskPolicy({account, chain})` in `packages/db`, returning one validated policy from DB config with env as explicit fallback, and enforce it **before claim** in every mode. Migrate existing operator config explicitly rather than overwriting (per `H15`).
+- [ ] **S0.5 Define and enforce one stop-loss contract (`L17`).** `stopLossPct: 20` exists in `DEFAULT_RISK_CONFIG` and `config.risk.stop_loss_pct` (migration `001`), and both the API and dashboard read it — but **nothing enforces it.** Fold it into the S0.4 policy object so runtime, DB, env docs, and alerts share one source, then enforce and test it. This is the only `NOT BUILT` row remaining in Phase 5.
+- [ ] **S0.6 Wire the unused canonical-lifecycle entry points (`F-CORE7`, `F-CORE3`).** These `packages/db/src/copy-trade-lifecycle.ts` exports have **zero runtime callers**: `claimCopyExecutionsForReconciliation`, `releaseCopyExecutionReconciliationClaim`, `requestCopyExecution`, `buildCopyExecutionClientOrderId`, `advanceSourceTradeConfirmation`. Per-venue reconciliation exists (Trojan, Robinhood, Polymarket), but no single coordinator sweeps *every* ambiguous canonical execution at startup and on a schedule. Build that coordinator on `claimCopyExecutionsForReconciliation`, account-parameterized. Also add the explicit minimum-activity/selected-wallet policy at the canonical claim boundary for `F-CORE3`.
+- [ ] **S0.7 Untrack committed build artifacts.** `git rm --cached` for `apps/discovery/dist/` (4 files), `.turbo/cache/*`, and `apps/*/.turbo/turbo-build.log` + `packages/*/.turbo/turbo-build.log`. `.gitignore` already lists `.turbo/` and `dist/`, which has no effect on already-tracked paths. Closes the Final Repository Gate artifact row and part of the third Working Rule.
+- [ ] **S0.8 Activate the D17 database items.** None are present: no `readPool`/`writePool` split in `packages/db/src/client.ts`, no BRIN index on transaction timestamps, no `pg_stat_statements`. Cheap now, and the pool split is far easier before per-user query volume arrives in Stage 2.
+- [ ] **S0.9 Add the missing Stage 0 test coverage (`G7-T5`, `G7-T1`).** `G7-T5` chaos checks (executor death after submit, Redis restart, PostgreSQL restart, worker reconnection) are `NOT BUILT`. Add them once S0.3-S0.6 have settled, so they exercise the account-parameterized machinery rather than needing a rewrite.
+
+**Stage 0 exit gate:** CI green on every merge; risk policy DB-resolved and enforced pre-claim; one reconciliation coordinator covering all ambiguous executions; breaker keyed `(account, chain)`; no generated artifacts tracked. D1/D2/D3/D7/D10/D15 infrastructure is a parallel operational track and does not block code work.
+
+### After Stage 0
+
+Do not start these until the Stage 0 gate holds — each one multiplies the cost of the rework above.
+
+- **Stage 1 (auth/tenancy)** may begin in parallel once S0.2 is green, since it touches no execution code. Migrations `033+` for `users`/`user_sessions`/`user_auth_wallets`/`user_api_keys`, `apps/api/src/auth/`, and the audit-log table. Note the migration number collides with S0.3's breaker migration — whichever lands second renumbers.
+- **Stage 2 (per-user tracking)** carries the `G6-A2`-`G6-A10` attribution track as a non-blocking parallel effort.
+- **Stage 3 (venue certification)** is pull-based: certify a venue only when live money is actually wanted there. `DG-1` is resolved in favor of direct Jupiter signing with Jito bundles, so `F-SOL2`/`F-SOL3` are retargeted to that path and the Trojan work (`H4`, `TROJAN_*` env) retires with it. Paper mode ships everywhere without this stage. With `LIVE_ENABLED_CHAINS` empty and zero certification rows, all three chains are correctly clamped to paper today.
+- **Stage 4 (custody)** is hard-blocked by `DG-2` (legal opinion), which is non-negotiable and has no code workaround.
+- **Stages 5-7** are unchanged from the Builder Guide. Stage 7's chain-registry refactor stays strictly last; the green suite from S0.1 is its safety net.
+
+### What is genuinely working today
+
+So this plan is not read as "everything is broken": all nine services build and pass tests; ingestion, scoring, clustering, signal detection, alerting, and paper execution are implemented end to end across all three chains; the canonical source-event and execution state machine has real runtime callers in `apps/trade-executor`; live execution is correctly gated off by two independent controls. The gaps above are real but bounded, and none of them block paper-mode operation.
+
 ## Full Codebase Status Review - 2026-07-27
 
 This review inspected the current source, SQL migrations, tests, CI, runtime documentation, and live-certification records. Existing checkmarks were treated as claims to verify, not as evidence. Current focused verification passed 112 database tests and 127 trade-executor tests; both packages typechecked. Migrations `001` through `032` replayed twice on a clean temporary database and twice on the upgraded local database. A real PostgreSQL breaker probe tripped on the third failure, granted one half-open lease, rejected a concurrent probe, and reset durably. No production order was submitted and no chain certification is inferred from tests.
@@ -33,8 +81,8 @@ Current disposition:
 - [x] Treat source events and submitted executions as idempotent; never infer or fabricate a fill.
 - [x] Use least-privilege, bounded token approvals; never grant infinite ERC-20 allowances.
 - [ ] Run focused tests after each item group and update this file immediately after validation. **PARTIAL** - focused suites are current, but this tracker was not updated immediately after every prior batch.
-- [ ] Run full `pnpm typecheck`, `pnpm test`, and `pnpm build` at every phase gate. **PARTIAL** - prior gates are recorded; the final post-audit repository gate remains open.
-- [ ] Review each phase diff for secrets, generated artifacts, unrelated changes, and unchecked failure paths. **PARTIAL** - the worktree still contains generated `.turbo`/`dist` changes and requires a final secret/artifact review.
+- [ ] Run full `pnpm typecheck`, `pnpm test`, and `pnpm build` at every phase gate. **PARTIAL** - all three now pass from a clean tree as of 2026-07-30 (typecheck 13/13, 439 tests across 13/13 packages, build 11/11) after the S0.1 build fix. Prior recorded gates were unreliable: the committed `tsbuildinfo` meant a fresh checkout emitted no build output while `tsc` exited 0. One GitHub-hosted CI run must still go green (S0.2), and the final post-audit repository gate remains open.
+- [ ] Review each phase diff for secrets, generated artifacts, unrelated changes, and unchecked failure paths. **PARTIAL** - no secrets or private keys are tracked (verified 2026-07-30), but `apps/discovery/dist/`, `.turbo/cache/*`, and the per-package `.turbo/turbo-build.log` files are **committed**, not merely dirty; `.gitignore` cannot affect tracked paths. See S0.7.
 
 Migration numbering is authoritative from `packages/db/sql/`: `015_audit_schema_repairs.sql` is followed by `016_timestamp_tz.sql`, `017_execution_config.sql`, `018_shadow_trades.sql`, and subsequent ordered migrations.
 
@@ -297,7 +345,7 @@ Verification completed 2026-07-22: node-postgres now installs precision-aware pa
 - [ ] **F-RH6** Test native/token and token/token entry/exit, duplicate logs, no-route, simulation revert, reverted receipt, timeout, restart, and reconciliation. **PARTIAL** - entry/exit, route, revert, timeout, receipt, and restart cases exist, but the full native/token plus token/token matrix is not covered.
 - [x] **G2-R11** Add a golden-vector calldata encoding test for the certified router ABI.
 - [ ] **G2-R12** Record a tiny successful buy with receipt-derived amounts, a forced failure with released claim, and an orphaned receipt resolved after restart. **EXTERNAL EVIDENCE** - mocked/runtime tests are not a production canary record.
-- [ ] **G2-R13** Add `robinhood-chain` to `LIVE_ENABLED_CHAINS` only after `docs/certification/robinhood-chain.md` is reviewed. **EXTERNAL EVIDENCE** - `.env` currently allowlists the chain prematurely, but the missing reviewed document and active certification row keep effective execution clamped to paper; remove the allowlist entry until review.
+- [ ] **G2-R13** Add `robinhood-chain` to `LIVE_ENABLED_CHAINS` only after `docs/certification/robinhood-chain.md` is reviewed. **EXTERNAL EVIDENCE** - the premature allowlist entry is gone: `.env:128` is `LIVE_ENABLED_CHAINS=` (empty, verified 2026-07-30). Remaining work is the reviewed certification document and canary evidence, not an env change.
 
 ## Phase 3 - Polymarket Live CLOB Executor
 
@@ -360,9 +408,9 @@ Verification completed 2026-07-26: confirmed-trade parsing and backfill tests pr
 
 **Exit gate:** every paper and live order is checked before claim/submission, failures are isolated per chain, and emergency-off takes effect within 30 seconds.
 
-- [ ] **G5-R1** Enforce per-trade `maxPositionPct` against live balance or `PAPER_BANKROLL_USD` (default USD 10,000) in paper mode. **PARTIAL** - balance-aware sizing and the USD 10,000 paper bankroll are enforced, but executor sizing reads environment percentages and does not consume the hot database `trading.max_position_pct` value exposed by reporting.
+- [ ] **G5-R1** Enforce per-trade `maxPositionPct` against live balance or `PAPER_BANKROLL_USD` (default USD 10,000) in paper mode. **PARTIAL** - balance-aware sizing and the USD 10,000 paper bankroll are enforced, but executor sizing reads environment percentages (`apps/trade-executor/src/index.ts:341-370`) and does not consume the hot database `trading.max_position_pct`, which is read only by `apps/api/src/attribution-routes.ts:43` for reporting. No `resolveRiskPolicy` exists in the repo. See S0.4.
 - [x] **G5-R2** Enforce per-chain rolling 24-hour exposure and emit one deduplicated daily-cap alert.
-- [x] **G5-R3** Upgrade the circuit breaker to persisted, per-chain `{consecutiveFailures,trippedAt}` state that trips on the Nth failure and resets on success.
+- [ ] **G5-R3** Upgrade the circuit breaker to persisted, per-chain `{consecutiveFailures,trippedAt}` state that trips on the Nth failure and resets on success. **PARTIAL - reopened 2026-07-30 under Builder Guide Standing Rule 2.** The implementation is complete and durable as an audit item, but state is keyed `breaker:${chain}` (`packages/db/src/circuit-breaker.ts:33`) with no account dimension. Builder Guide Standing Rule 2 requires `(account, chain)`, and the schema already supports it via `target_account` in migration `028`. Re-key before any further risk or execution work builds on breaker state. See S0.3.
 - [x] **G5-R4** Delay blocked BullMQ jobs by five minutes instead of completing or dropping them.
 - [x] **G5-R5** Honor an all-chain `{"*":"off"}` kill switch within one execution-config cache TTL.
 - [x] **G5-R6** Reserve configured native gas balances and size down or skip rather than flooring upward.
@@ -424,7 +472,7 @@ Verification completed 2026-07-26: confirmed-trade parsing and backfill tests pr
 - [x] Run migrations twice against a clean database and once against an upgraded database.
 - [ ] Inspect queues and database constraints for duplicate-event and duplicate-execution protection. **PARTIAL** - deterministic queue IDs, source/execution unique indexes, and retry tests exist; final queue-state inspection across all running services is not recorded.
 - [x] Confirm `.env.example`, `README.md`, and `DEPLOYMENT.md` match the effective runtime configuration.
-- [ ] Remove agent-generated build artifacts from the diff and review all remaining changes. **NOT BUILT** - generated `.turbo` and `dist` changes remain in the dirty worktree.
+- [ ] Remove agent-generated build artifacts from the diff and review all remaining changes. **NOT BUILT** - and more serious than a dirty worktree: `apps/discovery/dist/` (4 files), `.turbo/cache/*`, and every `apps/*/.turbo/turbo-build.log` and `packages/*/.turbo/turbo-build.log` are **tracked in git**. Requires `git rm --cached`; `.gitignore` already lists `.turbo/` and `dist/` but does not apply to already-tracked paths. See S0.7.
 - [ ] Confirm no secret, private key, API credential, generated wallet data, or production order artifact is committed. **PARTIAL** - no production artifact was intentionally created, but the final full-worktree secret scan/review is not recorded.
 
 ## Final Definition of Done
@@ -435,7 +483,7 @@ Verification completed 2026-07-26: confirmed-trade parsing and backfill tests pr
 - [x] Every chain has visible ingestion lag, completeness, failure counts, and recovery alerts.
 - [ ] Every trade participates in risk enforcement and attribution; shadow trades affect benchmarking only. **PARTIAL** - shadow exclusion and core risk/attribution are implemented; the incomplete canonical policy and production acceptance prevent a universal claim.
 - [ ] The nightly report shows actual expectancy and latency per pattern, tier, chain, and mode. **PARTIAL** - expectancy dimensions and chain/mode latency exist, but latency is not fully broken down by pattern and tier with active-dimension coverage assertions.
-- [ ] No chain is declared live-capable before its manual certification document is reviewed. **PARTIAL** - database certification evidence still clamps all uncertified chains, but `.env` prematurely includes `robinhood-chain` in `LIVE_ENABLED_CHAINS`; remove it until the missing Robinhood certification document is reviewed.
+- [ ] No chain is declared live-capable before its manual certification document is reviewed. **PARTIAL** - both controls are correctly closed as of 2026-07-30: `LIVE_ENABLED_CHAINS` is empty and no active certification row exists, so all three chains resolve to paper. The item stays open only until a chain is actually certified through the reviewed-document path.
 
 ## Implementation References
 
