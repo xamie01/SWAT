@@ -16,6 +16,13 @@ vi.mock('@swat/db', () => ({
   insertTradeAndMarkSignalExecuted: vi.fn().mockResolvedValue('live-trade-123'),
   insertTradeAndReleaseSignalClaim: vi.fn().mockResolvedValue({ id: 'skipped-trade-123' }),
   getTokenDecimals: vi.fn().mockResolvedValue(6),
+  resolveRiskPolicy: vi.fn().mockResolvedValue({
+    maxPositionPct: 5,
+    maxDailyExposurePct: 25,
+    stopLossPct: 20,
+    maxConsecutiveFailures: 3,
+    minLiquidityUsd: 50000
+  }),
   readCircuitBreakerState: vi.fn(),
   recordCircuitBreakerFailure: vi.fn(),
   recordCircuitBreakerSuccess: vi.fn(),

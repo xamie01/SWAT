@@ -1264,6 +1264,39 @@ async function reconcilePendingPolymarketTrade(
   return markAmbiguous(row, `Polymarket matched order ${order.id} has no confirmed fill evidence`);
 }
 
+/**
+ * Reconcile the one pending trade belonging to a canonical execution.
+ *
+ * `pollPolymarketOrders` sweeps by `status = 'pending_confirmation'`, so an
+ * execution whose trade row has already left that status is invisible to it.
+ * The reconciliation coordinator claims from `copy_executions` instead and needs
+ * to drive a single execution, so it comes through here.
+ *
+ * Returns null when there is nothing to reconcile — either live readiness is
+ * absent or no matching pending trade row exists.
+ */
+export async function reconcilePolymarketExecution(
+  executionId: string,
+  now: number = Date.now()
+): Promise<PolymarketReconciliationOutcome | null> {
+  if (!liveReadiness.ready) return null;
+  const client = requireSecureClobClient();
+  const [row] = await query<PendingPolymarketTrade>(
+    `SELECT id, signal_id, copy_execution_id, token_mint, direction,
+            venue_order_id, submitted_at
+       FROM trades
+      WHERE copy_execution_id = $1
+        AND chain = 'polygon'
+        AND executor = 'polymarket-clob'
+        AND venue_order_id IS NOT NULL
+      ORDER BY COALESCE(submitted_at, executed_at) DESC, id DESC
+      LIMIT 1`,
+    [executionId]
+  );
+  if (!row) return null;
+  return reconcilePendingPolymarketTrade(client, row, now);
+}
+
 export async function pollPolymarketOrders(): Promise<PolymarketReconciliationOutcome[]> {
   if (!liveReadiness.ready) return [];
   const outcomes: PolymarketReconciliationOutcome[] = [];

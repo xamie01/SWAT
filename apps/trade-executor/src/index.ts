@@ -12,6 +12,7 @@ import {
 import type { Chain, JupiterSimulatedFill } from '@swat/shared';
 import {
   claimCircuitBreakerProbe,
+  claimCopyExecutionsForReconciliation,
   claimSourceSignalForCopyExecution,
   claimSignalForExecution,
   getRollingExposureUsd,
@@ -24,11 +25,13 @@ import {
   insertTradeAndReleaseSignalClaim,
   pool,
   query,
+  resolveRiskPolicy,
   readCircuitBreakerState,
   recordCopyExecutionEvidence,
   recordCircuitBreakerFailure,
   recordCircuitBreakerSuccess,
   releaseSignalClaim,
+  releaseCopyExecutionReconciliationClaim,
   resolveChainMode,
   transitionCopyExecution,
   type CopyExecutionRecord
@@ -69,6 +72,7 @@ import {
 import {
   triggerPolymarket,
   pollPolymarketOrders,
+  reconcilePolymarketExecution,
   getPolymarketAskPrice,
   getPolymarketAvailableBalance,
   getPolymarketLiveReadiness
@@ -93,6 +97,16 @@ import {
   resolvePaperCopyTargetAccount,
   sourceSellFractionToBps
 } from './canonical-copy.js';
+import {
+  RECONCILIATION_ACCOUNT,
+  runReconciliationCoordinator,
+  type VenueReconciler
+} from './reconciliation-coordinator.js';
+import {
+  createEvmReceiptReconciler,
+  createPolymarketReconciler,
+  createSolanaConfirmationReconciler
+} from './reconciliation-venues.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 let redis: Redis | null = null;
@@ -384,6 +398,8 @@ async function getAvailablePositionBalance(opts: {
   tokenMint: string;
 }): Promise<number> {
   if (opts.sizingMode === 'paper') {
+    // Resolve DB-backed risk policy (30s TTL) so changing DB values affects sizing without restart
+    const policy = await resolveRiskPolicy('operator', opts.chain);
     const bankrollUsd = parsePositiveNumber(
       process.env.PAPER_BANKROLL_USD,
       10_000,
@@ -433,6 +449,16 @@ async function getBalanceAwarePositionSize(
   const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
   const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
   const config = getSizingConfig(chain, sizingMode);
+  if (sizingMode === 'paper') {
+    try {
+      const policy = await resolveRiskPolicy('operator', chain);
+      // override risk percentage from DB-backed policy when present
+      (config as any).riskPct = policy.maxPositionPct;
+    } catch (error) {
+      // If policy resolution fails, fall back to existing env/default behavior
+      console.warn('[trade-executor] resolveRiskPolicy failed, using env/defaults', error);
+    }
+  }
   const balance = await getAvailablePositionBalance({
     chain,
     sizingMode,
@@ -624,6 +650,72 @@ export async function runChainReconciliations(tasks: ChainReconciliationTask[]):
   });
 }
 
+/**
+ * Build the venue handlers the canonical coordinator routes to.
+ *
+ * A chain is only included when its live runtime exists. Omitting one is
+ * deliberate and safe: the coordinator counts that execution `unsupported` and
+ * reschedules it, so the row survives until a process that *can* probe the venue
+ * claims it, rather than being resolved by a process with no evidence.
+ */
+export function buildVenueReconcilers(input: {
+  robinhoodRuntime: Pick<RobinhoodRuntime, 'adapter'> | null;
+  trojanRuntime: Pick<TrojanRuntime, 'readConfirmation'> | null;
+  polymarketReady: boolean;
+}): Partial<Record<Chain, VenueReconciler>> {
+  const reconcilers: Partial<Record<Chain, VenueReconciler>> = {};
+  if (input.robinhoodRuntime) {
+    const adapter = input.robinhoodRuntime.adapter;
+    reconcilers['robinhood-chain'] = createEvmReceiptReconciler({
+      probe: async (hash) => {
+        const receipt = await adapter.getReceipt(hash as `0x${string}`);
+        return receipt ? { status: receipt.status } : null;
+      }
+    });
+  }
+  if (input.trojanRuntime?.readConfirmation) {
+    const readConfirmation = input.trojanRuntime.readConfirmation;
+    reconcilers.solana = createSolanaConfirmationReconciler({
+      probe: (signature) => readConfirmation(signature)
+    });
+  }
+  if (input.polymarketReady) {
+    reconcilers.polygon = createPolymarketReconciler({
+      probe: (executionId) => reconcilePolymarketExecution(executionId)
+    });
+  }
+  return reconcilers;
+}
+
+/**
+ * Publish an execution that has burned every reconciliation attempt.
+ *
+ * Nothing else will ever claim the row, so without this it would sit ambiguous
+ * and unnoticed. This does not resolve the execution — deciding a money-moving
+ * state without venue evidence is exactly what must not happen automatically.
+ */
+function escalateStuckExecution(redisClient: Redis) {
+  return async (execution: CopyExecutionRecord, reason: string) => {
+    console.error(
+      `[trade-executor] execution ${execution.id} exhausted reconciliation attempts: ${reason}`
+    );
+    await redisClient.publish(REDIS_CHANNELS.alertQueue, JSON.stringify({
+      type: 'RECONCILIATION_EXHAUSTED',
+      title: `Unreconciled ${execution.chain} execution needs review`,
+      message:
+        `Execution ${execution.id} (${execution.direction} ${execution.tokenMint}) is still `
+        + `in state ${execution.state} after ${execution.reconciliationAttempts} attempts.\n`
+        + `Submission: ${execution.submissionType ?? 'none'} ${execution.submissionId ?? 'unknown'}\n`
+        + `Client order id: ${execution.clientOrderId}\n`
+        + `Reason: ${reason}\n`
+        + 'It will not be retried automatically. Confirm the venue state by hand.',
+      severity: 'high',
+      chain: execution.chain
+    }));
+  };
+}
+
+
 type ExecutorJobResult = {
   status: string;
   reason?: string;
@@ -682,12 +774,12 @@ export async function executeJobWithCircuitBreaker(
   execute: (job: { data: unknown }) => Promise<ExecutorJobResult> = handleJob
 ): Promise<ExecutorJobResult> {
   const chain = chainFromJob(job);
-  const state = await readCircuitBreakerState(chain);
+  const state = await readCircuitBreakerState('operator', chain);
 
   if (state.trippedAt !== null) {
-    const probeClaimed = await claimCircuitBreakerProbe(chain, CIRCUIT_BREAKER_RESET_MS);
+    const probeClaimed = await claimCircuitBreakerProbe('operator', chain, CIRCUIT_BREAKER_RESET_MS);
     if (!probeClaimed) {
-      const current = await readCircuitBreakerState(chain);
+      const current = await readCircuitBreakerState('operator', chain);
       if (current.trippedAt !== null) {
         console.log(`[trade-executor] circuit breaker active for ${chain}; delaying job`);
         return delayForCircuitBreaker(job, chain, current.trippedAt);
@@ -700,9 +792,10 @@ export async function executeJobWithCircuitBreaker(
   try {
     const result = await execute(job);
     if (successfulBreakerOutcomes.has(result.status)) {
-      await recordCircuitBreakerSuccess(chain);
+      await recordCircuitBreakerSuccess('operator', chain);
     } else if (failedBreakerOutcomes.has(result.status)) {
       const failed = await recordCircuitBreakerFailure(
+        'operator',
         chain,
         DEFAULT_RISK_CONFIG.maxConsecutiveFailures
       );
@@ -716,6 +809,7 @@ export async function executeJobWithCircuitBreaker(
   } catch (error) {
     if (error instanceof UnrecoverableError || error instanceof DelayedError) throw error;
     const failed = await recordCircuitBreakerFailure(
+      'operator',
       chain,
       DEFAULT_RISK_CONFIG.maxConsecutiveFailures
     );
@@ -934,6 +1028,8 @@ export async function handleJob(job: { data: unknown }) {
     clusterTier?: ClusterTier;
     manual?: boolean;
     direction?: 'buy' | 'sell';
+    stopLoss?: boolean;
+    sellTokenAmount?: number;
   };
 
   if (!payload.signalId || typeof payload.signalId !== 'string') {
@@ -979,8 +1075,11 @@ export async function handleJob(job: { data: unknown }) {
     console.warn(`[trade-executor] WARNING: ${clampReason} | requested: ${chain} live`);
   }
 
-  // Auto-execute gate
-  if (!payload.manual && (!AUTO_EXECUTE || score < AUTO_EXECUTE_MIN_SCORE)) {
+  // Auto-execute gate. A stop-loss is exempt: it only ever reduces an existing
+  // position, and gating it behind the entry switch would leave every position
+  // opened while AUTO_EXECUTE was off permanently unprotected. The chain's
+  // execution mode (including the 'off' kill switch) still applies above.
+  if (!payload.manual && !payload.stopLoss && (!AUTO_EXECUTE || score < AUTO_EXECUTE_MIN_SCORE)) {
     console.log(`[trade-executor] SKIPPED: auto-execute=${AUTO_EXECUTE}, score=${score}, threshold=${AUTO_EXECUTE_MIN_SCORE} | token: ${payload.tokenMint}`);
     return {
       status: 'skipped',
@@ -989,9 +1088,26 @@ export async function handleJob(job: { data: unknown }) {
   }
 
   const direction = payload.direction ?? 'buy';
+
+  // A stop-loss closes the whole position, so the quantity is dictated by the
+  // ledger rather than by balance-aware sizing.
+  let stopLossSellQuantity: number | null = null;
+  if (payload.stopLoss) {
+    if (direction !== 'sell') {
+      throw new UnrecoverableError(`Stop-loss job ${payload.signalId} must be a sell`);
+    }
+    const quantity = Number(payload.sellTokenAmount);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new UnrecoverableError(
+        `Stop-loss job ${payload.signalId} needs a positive sellTokenAmount`
+      );
+    }
+    stopLossSellQuantity = quantity;
+  }
+
   const sizingMode = execMode === 'paper' ? 'paper' : 'live';
   const liveTokenSell = direction === 'sell' && chain !== 'polygon' && sizingMode === 'live';
-  const size = liveTokenSell
+  const size = liveTokenSell || stopLossSellQuantity !== null
     ? 0
     : await getBalanceAwarePositionSize(
         score,
@@ -1002,7 +1118,7 @@ export async function handleJob(job: { data: unknown }) {
         cleanMint
       );
 
-  if (!Number.isFinite(size) || (size <= 0 && !liveTokenSell)) {
+  if (!Number.isFinite(size) || (size <= 0 && !liveTokenSell && stopLossSellQuantity === null)) {
     console.log(`[trade-executor] SKIPPED: position size = 0 | token: ${payload.tokenMint}`);
     return { status: 'skipped', reason: 'Position size calculated to 0' };
   }
@@ -1087,13 +1203,16 @@ export async function handleJob(job: { data: unknown }) {
       );
       canonicalLiveTradeId = linkedTrade[0]?.id ?? null;
     }
-  } else {
+  } else if (!payload.stopLoss) {
     const claimed = await claimSignalForExecution(payload.signalId);
     if (!claimed) {
       console.log(`[trade-executor] SKIPPED: signal is not pending | signalId: ${payload.signalId}`);
       return { status: 'skipped', reason: 'Signal is not pending' };
     }
   }
+  // A stop-loss signal is already 'executed' — its entry filled — so it cannot
+  // pass the pending claim. Its exactly-once guard is the (account, signal) row
+  // in signal_stop_losses, claimed by the scorer before this job was queued.
 
   try {
     let paperResult: ExecutorJobResult | null = null;
@@ -1616,9 +1735,16 @@ export async function handleJob(job: { data: unknown }) {
 
       let simulatedVia = 'spot-price';
       let simTokenAmount: number | null = null;
-      let simBaseQuantity: string | null = paperExecution?.direction === 'sell'
-        ? paperExecution.requestedBaseQuantity
-        : null;
+      // A stop-loss job carries the exact ledger quantity to unwind. It has no
+      // sourceTradeId, so there is no canonical execution to read the quantity
+      // from — the payload is the only authority, and using bankroll-derived
+      // sizing instead would record a wrong-quantity sell and corrupt the
+      // position ledger permanently.
+      let simBaseQuantity: string | null = stopLossSellQuantity !== null
+        ? stopLossSellQuantity.toString()
+        : paperExecution?.direction === 'sell'
+          ? paperExecution.requestedBaseQuantity
+          : null;
       let simAmountUsd: number | undefined;
       let simPriceUsd: number | null = null;
       let simExecutor = 'paper';
@@ -1661,9 +1787,10 @@ export async function handleJob(job: { data: unknown }) {
         simulatedVia = 'polymarket-book';
         simExecutor = 'polymarket-sim';
         simTokenAmount = direction === 'sell'
-          ? paperExecution
-            ? Number(paperExecution.requestedBaseQuantity)
-            : size / targetPrice
+          ? stopLossSellQuantity
+            ?? (paperExecution
+              ? Number(paperExecution.requestedBaseQuantity)
+              : size / targetPrice)
           : size / targetPrice;
         simBaseQuantity = simTokenAmount.toString();
         simPriceUsd = targetPrice;
@@ -1691,7 +1818,9 @@ export async function handleJob(job: { data: unknown }) {
       }
 
       if (simulatedVia === 'spot-price') {
-        if (paperExecution) {
+        // Stop-loss sells have no canonical execution but still need a priced,
+        // quantity-accurate fill, so they take this path too.
+        if (paperExecution || stopLossSellQuantity !== null) {
           simPriceUsd = await fetchTokenPriceUsd(payload.tokenMint);
           if (!simPriceUsd || simPriceUsd <= 0) {
             throw new Error('Spot-price simulation lacks a positive token price');
@@ -1710,13 +1839,17 @@ export async function handleJob(job: { data: unknown }) {
             }
             simBaseQuantity = (simAmountUsd / simPriceUsd).toString();
           } else {
-            simBaseQuantity = paperExecution.requestedBaseQuantity;
+            simBaseQuantity = stopLossSellQuantity !== null
+              ? stopLossSellQuantity.toString()
+              : paperExecution!.requestedBaseQuantity;
             simAmountUsd = Number(simBaseQuantity) * simPriceUsd;
           }
           simTokenAmount = Number(simBaseQuantity);
         }
         console.log(
-          `[trade-executor] PAPER (spot-price fallback): ${payload.tokenMint} | ${size} base units (score: ${payload.score})`
+          `[trade-executor] PAPER (spot-price fallback): ${payload.tokenMint} | ` +
+          `${stopLossSellQuantity !== null ? `${stopLossSellQuantity} tokens (stop-loss)` : `${size} base units`} ` +
+          `(score: ${payload.score})`
         );
       }
 
@@ -1843,6 +1976,34 @@ export async function main() {
         tasks.push({ chain: 'solana', run: () => runTrojanReconciliation(trojanRuntime) });
       }
       await runChainReconciliations(tasks);
+
+      // The per-venue sweeps above are the fast path and run first. This is the
+      // backstop for canonical executions their pending stores can no longer
+      // see. It shares this guard rather than getting its own timer so two
+      // reconciliation passes can never overlap.
+      try {
+        const sweep = await runReconciliationCoordinator({
+          claim: ({ limit }) => claimCopyExecutionsForReconciliation({ limit }),
+          release: (input) => releaseCopyExecutionReconciliationClaim(input),
+          reconcilers: buildVenueReconcilers({
+            robinhoodRuntime,
+            trojanRuntime,
+            polymarketReady: getPolymarketLiveReadiness().ready
+          }),
+          escalate: escalateStuckExecution(redisClient),
+          account: RECONCILIATION_ACCOUNT
+        });
+        if (sweep.claimed > 0) {
+          console.log(
+            `[trade-executor] canonical reconciliation: claimed ${sweep.claimed}, `
+            + `resolved ${sweep.resolved}, pending ${sweep.pending}, `
+            + `unresolved ${sweep.unresolved}, exhausted ${sweep.exhausted}, `
+            + `unsupported ${sweep.unsupported}`
+          );
+        }
+      } catch (error) {
+        console.error('[trade-executor] canonical reconciliation failed', error);
+      }
     } finally {
       reconciliationRunning = false;
     }

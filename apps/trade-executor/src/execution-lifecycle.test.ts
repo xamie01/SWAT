@@ -22,6 +22,13 @@ vi.mock('@swat/db', () => ({
   getRollingExposureUsd: vi.fn(),
   getTokenDecimals: vi.fn(),
   hasRecentBuy: vi.fn(),
+    resolveRiskPolicy: vi.fn().mockResolvedValue({
+      maxPositionPct: 5,
+      maxDailyExposurePct: 25,
+      stopLossPct: 20,
+      maxConsecutiveFailures: 3,
+      minLiquidityUsd: 50000
+    }),
   insertTrade: vi.fn().mockResolvedValue({ id: 'inserted-trade' }),
   insertTradeAndMarkSignalExecuted: vi.fn().mockResolvedValue({ id: 'filled-trade' }),
   insertTradeAndReleaseSignalClaim: vi.fn().mockResolvedValue({ id: 'skipped-trade' }),
@@ -318,13 +325,13 @@ describe('executor trade-state routing', () => {
       status: 'skipped',
       reason: 'policy'
     });
-    expect(db.readCircuitBreakerState).toHaveBeenCalledWith('polygon');
+    expect(db.readCircuitBreakerState).toHaveBeenCalledWith('operator', 'polygon');
     expect(db.recordCircuitBreakerSuccess).not.toHaveBeenCalled();
     expect(db.recordCircuitBreakerFailure).not.toHaveBeenCalled();
 
     const success = vi.fn().mockResolvedValue({ status: 'live-executed' });
     await executeJobWithCircuitBreaker(job, success);
-    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('polygon');
+    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('operator', 'polygon');
   });
 
   it('counts returned execution failures and thrown transient failures', async () => {
@@ -345,6 +352,7 @@ describe('executor trade-state routing', () => {
 
     expect(db.recordCircuitBreakerFailure).toHaveBeenCalledTimes(2);
     expect(db.recordCircuitBreakerFailure).toHaveBeenCalledWith(
+      'operator',
       'robinhood-chain',
       3
     );
@@ -374,7 +382,7 @@ describe('executor trade-state routing', () => {
       status: 'submitted'
     });
     expect(probe).toHaveBeenCalledOnce();
-    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('solana');
+    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('operator', 'solana');
   });
 
   it('routes a Solana SELL through the stable Trojan runtime without BUY sizing', async () => {

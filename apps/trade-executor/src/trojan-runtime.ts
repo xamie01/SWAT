@@ -113,6 +113,14 @@ export function createTrojanRuntime(options: {
   const now = options.now ?? (() => new Date());
 
   return {
+    /**
+     * Probe one signature directly, bypassing the pending store.
+     *
+     * The canonical reconciliation coordinator needs this: it handles executions
+     * whose pending-store entry is already gone, so `reconcile()` below — which
+     * iterates that store — structurally cannot see them.
+     */
+    readConfirmation: options.readConfirmation,
     async submit(input: TrojanSubmitInput): Promise<TrojanRuntimeSubmission> {
       const existing = await options.pendingStore.findPending(input.signalId);
       if (existing) return existing.submission;

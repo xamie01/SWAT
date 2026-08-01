@@ -1,6 +1,7 @@
-import { fetchTokenPriceUsd } from '@swat/shared';
+import { fetchTokenPriceUsd, isChain } from '@swat/shared';
 import { query } from './client.js';
 import { calculateAverageCostPnl } from './pnl-math.js';
+import type { OpenPositionSnapshot } from './stop-loss.js';
 
 export { calculateAverageCostPnl, markToMarketPnl } from './pnl-math.js';
 
@@ -17,10 +18,14 @@ type PositionTrade = {
 /**
  * Recompute realized and unrealized average-cost P&L from ordered filled trades.
  * Token prices are fetched once per distinct mint and only for open positions.
+ *
+ * Also returns a snapshot of every still-open position it priced, so stop-loss
+ * enforcement can reuse this pass instead of re-querying the ledger and
+ * re-fetching prices on its own schedule.
  */
 export async function markToMarketOpenPositions(
   signalId?: string
-): Promise<{ updated: number; skipped: number }> {
+): Promise<{ updated: number; skipped: number; positions: OpenPositionSnapshot[] }> {
   const trades = await query<PositionTrade>(`
     SELECT
       t.signal_id,
@@ -47,6 +52,7 @@ export async function markToMarketOpenPositions(
   }
 
   const priceCache = new Map<string, number | null>();
+  const positions: OpenPositionSnapshot[] = [];
   let updated = 0;
   let skipped = 0;
 
@@ -128,7 +134,23 @@ export async function markToMarketOpenPositions(
       [pnl.totalPnlUsd, pnl.realizedPnlUsd, pnl.unrealizedPnlUsd, signalId]
     );
     updated++;
+
+    if (pnl.openQuantity > 1e-12 && currentPrice !== null) {
+      const separator = tokenMint.indexOf(':');
+      const chain = separator >= 0 ? tokenMint.slice(0, separator) : 'solana';
+      if (isChain(chain)) {
+        positions.push({
+          signalId,
+          tokenMint,
+          chain,
+          openQuantity: pnl.openQuantity,
+          openCostBasisUsd: pnl.openCostBasisUsd,
+          unrealizedPnlUsd: pnl.unrealizedPnlUsd,
+          currentPriceUsd: currentPrice
+        });
+      }
+    }
   }
 
-  return { updated, skipped };
+  return { updated, skipped, positions };
 }

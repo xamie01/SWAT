@@ -16,8 +16,8 @@ const initialState: CircuitBreakerState = {
 };
 
 export class CircuitBreakerStateCorruptionError extends Error {
-  constructor(chain: Chain) {
-    super(`Circuit breaker state for ${chain} is malformed; refusing to continue`);
+  constructor(account: string, chain: Chain) {
+    super(`Circuit breaker state for ${account}:${chain} is malformed; refusing to continue`);
     this.name = 'CircuitBreakerStateCorruptionError';
   }
 }
@@ -28,18 +28,21 @@ function assertChain(chain: Chain): void {
   }
 }
 
-function breakerKey(chain: Chain): string {
+function breakerKey(account: string, chain: Chain): string {
   assertChain(chain);
-  return `breaker:${chain}`;
+  if (!account || typeof account !== 'string') {
+    throw new Error('Account must be a non-empty string for circuit breaker keys');
+  }
+  return `breaker:${account}:${chain}`;
 }
 
 function serializeState(state: CircuitBreakerState): string {
   return JSON.stringify(state);
 }
 
-function parseState(chain: Chain, value: unknown): CircuitBreakerState {
+function parseState(account: string, chain: Chain, value: unknown): CircuitBreakerState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new CircuitBreakerStateCorruptionError(chain);
+    throw new CircuitBreakerStateCorruptionError(account, chain);
   }
 
   const record = value as Record<string, unknown>;
@@ -57,7 +60,7 @@ function parseState(chain: Chain, value: unknown): CircuitBreakerState {
   );
 
   if (!hasExactShape || !hasValidFailures || !hasValidTripTime) {
-    throw new CircuitBreakerStateCorruptionError(chain);
+    throw new CircuitBreakerStateCorruptionError(account, chain);
   }
 
   return {
@@ -85,24 +88,25 @@ function validateCooldown(cooldownMs: number): void {
 }
 
 /** Reads directly from PostgreSQL on every call so state is shared across processes and restarts. */
-export async function readCircuitBreakerState(chain: Chain): Promise<CircuitBreakerState> {
-  const key = breakerKey(chain);
+export async function readCircuitBreakerState(account: string, chain: Chain): Promise<CircuitBreakerState> {
+  const key = breakerKey(account, chain);
   const rows = await query<CircuitBreakerRow>(
     'SELECT value FROM config WHERE key = $1',
     [key]
   );
 
-  if (rows.length === 0) throw new CircuitBreakerStateCorruptionError(chain);
-  return parseState(chain, rows[0]?.value);
+  if (rows.length === 0) throw new CircuitBreakerStateCorruptionError(account, chain);
+  return parseState(account, chain, rows[0]?.value);
 }
 
 /** Atomically increments one chain and records the first threshold-crossing timestamp. */
 export async function recordCircuitBreakerFailure(
+  account: string,
   chain: Chain,
   threshold: number,
   failedAt = new Date()
 ): Promise<CircuitBreakerState> {
-  const key = breakerKey(chain);
+  const key = breakerKey(account, chain);
   validateThreshold(threshold);
   validateFailureTime(failedAt);
 
@@ -113,7 +117,7 @@ export async function recordCircuitBreakerFailure(
       'SELECT value FROM config WHERE key = $1 FOR UPDATE',
       [key]
     );
-    const current = parseState(chain, result.rows[0]?.value);
+    const current = parseState(account, chain, result.rows[0]?.value);
     const consecutiveFailures = Math.min(
       current.consecutiveFailures + 1,
       Number.MAX_SAFE_INTEGER
@@ -142,8 +146,8 @@ export async function recordCircuitBreakerFailure(
 }
 
 /** Atomically clears one chain after validating and locking its persisted state. */
-export async function recordCircuitBreakerSuccess(chain: Chain): Promise<CircuitBreakerState> {
-  const key = breakerKey(chain);
+export async function recordCircuitBreakerSuccess(account: string, chain: Chain): Promise<CircuitBreakerState> {
+  const key = breakerKey(account, chain);
   const reset = { ...initialState };
   const client = await pool.connect();
 
@@ -153,7 +157,7 @@ export async function recordCircuitBreakerSuccess(chain: Chain): Promise<Circuit
       'SELECT value FROM config WHERE key = $1 FOR UPDATE',
       [key]
     );
-    parseState(chain, result.rows[0]?.value);
+    parseState(account, chain, result.rows[0]?.value);
     await client.query(
       `UPDATE config
           SET value = $2::jsonb,
@@ -176,11 +180,12 @@ export async function recordCircuitBreakerSuccess(chain: Chain): Promise<Circuit
  * acts as a cross-process lease so concurrent workers continue delaying.
  */
 export async function claimCircuitBreakerProbe(
+  account: string,
   chain: Chain,
   cooldownMs: number,
   now = new Date()
 ): Promise<boolean> {
-  const key = breakerKey(chain);
+  const key = breakerKey(account, chain);
   validateCooldown(cooldownMs);
   validateFailureTime(now);
   const client = await pool.connect();
@@ -191,7 +196,7 @@ export async function claimCircuitBreakerProbe(
       'SELECT value FROM config WHERE key = $1 FOR UPDATE',
       [key]
     );
-    const current = parseState(chain, result.rows[0]?.value);
+    const current = parseState(account, chain, result.rows[0]?.value);
     if (current.trippedAt === null) {
       await client.query('COMMIT');
       return false;

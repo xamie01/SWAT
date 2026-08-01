@@ -16,3 +16,5 @@ export * from './chain-certifications.js';
 export * from './attribution-queries.js';
 export * from './copy-trade-lifecycle.js';
 export * from './circuit-breaker.js';
+export * from './risk-policy.js';
+export * from './stop-loss.js';

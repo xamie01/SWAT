@@ -8,6 +8,13 @@ vi.mock('@swat/db', () => ({
   claimCircuitBreakerProbe: vi.fn(),
   resolveChainMode: vi.fn(),
   hasRecentBuy: vi.fn().mockResolvedValue(false),
+  resolveRiskPolicy: vi.fn().mockResolvedValue({
+    maxPositionPct: 5,
+    maxDailyExposurePct: 25,
+    stopLossPct: 20,
+    maxConsecutiveFailures: 3,
+    minLiquidityUsd: 50000
+  }),
   getRollingExposureUsd: vi.fn().mockResolvedValue(0),
   claimSignalForExecution: vi.fn().mockResolvedValue(true),
   releaseSignalClaim: vi.fn().mockResolvedValue(undefined),
