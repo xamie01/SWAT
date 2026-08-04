@@ -1,6 +1,7 @@
 import type { Chain } from '@swat/shared';
 import type { QueryResultRow } from 'pg';
-import { pool, query } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 
 export interface CircuitBreakerState {
   consecutiveFailures: number;
@@ -110,9 +111,7 @@ export async function recordCircuitBreakerFailure(
   validateThreshold(threshold);
   validateFailureTime(failedAt);
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  return withTransaction(async (client) => {
     const result = await client.query<CircuitBreakerRow>(
       'SELECT value FROM config WHERE key = $1 FOR UPDATE',
       [key]
@@ -135,24 +134,15 @@ export async function recordCircuitBreakerFailure(
         WHERE key = $1`,
       [key, serializeState(next)]
     );
-    await client.query('COMMIT');
     return next;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /** Atomically clears one chain after validating and locking its persisted state. */
 export async function recordCircuitBreakerSuccess(account: string, chain: Chain): Promise<CircuitBreakerState> {
   const key = breakerKey(account, chain);
   const reset = { ...initialState };
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
+  return withTransaction(async (client) => {
     const result = await client.query<CircuitBreakerRow>(
       'SELECT value FROM config WHERE key = $1 FOR UPDATE',
       [key]
@@ -165,14 +155,8 @@ export async function recordCircuitBreakerSuccess(account: string, chain: Chain)
         WHERE key = $1`,
       [key, serializeState(reset)]
     );
-    await client.query('COMMIT');
     return reset;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -188,25 +172,18 @@ export async function claimCircuitBreakerProbe(
   const key = breakerKey(account, chain);
   validateCooldown(cooldownMs);
   validateFailureTime(now);
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
+  return withTransaction(async (client) => {
     const result = await client.query<CircuitBreakerRow>(
       'SELECT value FROM config WHERE key = $1 FOR UPDATE',
       [key]
     );
     const current = parseState(account, chain, result.rows[0]?.value);
-    if (current.trippedAt === null) {
-      await client.query('COMMIT');
-      return false;
-    }
+    // Returning commits the (read-only) transaction and releases the row lock,
+    // which is what the explicit COMMIT on these paths did.
+    if (current.trippedAt === null) return false;
 
     const elapsedMs = now.getTime() - Date.parse(current.trippedAt);
-    if (!Number.isFinite(elapsedMs) || elapsedMs < cooldownMs) {
-      await client.query('COMMIT');
-      return false;
-    }
+    if (!Number.isFinite(elapsedMs) || elapsedMs < cooldownMs) return false;
 
     const leased: CircuitBreakerState = {
       consecutiveFailures: current.consecutiveFailures,
@@ -219,12 +196,6 @@ export async function claimCircuitBreakerProbe(
         WHERE key = $1`,
       [key, serializeState(leased)]
     );
-    await client.query('COMMIT');
     return true;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }

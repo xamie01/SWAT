@@ -1,7 +1,7 @@
-import { pool, query } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 
 export async function generateFundingClusters() {
-  const client = await pool.connect();
   const expectedMembershipsCte = `
     WITH eligible_funders AS (
       SELECT wr.wallet_a
@@ -23,8 +23,7 @@ export async function generateFundingClusters() {
       JOIN wallets w ON w.address = edge.wallet_address
     )`;
 
-  try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+  await withTransaction(async (client) => {
 
   // Create a cluster per funder that funded >= 2 distinct wallets (a hub — the
   // Sybil/coordination signal). A lone A→B funding pair is too weak to be a
@@ -88,13 +87,7 @@ export async function generateFundingClusters() {
       DELETE FROM wallet_clusters
       WHERE cluster_type = 'funding' AND wallet_count < 2
     `);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, { isolationLevel: 'REPEATABLE READ' });
 }
 
 export async function generateBehavioralClusters() {
@@ -142,10 +135,8 @@ export async function generateBehavioralClusters() {
       CROSS JOIN LATERAL (VALUES (sp.w_low), (sp.w_high)) AS edge(wallet_address)
       JOIN wallets w ON w.address = edge.wallet_address
     )`;
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+  await withTransaction(async (client) => {
 
     // Step 1: create one cluster per anchor wallet (w_low).
     await client.query(`
@@ -201,13 +192,7 @@ export async function generateBehavioralClusters() {
       DELETE FROM wallet_clusters
       WHERE cluster_type = 'behavioral' AND wallet_count < 2
     `);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, { isolationLevel: 'REPEATABLE READ' });
 }
 
 export async function updateClusterPerformance(clusterId: string) {

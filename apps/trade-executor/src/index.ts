@@ -23,8 +23,9 @@ import {
   insertTrade,
   insertTradeAndMarkSignalExecuted,
   insertTradeAndReleaseSignalClaim,
-  pool,
+  loadCopyEligibilityFacts,
   query,
+  recordCopyEligibilityRejection,
   resolveRiskPolicy,
   readCircuitBreakerState,
   recordCopyExecutionEvidence,
@@ -34,6 +35,7 @@ import {
   releaseCopyExecutionReconciliationClaim,
   resolveChainMode,
   transitionCopyExecution,
+  withTransaction,
   type CopyExecutionRecord
 } from '@swat/db';
 import {
@@ -75,7 +77,8 @@ import {
   reconcilePolymarketExecution,
   getPolymarketAskPrice,
   getPolymarketAvailableBalance,
-  getPolymarketLiveReadiness
+  getPolymarketLiveReadiness,
+  simulatePolymarketBookFill
 } from './polymarket.js';
 import { polymarketSigner, resolvePolymarketIdentity } from './polymarket.js';
 import { OrderSide } from '@polymarket/client';
@@ -97,6 +100,11 @@ import {
   resolvePaperCopyTargetAccount,
   sourceSellFractionToBps
 } from './canonical-copy.js';
+import {
+  COPY_ELIGIBILITY_ACCOUNT,
+  enforceCopyEligibility,
+  type CopyEligibilityThresholds
+} from './copy-eligibility.js';
 import {
   RECONCILIATION_ACCOUNT,
   runReconciliationCoordinator,
@@ -497,7 +505,14 @@ export function createRobinhoodRuntime(redisClient: Redis): RobinhoodRuntime {
       address: token,
       abi: ownerAbi,
       functionName: 'owner'
-    })
+    }),
+    // `verifySource`, `readHolderConcentration`, and `probeFeeOnTransfer` are
+    // deliberately left unset: Robinhood Chain has no reviewed explorer
+    // source-verification or holder-distribution provider configured, and there
+    // is no transfer-tax probe. Each check therefore reports `unknown` and
+    // unreliable, which does not block an order. Wiring a provider here is all
+    // that is needed to turn any of them into a hard gate — see G2-R5.
+    maxTransferFeeBps: Number(process.env.ROBINHOOD_MAX_TRANSFER_FEE_BPS ?? '0')
   });
   configureRobinhoodRuntime({ pendingStore, safetyAssessment });
   return { adapter, config, pendingStore, safetyAssessment };
@@ -528,9 +543,7 @@ async function transitionPendingTrade(input: {
   if (!input.signalId && !input.signature) {
     throw new Error('A signal ID or transaction identity is required to reconcile a pending trade');
   }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     const result = await client.query<{ signal_id: string | null }>(
       `UPDATE trades
           SET status = $3,
@@ -568,13 +581,7 @@ async function transitionPendingTrade(input: {
         );
       }
     }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function runRobinhoodReconciliation(runtime: RobinhoodRuntime): Promise<RobinhoodReconciliationOutcome[]> {
@@ -827,6 +834,40 @@ const SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS = parsePositiveNumber(
   10 * 60_000,
   'SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS'
 );
+
+const COPY_ELIGIBILITY_THRESHOLDS: CopyEligibilityThresholds = {
+  // Matches the signal-engine's own emit-time window, so a signal is not
+  // considered fresh enough to create and then stale enough to refuse.
+  maxEventAgeMs: parsePositiveNumber(
+    process.env.SOURCE_COPY_MAX_EVENT_AGE_MS,
+    10 * 60_000,
+    'SOURCE_COPY_MAX_EVENT_AGE_MS'
+  ),
+  maxClockSkewMs: parseNonNegativeNumber(
+    process.env.COPY_MAX_CLOCK_SKEW_MS,
+    30_000,
+    'COPY_MAX_CLOCK_SKEW_MS'
+  ),
+  // Defaults to 0 so the USD floor is opt-in: the notional a wallet trades is
+  // strategy-dependent, and a surprise floor would silently drop live signals.
+  minimumSourceActivityUsd: parseNonNegativeNumber(
+    process.env.COPY_MIN_SOURCE_ACTIVITY_USD,
+    0,
+    'COPY_MIN_SOURCE_ACTIVITY_USD'
+  ),
+  // A wallet with fewer than three recorded trades has no track record to copy;
+  // whatever score it carries is an artifact of a tiny sample.
+  minimumSourceTradeCount: parseNonNegativeNumber(
+    process.env.COPY_MIN_SOURCE_TRADES,
+    3,
+    'COPY_MIN_SOURCE_TRADES'
+  ),
+  activityLookbackMs: parsePositiveNumber(
+    process.env.COPY_ACTIVITY_LOOKBACK_MS,
+    30 * 24 * 60 * 60_000,
+    'COPY_ACTIVITY_LOOKBACK_MS'
+  )
+};
 
 type CanonicalExecutionSet = Partial<Record<'paper' | 'live' | 'shadow', CopyExecutionRecord>>;
 
@@ -1171,6 +1212,29 @@ export async function handleJob(job: { data: unknown }) {
   let canonicalLiveTradeId: string | null = null;
   let canonicalShadowReason: string | undefined;
   if (payload.sourceTradeId) {
+    // Copy eligibility is the last gate before the one-shot canonical claim.
+    // Stop-loss jobs never reach it — they carry no sourceTradeId — which is
+    // the behaviour we want: an exit must stay possible after its source
+    // wallet has been dropped, or every position opened before a wallet was
+    // paused would be stranded.
+    const eligibility = await enforceCopyEligibility(
+      {
+        account: COPY_ELIGIBILITY_ACCOUNT,
+        signalId: payload.signalId,
+        chain
+      },
+      {
+        loadFacts: (facts) => loadCopyEligibilityFacts(facts),
+        recordRejection: (rejection) => recordCopyEligibilityRejection(rejection),
+        thresholds: COPY_ELIGIBILITY_THRESHOLDS
+      }
+    );
+    if (!eligibility.allowed) {
+      const reason = `Copy policy rejected the source: ${eligibility.reasons.join(', ')}`;
+      console.log(`[trade-executor] SKIPPED: ${reason} | signalId: ${payload.signalId}`);
+      return { status: 'skipped', reason };
+    }
+
     const prepared = await prepareCanonicalExecutions({
       sourceTradeId: payload.sourceTradeId,
       signalId: payload.signalId,
@@ -1779,23 +1843,36 @@ export async function handleJob(job: { data: unknown }) {
           }
         }
       } else if (chain === 'polygon') {
-        const tradeSide = direction === 'buy' ? OrderSide.BUY : OrderSide.SELL;
-        const targetPrice = await getPolymarketAskPrice(cleanMint, tradeSide);
-        if (targetPrice > 0.95 || targetPrice < 0.05) {
-          throw new Error(`Paper Simulation aborted: Price ${targetPrice} outside bounds`);
+        // A sell knows its share count up front; a buy knows its USD notional.
+        // Either way the book is walked for that exact size, so a paper fill
+        // carries the same average price the live path would have paid.
+        const requestedShares = direction === 'sell'
+          ? stopLossSellQuantity
+            ?? (paperExecution ? Number(paperExecution.requestedBaseQuantity) : null)
+          : null;
+        if (direction === 'sell' && (requestedShares === null || !(requestedShares > 0))) {
+          throw new Error('Paper Simulation aborted: Polymarket sell has no share quantity to price');
+        }
+        const plan = await simulatePolymarketBookFill({
+          tokenID: cleanMint,
+          direction,
+          requestedAmount: direction === 'buy' ? size : requestedShares!
+        });
+        // The bound is about refusing near-certain markets, so it reads the best
+        // price, exactly as it did before the depth walk was introduced.
+        if (plan.bestPrice > 0.95 || plan.bestPrice < 0.05) {
+          throw new Error(`Paper Simulation aborted: Price ${plan.bestPrice} outside bounds`);
         }
         simulatedVia = 'polymarket-book';
         simExecutor = 'polymarket-sim';
-        simTokenAmount = direction === 'sell'
-          ? stopLossSellQuantity
-            ?? (paperExecution
-              ? Number(paperExecution.requestedBaseQuantity)
-              : size / targetPrice)
-          : size / targetPrice;
+        simTokenAmount = direction === 'sell' ? requestedShares! : plan.estimatedShares;
         simBaseQuantity = simTokenAmount.toString();
-        simPriceUsd = targetPrice;
-        simAmountUsd = simTokenAmount * targetPrice;
-        console.log(`[trade-executor] PAPER (polymarket-sim): ${payload.tokenMint} | Size: $${simAmountUsd} | Est Price: $${targetPrice}`);
+        simPriceUsd = plan.averagePrice;
+        simAmountUsd = plan.estimatedNotionalUsd;
+        console.log(
+          `[trade-executor] PAPER (polymarket-sim): ${payload.tokenMint} | Size: $${simAmountUsd} | `
+          + `Avg Price: $${plan.averagePrice} (best $${plan.bestPrice}, ${plan.slippageBps.toFixed(1)} bps)`
+        );
       } else if (chain === 'robinhood-chain' && (direction === 'buy' || paperExecution)) {
         const tokenDecimals = await getTokenDecimals(payload.tokenMint, 'robinhood-chain');
         if (tokenDecimals === null) throw new Error('Robinhood token decimals are unavailable');

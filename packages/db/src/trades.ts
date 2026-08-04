@@ -1,4 +1,5 @@
-import { pool, query } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 import { resolveChainAddress, resolveChainValue } from '@swat/shared';
 import type { Chain } from '@swat/shared';
 
@@ -183,10 +184,7 @@ export async function insertTradeAndMarkSignalExecuted(
   }
   validatedFeeUsd(input);
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
+  return withTransaction(async (client) => {
     const signal = await client.query<{ id: string }>(
       `SELECT id FROM signals WHERE id = $1 FOR UPDATE`,
       [input.signalId]
@@ -223,14 +221,8 @@ export async function insertTradeAndMarkSignalExecuted(
         WHERE id = $1`,
       [input.signalId]
     );
-    await client.query('COMMIT');
     return trade;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /** Persist a terminal non-fill attempt and release its execution claim atomically. */
@@ -245,9 +237,7 @@ export async function insertTradeAndReleaseSignalClaim(
   }
   validatedFeeUsd(input);
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  return withTransaction(async (client) => {
     const signal = await client.query<{ id: string }>(
       `SELECT id FROM signals WHERE id = $1 FOR UPDATE`,
       [input.signalId]
@@ -267,14 +257,8 @@ export async function insertTradeAndReleaseSignalClaim(
           AND status = 'executing'`,
       [input.signalId]
     );
-    await client.query('COMMIT');
     return inserted.rows[0] ?? null;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**

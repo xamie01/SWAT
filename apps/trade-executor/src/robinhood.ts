@@ -332,7 +332,7 @@ export async function getRobinhoodQuote(
 }
 
 export type RobinhoodSafetyCheck = {
-  name: 'sell_simulation' | 'ownership_admin' | 'liquidity' | 'source_verification' | 'holder_concentration';
+  name: 'sell_simulation' | 'ownership_admin' | 'liquidity' | 'source_verification' | 'holder_concentration' | 'fee_on_transfer';
   status: 'pass' | 'fail' | 'unknown';
   reliable: boolean;
   evidence: string;

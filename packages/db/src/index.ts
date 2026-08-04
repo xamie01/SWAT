@@ -1,4 +1,5 @@
 export * from './client.js';
+export * from './transaction.js';
 export * from './numeric.js';
 export * from './wallets.js';
 export * from './signals.js';
@@ -15,6 +16,7 @@ export * from './execution-config.js';
 export * from './chain-certifications.js';
 export * from './attribution-queries.js';
 export * from './copy-trade-lifecycle.js';
+export * from './copy-eligibility.js';
 export * from './circuit-breaker.js';
 export * from './risk-policy.js';
 export * from './stop-loss.js';

@@ -1,10 +1,17 @@
 import { OrderSide, OrderType, WalletType, production } from '@polymarket/client';
 import { AssetType } from '@polymarket/bindings/clob';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const polymarketActionMocks = vi.hoisted(() => ({
   fetchBalanceAllowance: vi.fn(),
   fetchBuilderFeeRates: vi.fn()
+}));
+
+// The live market-state gate has its own suite in polymarket-market-state.test.ts;
+// here it is stubbed so these tests stay about order flow, with one case below
+// proving the gate is actually wired into the submission path.
+const marketStateMocks = vi.hoisted(() => ({
+  assertPolymarketMarketOpenForSubmission: vi.fn()
 }));
 
 process.env.EVM_PRIVATE_KEY = 'test-only-placeholder';
@@ -39,6 +46,8 @@ vi.mock('@swat/db', () => ({
 }));
 
 vi.mock('@polymarket/client/actions', () => polymarketActionMocks);
+
+vi.mock('./polymarket-market-state.js', () => marketStateMocks);
 
 vi.mock('bullmq', () => ({
   UnrecoverableError: class UnrecoverableError extends Error {}
@@ -237,6 +246,7 @@ let getPolymarketAskPrice: any;
 let pollPolymarketOrders: any;
 let setPolymarketLiveReadiness: any;
 let setPolymarketClientForTesting: any;
+let simulatePolymarketBookFill: any;
 let initializePolymarketClient: any;
 let loadPolymarketApiCredentials: any;
 let loadPolymarketBuilderCredentials: any;
@@ -254,6 +264,7 @@ beforeAll(async () => {
   pollPolymarketOrders = mod.pollPolymarketOrders;
   setPolymarketLiveReadiness = mod.setPolymarketLiveReadiness;
   setPolymarketClientForTesting = mod.setPolymarketClientForTesting;
+  simulatePolymarketBookFill = mod.simulatePolymarketBookFill;
   initializePolymarketClient = mod.initializePolymarketClient;
   loadPolymarketApiCredentials = mod.loadPolymarketApiCredentials;
   loadPolymarketBuilderCredentials = mod.loadPolymarketBuilderCredentials;
@@ -279,6 +290,14 @@ describe('Polymarket live executor', () => {
     polymarketActionMocks.fetchBuilderFeeRates.mockReset().mockResolvedValue({
       maker: 0.0025,
       taker: 0.005
+    });
+    marketStateMocks.assertPolymarketMarketOpenForSubmission.mockReset().mockResolvedValue({
+      conditionId: `0x${'1'.repeat(64)}`,
+      active: true,
+      closed: false,
+      acceptingOrders: true,
+      resolutionStatus: 'unresolved',
+      endDate: new Date(Date.now() + 86_400_000)
     });
     setPolymarketClientForTesting(client);
     setPolymarketLiveReadiness(true);
@@ -337,6 +356,147 @@ describe('Polymarket live executor', () => {
           { price: '0.55', size: '20' }
         ]
       }), 'buy', 5, 200)).toThrow('exceeds 200 bps');
+    });
+  });
+
+  describe('market-state gate', () => {
+    it('refuses to submit when the market stopped accepting orders', async () => {
+      // A healthy book is not permission to trade: the market can pause,
+      // close, or go to resolution between the signal and this submission.
+      client.fetchOrderBook.mockResolvedValue(orderBook({
+        tokenId: 'token-paused',
+        asks: [{ price: '0.50', size: '100' }]
+      }));
+      marketStateMocks.assertPolymarketMarketOpenForSubmission.mockRejectedValue(
+        new Error('Polymarket Protection: market is paused for orders')
+      );
+
+      await expect(triggerPolymarket({
+        signalId: 'sig-paused',
+        tokenID: 'token-paused',
+        spendAmountUsd: 10,
+        direction: 'buy'
+      })).rejects.toThrow('paused for orders');
+
+      expect(marketStateMocks.assertPolymarketMarketOpenForSubmission).toHaveBeenCalledWith({
+        conditionId: `0x${'1'.repeat(64)}`
+      });
+      // Nothing may reach the venue once the gate refuses.
+      expect(client.createMarketOrder).not.toHaveBeenCalled();
+      expect(client.postOrder).not.toHaveBeenCalled();
+    });
+
+    it('checks market state only after the book passes its own bounds', async () => {
+      // No point asking Gamma about a market whose book already failed.
+      client.fetchOrderBook.mockResolvedValue(orderBook({
+        tokenId: 'token-thin-gate',
+        asks: [{ price: '0.50', size: '0.1' }]
+      }));
+
+      await expect(triggerPolymarket({
+        signalId: 'sig-thin-gate',
+        tokenID: 'token-thin-gate',
+        spendAmountUsd: 500,
+        direction: 'buy'
+      })).rejects.toThrow();
+
+      expect(marketStateMocks.assertPolymarketMarketOpenForSubmission).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('simulatePolymarketBookFill', () => {
+    // The simulator reads the same slippage bound the live path reads, so the
+    // fixtures below have to stay inside it — that coupling is the point.
+    beforeEach(() => {
+      process.env.POLYMARKET_SLIPPAGE_BPS = '500';
+    });
+
+    // Scoped, not global: leaving it set would silently widen the bound for
+    // every later describe in this file.
+    afterEach(() => {
+      delete process.env.POLYMARKET_SLIPPAGE_BPS;
+    });
+
+    it('prices a paper buy off walked depth, not the best level', async () => {
+      // 10 shares at 0.50 then 10 at 0.52. $7.60 cannot clear at the best
+      // level; taking 0.50 for the whole order would invent liquidity that is
+      // not on the book and make paper look better than live ever could.
+      client.fetchOrderBook.mockResolvedValue(orderBook({
+        tokenId: 'token-paper-depth',
+        asks: [
+          { price: '0.52', size: '10' },
+          { price: '0.50', size: '10' }
+        ]
+      }));
+
+      const plan = await simulatePolymarketBookFill({
+        tokenID: 'token-paper-depth',
+        direction: 'buy',
+        requestedAmount: 7.6
+      });
+
+      expect(plan.bestPrice).toBe(0.5);
+      expect(plan.estimatedShares).toBe(15);
+      expect(plan.estimatedNotionalUsd).toBeCloseTo(7.6);
+      // 7.6 / 15 shares — strictly worse than the 0.50 best price.
+      expect(plan.averagePrice).toBeCloseTo(0.50667, 5);
+      expect(plan.averagePrice).toBeGreaterThan(plan.bestPrice);
+    });
+
+    it('agrees exactly with the live path for the same book and size', async () => {
+      // Paper and live must not drift: both go through planPolymarketBookOrder.
+      const book = orderBook({
+        tokenId: 'token-parity',
+        asks: [
+          { price: '0.50', size: '4' },
+          { price: '0.51', size: '30' }
+        ]
+      });
+      client.fetchOrderBook.mockResolvedValue(book);
+
+      const simulated = await simulatePolymarketBookFill({
+        tokenID: 'token-parity',
+        direction: 'buy',
+        requestedAmount: 10
+      });
+      const live = planPolymarketBookOrder(book, 'buy', 10, 500);
+
+      expect(simulated).toEqual(live);
+    });
+
+    it('refuses a book too thin for the requested paper size', async () => {
+      client.fetchOrderBook.mockResolvedValue(orderBook({
+        tokenId: 'token-paper-thin',
+        asks: [{ price: '0.50', size: '1' }]
+      }));
+
+      await expect(simulatePolymarketBookFill({
+        tokenID: 'token-paper-thin',
+        direction: 'buy',
+        requestedAmount: 50
+      })).rejects.toThrow('too thin');
+    });
+
+    it('prices a paper sell from bid depth for the requested shares', async () => {
+      client.fetchOrderBook.mockResolvedValue(orderBook({
+        tokenId: 'token-paper-sell',
+        bids: [
+          { price: '0.40', size: '5' },
+          { price: '0.38', size: '20' }
+        ]
+      }));
+
+      const plan = await simulatePolymarketBookFill({
+        tokenID: 'token-paper-sell',
+        direction: 'sell',
+        requestedAmount: 10
+      });
+
+      expect(plan.bestPrice).toBe(0.4);
+      // 5 @ 0.40 + 5 @ 0.38 = 3.90 over 10 shares.
+      expect(plan.estimatedNotionalUsd).toBeCloseTo(3.9);
+      expect(plan.averagePrice).toBeCloseTo(0.39);
+      expect(plan.averagePrice).toBeLessThan(plan.bestPrice);
     });
   });
 
@@ -785,7 +945,10 @@ describe('Polymarket live executor', () => {
       expect(ambiguousUpdate?.[1]).toEqual([
         ambiguousRow.id,
         'ambiguous',
-        'Polymarket order delayed-ambiguous returned unknown status MYSTERY'
+        'Polymarket order delayed-ambiguous returned unknown status MYSTERY',
+        // An ambiguous ORDER status carries no settlement state: the order never
+        // got far enough for its trades to have one.
+        null
       ]);
     });
 
@@ -933,6 +1096,99 @@ describe('Polymarket live executor', () => {
         'incomplete L2 API credentials'
       );
       expect(getPolymarketLiveReadiness().ready).toBe(false);
+    });
+  });
+
+  describe('settlement state persistence', () => {
+    // The venue advances a trade MATCHED -> MINED -> CONFIRMED independently of
+    // the order status, with RETRYING when an onchain attempt failed. Collapsing
+    // those into one "pending" bucket hides which of three very different
+    // positions is actually being held.
+    function settlingTrade(params: {
+      tokenId: string;
+      orderId: string;
+      tradeId: string;
+      status: string;
+    }) {
+      return {
+        ...confirmedAccountTrade({
+          tokenId: params.tokenId,
+          orderId: params.orderId,
+          tradeId: params.tradeId,
+          price: '0.40',
+          size: '5'
+        }),
+        status: params.status
+      };
+    }
+
+    async function reconcileWith(orderId: string, tradeStatuses: string[]) {
+      const db = await import('@swat/db');
+      const tokenId = `token-${orderId}`;
+      const tradeIds = tradeStatuses.map((_, index) => `${orderId}-trade-${index}`);
+      const row = pendingPolymarketTrade({ tokenId, orderId });
+      vi.mocked(db.query)
+        .mockResolvedValueOnce([row] as never)
+        .mockResolvedValue([] as never);
+      client.fetchOrder.mockResolvedValue(fetchedOrder({
+        tokenId,
+        orderId,
+        status: 'MATCHED',
+        originalSize: '5',
+        sizeMatched: '5',
+        associateTrades: tradeIds
+      }));
+      client.listAccountTrades.mockImplementation(({ id }: { id: string }) => {
+        const index = tradeIds.indexOf(id);
+        return paginator([settlingTrade({
+          tokenId,
+          orderId,
+          tradeId: id,
+          status: tradeStatuses[index]!
+        })]);
+      });
+
+      const outcomes = await pollPolymarketOrders();
+      const update = vi.mocked(db.query).mock.calls.find(([sql]) =>
+        String(sql).includes('venue_settlement_status = $4')
+      );
+      return { outcomes, update, rowId: row.id };
+    }
+
+    it.each([
+      ['TRADE_STATUS_MATCHED', 'matched'],
+      ['TRADE_STATUS_MATCHED_NOT_BROADCASTED', 'matched'],
+      ['TRADE_STATUS_MINED', 'mined'],
+      ['TRADE_STATUS_RETRYING', 'retrying']
+    ])('persists %s distinctly as %s without creating a fill', async (venueStatus, expected) => {
+      const { outcomes, update, rowId } = await reconcileWith(`settle-${expected}-${venueStatus}`, [venueStatus]);
+
+      expect(outcomes).toEqual([expect.objectContaining({ status: 'pending_confirmation' })]);
+      expect(outcomes[0].shares).toBeUndefined();
+      expect(update?.[1]).toEqual([rowId, 'MATCHED', expect.stringContaining(`settlement ${expected}`), expected]);
+    });
+
+    it('reports the weakest settlement state across several trades', async () => {
+      // One leg mined and another retrying is a RETRYING position: the order is
+      // only as settled as its least-settled trade.
+      const { outcomes, update } = await reconcileWith('settle-mixed', [
+        'TRADE_STATUS_MINED',
+        'TRADE_STATUS_RETRYING'
+      ]);
+
+      expect(outcomes[0].status).toBe('pending_confirmation');
+      expect(update?.[1]?.[3]).toBe('retrying');
+    });
+
+    it('fails closed on a settlement status outside the documented set', async () => {
+      // Parking an unrecognised state as "pending" is how a position ends up
+      // sitting forever in a state nobody is watching.
+      const { outcomes } = await reconcileWith('settle-unknown', ['TRADE_STATUS_TELEPORTED']);
+
+      expect(outcomes).toEqual([expect.objectContaining({
+        status: 'ambiguous',
+        reason: expect.stringContaining('unrecognised settlement status')
+      })]);
     });
   });
 });

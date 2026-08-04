@@ -1,4 +1,5 @@
-import { query, pool } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 import {
   getChainPrefix,
   resolveChainAddress,
@@ -98,21 +99,13 @@ export async function deleteWallet(address: string, chain?: WalletChain) {
  */
 export async function deleteWalletCascade(address: string, chain?: WalletChain) {
   const prefixed = await resolvePrefixedAddress(address, chain);
-  // A single pooled client so BEGIN/COMMIT actually form one transaction.
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  // A single pooled client so the deletes actually form one transaction.
+  await withTransaction(async (client) => {
     await client.query('DELETE FROM cluster_memberships WHERE wallet_address = $1', [prefixed]);
     await client.query('DELETE FROM transactions WHERE wallet_address = $1', [prefixed]);
     await client.query('DELETE FROM wallet_relationships WHERE wallet_a = $1 OR wallet_b = $1', [prefixed]);
     await client.query('DELETE FROM wallets WHERE address = $1', [prefixed]);
-    await client.query('COMMIT');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function refreshWalletActivity(address: string, lastActive?: Date | null, tradeIncrement = 0) {

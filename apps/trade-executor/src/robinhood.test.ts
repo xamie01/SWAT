@@ -32,6 +32,9 @@ const quoter = '0x3000000000000000000000000000000000000003';
 const weth = '0x4000000000000000000000000000000000000004';
 const token = '0x5000000000000000000000000000000000000005';
 const sanityToken = '0x6000000000000000000000000000000000000006';
+// Base asset for the erc20 mode legs, distinct from WETH so the two modes
+// cannot pass by accidentally sharing an address.
+const baseErc20 = '0x7000000000000000000000000000000000000007';
 const hash = `0x${'a'.repeat(64)}` as Hex;
 const approvalHash = `0x${'b'.repeat(64)}` as Hex;
 
@@ -146,6 +149,218 @@ async function executeBuy(options: {
     requireReadiness: false
   });
 }
+
+/**
+ * Adapter for a leg that spends an ERC-20 and therefore sends two transactions:
+ * the exact approval, then the swap. The native-weth buy leg sends only the
+ * swap, which is what `fakeAdapter` already models.
+ */
+function matrixAdapter(params: {
+  direction: 'buy' | 'sell';
+  baseAssetMode: 'native-weth' | 'erc20';
+  /** Base units actually spent, which the receipt's outbound leg must match. */
+  spent?: bigint;
+  overrides?: Partial<RobinhoodExecutionAdapter>;
+}): RobinhoodExecutionAdapter {
+  const baseAsset = params.baseAssetMode === 'erc20' ? baseErc20 : weth;
+  const spent = params.spent ?? (params.direction === 'sell' ? 10_000n : 100_000_000_000_000_000n);
+  // The receipt is verified on both legs: what left the account and what
+  // arrived. A native-weth buy spends native value, so it has no outbound
+  // ERC-20 transfer to show.
+  const logs = params.direction === 'buy'
+    ? [
+        ...(params.baseAssetMode === 'erc20'
+          ? [transferLog(baseAsset, account, router, spent, 0)]
+          : []),
+        transferLog(token, router, account, 4_900n, 1)
+      ]
+    : [
+        transferLog(token, account, router, spent, 0),
+        transferLog(baseAsset, router, account, 4_900n, 1)
+      ];
+  const swapReceipt = receipt(logs);
+  const needsApproval = params.direction === 'sell' || params.baseAssetMode === 'erc20';
+  if (!needsApproval) {
+    return fakeAdapter({ waitForReceipt: vi.fn().mockResolvedValue(swapReceipt), ...params.overrides });
+  }
+  return fakeAdapter({
+    send: vi.fn().mockResolvedValueOnce(approvalHash).mockResolvedValueOnce(hash),
+    waitForReceipt: vi.fn()
+      .mockResolvedValueOnce(receipt([]))
+      .mockResolvedValueOnce(swapReceipt),
+    ...params.overrides
+  });
+}
+
+async function executeOrder(options: {
+  direction: 'buy' | 'sell';
+  baseAssetMode?: 'native-weth' | 'erc20';
+  adapter?: RobinhoodExecutionAdapter;
+  safety?: RobinhoodSafetyAssessment;
+  proportionBps?: number;
+  clientOrderId?: string;
+}) {
+  const baseAssetMode = options.baseAssetMode ?? 'native-weth';
+  const values = configValues(
+    baseAssetMode === 'erc20'
+      ? { ROBINHOOD_BASE_ASSET_MODE: 'erc20', ROBINHOOD_BASE_ASSET: baseErc20 }
+      : {}
+  );
+  return executeRobinhoodOrder({
+    order: {
+      clientOrderId: options.clientOrderId ?? `signal-${options.direction}-matrix`,
+      token,
+      direction: options.direction,
+      ...(options.direction === 'buy'
+        ? { amountInBaseUnits: 100_000_000_000_000_000n }
+        : { proportionBps: options.proportionBps ?? 10_000 }),
+      slippageBps: 300
+    },
+    config: parseRobinhoodExecutionConfig(values),
+    account,
+    adapter: options.adapter ?? matrixAdapter({ direction: options.direction, baseAssetMode }),
+    pendingStore: createMemoryRobinhoodPendingStore(),
+    safetyAssessment: vi.fn().mockResolvedValue(options.safety ?? passingSafety),
+    requireReadiness: false
+  });
+}
+
+describe('Robinhood entry and exit matrix', () => {
+  // Both base-asset modes crossed with both directions. Previously only the
+  // native-weth buy leg was exercised, so the erc20 legs and every sell leg
+  // were untested paths in live code.
+  it.each([
+    ['native-weth', 'buy'],
+    ['native-weth', 'sell'],
+    ['erc20', 'buy'],
+    ['erc20', 'sell']
+  ] as const)('fills a %s %s through the router', async (baseAssetMode, direction) => {
+    const adapter = matrixAdapter({ direction, baseAssetMode });
+
+    const result = await executeOrder({ direction, baseAssetMode, adapter });
+
+    expect(result.status).toBe('filled');
+    expect(adapter.send).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['native-weth', 'buy', false],
+    ['native-weth', 'sell', true],
+    ['erc20', 'buy', true],
+    ['erc20', 'sell', true]
+  ] as const)('%s %s approves the router only when spending an ERC-20', async (
+    baseAssetMode,
+    direction,
+    expectsApproval
+  ) => {
+    // A native-weth buy spends native value, so there is nothing to approve.
+    // Every other leg spends a token and must set an exact allowance first.
+    const adapter = matrixAdapter({ direction, baseAssetMode });
+
+    await executeOrder({ direction, baseAssetMode, adapter });
+
+    expect(adapter.getAllowance).toHaveBeenCalledTimes(expectsApproval ? 1 : 0);
+  });
+
+  it('caps an exit to the actual token balance, not the requested proportion', async () => {
+    const adapter = matrixAdapter({
+      direction: 'sell',
+      baseAssetMode: 'native-weth',
+      // 50% of a real 4,000 balance.
+      spent: 2_000n,
+      overrides: { getTokenBalance: vi.fn().mockResolvedValue(4_000n) }
+    });
+
+    const result = await executeOrder({ direction: 'sell', proportionBps: 5_000, adapter });
+
+    expect(result.status).toBe('filled');
+    // 50% of the real 4,000 balance — never the stale figure a caller supplied.
+    expect(adapter.getAllowance).toHaveBeenCalledWith(token, account, router);
+    const approvalCall = vi.mocked(adapter.simulate).mock.calls[0]![0];
+    expect(approvalCall.data).toContain('7d0');
+  });
+
+  it('refuses an exit with nothing to sell rather than submitting an empty swap', async () => {
+    const adapter = matrixAdapter({
+      direction: 'sell',
+      baseAssetMode: 'native-weth',
+      overrides: { getTokenBalance: vi.fn().mockResolvedValue(0n) }
+    });
+
+    const result = await executeOrder({ direction: 'sell', adapter });
+
+    expect(result.status).toBe('skipped');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('Robinhood fee-on-transfer exits', () => {
+  const taxedSafety: RobinhoodSafetyAssessment = {
+    checks: [
+      ...passingSafety.checks,
+      {
+        name: 'fee_on_transfer',
+        status: 'fail',
+        reliable: true,
+        evidence: 'token charges 500 bps on transfer; Uniswap V3 cannot route fee-on-transfer tokens'
+      }
+    ]
+  };
+
+  it('refuses to exit a taxed token instead of attempting an unroutable swap', async () => {
+    // Uniswap V3 has no fee-on-transfer swap variant: the pool is credited less
+    // than it was sent, so the swap cannot settle. Refusing is the handling.
+    const adapter = fakeAdapter();
+
+    const result = await executeOrder({ direction: 'sell', adapter, safety: taxedSafety });
+
+    expect(result).toMatchObject({ status: 'skipped', state: 'safety_rejected' });
+    expect(result).toHaveProperty('reason', expect.stringContaining('fee_on_transfer'));
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses a taxed entry on the same evidence', async () => {
+    const adapter = fakeAdapter();
+
+    const result = await executeOrder({ direction: 'buy', adapter, safety: taxedSafety });
+
+    expect(result).toMatchObject({ status: 'skipped', state: 'safety_rejected' });
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it('does not block on an unavailable transfer-tax probe', async () => {
+    // An unreliable check is not a failing one; only reliable failures reject.
+    const adapter = matrixAdapter({ direction: 'sell', baseAssetMode: 'native-weth' });
+    const unknownProbe: RobinhoodSafetyAssessment = {
+      checks: [
+        ...passingSafety.checks,
+        { name: 'fee_on_transfer', status: 'unknown', reliable: false, evidence: 'no probe configured' }
+      ]
+    };
+
+    const result = await executeOrder({ direction: 'sell', adapter, safety: unknownProbe });
+
+    expect(result.status).toBe('filled');
+  });
+
+  it('skips a taxed exit whose swap simulation reverts, without submitting', async () => {
+    const adapter = matrixAdapter({
+      direction: 'sell',
+      baseAssetMode: 'native-weth',
+      overrides: {
+        simulate: vi.fn()
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValue(new Error('execution reverted: STF'))
+      }
+    });
+
+    const result = await executeOrder({ direction: 'sell', adapter });
+
+    expect(result).toMatchObject({ status: 'skipped', state: 'simulation_revert' });
+    // The approval goes out — it simulated fine — but the swap never does.
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('Robinhood strict deployment configuration', () => {
   it('requires every deployment fact and rejects self sanity quotes', () => {

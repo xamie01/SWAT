@@ -41,6 +41,108 @@ function getRedis(): Redis {
   return redis;
 }
 
+/**
+ * Page size. The Data API clamps `limit` at 10000; 500 keeps the request count
+ * ~5x lower than the old 100 while staying far inside the 200 req / 10s budget
+ * documented for `/trades`.
+ */
+const TRADES_PAGE_LIMIT = 500;
+
+/**
+ * The Data API *rejects* an `offset` past 10000 with a 400 rather than clamping
+ * it, and each `start`/`end` window carries its own offset budget.
+ */
+const TRADES_MAX_OFFSET = 10_000;
+
+function rawTradeTimestampSeconds(row: unknown): number | null {
+  const value = (row as { timestamp?: unknown } | null)?.timestamp;
+  const seconds = typeof value === 'string' ? Number(value) : value;
+  return typeof seconds === 'number' && Number.isFinite(seconds) ? seconds : null;
+}
+
+/**
+ * Read a wallet's whole confirmed-trade history out of the Data API.
+ *
+ * Paging is windowed, not a flat offset walk. A flat walk cannot get past
+ * offset 10000 - the API answers a deeper offset with a 400, which used to
+ * abort the entire backfill and discard every page already read, so the
+ * highest-volume wallets (exactly the ones worth tracking) could never be
+ * backfilled at all. When a window's offset budget is spent we re-anchor `end`
+ * on the oldest fill seen and open a fresh window. Rows repeated across a
+ * boundary cost nothing: `recordConfirmedPolymarketTrade` dedupes on its
+ * natural key and the source-trade fill index is a hash of the same identity.
+ */
+export async function fetchConfirmedPolymarketTradePages(input: {
+  user: string;
+  fetchImpl: FetchImplementation;
+  pageLimit?: number;
+  maxOffset?: number;
+}): Promise<unknown[]> {
+  const pageLimit = input.pageLimit ?? TRADES_PAGE_LIMIT;
+  const maxOffset = input.maxOffset ?? TRADES_MAX_OFFSET;
+  const rawTrades: unknown[] = [];
+  let offset = 0;
+  let windowEnd: number | null = null;
+  let oldestInWindow: number | null = null;
+
+  while (true) {
+    const url = new URL('https://data-api.polymarket.com/trades');
+    // `user` first so the query string stays recognisable in logs and tests.
+    url.searchParams.set('user', input.user);
+    url.searchParams.set('limit', String(pageLimit));
+    url.searchParams.set('offset', String(offset));
+    if (windowEnd !== null) url.searchParams.set('end', String(windowEnd));
+
+    const response = await input.fetchImpl(url.toString());
+    if (!response.ok) {
+      throw new Error(`Polymarket Data API returned status ${response.status}`);
+    }
+    const page = await response.json() as unknown;
+    if (!Array.isArray(page)) throw new Error('Polymarket Data API returned a non-array trade page');
+    if (page.length === 0) break;
+    console.log(
+      `[polymarket] Fetched ${page.length} confirmed trades (offset: ${offset}`
+      + `${windowEnd === null ? '' : `, end: ${windowEnd}`}) for ${input.user}`
+    );
+    rawTrades.push(...page);
+    for (const row of page) {
+      const seconds = rawTradeTimestampSeconds(row);
+      if (seconds === null) continue;
+      if (oldestInWindow === null || seconds < oldestInWindow) oldestInWindow = seconds;
+    }
+
+    // A short page means this window is exhausted, and the last window is the
+    // whole history.
+    if (page.length < pageLimit) break;
+
+    offset += pageLimit;
+    if (offset + pageLimit <= maxOffset) continue;
+
+    if (oldestInWindow === null) {
+      console.warn(
+        `[polymarket] offset budget spent with no usable timestamp to re-anchor on for ${input.user};`
+        + ' history older than this point was not read'
+      );
+      break;
+    }
+    if (windowEnd !== null && oldestInWindow >= windowEnd) {
+      // The window did not move, so another pass would re-read the same rows
+      // forever. Stop, and say so - a silent truncation here would read as a
+      // complete backfill.
+      console.warn(
+        `[polymarket] could not advance the trade window past ${windowEnd} for ${input.user};`
+        + ' history older than that timestamp was not read'
+      );
+      break;
+    }
+    windowEnd = oldestInWindow;
+    oldestInWindow = null;
+    offset = 0;
+  }
+
+  return rawTrades;
+}
+
 async function fetchGammaMarket(
   conditionId: string,
   fetchImpl: FetchImplementation
@@ -153,25 +255,10 @@ export async function backfillPolymarketWallet(
   let failed = 0;
   let lastEventAt: Date | null = null;
   let sourceTradeFailure: SourceTradePersistenceError | null = null;
-  let offset = 0;
-  const limit = 100;
-  const rawTrades: unknown[] = [];
-
-  while (true) {
-    const response = await fetchImpl(
-      `https://data-api.polymarket.com/trades?user=${encodeURIComponent(cleanAddr)}&limit=${limit}&offset=${offset}`
-    );
-    if (!response.ok) {
-      throw new Error(`Polymarket Data API returned status ${response.status}`);
-    }
-    const page = await response.json() as unknown;
-    if (!Array.isArray(page)) throw new Error('Polymarket Data API returned a non-array trade page');
-    if (page.length === 0) break;
-    console.log(`[polymarket] Fetched ${page.length} confirmed trades (offset: ${offset}) for ${cleanAddr}`);
-    rawTrades.push(...page);
-    if (page.length < limit) break;
-    offset += limit;
-  }
+  const rawTrades = await fetchConfirmedPolymarketTradePages({
+    user: cleanAddr,
+    fetchImpl
+  });
 
   const proxyActivity = new Map<string, { inserted: number; latestTimestamp: Date }>();
 

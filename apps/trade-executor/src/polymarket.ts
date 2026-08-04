@@ -36,6 +36,7 @@ import {
   transitionCopyExecution
 } from '@swat/db';
 import { capPositionToAvailableBalance } from './policy.js';
+import { assertPolymarketMarketOpenForSubmission } from './polymarket-market-state.js';
 
 export const POLYMARKET_CLOB_HOST = 'https://clob.polymarket.com';
 export const POLYGON_CHAIN_ID = 137;
@@ -512,6 +513,41 @@ export function planPolymarketBookOrder(
   };
 }
 
+/**
+ * Price a paper fill the way the live path prices a real one: walk the book for
+ * the requested size instead of assuming the whole order clears at the best
+ * level.
+ *
+ * Taking the best price for any size makes paper systematically optimistic
+ * against live - the thinner the book, the wider the gap - which is precisely
+ * the error a shadow/paper benchmark exists to avoid. This shares
+ * `planPolymarketBookOrder` with the live path so the two cannot drift, and it
+ * inherits the same staleness, tick-grid, thin-book, and slippage rejections.
+ *
+ * `requestedAmount` is USD notional for a buy and shares for a sell, matching
+ * the live contract.
+ */
+export async function simulatePolymarketBookFill(params: {
+  tokenID: string;
+  direction: 'buy' | 'sell';
+  requestedAmount: number;
+  now?: number;
+}): Promise<PolymarketBookPlan> {
+  const client = secureClobClient ?? publicClobClient;
+  if (!client) {
+    throw new UnrecoverableError('Polymarket order-book client is not initialized');
+  }
+  const book = await client.fetchOrderBook({ tokenId: params.tokenID });
+  const maxSlippageBps = Number(process.env.POLYMARKET_SLIPPAGE_BPS ?? '200');
+  return planPolymarketBookOrder(
+    book,
+    params.direction,
+    params.requestedAmount,
+    maxSlippageBps,
+    params.now
+  );
+}
+
 function collateralAvailableForPrincipal(available: number): number {
   const feeBufferBps = Number(process.env.POLYMARKET_FEE_BUFFER_BPS ?? '300');
   if (!Number.isInteger(feeBufferBps) || feeBufferBps < 0 || feeBufferBps > 5000) {
@@ -619,6 +655,12 @@ export async function triggerPolymarket(params: {
         `Polymarket Protection: Price ${plan.limitPrice} outside safe bounds configured for this executor`
       );
     }
+
+    // Last gate before the order exists. The book proves liquidity; this proves
+    // the market will still accept an order at all. Deliberately placed after
+    // the depth walk and price bounds so the state read is as close to the
+    // submission as the code allows.
+    await assertPolymarketMarketOpenForSubmission({ conditionId: String(book.conditionId) });
 
     const tradeSide = params.direction === 'buy' ? OrderSide.BUY : OrderSide.SELL;
     const order = await client.createMarketOrder(params.direction === 'buy'
@@ -789,12 +831,65 @@ export interface PolymarketReconciliationOutcome {
   settlementTransactionHashes?: string[];
 }
 
+/**
+ * Settlement states a venue trade passes through, from the documented set:
+ * MATCHED (sent to the executor) -> MINED (in a block) -> CONFIRMED (final),
+ * with RETRYING when an onchain attempt failed and is being resubmitted, and
+ * FAILED as the terminal failure. Only CONFIRMED may create a fill quantity.
+ */
+type SettlementState = 'retrying' | 'matched' | 'mined' | 'confirmed' | 'failed';
+
+/**
+ * Weakest-first. An order is only as settled as its least-settled trade, so a
+ * summary across several associated trades reports the minimum: one MINED plus
+ * one RETRYING is a RETRYING position, not a MINED one.
+ */
+const SETTLEMENT_PRECEDENCE: SettlementState[] = ['retrying', 'matched', 'mined', 'confirmed'];
+
+function classifySettlementState(status: string): SettlementState | null {
+  switch (normalizedTradeStatus(status)) {
+    case 'CONFIRMED':
+      return 'confirmed';
+    case 'FAILED':
+      return 'failed';
+    case 'RETRYING':
+      return 'retrying';
+    case 'MATCHED':
+    // The user stream reports a matched trade that has not yet been broadcast
+    // onchain. It is strictly earlier than MINED, so it groups with MATCHED.
+    case 'MATCHED_NOT_BROADCASTED':
+      return 'matched';
+    case 'MINED':
+      return 'mined';
+    default:
+      // Fail closed. An unrecognised settlement status must not be quietly
+      // treated as "still pending" - that is how a trade sits forever in a
+      // state nobody is watching.
+      return null;
+  }
+}
+
 type AssociatedTradeEvidence = {
   confirmed: ClobTrade[];
   failedIds: string[];
   pendingIds: string[];
+  /** Pending trade IDs grouped by their distinct settlement state. */
+  pendingByState: Map<SettlementState, string[]>;
+  /** Trades whose settlement status is outside the documented set. */
+  unknownIds: string[];
   missingIds: string[];
 };
+
+/**
+ * The weakest settlement state among the still-pending trades, which is what
+ * the order as a whole has actually reached.
+ */
+function weakestPendingSettlement(evidence: AssociatedTradeEvidence): SettlementState | null {
+  for (const state of SETTLEMENT_PRECEDENCE) {
+    if ((evidence.pendingByState.get(state)?.length ?? 0) > 0) return state;
+  }
+  return null;
+}
 
 type ConfirmedFillSummary = {
   shares: number;
@@ -892,6 +987,8 @@ async function fetchAssociatedTradeEvidence(
     confirmed: [],
     failedIds: [],
     pendingIds: [],
+    pendingByState: new Map(),
+    unknownIds: [],
     missingIds: []
   };
   const tradeIds = [...new Set(order.associateTrades.filter((id) => id.trim() !== ''))];
@@ -902,13 +999,18 @@ async function fetchAssociatedTradeEvidence(
       evidence.missingIds.push(tradeId);
       continue;
     }
-    const status = normalizedTradeStatus(trade.status);
-    if (status === 'CONFIRMED') {
+    const state = classifySettlementState(trade.status);
+    if (state === 'confirmed') {
       evidence.confirmed.push(trade);
-    } else if (status === 'FAILED') {
+    } else if (state === 'failed') {
       evidence.failedIds.push(tradeId);
+    } else if (state === null) {
+      evidence.unknownIds.push(tradeId);
     } else {
       evidence.pendingIds.push(tradeId);
+      const grouped = evidence.pendingByState.get(state) ?? [];
+      grouped.push(tradeId);
+      evidence.pendingByState.set(state, grouped);
     }
   }
   return evidence;
@@ -993,15 +1095,17 @@ function summarizeConfirmedFills(order: OpenOrder, fills: ClobTrade[]): Confirme
 async function setPendingReconciliationState(
   row: PendingPolymarketTrade,
   venueStatus: string,
-  reason: string | null
+  reason: string | null,
+  settlementStatus: SettlementState | null = null
 ): Promise<void> {
   await query(
     `UPDATE trades
         SET venue_status = $2,
-            error_message = $3
+            error_message = $3,
+            venue_settlement_status = $4
       WHERE id = $1
         AND status = 'pending_confirmation'`,
-    [row.id, venueStatus, reason]
+    [row.id, venueStatus, reason, settlementStatus]
   );
 }
 
@@ -1172,6 +1276,14 @@ async function reconcilePendingPolymarketTrade(
     return markAmbiguous(row, `Polymarket trade evidence lookup is unresolved: ${message}`);
   }
 
+  if (evidence.unknownIds.length > 0) {
+    // An undocumented settlement status is not evidence of anything. Treating
+    // it as pending would leave the position parked indefinitely.
+    return markAmbiguous(
+      row,
+      `Polymarket associated trades returned an unrecognised settlement status: ${evidence.unknownIds.join(', ')}`
+    );
+  }
   if (evidence.missingIds.length > 0) {
     const reason = `Polymarket associated trades are not yet readable: ${evidence.missingIds.join(', ')}`;
     if (orderState === 'pending') {
@@ -1181,8 +1293,11 @@ async function reconcilePendingPolymarketTrade(
     return markAmbiguous(row, reason);
   }
   if (evidence.pendingIds.length > 0) {
-    const reason = `Polymarket associated trades are not confirmed: ${evidence.pendingIds.join(', ')}`;
-    await setPendingReconciliationState(row, order.status, reason);
+    const settlement = weakestPendingSettlement(evidence);
+    const reason =
+      `Polymarket associated trades are not confirmed (settlement ${settlement ?? 'unknown'}): `
+      + evidence.pendingIds.join(', ');
+    await setPendingReconciliationState(row, order.status, reason, settlement);
     return { tradeId: row.id, orderId: order.id, status: 'pending_confirmation', reason };
   }
 

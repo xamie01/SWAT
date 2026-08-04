@@ -147,3 +147,106 @@ describe('Robinhood runtime safety assessment', () => {
     expect(evaluateRobinhoodSafety(assessment)).toContain('liquidity did not pass reliably');
   });
 });
+
+describe('Robinhood asset-provenance and transfer-tax checks', () => {
+  const context = {
+    order: {
+      clientOrderId: 'signal-rh-checks',
+      token: pending.token,
+      direction: 'buy' as const,
+      amountInBaseUnits: 100n,
+      slippageBps: 300
+    },
+    route: { status: 'route' as const, fee: 3000, amountOut: 100n },
+    tokenIn: pending.baseAsset,
+    tokenOut: pending.token
+  };
+
+  function assessWith(options: Record<string, unknown>) {
+    return createRobinhoodSafetyAssessment({
+      quote: vi.fn().mockResolvedValue(90n),
+      liquidityLookup: vi.fn().mockResolvedValue(1_000_000),
+      minimumLiquidityUsd: 50_000,
+      ...options
+    })(context);
+  }
+
+  function check(assessment: Awaited<ReturnType<ReturnType<typeof createRobinhoodSafetyAssessment>>>, name: string) {
+    return assessment.checks.find((candidate) => candidate.name === name);
+  }
+
+  it('declares provenance checks unreliable when no provider is configured', async () => {
+    // The honest default. Guessing either way on unverified source or unknown
+    // holder distribution would be worse than saying the evidence is absent.
+    const assessment = await assessWith({});
+
+    expect(check(assessment, 'source_verification')).toMatchObject({ status: 'unknown', reliable: false });
+    expect(check(assessment, 'holder_concentration')).toMatchObject({ status: 'unknown', reliable: false });
+    expect(check(assessment, 'fee_on_transfer')).toMatchObject({ status: 'unknown', reliable: false });
+    // Unreliable is not failing: only sell_simulation and liquidity are required.
+    expect(evaluateRobinhoodSafety(assessment)).toEqual([]);
+  });
+
+  it('rejects an unverified contract once a provider is wired', async () => {
+    const assessment = await assessWith({ verifySource: vi.fn().mockResolvedValue(false) });
+
+    expect(check(assessment, 'source_verification')).toMatchObject({ status: 'fail', reliable: true });
+    expect(evaluateRobinhoodSafety(assessment)).toContain('source_verification: contract source is unverified');
+  });
+
+  it('passes a verified contract', async () => {
+    const assessment = await assessWith({ verifySource: vi.fn().mockResolvedValue(true) });
+
+    expect(check(assessment, 'source_verification')).toMatchObject({ status: 'pass', reliable: true });
+    expect(evaluateRobinhoodSafety(assessment)).toEqual([]);
+  });
+
+  it('rejects supply concentrated in one holder and accepts a spread book', async () => {
+    const concentrated = await assessWith({ readHolderConcentration: vi.fn().mockResolvedValue(0.81) });
+    expect(check(concentrated, 'holder_concentration')).toMatchObject({ status: 'fail', reliable: true });
+    expect(evaluateRobinhoodSafety(concentrated)[0]).toContain('81.00% of supply');
+
+    const spread = await assessWith({ readHolderConcentration: vi.fn().mockResolvedValue(0.12) });
+    expect(check(spread, 'holder_concentration')).toMatchObject({ status: 'pass', reliable: true });
+  });
+
+  it('treats an out-of-range or failing provider as no evidence, not as a pass', async () => {
+    const nonsense = await assessWith({ readHolderConcentration: vi.fn().mockResolvedValue(4.2) });
+    expect(check(nonsense, 'holder_concentration')).toMatchObject({ status: 'unknown', reliable: false });
+
+    const broken = await assessWith({
+      verifySource: vi.fn().mockRejectedValue(new Error('explorer 502'))
+    });
+    expect(check(broken, 'source_verification')).toMatchObject({ status: 'unknown', reliable: false });
+    expect(check(broken, 'source_verification')?.evidence).toBe('explorer 502');
+  });
+
+  it('refuses any transfer tax by default', async () => {
+    // Uniswap V3 credits the pool less than it was sent for a taxed token, so
+    // there is no safe amount of tax — the default tolerance is zero.
+    const taxed = await assessWith({ probeFeeOnTransfer: vi.fn().mockResolvedValue(50) });
+
+    expect(check(taxed, 'fee_on_transfer')).toMatchObject({ status: 'fail', reliable: true });
+    expect(evaluateRobinhoodSafety(taxed)[0]).toContain('Uniswap V3 cannot route fee-on-transfer tokens');
+
+    const untaxed = await assessWith({ probeFeeOnTransfer: vi.fn().mockResolvedValue(0) });
+    expect(check(untaxed, 'fee_on_transfer')).toMatchObject({ status: 'pass', reliable: true });
+  });
+
+  it('honours an explicit transfer-tax tolerance', async () => {
+    const assessment = await assessWith({
+      probeFeeOnTransfer: vi.fn().mockResolvedValue(25),
+      maxTransferFeeBps: 30
+    });
+
+    expect(check(assessment, 'fee_on_transfer')).toMatchObject({ status: 'pass', reliable: true });
+  });
+
+  it('rejects a negative tolerance at construction', () => {
+    expect(() => createRobinhoodSafetyAssessment({
+      quote: vi.fn(),
+      minimumLiquidityUsd: 50_000,
+      maxTransferFeeBps: -1
+    })).toThrow('non-negative integer');
+  });
+});
