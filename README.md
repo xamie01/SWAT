@@ -64,7 +64,7 @@ SWAT is a **monorepo of microservices** that work together to form a multi-chain
 ## Prerequisites
 
 - **Node.js 22+** for the monorepo; **Node.js 24+** is required for Polymarket live execution
-  by `@polymarket/client` (run `node -v`; see [`DEPLOYMENT.md`](./DEPLOYMENT.md))
+  by `@polymarket/client` (run `node -v`)
 - **pnpm 9+** (`npm install -g pnpm`)
 - **Docker** (for PostgreSQL + Redis)
 
@@ -330,12 +330,11 @@ pnpm db:migrate             # Re-run migrations
 
 ## Production Deployment
 
-See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for:
-- Node.js 22 installation
-- Docker setup
-- Systemd service configuration
-- Helius webhook registration
-- Rate limits & scaling
+There is no deployment runbook in this repository yet. Deploying means: install
+Node (see Prerequisites), bring up PostgreSQL and Redis (`docker-compose.yml`),
+run `pnpm db:migrate`, supervise each service under your process manager of
+choice, and register the Helius webhook against the indexer's `WEBHOOK_PORT`.
+Copy `.env.example` to `.env` first — it is the authoritative variable list.
 
 ---
 

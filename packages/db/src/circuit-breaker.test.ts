@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => {
   return {
     clientQuery,
     release,
-    connect: vi.fn(async () => ({ query: clientQuery, release })),
+    // `on`/`off`: a real PoolClient is an EventEmitter, and withTransaction
+    // attaches an 'error' listener so a mid-transaction socket failure cannot
+    // crash the process. transaction.test.ts covers that behaviour itself.
+    connect: vi.fn(async () => ({ query: clientQuery, release, on: vi.fn(), off: vi.fn() })),
     query: vi.fn()
   };
 });
@@ -46,16 +49,16 @@ describe('database circuit breaker', () => {
         value: { consecutiveFailures: 3, trippedAt: '2026-07-27T10:00:00.000Z' }
       }]);
 
-    await expect(readCircuitBreakerState('polygon')).resolves.toEqual({
+    await expect(readCircuitBreakerState('operator', 'polygon')).resolves.toEqual({
       consecutiveFailures: 2,
       trippedAt: null
     });
-    await expect(readCircuitBreakerState('polygon')).resolves.toEqual({
+    await expect(readCircuitBreakerState('operator', 'polygon')).resolves.toEqual({
       consecutiveFailures: 3,
       trippedAt: '2026-07-27T10:00:00.000Z'
     });
     expect(mocks.query).toHaveBeenCalledTimes(2);
-    expect(mocks.query).toHaveBeenCalledWith(expect.any(String), ['breaker:polygon']);
+    expect(mocks.query).toHaveBeenCalledWith(expect.any(String), ['breaker:operator:polygon']);
   });
 
   it.each([
@@ -68,7 +71,7 @@ describe('database circuit breaker', () => {
   ])('fails closed when stored state is malformed: %j', async (value) => {
     mocks.query.mockResolvedValue([{ value }]);
 
-    await expect(readCircuitBreakerState('solana')).rejects.toBeInstanceOf(
+    await expect(readCircuitBreakerState('operator', 'solana')).rejects.toBeInstanceOf(
       CircuitBreakerStateCorruptionError
     );
   });
@@ -76,7 +79,7 @@ describe('database circuit breaker', () => {
   it('fails closed when the migrated chain key is missing', async () => {
     mocks.query.mockResolvedValue([]);
 
-    await expect(readCircuitBreakerState('robinhood-chain')).rejects.toBeInstanceOf(
+    await expect(readCircuitBreakerState('operator', 'robinhood-chain')).rejects.toBeInstanceOf(
       CircuitBreakerStateCorruptionError
     );
   });
@@ -90,7 +93,7 @@ describe('database circuit breaker', () => {
     }));
 
     await expect(
-      recordCircuitBreakerFailure('robinhood-chain', 3, failedAt)
+      recordCircuitBreakerFailure('operator', 'robinhood-chain', 3, failedAt)
     ).resolves.toEqual({
       consecutiveFailures: 3,
       trippedAt: failedAt.toISOString()
@@ -106,7 +109,7 @@ describe('database circuit breaker', () => {
       3,
       expect.any(String),
       [
-        'breaker:robinhood-chain',
+        'breaker:operator:robinhood-chain',
         JSON.stringify({ consecutiveFailures: 3, trippedAt: failedAt.toISOString() })
       ]
     );
@@ -116,7 +119,7 @@ describe('database circuit breaker', () => {
   it('rolls back a failure when the migrated chain key is missing', async () => {
     mocks.clientQuery.mockResolvedValue({ rows: [] });
 
-    await expect(recordCircuitBreakerFailure('polygon', 3)).rejects.toBeInstanceOf(
+    await expect(recordCircuitBreakerFailure('operator', 'polygon', 3)).rejects.toBeInstanceOf(
       CircuitBreakerStateCorruptionError
     );
     expect(mocks.clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
@@ -133,14 +136,14 @@ describe('database circuit breaker', () => {
     }));
 
     await expect(
-      recordCircuitBreakerFailure('solana', 3, new Date('2026-07-27T10:00:00.000Z'))
+      recordCircuitBreakerFailure('operator', 'solana', 3, new Date('2026-07-27T10:00:00.000Z'))
     ).resolves.toEqual({ consecutiveFailures: 4, trippedAt });
   });
 
   it.each([0, 101, 1.5, Number.NaN])(
     'rejects invalid threshold %s before opening a transaction',
     async (threshold) => {
-      await expect(recordCircuitBreakerFailure('solana', threshold)).rejects.toThrow(
+      await expect(recordCircuitBreakerFailure('operator', 'solana', threshold)).rejects.toThrow(
         /integer from 1 through 100/
       );
       expect(mocks.connect).not.toHaveBeenCalled();
@@ -154,7 +157,7 @@ describe('database circuit breaker', () => {
         : []
     }));
 
-    await expect(recordCircuitBreakerFailure('polygon', 3)).rejects.toBeInstanceOf(
+    await expect(recordCircuitBreakerFailure('operator', 'polygon', 3)).rejects.toBeInstanceOf(
       CircuitBreakerStateCorruptionError
     );
     expect(mocks.clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
@@ -164,7 +167,7 @@ describe('database circuit breaker', () => {
   });
 
   it('resets exactly one chain to the canonical success state', async () => {
-    await expect(recordCircuitBreakerSuccess('polygon')).resolves.toEqual({
+    await expect(recordCircuitBreakerSuccess('operator', 'polygon')).resolves.toEqual({
       consecutiveFailures: 0,
       trippedAt: null
     });
@@ -179,7 +182,7 @@ describe('database circuit breaker', () => {
       3,
       expect.any(String),
       [
-        'breaker:polygon',
+        'breaker:operator:polygon',
         JSON.stringify({ consecutiveFailures: 0, trippedAt: null })
       ]
     );
@@ -193,7 +196,7 @@ describe('database circuit breaker', () => {
         : []
     }));
 
-    await expect(recordCircuitBreakerSuccess('solana')).rejects.toBeInstanceOf(
+    await expect(recordCircuitBreakerSuccess('operator', 'solana')).rejects.toBeInstanceOf(
       CircuitBreakerStateCorruptionError
     );
     expect(mocks.clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
@@ -210,9 +213,9 @@ describe('database circuit breaker', () => {
         : []
     }));
 
-    await expect(claimCircuitBreakerProbe('solana', 300_000, now)).resolves.toBe(true);
+    await expect(claimCircuitBreakerProbe('operator', 'solana', 300_000, now)).resolves.toBe(true);
     expect(mocks.clientQuery).toHaveBeenNthCalledWith(3, expect.any(String), [
-      'breaker:solana',
+      'breaker:operator:solana',
       JSON.stringify({ consecutiveFailures: 3, trippedAt: now.toISOString() })
     ]);
   });
@@ -225,6 +228,7 @@ describe('database circuit breaker', () => {
       }))
       .mockImplementationOnce(async () => ({ rows: [] }));
     await expect(claimCircuitBreakerProbe(
+      'operator',
       'polygon',
       300_000,
       new Date('2026-07-27T10:01:00.000Z')
@@ -236,6 +240,7 @@ describe('database circuit breaker', () => {
         : []
     }));
     await expect(claimCircuitBreakerProbe(
+      'operator',
       'polygon',
       300_000,
       new Date('2026-07-27T10:04:59.999Z')
@@ -247,7 +252,7 @@ describe('database circuit breaker', () => {
   it.each([0, -1, 1.5, Number.NaN])(
     'rejects an invalid probe cooldown before opening a transaction: %s',
     async (cooldownMs) => {
-      await expect(claimCircuitBreakerProbe('solana', cooldownMs)).rejects.toThrow(
+      await expect(claimCircuitBreakerProbe('operator', 'solana', cooldownMs)).rejects.toThrow(
         'positive safe integer'
       );
       expect(mocks.connect).not.toHaveBeenCalled();

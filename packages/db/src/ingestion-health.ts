@@ -4,7 +4,8 @@ import {
   type Chain,
   type RawIngestionHealth
 } from '@swat/shared';
-import { pool, query } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 
 export type RecordIngestionBatchInput = {
   chain: Chain;
@@ -41,10 +42,8 @@ export async function recordIngestionBatch(input: RecordIngestionBatchInput) {
   const batchAt = input.batchAt ?? new Date();
   const lastEventAt = input.lastEventAt ?? null;
   const errorMessage = input.errorMessage?.slice(0, 2000) ?? null;
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO ingestion_health_batches (
          chain, source, batch_at, last_event_at,
@@ -102,13 +101,7 @@ export async function recordIngestionBatch(input: RecordIngestionBatchInput) {
         failed
       ]
     );
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function getIngestionHealth24h(): Promise<RawIngestionHealth[]> {

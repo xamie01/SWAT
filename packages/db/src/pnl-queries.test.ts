@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@swat/shared', () => ({
-  fetchTokenPriceUsd: mocks.fetchTokenPriceUsd
+  fetchTokenPriceUsd: mocks.fetchTokenPriceUsd,
+  isChain: (value: unknown) =>
+    value === 'solana' || value === 'polygon' || value === 'robinhood-chain'
 }));
 
 vi.mock('./client.js', () => ({
@@ -24,7 +26,8 @@ describe('markToMarketOpenPositions', () => {
   it('loads only ordered, filled, non-shadow ledger entries', async () => {
     await expect(markToMarketOpenPositions()).resolves.toEqual({
       updated: 0,
-      skipped: 0
+      skipped: 0,
+      positions: []
     });
 
     expect(mocks.query).toHaveBeenCalledOnce();
@@ -64,7 +67,21 @@ describe('markToMarketOpenPositions', () => {
       .mockResolvedValueOnce([]);
     mocks.fetchTokenPriceUsd.mockResolvedValue(1.5);
 
-    await expect(markToMarketOpenPositions()).resolves.toEqual({ updated: 1, skipped: 0 });
+    await expect(markToMarketOpenPositions()).resolves.toEqual({
+      updated: 1,
+      skipped: 0,
+      positions: [
+        {
+          signalId: 'signal-1',
+          tokenMint: 'solana:token-1',
+          chain: 'solana',
+          openQuantity: 60,
+          openCostBasisUsd: 60.6,
+          unrealizedPnlUsd: 29.4,
+          currentPriceUsd: 1.5
+        }
+      ]
+    });
 
     expect(mocks.fetchTokenPriceUsd).toHaveBeenCalledWith('solana:token-1');
     const updateCall = mocks.query.mock.calls.find(([sql]) =>
@@ -95,7 +112,11 @@ describe('markToMarketOpenPositions', () => {
       ])
       .mockResolvedValueOnce([]);
 
-    await expect(markToMarketOpenPositions()).resolves.toEqual({ updated: 1, skipped: 0 });
+    await expect(markToMarketOpenPositions()).resolves.toEqual({
+      updated: 1,
+      skipped: 0,
+      positions: []
+    });
     expect(mocks.fetchTokenPriceUsd).not.toHaveBeenCalled();
     expect(mocks.query.mock.calls[1]?.[1]).toEqual([30, 30, 0, 'signal-2']);
   });
@@ -112,7 +133,11 @@ describe('markToMarketOpenPositions', () => {
       }
     ]);
 
-    await expect(markToMarketOpenPositions()).resolves.toEqual({ updated: 0, skipped: 1 });
+    await expect(markToMarketOpenPositions()).resolves.toEqual({
+      updated: 0,
+      skipped: 1,
+      positions: []
+    });
     expect(mocks.fetchTokenPriceUsd).not.toHaveBeenCalled();
     expect(mocks.query).toHaveBeenCalledOnce();
   });

@@ -20,7 +20,11 @@ const TRANSACTION_HASH = `0x${'c'.repeat(64)}`;
 describe('Polymarket database context', () => {
   const client = {
     query: vi.fn(async () => ({ rows: [] })),
-    release: vi.fn()
+    release: vi.fn(),
+    // withTransaction attaches an 'error' listener to the checked-out client;
+    // a real PoolClient is an EventEmitter.
+    on: vi.fn(),
+    off: vi.fn()
   };
 
   beforeEach(() => {

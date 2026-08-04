@@ -22,10 +22,36 @@ vi.mock('@swat/db', () => ({
   getRollingExposureUsd: vi.fn(),
   getTokenDecimals: vi.fn(),
   hasRecentBuy: vi.fn(),
+    resolveRiskPolicy: vi.fn().mockResolvedValue({
+      maxPositionPct: 5,
+      maxDailyExposurePct: 25,
+      stopLossPct: 20,
+      maxConsecutiveFailures: 3,
+      minLiquidityUsd: 50000
+    }),
   insertTrade: vi.fn().mockResolvedValue({ id: 'inserted-trade' }),
   insertTradeAndMarkSignalExecuted: vi.fn().mockResolvedValue({ id: 'filled-trade' }),
   insertTradeAndReleaseSignalClaim: vi.fn().mockResolvedValue({ id: 'skipped-trade' }),
-  pool: { connect: vi.fn() },
+  // Copy eligibility is exercised on its own in copy-eligibility.test.ts. These
+  // tests are about lifecycle routing, so the source is a selected, active
+  // wallet — the gate has to pass for the claim under test to be reached.
+  loadCopyEligibilityFacts: vi.fn().mockImplementation(async ({ signalId }) => ({
+    signalId,
+    signalStatus: 'eligible',
+    chain: 'solana',
+    walletAddress: 'solana:source-wallet',
+    walletKnown: true,
+    walletStatus: 'active',
+    walletTradeCount: 40,
+    clusterSelected: true,
+    sourceActivityUsd: 10_000,
+    eventAt: new Date()
+  })),
+  recordCopyEligibilityRejection: vi.fn().mockResolvedValue(true),
+  // Runs the callback against a stub client. No test here reaches a
+  // transaction body; this keeps the barrel's shape honest if one does.
+  withTransaction: vi.fn(async (fn: (client: unknown) => Promise<unknown>) =>
+    fn({ query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }) })),
   query: vi.fn(),
   readCircuitBreakerState: vi.fn(),
   recordCircuitBreakerFailure: vi.fn(),
@@ -36,14 +62,20 @@ vi.mock('@swat/db', () => ({
   transitionCopyExecution: vi.fn()
 }));
 
-vi.mock('@swat/shared', () => ({
-  DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3 },
-  fetchTokenPriceUsd: vi.fn().mockResolvedValue(0.5),
-  getJupiterSimulatedFill: vi.fn(),
-  initLogger: vi.fn(),
-  isChain: vi.fn().mockReturnValue(true),
-  REDIS_CHANNELS: { alertQueue: 'alerts' }
-}));
+vi.mock('@swat/shared', async () => {
+  // evaluateCopyPolicy is pure decision math with its own suite in
+  // packages/shared; stubbing it would only test the stub.
+  const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
+  return {
+    DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3 },
+    evaluateCopyPolicy: actual.evaluateCopyPolicy,
+    fetchTokenPriceUsd: vi.fn().mockResolvedValue(0.5),
+    getJupiterSimulatedFill: vi.fn(),
+    initLogger: vi.fn(),
+    isChain: vi.fn().mockReturnValue(true),
+    REDIS_CHANNELS: { alertQueue: 'alerts' }
+  };
+});
 
 vi.mock('bullmq', () => ({
   DelayedError: class DelayedError extends Error {},
@@ -318,13 +350,13 @@ describe('executor trade-state routing', () => {
       status: 'skipped',
       reason: 'policy'
     });
-    expect(db.readCircuitBreakerState).toHaveBeenCalledWith('polygon');
+    expect(db.readCircuitBreakerState).toHaveBeenCalledWith('operator', 'polygon');
     expect(db.recordCircuitBreakerSuccess).not.toHaveBeenCalled();
     expect(db.recordCircuitBreakerFailure).not.toHaveBeenCalled();
 
     const success = vi.fn().mockResolvedValue({ status: 'live-executed' });
     await executeJobWithCircuitBreaker(job, success);
-    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('polygon');
+    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('operator', 'polygon');
   });
 
   it('counts returned execution failures and thrown transient failures', async () => {
@@ -345,6 +377,7 @@ describe('executor trade-state routing', () => {
 
     expect(db.recordCircuitBreakerFailure).toHaveBeenCalledTimes(2);
     expect(db.recordCircuitBreakerFailure).toHaveBeenCalledWith(
+      'operator',
       'robinhood-chain',
       3
     );
@@ -374,7 +407,7 @@ describe('executor trade-state routing', () => {
       status: 'submitted'
     });
     expect(probe).toHaveBeenCalledOnce();
-    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('solana');
+    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('operator', 'solana');
   });
 
   it('routes a Solana SELL through the stable Trojan runtime without BUY sizing', async () => {

@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { Redis } from 'ioredis';
+import { Queue } from 'bullmq';
 import {
   getWalletMetrics,
   updateWalletScore,
@@ -14,13 +15,24 @@ import {
   updateClusterPerformance,
   markToMarketOpenPositions,
   runNightlyAttribution,
-  persistExpectancyReport
+  persistExpectancyReport,
+  resolveRiskPolicy,
+  claimStopLossTrigger,
+  releaseStopLossTrigger
 } from '@swat/db';
 import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger } from '@swat/shared';
 import { runAttributionReporting } from './expectancy.js';
+import { runStopLossSweep } from './stop-loss.js';
 
 const redisUrlForPublish = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redisPublishClient = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
+
+// Stop-loss exits go through the same durable queue the signal engine uses, so
+// they inherit the executor's mode gating, circuit breaker and reconciliation.
+const tradeQueue = new Queue('swat-trades', {
+  connection: new Redis(redisUrlForPublish, { maxRetriesPerRequest: null })
+});
+tradeQueue.on('error', (error) => console.error('[scorer] trade queue error', error));
 
 initLogger('scorer');
 
@@ -121,11 +133,44 @@ async function runScoringBatch() {
  * on a short standalone cron so /v1/trading/performance stays current.
  */
 async function runMarkToMarket() {
+  let positions: Awaited<ReturnType<typeof markToMarketOpenPositions>>['positions'] = [];
   try {
-    const { updated, skipped } = await markToMarketOpenPositions();
-    console.log(`[scorer] Mark-to-market: updated ${updated}, skipped ${skipped}.`);
+    const result = await markToMarketOpenPositions();
+    positions = result.positions;
+    console.log(`[scorer] Mark-to-market: updated ${result.updated}, skipped ${result.skipped}.`);
   } catch (e) {
     console.error('[scorer] Mark-to-market failed:', e);
+    return;
+  }
+
+  // Stop-loss is evaluated against the prices the pass above just fetched, so a
+  // breach is acted on within one mark-to-market interval and never on a stale
+  // quote. A failure here must not mask a successful mark-to-market.
+  try {
+    const sweep = await runStopLossSweep({
+      positions,
+      resolvePolicy: resolveRiskPolicy,
+      claim: claimStopLossTrigger,
+      release: releaseStopLossTrigger,
+      enqueueSell: (job, jobId) => tradeQueue.add('stop-loss-sell', job, {
+        jobId,
+        removeOnComplete: true,
+        attempts: 4,
+        backoff: { type: 'exponential', delay: 5000 }
+      }),
+      publishAlert: (alert) => redisPublishClient.publish(
+        REDIS_CHANNELS.alertQueue,
+        JSON.stringify(alert)
+      )
+    });
+    if (sweep.breached > 0) {
+      console.log(
+        `[scorer] Stop-loss: scanned ${sweep.scanned}, breached ${sweep.breached}, ` +
+        `queued ${sweep.queued}, already triggered ${sweep.alreadyTriggered}, failed ${sweep.failed}.`
+      );
+    }
+  } catch (e) {
+    console.error('[scorer] Stop-loss sweep failed:', e);
   }
 }
 

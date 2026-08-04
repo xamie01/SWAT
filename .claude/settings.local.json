@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh --version)",
+      "Bash(timeout 900 pnpm test)",
+      "Bash(gh run *)",
+      "Bash(timeout 600 pnpm typecheck)",
+      "Bash(timeout 900 pnpm build)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm --filter @swat/db test)",
+      "Bash(pnpm --filter @swat/trade-executor test)",
+      "Bash(python3 *)",
+      "Bash(pnpm --filter @swat/db exec vitest run src/pnl-queries.test.ts)",
+      "Bash(pnpm --filter @swat/db exec vitest run src/stop-loss.test.ts)",
+      "Bash(pnpm --filter @swat/scorer exec vitest run src/stop-loss.test.ts)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm --filter @swat/db exec vitest run src/risk-policy.test.ts)",
+      "Bash(git reset *)",
+      "Bash(pnpm --filter @swat/db build)",
+      "Bash(pnpm --filter @swat/trade-executor exec vitest run src/reconciliation-coordinator.test.ts)",
+      "Bash(docker compose *)",
+      "Bash(DATABASE_URL='postgres://swat:swat@127.0.0.1:5432/swat_integration' pnpm db:migrate)",
+      "Bash(pnpm db:migrate)",
+      "Bash(pnpm build *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m ' *)",
+      "Bash(pnpm --filter @swat/shared build)",
+      "Bash(pnpm test:integration)",
+      "Bash(awk '{s+=$2} END {print \"total unit tests:\", s}')",
+      "Bash(awk '{s+=$1} END {print \"total:\", s}')",
+      "Bash(docker exec *)",
+      "Bash(pnpm --filter @swat/db exec vitest run src/client-pools.test.ts)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "polymarket-docs"
+  ],
+  "enableAllProjectMcpServers": true
+}

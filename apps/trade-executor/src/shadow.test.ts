@@ -8,6 +8,13 @@ vi.mock('@swat/db', () => ({
   claimCircuitBreakerProbe: vi.fn(),
   resolveChainMode: vi.fn(),
   hasRecentBuy: vi.fn().mockResolvedValue(false),
+  resolveRiskPolicy: vi.fn().mockResolvedValue({
+    maxPositionPct: 5,
+    maxDailyExposurePct: 25,
+    stopLossPct: 20,
+    maxConsecutiveFailures: 3,
+    minLiquidityUsd: 50000
+  }),
   getRollingExposureUsd: vi.fn().mockResolvedValue(0),
   claimSignalForExecution: vi.fn().mockResolvedValue(true),
   releaseSignalClaim: vi.fn().mockResolvedValue(undefined),
@@ -15,7 +22,10 @@ vi.mock('@swat/db', () => ({
   insertTradeAndMarkSignalExecuted: vi.fn().mockResolvedValue({ id: 'live-trade-123' }),
   insertTradeAndReleaseSignalClaim: vi.fn().mockResolvedValue({ id: 'skipped-trade-123' }),
   getTokenDecimals: vi.fn().mockResolvedValue(6),
-  pool: { connect: vi.fn() },
+  // Runs the callback against a stub client. No test here reaches a
+  // transaction body; this keeps the barrel's shape honest if one does.
+  withTransaction: vi.fn(async (fn: (client: unknown) => Promise<unknown>) =>
+    fn({ query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }) })),
   query: vi.fn(),
   readCircuitBreakerState: vi.fn(),
   recordCircuitBreakerFailure: vi.fn(),

@@ -12,7 +12,8 @@ import {
   type SourceConfirmationState,
   type SourceTradeSide
 } from '@swat/shared';
-import { pool, query } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 
 export type DecimalInput = string | number;
 export type SourceEventType = 'transaction' | 'order' | 'venue_trade';
@@ -308,18 +309,7 @@ function mapCopyExecution(row: CopyExecutionDbRow): CopyExecutionRecord {
 }
 
 async function inTransaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await operation(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  return withTransaction(operation);
 }
 
 function isStaleConfirmation(

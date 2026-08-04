@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => {
   return {
     clientQuery,
     release,
-    connect: vi.fn(async () => ({ query: clientQuery, release })),
+    // `on`/`off`: a real PoolClient is an EventEmitter, and withTransaction
+    // attaches an 'error' listener so a mid-transaction socket failure cannot
+    // crash the process. transaction.test.ts covers that behaviour itself.
+    connect: vi.fn(async () => ({ query: clientQuery, release, on: vi.fn(), off: vi.fn() })),
     query: vi.fn()
   };
 });

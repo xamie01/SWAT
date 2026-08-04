@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import { Redis } from "ioredis";
-import { query, resolvePrefixedAddress, pool } from "@swat/db";
+import { query, resolvePrefixedAddress, withTransaction } from "@swat/db";
 import { initLogger, REDIS_CHANNELS } from "@swat/shared";
 import { z } from "zod";
 
@@ -264,9 +264,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "add_to_blacklist": {
         const { tokenMint } = z.object({ tokenMint: z.string() }).parse(args);
 
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
+        const limitReached = await withTransaction(async (client) => {
           const res = await client.query(`SELECT value FROM config WHERE key = 'blacklist' FOR UPDATE`);
           const value = res.rows[0]?.value;
           let blacklist: string[] = [];
@@ -285,10 +283,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           if (!blacklist.includes(tokenMint)) {
             if (blacklist.length >= 100) {
-              await client.query("ROLLBACK");
-              return {
-                content: [{ type: "text", text: "Blacklist limit reached. Please remove items first." }],
-              };
+              // Returning commits the (still read-only) transaction and drops
+              // the FOR UPDATE row lock — what the explicit ROLLBACK on this
+              // path did. Nothing has been written yet.
+              return true;
             }
             blacklist.push(tokenMint);
           }
@@ -298,12 +296,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
              ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
             [JSON.stringify(blacklist)]
           );
-          await client.query("COMMIT");
-        } catch (err) {
-          await client.query("ROLLBACK");
-          throw err;
-        } finally {
-          client.release();
+          return false;
+        });
+
+        if (limitReached) {
+          return {
+            content: [{ type: "text", text: "Blacklist limit reached. Please remove items first." }],
+          };
         }
 
         return {
@@ -314,9 +313,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "remove_from_blacklist": {
         const { tokenMint } = z.object({ tokenMint: z.string() }).parse(args);
 
-        const client = await pool.connect();
-        try {
-          await client.query("BEGIN");
+        await withTransaction(async (client) => {
           const res = await client.query(`SELECT value FROM config WHERE key = 'blacklist' FOR UPDATE`);
           const value = res.rows[0]?.value;
           let blacklist: string[] = [];
@@ -339,13 +336,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `UPDATE config SET value = $1, updated_at = NOW() WHERE key = 'blacklist'`,
             [JSON.stringify(filtered)]
           );
-          await client.query("COMMIT");
-        } catch (err) {
-          await client.query("ROLLBACK");
-          throw err;
-        } finally {
-          client.release();
-        }
+        });
 
         return {
           content: [{ type: "text", text: `Successfully removed ${tokenMint} from the blacklist.` }],

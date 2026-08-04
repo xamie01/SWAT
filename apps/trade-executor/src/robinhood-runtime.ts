@@ -114,12 +114,38 @@ export function createRobinhoodSafetyAssessment(options: {
   minimumLiquidityUsd: number;
   liquidityLookup?: (token: string) => Promise<number | null>;
   readOwner?: (token: `0x${string}`) => Promise<`0x${string}` | null>;
+  /**
+   * Reports whether the token's contract source is verified on a reviewed
+   * Robinhood Chain explorer. Absent by default: there is no such provider
+   * configured, and an unverified assumption either way would be worse than
+   * declaring the check unreliable.
+   */
+  verifySource?: (token: `0x${string}`) => Promise<boolean | null>;
+  /**
+   * Returns the share of supply held by the largest non-pool holder, as a
+   * fraction in [0,1]. Absent by default for the same reason.
+   */
+  readHolderConcentration?: (token: `0x${string}`) => Promise<number | null>;
+  /**
+   * Returns the token's transfer tax in basis points, or 0 for a plain ERC-20.
+   * Uniswap V3 has no fee-on-transfer swap variant, so a taxed token cannot be
+   * exited through this router at all and is refused rather than attempted.
+   */
+  probeFeeOnTransfer?: (token: `0x${string}`) => Promise<number | null>;
+  /** Maximum tolerated transfer tax in bps. Defaults to 0 — any tax is refused. */
+  maxTransferFeeBps?: number;
 }): (context: SafetyContext) => Promise<RobinhoodSafetyAssessment> {
   if (!Number.isFinite(options.minimumLiquidityUsd) || options.minimumLiquidityUsd <= 0) {
     throw new Error('Robinhood minimum liquidity must be positive');
   }
   const liquidityLookup = options.liquidityLookup
     ?? ((token: string) => fetchDexScreenerLiquidity(token, 'robinhood-chain'));
+  const maximumTransferFeeBps = options.maxTransferFeeBps ?? 0;
+  if (!Number.isInteger(maximumTransferFeeBps) || maximumTransferFeeBps < 0) {
+    throw new Error('Robinhood maximum transfer fee must be a non-negative integer');
+  }
+  // A single holder above this share can move the price against any exit.
+  const maximumHolderShare = 0.5;
 
   return async (context) => {
     let sellSimulation: RobinhoodSafetyAssessment['checks'][number];
@@ -206,23 +232,119 @@ export function createRobinhoodSafetyAssessment(options: {
       }
     }
 
+    let sourceVerification: RobinhoodSafetyAssessment['checks'][number] = {
+      name: 'source_verification',
+      status: 'unknown',
+      reliable: false,
+      evidence: 'no reviewed Robinhood explorer source-verification provider is configured'
+    };
+    if (options.verifySource) {
+      try {
+        const verified = await options.verifySource(context.order.token);
+        if (verified !== null) {
+          sourceVerification = {
+            name: 'source_verification',
+            status: verified ? 'pass' : 'fail',
+            reliable: true,
+            evidence: verified ? 'contract source is verified' : 'contract source is unverified'
+          };
+        }
+      } catch (error) {
+        sourceVerification = {
+          name: 'source_verification',
+          status: 'unknown',
+          reliable: false,
+          evidence: error instanceof Error ? error.message : 'source verification lookup failed'
+        };
+      }
+    }
+
+    let holderConcentration: RobinhoodSafetyAssessment['checks'][number] = {
+      name: 'holder_concentration',
+      status: 'unknown',
+      reliable: false,
+      evidence: 'no reviewed Robinhood holder-distribution provider is configured'
+    };
+    if (options.readHolderConcentration) {
+      try {
+        const topShare = await options.readHolderConcentration(context.order.token);
+        if (topShare !== null) {
+          if (!Number.isFinite(topShare) || topShare < 0 || topShare > 1) {
+            holderConcentration = {
+              name: 'holder_concentration',
+              status: 'unknown',
+              reliable: false,
+              evidence: `holder concentration provider returned an out-of-range share: ${topShare}`
+            };
+          } else {
+            const concentrated = topShare > maximumHolderShare;
+            holderConcentration = {
+              name: 'holder_concentration',
+              status: concentrated ? 'fail' : 'pass',
+              reliable: true,
+              evidence: `largest non-pool holder controls ${(topShare * 100).toFixed(2)}% of supply`
+            };
+          }
+        }
+      } catch (error) {
+        holderConcentration = {
+          name: 'holder_concentration',
+          status: 'unknown',
+          reliable: false,
+          evidence: error instanceof Error ? error.message : 'holder distribution lookup failed'
+        };
+      }
+    }
+
+    let feeOnTransfer: RobinhoodSafetyAssessment['checks'][number] = {
+      name: 'fee_on_transfer',
+      status: 'unknown',
+      reliable: false,
+      evidence: 'no transfer-tax probe is configured'
+    };
+    if (options.probeFeeOnTransfer) {
+      try {
+        const feeBps = await options.probeFeeOnTransfer(context.order.token);
+        if (feeBps !== null) {
+          if (!Number.isFinite(feeBps) || feeBps < 0) {
+            feeOnTransfer = {
+              name: 'fee_on_transfer',
+              status: 'unknown',
+              reliable: false,
+              evidence: `transfer-tax probe returned an invalid rate: ${feeBps}`
+            };
+          } else {
+            const taxed = feeBps > maximumTransferFeeBps;
+            feeOnTransfer = {
+              name: 'fee_on_transfer',
+              status: taxed ? 'fail' : 'pass',
+              reliable: true,
+              // V3's exactInputSingle credits the pool less than it was sent,
+              // so a taxed token cannot be exited through this router at all.
+              evidence: taxed
+                ? `token charges ${feeBps} bps on transfer; Uniswap V3 cannot route fee-on-transfer tokens`
+                : 'token transfers untaxed'
+            };
+          }
+        }
+      } catch (error) {
+        feeOnTransfer = {
+          name: 'fee_on_transfer',
+          status: 'unknown',
+          reliable: false,
+          evidence: error instanceof Error ? error.message : 'transfer-tax probe failed'
+        };
+      }
+    }
+
     return {
       checks: [
         sellSimulation,
         liquidity,
         ownership,
-        {
-          name: 'source_verification',
-          status: 'unknown',
-          reliable: false,
-          evidence: 'no reviewed Robinhood explorer source-verification provider is configured'
-        },
-        {
-          name: 'holder_concentration',
-          status: 'unknown',
-          reliable: false,
-          evidence: 'no reviewed Robinhood holder-distribution provider is configured'
-        }
+        sourceVerification,
+        holderConcentration,
+        feeOnTransfer
       ]
     };
   };

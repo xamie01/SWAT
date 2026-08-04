@@ -1,4 +1,5 @@
-import { pool, query } from './client.js';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 import { getChainPrefix, prefixChainValue, stripChainPrefix } from '@swat/shared';
 
 function normalizeConditionId(conditionId: string): string {
@@ -137,9 +138,7 @@ export async function upsertPolymarketContext(context: PolymarketContextInsert):
     throw new Error(`Invalid Polymarket end date for ${conditionId}`);
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  await withTransaction(async (client) => {
     const tokenIds = context.outcomes.map((outcome) => normalizeTokenId(outcome.tokenId));
     await client.query(
       `INSERT INTO polymarket_markets (
@@ -211,13 +210,7 @@ export async function upsertPolymarketContext(context: PolymarketContextInsert):
         [tokenId, conditionId, outcome.outcome.trim(), outcome.outcomeIndex]
       );
     }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function getPolymarketOutcomeContext(tokenId: string): Promise<PolymarketOutcomeContext | null> {
