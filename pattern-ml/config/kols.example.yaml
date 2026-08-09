@@ -1,0 +1,32 @@
+# Copy to config/kols.yaml and add the KOLs you actually care about.
+#
+#   cp config/kols.example.yaml config/kols.yaml
+#
+# Only `address` is required. Everything else is metadata that makes the
+# pattern reports readable and lets you slice results by cohort.
+#
+# Addresses here are written BARE (no `solana:` / `polygon:` prefix) — the
+# chain comes from the section they sit under. This differs from the main SWAT
+# database, which stores chain-prefixed addresses; pattern_ml keeps its own
+# store and normalizes on read (a pasted prefix is stripped, not rejected).
+
+solana:
+  # - address: 5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1
+  #   handle: example-kol
+  #   tags: [memecoin, high-frequency]
+  #   note: "Why you're tracking them — shows up in reports"
+
+polymarket:
+  # Polymarket addresses are the EVM proxy wallet the trader uses on Polygon.
+  # Grab it from the trader's profile URL: polymarket.com/profile/<address>
+  # - address: "0x0000000000000000000000000000000000000000"
+  #   handle: example-predictor
+  #   tags: [politics, sports]
+  #   note: "..."
+
+# Optional global defaults applied to every KOL above.
+defaults:
+  # How far back to pull on the first run. `null` means full history.
+  # Full history is the right default for pattern mining — you want the
+  # losing streaks too, not just the recent hot run.
+  since: null

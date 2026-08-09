@@ -1,0 +1,18 @@
+# Isolated venv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local data warehouse — never commit trade data
+data/
+!data/.gitkeep
+
+# Real KOL list and secrets stay local
+config/kols.yaml
+.env
+
+# Model artifacts / run archives
+artifacts/
+reports/
