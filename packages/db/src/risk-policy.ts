@@ -20,9 +20,44 @@ interface CachedRiskPolicy {
 // Keyed by account:chain. The resolved policy is chain-specific (the env
 // fallbacks below differ per chain), so a single shared slot would let one
 // chain serve another chain's limits for the whole TTL.
+//
+// Bounded on purpose (`S4-P3`). With one operator this map holds three entries;
+// under fan-out the key includes a user id, so it grows one entry per active user
+// per chain and — because entries were only ever TTL-checked on *read*, never
+// swept — retained every user who had ever traded, including churned ones. That
+// is unbounded growth keyed by user id inside the process that also holds the
+// custody master key, which is the last place to leak memory.
 const cachedPolicies = new Map<string, CachedRiskPolicy>();
 const policyLoads = new Map<string, { generation: number; promise: Promise<RiskPolicy> }>();
 let cacheGeneration = 0;
+
+/**
+ * Hard entry cap. Sized for a few thousand active (user, chain) pairs; well past
+ * that the DB round trip is cheaper than the resident memory.
+ */
+const RISK_POLICY_CACHE_MAX_ENTRIES = 5_000;
+
+/**
+ * Drops expired entries, then evicts oldest-first if still over the cap.
+ *
+ * Eviction is by insertion order, which `Map` preserves — an approximation of LRU
+ * that costs nothing, and is adequate because every entry expires within the TTL
+ * anyway. The cap is the backstop for a burst that outruns expiry, not the primary
+ * mechanism.
+ */
+function pruneRiskPolicyCache(now: number): void {
+  for (const [key, entry] of cachedPolicies) {
+    if (now - entry.timestamp >= RISK_POLICY_CACHE_TTL_MS) cachedPolicies.delete(key);
+  }
+  if (cachedPolicies.size <= RISK_POLICY_CACHE_MAX_ENTRIES) return;
+  const excess = cachedPolicies.size - RISK_POLICY_CACHE_MAX_ENTRIES;
+  let removed = 0;
+  for (const key of cachedPolicies.keys()) {
+    if (removed >= excess) break;
+    cachedPolicies.delete(key);
+    removed += 1;
+  }
+}
 
 function policyCacheKey(account: string, chain: Chain): string {
   return `${account}:${chain}`;
@@ -91,7 +126,12 @@ export async function resolveRiskPolicy(account: string, chain: Chain): Promise<
   const generation = cacheGeneration;
   const promise = loadRiskPolicyFromDb(chain).then((policy) => {
     if (generation === cacheGeneration) {
-      cachedPolicies.set(key, { policy, timestamp: Date.now() });
+      const now = Date.now();
+      cachedPolicies.set(key, { policy, timestamp: now });
+      // Swept on write rather than on a timer: a timer would keep the process
+      // alive and would run when nothing is being cached, whereas growth only
+      // ever happens here.
+      pruneRiskPolicyCache(now);
     }
     return policy;
   });
@@ -109,3 +149,10 @@ export function clearRiskPolicyCache(): void {
   cachedPolicies.clear();
   policyLoads.clear();
 }
+
+/** Entry count. Test-only — lets a test assert the cache is actually bounded. */
+export function riskPolicyCacheSize(): number {
+  return cachedPolicies.size;
+}
+
+export { RISK_POLICY_CACHE_MAX_ENTRIES, RISK_POLICY_CACHE_TTL_MS };

@@ -7,7 +7,8 @@ import {
   getJupiterSimulatedFill,
   initLogger,
   isChain,
-  REDIS_CHANNELS
+  REDIS_CHANNELS,
+  resolveSlippageBps
 } from '@swat/shared';
 import type { Chain, JupiterSimulatedFill } from '@swat/shared';
 import {
@@ -78,6 +79,7 @@ import {
   getPolymarketAskPrice,
   getPolymarketAvailableBalance,
   getPolymarketLiveReadiness,
+  getPolymarketClientIfReady,
   simulatePolymarketBookFill
 } from './polymarket.js';
 import { polymarketSigner, resolvePolymarketIdentity } from './polymarket.js';
@@ -93,6 +95,18 @@ import {
   type TrojanRuntime,
   type TrojanTerminalResolution
 } from './trojan-runtime.js';
+import {
+  createJupiterJitoRuntimeFromEnvironment,
+  getConfiguredJupiterJitoRuntime,
+  getJupiterJitoLiveReadiness,
+  getJupiterJitoSigner
+} from './jupiter-jito-config.js';
+import { dispatchSolanaTrade } from './solana-dispatch.js';
+import { resolveSolanaExecutor, shouldUseJupiterJito } from './solana-executor-selection.js';
+import {
+  runPolymarketRedemptionSweep,
+  type PolymarketRedemptionClient
+} from './polymarket-redemption.js';
 import type { TrojanReconciliationResult } from './trojan.js';
 import {
   decimalQuantityToBaseUnits,
@@ -117,6 +131,20 @@ import {
 } from './reconciliation-venues.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+
+/**
+ * Whose risk policy sizing resolves.
+ *
+ * Deliberately a separate constant from `RECONCILIATION_ACCOUNT`, even though both
+ * are `'operator'` today, because they diverge at Stage 4 and in opposite
+ * directions. This one **becomes the user id** under fan-out — it is a tenancy
+ * key, and per-user sizing is exactly the point. `RECONCILIATION_ACCOUNT` must
+ * **stay** `'operator'`: it is an escalation label, and `copy_executions.target_account`
+ * holds a wallet address, so filtering it by an account value claims zero rows.
+ * Collapsing the two into one shared constant is how that distinction gets lost.
+ */
+const RISK_POLICY_ACCOUNT = 'operator';
+
 let redis: Redis | null = null;
 
 function getRedis(): Redis {
@@ -334,13 +362,20 @@ export function clampExecutionModeForStartup(
   }
   if (
     chain === 'solana' &&
-    (effectiveMode === 'live' || effectiveMode === 'live+shadow') &&
-    !getTrojanLiveReadiness().ready
+    (effectiveMode === 'live' || effectiveMode === 'live+shadow')
   ) {
-    return {
-      effectiveMode: 'paper',
-      reason: `Solana runtime readiness failed: ${getTrojanLiveReadiness().reason}`
-    };
+    // Solana may execute live through either path. Trojan is the legacy one and
+    // retires once Jupiter+Jito is certified (S3-6); until then EITHER being
+    // ready is sufficient, so enabling the new path does not require the old
+    // one to still be configured, and vice versa.
+    const jito = getJupiterJitoLiveReadiness();
+    const trojan = getTrojanLiveReadiness();
+    if (!jito.ready && !trojan.ready) {
+      return {
+        effectiveMode: 'paper',
+        reason: `Solana runtime readiness failed: jupiter-jito=${jito.reason}; trojan=${trojan.reason}`
+      };
+    }
   }
   return { effectiveMode, reason };
 }
@@ -446,7 +481,7 @@ async function getAvailablePositionBalance(opts: {
   return getRobinhoodSpendableEth();
 }
 
-async function getBalanceAwarePositionSize(
+export async function getBalanceAwarePositionSize(
   score: number,
   chain: Chain,
   clusterTier: ClusterTier,
@@ -456,17 +491,21 @@ async function getBalanceAwarePositionSize(
 ): Promise<number> {
   const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
   const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
-  const config = getSizingConfig(chain, sizingMode);
-  if (sizingMode === 'paper') {
-    try {
-      const policy = await resolveRiskPolicy('operator', chain);
-      // override risk percentage from DB-backed policy when present
-      (config as any).riskPct = policy.maxPositionPct;
-    } catch (error) {
-      // If policy resolution fails, fall back to existing env/default behavior
-      console.warn('[trade-executor] resolveRiskPolicy failed, using env/defaults', error);
-    }
-  }
+  const envConfig = getSizingConfig(chain, sizingMode);
+
+  // The DB risk policy applies in EVERY mode, not just paper (`S4-P2`).
+  //
+  // This branch used to read `if (sizingMode === 'paper')`, so live sizing silently
+  // ignored the policy and used the env value. With one operator whose env and DB
+  // agree that is invisible; under fan-out the per-user risk percentage exists
+  // *only* in the database, so live sizing would size every user off one env
+  // constant — the opposite of "exposure proportional to what they agreed to".
+  //
+  // Resolution failure is fatal rather than a warn-and-default (`Principle 3`).
+  // Defaulting substitutes a risk percentage the account never agreed to, which is
+  // a wrong-sized real trade. Throwing costs one skipped signal.
+  const policy = await resolveRiskPolicy(RISK_POLICY_ACCOUNT, chain);
+  const config = { ...envConfig, riskPct: policy.maxPositionPct };
   const balance = await getAvailablePositionBalance({
     chain,
     sizingMode,
@@ -1278,6 +1317,17 @@ export async function handleJob(job: { data: unknown }) {
   // pass the pending claim. Its exactly-once guard is the (account, signal) row
   // in signal_stop_losses, claimed by the scorer before this job was queued.
 
+  // Slippage tolerance for every venue call below (`S4-P4`). Resolved once per
+  // job rather than repeated as a literal at each call site, where it appeared as
+  // 1500 on Solana and 300 on Robinhood in fourteen places.
+  //
+  // `null` means "no user preference", which resolves to the chain default and is
+  // byte-identical to the constants it replaces — this is a refactor, not a
+  // behaviour change. Migration `049` adds
+  // `user_chain_execution_settings.max_slippage_bps`, at which point this one line
+  // reads the user's value and every call site downstream is already correct.
+  const slippageBps = resolveSlippageBps(chain, null);
+
   try {
     let paperResult: ExecutorJobResult | null = null;
     let liveResult: ExecutorJobResult | null = canonicalLiveAlreadyConfirmed
@@ -1328,6 +1378,135 @@ export async function handleJob(job: { data: unknown }) {
           ).toString();
         }
         const submittedAt = new Date();
+
+        // S3-7 cutover seam. Jupiter+Jito is built and unit-tested but NOT
+        // certified — `S3-9` requires a capped live canary — so it carries a
+        // trade only when the operator has explicitly opted in AND a signer and
+        // block engine are actually configured. Neither control implies the
+        // other. Default remains Trojan, the incumbent certified path.
+        const jitoRuntime = getConfiguredJupiterJitoRuntime();
+        const jitoSigner = getJupiterJitoSigner();
+        const useJupiterJito = shouldUseJupiterJito({
+          chain,
+          configured: resolveSolanaExecutor(),
+          jitoReady: Boolean(jitoRuntime && jitoSigner)
+        });
+
+        if (useJupiterJito && jitoRuntime && jitoSigner) {
+          const outcome = await dispatchSolanaTrade(
+            {
+              clientOrderId: canonicalExecution?.clientOrderId ?? payload.signalId,
+              tokenMint: cleanMint,
+              direction,
+              amountSol: submissionSize,
+              sellBaseUnits: maximumTokenAmountBaseUnits,
+              slippageBps
+            },
+            {
+              runtime: jitoRuntime,
+              signerPublicKey: jitoSigner.publicKey,
+              jupiterApiKey: process.env.JUPITER_API_KEY
+            }
+          );
+
+          if (outcome.kind === 'submitted' || outcome.kind === 'ambiguous') {
+            // A bundle id is not a transaction signature — the signature only
+            // exists once the bundle lands, and the reconciliation sweep fills
+            // it in. Persisting the bundle id here would put a value in
+            // `trades.signature` that no explorer can resolve.
+            if (canonicalExecution) {
+              await transitionCopyExecution({
+                executionId: canonicalExecution.id,
+                nextState: 'reconciliation_required',
+                reason: outcome.kind === 'ambiguous'
+                  ? outcome.reason
+                  : `jito bundle ${outcome.bundleId} awaiting confirmation`,
+                nextReconciliationAt: new Date(Date.now() + 30_000)
+              });
+            }
+            liveTradeId = await persistTrade({
+              signalId: payload.signalId,
+              sourceTradeId: payload.sourceTradeId,
+              copyExecutionId: canonicalExecution?.id,
+              tokenMint: payload.tokenMint,
+              size: submissionSize,
+              chain,
+              executionMode: 'live',
+              direction,
+              executor: 'jupiter-jito',
+              signature: null,
+              venueStatus: outcome.kind === 'submitted' ? outcome.venueStatus : 'submission_unknown',
+              status: 'pending_confirmation',
+              errorMessage: outcome.kind === 'ambiguous' ? outcome.reason : null,
+              slippageBps,
+              submittedAt
+            });
+            liveResult = {
+              status: 'submitted',
+              state: 'pending_confirmation',
+              signalId: payload.signalId,
+              tokenMint: payload.tokenMint,
+              size: submissionSize,
+              signature: null
+            };
+          } else if (outcome.kind === 'filled') {
+            // Only reachable on a redelivered job whose bundle already landed.
+            if (canonicalExecution) {
+              await persistCanonicalSubmission({
+                execution: canonicalExecution,
+                executor: 'jupiter-jito',
+                submissionType: 'transaction',
+                submissionId: outcome.signature
+              });
+            }
+            liveTradeId = await persistTrade({
+              signalId: payload.signalId,
+              sourceTradeId: payload.sourceTradeId,
+              copyExecutionId: canonicalExecution?.id,
+              tokenMint: payload.tokenMint,
+              size: submissionSize,
+              chain,
+              executionMode: 'live',
+              direction,
+              executor: 'jupiter-jito',
+              signature: outcome.signature,
+              venueStatus: 'filled',
+              status: 'pending_confirmation',
+              slippageBps,
+              submittedAt
+            });
+            liveResult = {
+              status: 'submitted',
+              state: 'pending_confirmation',
+              signalId: payload.signalId,
+              tokenMint: payload.tokenMint,
+              size: submissionSize,
+              signature: outcome.signature
+            };
+          } else {
+            await terminateCanonicalExecution(
+              canonicalExecution,
+              `Jupiter+Jito rejected the request: ${outcome.reason}`,
+              'cancelled'
+            );
+            liveTradeId = await persistTrade({
+              signalId: payload.signalId,
+              sourceTradeId: payload.sourceTradeId,
+              copyExecutionId: canonicalExecution?.id,
+              tokenMint: payload.tokenMint,
+              size: submissionSize,
+              chain,
+              executionMode: 'live',
+              direction,
+              executor: 'jupiter-jito',
+              status: 'rejected',
+              errorMessage: outcome.reason,
+              slippageBps,
+              submittedAt
+            });
+            liveResult = { status: 'rejected', reason: outcome.reason };
+          }
+        } else {
         const result = await triggerTrojan({
           signalId: canonicalExecution?.clientOrderId ?? payload.signalId,
           tokenMint: cleanMint,
@@ -1335,7 +1514,7 @@ export async function handleJob(job: { data: unknown }) {
           direction,
           sellProportionBps: direction === 'sell' ? sellProportionBps ?? 10_000 : undefined,
           maximumTokenAmountBaseUnits,
-          slippageBps: 1500
+          slippageBps
         });
         if (result.status === 'pending_confirmation' || result.status === 'submission_unknown') {
           const signature = result.status === 'pending_confirmation'
@@ -1374,7 +1553,7 @@ export async function handleJob(job: { data: unknown }) {
             venueStatus: result.status,
             status: 'pending_confirmation',
             errorMessage: result.status === 'submission_unknown' ? result.reason : null,
-            slippageBps: 1500,
+            slippageBps,
             submittedAt
           });
           liveResult = {
@@ -1403,7 +1582,7 @@ export async function handleJob(job: { data: unknown }) {
             executor: 'trojan',
             status: 'rejected',
             errorMessage: `Trojan rejected the request with HTTP ${result.httpStatus}`,
-            slippageBps: 1500,
+            slippageBps,
             submittedAt
           });
           liveResult = { status: 'rejected', reason: `Trojan HTTP ${result.httpStatus}` };
@@ -1455,7 +1634,7 @@ export async function handleJob(job: { data: unknown }) {
               tokenAmount,
               status: canonicalFillConfirmed ? 'filled' : 'pending_confirmation',
               venueStatus: canonicalFillConfirmed ? 'confirmed' : 'reconciliation_required',
-              slippageBps: 1500,
+              slippageBps,
               submittedAt,
               confirmedAt: resolution.confirmedAt
             });
@@ -1485,11 +1664,12 @@ export async function handleJob(job: { data: unknown }) {
               executor: 'trojan',
               status: resolution.status === 'rejected' ? 'rejected' : 'failed',
               errorMessage,
-              slippageBps: 1500,
+              slippageBps,
               submittedAt
             });
             liveResult = { status: 'failed', reason: errorMessage };
           }
+        }
         }
       } else if (chain === 'robinhood-chain') {
         const canonicalExecution = canonicalExecutions.live;
@@ -1521,7 +1701,7 @@ export async function handleJob(job: { data: unknown }) {
           direction,
           amountInBaseUnits: canonicalSellBaseUnits,
           proportionBps: direction === 'sell' ? canonicalSellBps ?? 10_000 : undefined,
-          slippageBps: 300
+          slippageBps
         });
         if (result.status === 'filled') {
           const decimals = await getTokenDecimals(payload.tokenMint, 'robinhood-chain');
@@ -1567,7 +1747,7 @@ export async function handleJob(job: { data: unknown }) {
             tokenAmount,
             status: canonicalFillConfirmed ? 'filled' : 'pending_confirmation',
             venueStatus: canonicalFillConfirmed ? 'confirmed' : 'reconciliation_required',
-            slippageBps: 300,
+            slippageBps,
             submittedAt,
             confirmedAt: new Date()
           });
@@ -1609,7 +1789,7 @@ export async function handleJob(job: { data: unknown }) {
             signature: result.transactionHash,
             venueStatus: result.stage,
             status: 'pending_confirmation',
-            slippageBps: 300,
+            slippageBps,
             submittedAt
           });
           liveResult = {
@@ -1647,7 +1827,7 @@ export async function handleJob(job: { data: unknown }) {
             signature: 'transactionHash' in result ? result.transactionHash ?? null : null,
             status: result.status,
             errorMessage: result.reason,
-            slippageBps: 300,
+            slippageBps,
             submittedAt
           });
           liveResult = { status: result.status, reason: result.reason };
@@ -2033,6 +2213,30 @@ export async function main() {
     setTrojanRuntimeUnavailable(reason);
   }
 
+  // Jupiter + Jito (DG-1). Stood up alongside Trojan, not in place of it: the
+  // legacy path retires only once this one is certified (S3-6), and until then
+  // `resolveChainMode` accepts either being ready.
+  //
+  // A configuration error here must not stop the worker — it is caught, recorded
+  // as a readiness reason, and the chain clamps to paper. Throwing would take
+  // down execution for every chain because one chain's optional live path is
+  // misconfigured.
+  try {
+    const created = createJupiterJitoRuntimeFromEnvironment(redisClient);
+    if (created) {
+      console.log(
+        `[trade-executor] Jupiter+Jito ready, signer ${created.signer.publicKey.slice(0, 8)}…`
+      );
+    } else {
+      console.log(
+        `[trade-executor] Jupiter+Jito unavailable: ${getJupiterJitoLiveReadiness().reason}`
+      );
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`[trade-executor] Jupiter+Jito configuration failed: ${reason}`);
+  }
+
   await verifyPolymarketEnvironment().catch(err => {
     console.error(`[trade-executor] Polymarket startup check failed: ${err.message}`);
   });
@@ -2052,6 +2256,64 @@ export async function main() {
       if (trojanRuntime) {
         tasks.push({ chain: 'solana', run: () => runTrojanReconciliation(trojanRuntime) });
       }
+      const jupiterJito = getConfiguredJupiterJitoRuntime();
+      if (jupiterJito) {
+        tasks.push({
+          chain: 'solana',
+          run: async () => {
+            // The block height is what makes an expired-blockhash miss
+            // *provable*. Without it the sweep can only ever time out into
+            // `ambiguous`, so a definitively-dead bundle would sit pending until
+            // its TTL instead of resolving immediately. A failure reading it is
+            // not fatal — the sweep degrades to the timeout path.
+            let blockHeight: number | undefined;
+            try {
+              blockHeight = await getJupiterJitoSigner()?.getBlockHeight();
+            } catch (error) {
+              console.warn(
+                '[trade-executor] block height unavailable for Jito sweep',
+                error instanceof Error ? error.message : error
+              );
+            }
+            const resolutions = await jupiterJito.sweep(blockHeight);
+            if (resolutions.length > 0) {
+              console.log(
+                `[trade-executor] jito sweep resolved ${resolutions.length}: `
+                + resolutions.map((r) => `${r.clientOrderId}=${r.status}`).join(', ')
+              );
+            }
+          }
+        });
+      }
+
+      // Redeem resolved Polymarket positions (S3-18). A resolved market stops
+      // accepting orders, so a winning position cannot be sold — redemption is
+      // the only exit, and without this the position stays open in the ledger
+      // forever with its collateral stranded.
+      //
+      // Gated on the live client existing: redemption is a real on-chain claim,
+      // so there is nothing to do in paper mode. `runChainReconciliations` maps
+      // positionally rather than keying by chain, so a second 'polygon' task
+      // sits alongside the venue sweep without either being dropped.
+      const polymarketClient = getPolymarketClientIfReady();
+      if (polymarketClient && getPolymarketLiveReadiness().ready) {
+        tasks.push({
+          chain: 'polygon',
+          run: async () => {
+            const sweep = await runPolymarketRedemptionSweep({
+              client: polymarketClient as unknown as PolymarketRedemptionClient,
+              log: (message) => console.log(message)
+            });
+            if (sweep.redeemed > 0 || sweep.failed > 0) {
+              console.log(
+                `[trade-executor] polymarket redemption: scanned ${sweep.scanned}, `
+                + `redeemed ${sweep.redeemed}, failed ${sweep.failed}, skipped ${sweep.skipped}`
+              );
+            }
+          }
+        });
+      }
+
       await runChainReconciliations(tasks);
 
       // The per-venue sweeps above are the fast path and run first. This is the
