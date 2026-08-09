@@ -243,6 +243,18 @@ export function setPolymarketClientForTesting(client: PolymarketSecureClient | n
   secureClobClient = client;
 }
 
+/**
+ * The authenticated client, or null when Polymarket is not configured.
+ *
+ * Nullable counterpart to `requireSecureClobClient`, for callers that must
+ * degrade rather than fail — the redemption sweep runs on a timer and an absent
+ * client is the normal paper-mode posture, not an error worth throwing on every
+ * tick.
+ */
+export function getPolymarketClientIfReady(): PolymarketSecureClient | null {
+  return secureClobClient;
+}
+
 export async function initializePolymarketClient(
   env: NodeJS.ProcessEnv = process.env,
   clientFactory: PolymarketClientFactory = createSecureClient,

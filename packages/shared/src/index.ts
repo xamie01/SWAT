@@ -11,3 +11,8 @@ export * from './starter-pack.js';
 export * from './ingestion-health.js';
 export * from './execution.js';
 export * from './copy-trade-lifecycle.js';
+export * from './tiers.js';
+export * from './jito.js';
+export * from './jupiter-swap.js';
+export * from './polymarket-clob-auth.js';
+export * from './slippage.js';
