@@ -2,7 +2,14 @@
 
 Convert the single-operator SWAT pipeline into a SaaS platform: signup/login, EVM+Solana wallet connection, per-user tracked wallets & token backfill, per-user signal feeds, platform-managed trading wallets with risk-proportional autonomous execution, tiered subscriptions (Stripe + USDC), and Ultra-tier dynamic chain tracking (Chainlist / DeFi Llama / CoinGecko).
 
-**Decisions locked in:** platform-managed custodial trading wallets · email/password auth + wallet linking (SIWE/SIWS) · Stripe AND USDC billing · full vision planned now, built in 6 phases.
+> **CORRECTED 2026-08-09** by `docs/adr/0003-delegated-execution-authority.md`.
+> "Platform-managed custodial trading wallets" below is **no longer the direction.**
+> WAKE does not hold, wrap, or decrypt user root keys; users grant scoped, revocable,
+> expiring authority over wallets they keep. §"Key management" and the `packages/custody`
+> section are superseded — see the ADR, and `AUDIT-FIX-CHECKLIST.md` §2 for the four
+> corrections that already override this document.
+
+**Decisions locked in:** ~~platform-managed custodial trading wallets~~ **scoped delegated authority per chain (ADR-0003)** · email/password auth + wallet linking (SIWE/SIWS) · Stripe AND USDC billing · full vision planned now, built in 6 phases.
 
 **Current state (verified):** zero users/tenancy anywhere — one shared `API_KEY` (browser-exposed via `NEXT_PUBLIC_API_KEY`), one global `wallets` table, one `EVM_PRIVATE_KEY` + Trojan wallet for all execution, global `config` singletons, fake hardcoded login in `apps/web/app/page.tsx`, chains hard-coded as a 3-value union in ~15 places.
 
@@ -51,7 +58,7 @@ Convert the single-operator SWAT pipeline into a SaaS platform: signup/login, EV
 
 ### Executor fan-out
 - signal-engine, on a trade-eligible signal, publishes once; a new **fan-out step** (in trade-executor) enumerates eligible users: subscribed to the signal's cluster ∩ auto_execute on ∩ chain enabled ∩ tier allows ∩ balance ≥ min. One BullMQ job per (signal, user) on `swat-trades`, idempotent via UNIQUE(signal_id, user_id).
-- Extend `trades` and `copy_executions` with `user_id` FK (nullable = legacy operator trades; `target_account` already exists in 028 and maps to user id). Per-user circuit breaker keys (`swat:cb:<user>:<chain>`), per-user daily exposure caps, per-user paper bankroll.
+- Extend `trades` and `copy_executions` with `user_id` FK (nullable = legacy operator trades). **Correction (ADR-0001, 2026-08-04):** an earlier version of this line claimed `target_account` "already exists in 028 and maps to user id". It does not — `target_account` holds a **chain-prefixed wallet address** (`apps/trade-executor/src/index.ts:904`), so the `(source_trade_id, target_account, execution_mode)` uniqueness is keyed on a wallet, not a tenant. Reusing it as the tenancy key would collide every paper-mode user on a chain onto one key and fork a user's history on custodial key rotation. `user_id` is the tenancy key; `target_account` stays the settlement address. See `docs/adr/0001-tenancy-key.md`. Per-user circuit breaker keys (`swat:cb:<user>:<chain>`), per-user daily exposure caps, per-user paper bankroll.
 - Solana live execution moves from the Trojan webhook to direct Jupiter swap (quote client already exists in `jupiter.ts`; add swap-transaction build + sign with the user's custodial key), submitted as **Jito bundles** with a tip instruction for front-running/MEV protection — never public RPC broadcast. Full executor spec in `BUILDER-GUIDE.md` Stage 3 (DG-1 resolved). Polygon/Polymarket per-user = derive CLOB L2 creds from each user's EVM key. Robinhood Chain reuses `robinhood.ts` with per-user signer.
 - Global `chain_certifications` + `LIVE_ENABLED_CHAINS` gates still apply platform-wide on top of user settings.
 

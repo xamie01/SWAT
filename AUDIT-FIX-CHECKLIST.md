@@ -1,733 +1,655 @@
-# Unified Audit Remediation & Goal Delivery Checklist
+# SWAT Build Checklist — Current State → Multi-Tenant SaaS
 
-Sources:
+**The execution tracker.** Every task needed to take this codebase from where it is today to the destination in `docs/plans/saas-conversion-plan.md`, in the stage order set by `docs/plans/BUILDER-GUIDE.md`.
 
-- `AUDIT-REPORT.md`, dated 2026-07-15, defined defects and unsafe behavior. **Deleted from the repo in commit `9726756` (2026-07-30).** Recover from git history if an audit ID's original wording is needed: `git show 9726756^:AUDIT-REPORT.md`.
-- `gaol.md`, dated 2026-07-16, defined the required end state. **Deleted in the same commit.** Recover with `git show 9726756^:gaol.md`. `docs/plans/BUILDER-GUIDE.md` is now the authoritative statement of the destination.
-
-This file is the single execution tracker. Audit IDs are retained for traceability; `G*` items are goal deliverables. Check an item only after implementation, focused tests, and inspection of the resulting data or external state. A live-chain certification item also requires recorded evidence under `docs/certification/`.
-
-## Status Legend
-
-- `[]` **COMPLETE** - implementation, focused tests, and repository evidence are present.
-- `[ ] ... **PARTIAL**` - a usable implementation exists, but one or more stated behaviors or tests are missing.
-- `[ ] ... **NOT BUILT**` - no substantive implementation for the stated deliverable was found.
-- `[ ] ... **EXTERNAL EVIDENCE**` - code may be ready, but production credentials, measured canaries, operator review, or certification evidence is still required.
-
-## Verified State and Recommended Plan - 2026-07-30
-
-This section re-verified the repository against `docs/plans/BUILDER-GUIDE.md` and supersedes the 2026-07-27 ledger where they disagree. It exists to answer one question: **what to do next, in what order.** Audit IDs are preserved so work still checks off against the phases below.
-
-### Corrections to earlier claims
-
-Facts re-checked in the working tree on 2026-07-30. Each of these was asserted differently above:
-
-| Earlier claim | Verified reality |
+| Doc | Role |
 |---|---|
-| "`pnpm test` passes / prior gates recorded" | **`pnpm typecheck`, `pnpm test`, and `pnpm build` all failed from a clean checkout.** `packages/shared/tsconfig.tsbuildinfo` was committed while `dist/` is gitignored, so `tsc` read a stale incremental cache, emitted nothing, and exited 0; every consumer then failed to resolve `@swat/shared`. `turbo.json` also declared `test`/`typecheck` as `dependsOn: ["^test"]`/`["^typecheck"]` rather than `^build`. **Fixed 2026-07-30**: buildinfo untracked, `*.tsbuildinfo` ignored, `^build` added. Now green from a clean tree — typecheck 13/13, **439 tests across 13/13 packages**, build 11/11. |
-| CI exists and was reviewed (G7-T3 marked `[x]`) | The workflow exists and is correct, but **had never completed a run.** Every push failed at the Typecheck step with `Cannot find module '@swat/shared'`; the Test, build, and Integration steps never executed. G7-T3 cannot be considered evidenced until one GitHub-hosted run goes green. |
-| "`.env` currently allowlists `robinhood-chain` prematurely" (G2-R13, DoD item 7) | **Stale — already resolved.** `.env:128` is `LIVE_ENABLED_CHAINS=` (empty). No chain is allowlisted. Both items' remaining work is the certification document and canary, not an env removal. |
-| G5-R3 breaker "complete" | Implemented and durable, but keyed **`breaker:${chain}`** only (`packages/db/src/circuit-breaker.ts:33`). This satisfies the audit item and **violates Builder Guide Standing Rule 2**, which requires `(account, chain)`. See task B1. |
-| Generated artifacts "remain in the dirty worktree" | Worse than dirty — **they are committed.** `apps/discovery/dist/` (4 files) plus `.turbo/cache/*` and `apps/*/.turbo/turbo-build.log` are tracked in git, so `.gitignore` does not affect them. Requires `git rm --cached`. |
+| `docs/plans/BUILDER-GUIDE.md` | **Why this order.** Stage definitions, standing rules, decision gates. Wins on any sequencing conflict. |
+| **`AUDIT-FIX-CHECKLIST.md`** (this) | **What to build, in order.** Numbered tasks, files, done-when. Check items off here. |
+| `docs/plans/saas-conversion-plan.md` | SaaS design detail — schemas, routes, packages. See §2 for four corrections that override it. |
+| `docs/plans/production-decisions.md` | D1–D18 infrastructure/security decisions. |
+| `docs/plans/audit-history.md` | Archived evidence log for every audit ID (`F-CORE7`, `G5-R3`, …). Read-only. |
 
-### Rule that governs every task below
+Audit IDs are kept inline for traceability. `S<n>-<k>` is this document's own task numbering.
 
-Builder Guide Standing Rule 2: **all execution and risk code must take an `account` parameter.** Today the only value is `'operator'`. The schema already supports it — migration `028` defines `target_account` with `UNIQUE (source_trade_id, target_account, execution_mode)` and `UNIQUE (chain, target_account, client_order_id)`.
+## Status legend
 
-Write single-account code now and it must be rewritten later, plus a migration against live money. Batches are ordered so nothing is built on something a later batch re-keys.
+- `[x]` — implemented, focused tests pass, evidence in the repo.
+- `[ ]` — not started or partial; the **Done when** line is the acceptance test.
+- `[!]` — **blocker or correction.** Do these before the stage they sit in.
+- `(ext)` — needs credentials, funded wallets, a canary, or a human reviewer. Cannot be closed by code.
 
-### Batch progress
+---
 
-| Batch | Tasks | Blocks | Status |
+## 1. Verified baseline — updated 2026-08-05
+
+Measurements from an actual run, not claims carried forward.
+
+| Gate | Result |
+|---|---|
+| `pnpm db:migrate` | **46/46** apply (highest file `046_polymarket_redemptions.sql`) |
+| `pnpm check:secrets` | ✅ 226 files, 1 grandfathered (`NEXT_PUBLIC_API_KEY`, tracked by S6-3) |
+| `pnpm typecheck` | ✅ all packages + `typecheck:tools` |
+| `pnpm test` | ✅ **774 passed** across 11 packages |
+| `pnpm build` | ✅ 11/11 |
+| `pnpm test:integration` | ✅ **50/50 across 8 files** |
+
+**Engine is complete and green.** Audit batches A–F all landed: build fix, CI, artifact cleanup, account-keyed circuit breaker, DB-resolved risk policy, stop-loss enforcement, reconciliation coordinator, copy-eligibility policy, read/write pool split, BRIN index, `pg_stat_statements`, chaos fixtures, per-chain pipeline fixtures, and the four Polymarket partials. Ingestion, scoring, clustering, signal detection, alerting, and paper execution work end to end on all three chains.
+
+**Stage 0 blockers cleared; Stages 1 and 2 complete; Stage 3 codeable half in progress** (2026-08-05). Identity, sessions, SIWE/SIWS wallet linking, tiers/roles, the `forUser()` tenancy layer, the audit log, per-user subscriptions with transactional quotas, admin-gated global routes, and two mutation-tested isolation/safety suites are all in place. Stage 3 has the Jito bundle client, Jupiter swap build, CLOB V2 auth, and the Jupiter+Jito runtime — see §6.0.
+
+**Still absent (Stages 4–7):** `user_trading_wallets`, `user_balances`, `user_execution_settings`, `subscriptions`, `payments`, `chains`; no `packages/custody`; no `user_id` on `trades`/`copy_executions` yet; no Stripe or wagmi dependency; the frontend is unrebuilt (`/workspace` still unauthenticated, `NEXT_PUBLIC_API_KEY` still shipped — both S6).
+
+**The groundwork that keeps Stage 4 cheap:** Standing Rule 2 is honoured across the risk surface. `account: string` is threaded through `resolveRiskPolicy`, `circuit-breaker` (`breaker:${account}:${chain}`), `stop-loss`, and `copy-eligibility`. Every caller passes the literal `'operator'`, so per-user risk is *mostly* a value-substitution exercise rather than a signature rewrite.
+
+**Three exceptions, verified in source 2026-08-07 — do not assume the substitution is uniform:**
+- **`runStopLossSweep` needs a signature change, not a substituted value.** It resolves **one** account before the loop (`apps/scorer/src/stop-loss.ts:85`) and then claims every position under it. With `signal_stop_losses` keyed `PRIMARY KEY (account, signal_id)` (`034_stop_loss_triggers.sql:18`), under fan-out the **first user to breach claims the signal and every other holder is never sold** — the position stays open past its stop. The account must become per-position, sequenced *after* migration `050`.
+- **`RECONCILIATION_ACCOUNT` must stay `'operator'`.** It is an escalation label, not a tenancy key — the C1 code carries a comment saying exactly that, because `copy_executions.target_account` holds a wallet address and filtering it by an account value claims zero rows. Mechanically substituting a user id here fragments one alert stream into N while scoping nothing. `S4-P2` therefore introduced a **separate** `RISK_POLICY_ACCOUNT` constant in the executor: that one *does* become the user id, and keeping the two literals apart is what stops a later find-and-replace from breaking reconciliation.
+- **The risk policy was not reaching live sizing at all** — see `S4-P2`. Substituting a user id into `resolveRiskPolicy` would have had no effect on a live trade before that fix, because the call sat inside a paper-only branch.
+
+---
+
+## 2. Blockers and corrections — do these first
+
+Four of these are defects **in the planning documents**, found by reading them against the code. Building on them as written would put a wrong tenancy key into a table that later holds real money.
+
+- [x] **S0-B1 — `LIVE_ENABLED_CHAINS` is not empty.** *(Closed 2026-08-04.)* `.env:66` read `LIVE_ENABLED_CHAINS=solana,robinhood-chain`, contradicting both `audit-history.md` and `G2-R13`. Nothing was live — `TRADING_MODE=paper`, `AUTO_EXECUTE=false`, and `chain_certifications` had **0 rows** (verified) — but one of two independent controls was off, and `G2-R13` forbids `robinhood-chain` appearing here before its certification doc is reviewed.
+  **Fixed:** set to empty with a comment stating both gates required to re-add a chain.
+
+- [x] **S0-B2 — build artifacts tracked again.** *(Closed 2026-08-04.)* 30 `.turbo/cache/*` files, reintroduced by commit `71624e1` after task A3 removed them.
+  **Fixed:** `git rm -r --cached .turbo/cache`. `git ls-files | grep -E '(^|/)(dist/|\.turbo/)'` is now empty; `.gitignore:5-6` already covered both.
+
+- [x] **S0-B3 — `bullmq` / `ioredis` declared but not installed.** *(Closed 2026-08-04.)* Root `devDependencies` listed both; neither was in `node_modules`, so `chaos.integration.test.ts` failed to load.
+  **Verified:** the lockfile carries both; `pnpm install --frozen-lockfile` is clean and the suite loads. The working tree had simply never been re-installed after they were added.
+
+- [x] **S0-B4 — stale integration schema produced a misleading failure cascade.** *(Closed 2026-08-04. Root cause differs from the original diagnosis — recorded because the wrong one is easy to re-reach.)*
+  **What was seen:** `pnpm test:integration` failed 20/20, loudest error a *cleanup* failure, and an orphaned `trades` row (`copy_execution_id` set, `signal_id`/`source_trade_id` NULL) was blocking migration `030`.
+  **What it looked like:** a third instance of the E2 fixture-teardown selector gap.
+  **What it actually was:** `swat_integration` was stranded at migration `029`. On a migrated database that orphan shape **cannot exist** — `030` adds both `chk_trades_copy_execution_identity_complete` (rejects the shape on insert) and `fk_trades_copy_execution_identity ... ON DELETE RESTRICT` (a `copy_executions` delete fails loudly rather than orphaning). The teardown logic was never at fault; an extra delete statement for that shape would have been unreachable dead code.
+  **Fixed:** `tests/integration/helpers/schema-guard.ts` + `tests/integration/global-setup.ts` assert the schema is current **once, before any test file**, failing with a single actionable message naming the missing objects, the newest migration on disk, and the command to run. It checks for late-migration tables/columns rather than counting applied files, because `migrate.ts` deliberately keeps no applied-migrations table (D16) — the schema is the only record. `trades` was also added to the teardown's leftover-verification count, so a stray trade can never again let cleanup report success.
+  **Verified:** suite green 28/28 against a current schema; a deliberately stale scratch database produces exactly one error naming `signal_stop_losses`, `copy_eligibility_rejections`, and `trades.venue_settlement_status`.
+
+- [x] **S1-B5 — `target_account` does not hold a user id.** *(Resolved 2026-08-04 — `docs/adr/0001-tenancy-key.md`.)* `saas-conversion-plan.md` §Phase 3 claimed "`target_account` already exists in 028 and maps to user id." It does not: `apps/trade-executor/src/index.ts:904` fills it from `resolveLiveCopyTargetAccount(chain)` / `resolvePaperCopyTargetAccount(chain)` — a **chain-prefixed wallet address**. Both fan-out uniqueness constraints were therefore keyed on a wallet, not a tenant.
+  **Decided:** explicit `user_id UUID` FK is the tenancy key; `target_account` keeps its real meaning (settlement wallet). Reusing the address was rejected for two reasons found while writing the ADR: paper mode has a synthetic per-chain address, so **every paper user on a chain would collide onto one key** and the unique constraint would admit exactly one user's paper execution per source trade — breaking the default path for every free-tier user; and a custodial key rotation (`user_trading_wallets.key_version` exists precisely because rotation is expected) would fork a user's execution history, silently resetting their P&L, exposure cap, and breaker.
+  **Consequence:** no signature changes needed — the `account: string` parameter already threaded through the risk surface (Standing Rule 2) becomes the user id at Stage 4. `saas-conversion-plan.md` corrected.
+
+- [x] **S1-B6 — migration numbering in the SaaS plan was stale.** *(Closed 2026-08-05.)* The plan said "new migrations `029+`"; `029`–`038` were already consumed by audit work. Stage 1 took **`039`–`043`**, and §11 now reserves a range per stage so the next collision cannot happen silently.
+
+- [!] **S6-B7 — `/workspace` is completely unauthenticated.** The plan describes "fake hardcoded login in `apps/web/app/page.tsx`". That file is now a 509-line marketing landing page whose `enterWorkspace()` is a bare `router.push('/workspace')` — there is no login at all, fake or otherwise, and no route protection. Anyone who can reach the web tier gets the full operator dashboard.
+  **Do:** treat as live exposure wherever the web tier is network-reachable. Gate at the proxy now; `middleware.ts` (S6-2) is the real fix.
+  **Done when:** unauthenticated `GET /workspace` does not return the dashboard.
+
+- [!] **S7-B8 — chain-literal blast radius is larger than scoped.** The plan and BUILDER-GUIDE §Stage 7 both estimate "~15 places". Actual count is **20 files** across `packages/shared`, `packages/db`, and `apps/api` — before counting SQL `CHECK` constraints. Re-scope Stage 7 accordingly.
+
+---
+
+## 3. Stage 0 — Close out the engine
+
+*Everything else stands on this. Most of it is done; what remains is listed in full.*
+
+### 3.1 Corrections
+- [x] **S0-1** Blockers **S0-B1 … S0-B4** cleared 2026-08-04. Full gate re-verified after: typecheck 13/13, test 13/13, build 11/11, integration 28/28.
+
+### 3.2 Remaining audit items (BUILDER-GUIDE §6 disposition: Stage 0)
+- [ ] **S0-2** `G5-R7` — multi-process risk acceptance. Cap boundaries, breaker transitions, restart persistence, chain isolation, kill-switch latency, and gas-floor behaviour exist as unit tests; what is missing is a **process-level** run proving isolation and restart across separate workers.
+  **Done when:** two executor processes against one database demonstrate breaker isolation per `(account, chain)` and kill-switch effect within one cache TTL.
+- [ ] **S0-3** `G7-A4` — strictness gate. Explicit `any` remains in source and tests.
+  **Done when:** `any` is eliminated or individually justified with a comment, and `pnpm typecheck` passes under the stricter setting.
+- [ ] **S0-4** `G7-T1` — regression tests for audit/goal data contracts not yet covered by a focused suite.
+- [ ] **S0-5** `G7-A1` — numeric golden vectors for every expectancy formula, **including ROI** (currently SQL shape and persistence are tested, the arithmetic is not).
+- [ ] **S0-6** Product decision, then implementation: Polymarket `/trades` defaults `takerOnly=true`, so **maker-side fills are invisible to ingestion**. For copy-trading a liquidity-providing wallet this is a real coverage gap, but flipping it changes what the pipeline counts as a source trade.
+  **Done when:** the call is recorded in `docs/adr/` and, if flipped, source-trade classification tests cover maker fills.
+
+### 3.3 Infrastructure baseline (D1, D2, D3, D7, D10, D15 — operational track, parallel to code)
+- [ ] **S0-7** `D1` — provision the dedicated box (8–16 vCPU / 32–64 GB), Docker Compose deploy.
+- [ ] **S0-8** `D2` — staging environment, permanently paper-clamped by three independent locks: empty `LIVE_ENABLED_CHAINS`, zero `chain_certifications` rows, no custody master key present.
+- [ ] **S0-9** `D3` — GitHub Actions → SHA-tagged images → auto-deploy staging → **manual** prod promotion. The manual gate is deliberate: services that sign with user keys must not self-deploy on merge.
+- [ ] **S0-10** `D7` + `D10` — Caddy (TLS, `api.`/`app.`/`webhook.` routing, size limits, **SSE: proxy buffering off, idle timeout > heartbeat**) behind Cloudflare (WAF, edge rate limits); Postgres/Redis bound to the Docker network only; SSH key-only + fail2ban; SOPS-encrypted env files; trade-executor accepts **no inbound connections**.
+- [ ] **S0-11** `D15` — nightly `pg_dump` to encrypted offsite storage, 30-day retention, staging restoring from it nightly so the backup is continuously tested. Honest RPO: 24h.
+- [ ] **S0-12** `D16` — migrations as a dedicated deploy step (not service startup); CI replays the full set twice on scratch Postgres **and** once against a staging-data copy.
+- [x] **S0-13** `D17`-now — `pg_stat_statements`, BRIN on transaction timestamps, `readPool`/`writePool` split. *(Batch D, 2026-08-02.)*
+
+**Stage 0 exit gate:** blockers cleared; CI green on every merge; staging auto-deploying; backups restoring nightly; risk policy DB-resolved and enforced pre-claim; one coordinator reconciling all ambiguous executions; no artifacts tracked.
+
+---
+
+## 4. Stage 1 — Auth & tenancy *(SaaS Phase 1)*
+
+*May start in parallel with Stage 0 infra once CI is green — it touches no execution code.*
+
+### 4.1 Decide first
+- [x] **S1-1** `DG-5` resolved (`docs/adr/0001-tenancy-key.md`) and `DG-6` numbering corrected. Construction spec written: **`docs/plans/stage-1-design.md`** — DDL, session/credential parameters, SIWE/SIWS flow, route contracts, `forUser()` layer, test plan.
+
+### 4.2 Schema — migrations `039`–`043` *(applied 2026-08-04; replayed twice clean on both databases; 43/43)*
+- [x] **S1-2** `039_users.sql` — `CITEXT` email (case-insensitive uniqueness is a column property, so no call site can bypass it), argon2id `password_hash` as `TEXT` (encoded hashes change length when parameters are tuned), CHECKs on role/tier/status, partial index on `tier_expires_at`. `tier_expires_at IS NULL` means **lifetime**, not expired.
+- [x] **S1-3** `040_user_sessions.sql` — SHA-256 `token_hash` only, never the raw token, so a database dump cannot be replayed as a login. Fast hash is correct here (256-bit CSPRNG token has no low-entropy secret to protect); argon2 is for passwords. `revoked_at` set rather than row deleted, so logout-everywhere leaves a trail.
+- [x] **S1-4** `041_user_auth_wallets.sql` — `UNIQUE (chain_kind, address)` **globally, not per user**: one wallet proves one identity, otherwise Stage 4's withdraw-to-linked-wallet-only control has no single answer to whose address it is. `chain_kind` not `chain`, because an EVM signature proves control on every EVM chain at once.
+- [x] **S1-5** `042_user_api_keys.sql` — indexed `UNIQUE key_prefix` so verification is one indexed equality plus one constant-time compare; the scan-all-and-compare alternative degrades linearly and is a timing oracle.
+- [x] **S1-6** `043_audit_log.sql` — **no FK on `actor_id`, deliberately**: the log must outlive the user it describes, and a failed login for a nonexistent email has no user to reference — precisely the row worth keeping during credential stuffing. `actor_type = 'anonymous'` covers pre-auth events.
+
+  **Verified by direct SQL probe, not assumed** — each design claim exercised in a rolled-back transaction: `Alice@Example.com` then `alice@example.com` rejected by `users_email_key`; `tier='platinum'` and `role='superuser'` rejected; a second user claiming a linked address rejected by `uq_auth_wallet` while the same address under a different `chain_kind` is allowed; `chain_kind='bitcoin'` rejected; deleting a user cascades its sessions to zero; `audit_log` accepts both an anonymous actor and an `actor_id` for a nonexistent user, and rejects `actor_type='robot'`.
+- [x] **S1-7** Admin seed. **Split from `039` deliberately:** a migration that seeds a credential would put a password hash in a file that replays on every deploy (D16), and would make the schema undeployable without also choosing an admin password. `packages/db/src/seed-admin.ts` + `pnpm seed:admin` instead. **Never rewrites an existing admin's password**, so re-running after the operator rotates it cannot restore the bootstrap value; refuses a password under 12 chars (the one account that reaches every admin route is the worst place for an exception); tolerates losing a race with a concurrent seed. Existing operator `trades`/`copy_executions` keep `user_id NULL` per ADR-0001 and are never backfilled — attributing historical single-operator activity to an account would corrupt its P&L, expectancy, and exposure caps with trades it never made.
+  **Verified:** no-env → no-action · weak password → refused · proper → created · re-run with a *different* password → no-action.
+
+- [x] **S1-16** Cross-tenant CI suite + browser-secret lint. *(Both land before Stage 2's `/v1/me/*` routes exist, not after — that ordering is the point.)*
+  `tests/integration/cross-tenant.integration.test.ts` — 8 cases against the **real** auth plugin and routes, mounted on a minimal Fastify app rather than importing `apps/api/src/index.ts` (which opens Redis and BullMQ at module scope; importing it would start a second API against the test database — the same constraint the pipeline suite documents for `signal-engine`). It includes a stand-in `/v1/me/wallets` route so the scoping path is exercised now and inherited by real routes later. Covers: wallet isolation between tenants, no-credential 401, **tenant-less legacy service key refused on a per-user route**, normal user → admin route 403, one tenant's CSRF token paired with another's session 403, logout revoking only the logging-out tenant, cross-tenant wallet link 409, and own-wallet re-link idempotent.
+  **Mutation-tested, so the suite is known to have teeth:** deleting the `WHERE user_id = $1` filter from `listAuthWallets` — the classic tenancy bug — turned it red immediately (2 failures). A green isolation suite that cannot fail is worse than none, because it licenses the assumption it never checked.
+  `scripts/check-public-secrets.mjs` + `pnpm check:secrets`, wired into CI **before** typecheck so it fails fast. `NEXT_PUBLIC_*` is inlined into the client bundle and shipped to every visitor, so a secret there is *published*, not configured. The existing `NEXT_PUBLIC_API_KEY` is grandfathered with a pointer to S6-3; the script's job is that no **new** one can appear while that work is pending. **Verified both directions:** passes on the tree as-is (197 files, 1 grandfathered), and rejects a planted `NEXT_PUBLIC_STRIPE_SECRET_KEY` with exit 1.
+
+**Exit gate:** ✅ **met 2026-08-05.** signup → login → wallet-link → `/v1/auth/me` end to end; cross-tenant suite green in CI; browser holds no *new* shared secret (the pre-existing one is tracked by S6-3 and blocked from growing).
+Full gate: typecheck 13/13 · test 13/13 · build 11/11 · **integration 36/36 across 6 files** · migrations 43/43.
+
+### 4.3 API — `apps/api/src/auth/` *(built 2026-08-05)*
+- [x] **S1-8** `POST /v1/auth/signup`, `/login`, `/logout`; `GET /v1/auth/me`. Login returns a byte-identical 401 for unknown-email and wrong-password, backed by the matching argon2 burn in `authenticateUser` so timing agrees with the body.
+- [x] **S1-9** `POST /v1/auth/wallet/nonce` and `/verify` — SIWE (EIP-4361 via `viem`) and SIWS (ed25519 via `tweetnacl`/`bs58`). Serves both linking (session present) and wallet-only login (no session). A proven signature for an *unlinked* wallet is **not** an account — creating one there would let anyone with a keypair mint accounts without an email.
+  Nonces are consumed with Redis **`GETDEL`**: a `GET`-then-`DEL` pair lets two concurrent requests both observe the same nonce, which is precisely the replay the nonce exists to stop. The nonce is also bound to the address it was issued for, so one minted for wallet A cannot be spent proving control of wallet B.
+- [x] **S1-10** Layered auth plugin replacing the global `onRequest` key hook: session cookie → per-user API key (reserved) → legacy `X-Api-Key` as a **tenant-less service principal**. `requireUser` rejects the service principal outright rather than trusting each route to remember.
+- [x] **S1-11** `requireTier` / `requireRole`. An expired paid tier degrades to `free`; `tier_expires_at IS NULL` means lifetime and is never read as expired.
+- [x] **S1-12** `@fastify/rate-limit` — 300/min globally, plus a scoped 10/15-min bucket on credential routes keyed on **IP + email**, so one attacker cannot lock out a whole NAT and one account cannot be sprayed from a single address. Double-submit CSRF on every state-changing cookie request; `SameSite=Lax` is deliberate (see design doc) and CSRF covers what it does not.
+- [x] **S1-13** SSE tickets preserved and hardened — see the regression below.
+- [x] **S1-14** Legacy `API_KEY` is now service/admin-only and carries no tenant.
+
+  **Verified against a live server, not just types.** Three defects surfaced that unit tests would not have caught:
+  1. **SSE was briefly left unauthenticated.** Moving the hook dropped the ticket check, and `GET /v1/logs/stream` performs *no validation of its own* — the old hook was the only gate. Ticket consumption is now injected into the plugin (`consumeSseTicket`) with a comment recording that the route cannot be trusted to check.
+  2. **Auth routes were registered before the hook.** Fastify applies a parent's hooks only to children registered *after* `addHook`, so `request.principal` was never populated for them — an authenticated wallet-link request was silently treated as an anonymous wallet-only login and returned 401. Registration order is now explicit and commented.
+  3. **Public paths returned before resolving the session.** `POST /v1/auth/wallet/verify` is public (wallet-only login needs it) but must still see a session when one exists, or linking can never work. The hook now resolves opportunistically on public paths, still enforces CSRF when a session is present, and lets a *stale* cookie through so an expired user can log in again without manually clearing cookies.
+
+  **Live probe results:** health 200 · no-creds 401 · wrong-key 401 · legacy-key 200 · bearer 401 · SSE-no-ticket 401 · signup 201 · me-with-session 200 · me-without 401 · duplicate-signup 409 · wrong-password and unknown-email both `401 {"error":"Invalid credentials"}` · short-password 400 · POST-without-CSRF 403 · POST-with-CSRF 200 · forged-CSRF rejected · logout revokes session · wallet link 200 · **nonce replay 410** · wallet-only login 200 · unlinked-wallet login 401.
+- [x] **S1-20** `packages/db/src/auth-wallets.ts` — re-linking a wallet the same user already owns is an idempotent success; claiming one owned by **another** user is a 409, never a silent re-link, because quietly moving a verified wallet between accounts would hand over its role as a Stage 4 withdrawal destination.
+- [x] **S1-21** `packages/db/src/audit-log.ts` — `recordAuditEvent` is best-effort and never throws (an audit failure must not turn a successful login into a 500); `recordAuditEventStrict` throws, for custody/withdrawal/tier events where an unlogged action is worse than a failed one.
+- [x] **S1-22** `apps/api/src/auth/wallet-signature.test.ts` — 12 cases with real keypairs, including the **cross-domain replay**: a signature harvested by `evil.test` is rejected here even though it is cryptographically valid. Domain/URI binding is the check most often omitted, and signature validity alone never proves the signer meant to authenticate *here*.
+
+### 4.4 Tenancy discipline (D12) — establish before any per-user route exists
+- [x] **S1-15** `packages/db/src/tenancy.ts` — `forUser(userId)` is the only constructor for a `UserScope`. Made a **branded nominal type**, not `{userId: string}`: a signature of `(userId: string, …)` accepts `request.body.userId` exactly as happily as the session's id and the mistake is invisible in review, whereas `(scope: UserScope, …)` will not compile against a raw string. The type is the control, not the convention. `crossTenantScope(reason)` is the deliberately verbose, greppable escape hatch for admin and background-job paths.
+
+### 4.5 Credential layer *(built 2026-08-05)*
+- [x] **S1-17** `packages/db/src/credentials.ts` — argon2id for passwords, SHA-256 + `timingSafeEqual` for session tokens and API keys. **Two strategies on purpose:** passwords are low-entropy so they need a slow memory-hard hash; tokens are 256-bit CSPRNG output where a slow hash buys nothing and would put ~110 ms on *every authenticated request*.
+  **Parameters measured, not assumed:** the first draft specified m=65536/t=3, which costs **450 ms** on this 2-core box. Every login *and every failed login* pays that, making it a self-inflicted DoS lever under exactly the credential stuffing the rate limit exists to blunt. Switched to **m=47104/t=1/p=1 (110 ms)** — a configuration OWASP treats as equivalent in strength. Raising parallelism was not an option: 2 cores.
+- [x] **S1-18** `packages/db/src/users.ts` — user and session queries. `authenticateUser` burns an equivalent argon2 verify against a module-scoped dummy hash when the email is unknown, so response *timing* cannot enumerate users; the identical 401 body is otherwise cosmetic. `changePassword` revokes all sessions **in the same transaction** — separable, it fails to evict whoever the user is changing the password because of. `resolveSession` applies both expiry rules inside the `UPDATE … RETURNING` CTE so touching and validating are one atomic step; select-then-update would leave a window where a concurrently revoked session still resolves.
+- [x] **S1-19** `packages/db/src/credentials.test.ts` — 14 cases. **Found and fixed a real bug:** `parseApiKeyPrefix` split on `_` and required exactly 3 parts, but the base64url secret alphabet *includes* `_`, so roughly half of all generated keys were rejected as malformed. Now parsed by position with a hex prefix that cannot contain the delimiter; the regression is pinned by a 40-iteration round-trip test.
+
+---
+
+## 5. Stage 2 — Per-user tracking, backfill, feeds *(SaaS Phase 2)*
+
+**Model:** global dedup, per-user subscription. `wallets`, `transactions`, clusters, and scoring stay **global** — one wallet indexed once serves every subscriber (D9).
+
+### 5.1 Schema — migrations `044`–`045` *(applied 2026-08-05; replayed twice clean on both databases; 45/45)*
+- [x] **S2-1** `044_user_wallet_subscriptions.sql` — `PRIMARY KEY (user_id, wallet_address)` rather than a surrogate id, because the pair **is** the fact. Reverse index on `wallet_address` so the nightly "does this wallet have subscribers?" sweep is not a sequential scan. `ON DELETE CASCADE` on both sides is safe *here* — a subscription is a preference, not a financial record — and is deliberately not used on `trades`/`copy_executions`.
+- [x] **S2-2** `045_user_token_watches.sql` — surrogate PK (lifecycle state outlives identity), `UNIQUE (user_id, chain, token_mint)` so re-requesting a backfill is idempotent rather than burning quota, and a `(user_id, created_at DESC)` index serving the rolling-24h count directly.
+
+### 5.2 Tiers and quotas
+- [x] **S2-3** `packages/shared/src/tiers.ts` — capability matrix, **capability only, never price**, so a Stage 5 price change never touches quota logic. `unlimited` is `null`, not `Infinity`: `Infinity` does not survive `JSON.stringify` or a numeric column, and invites `if (!limit)` checks that treat it as `0`. 17 unit tests including the matrix invariants (a higher tier can never have a smaller quota; higher tiers get a *lower* BullMQ priority number, an inversion that would otherwise silently starve paying users behind free ones).
+- [x] **S2-4** Quotas enforced in `packages/db`, not in route handlers — a quota checked in a handler is one the next handler forgets. Over-quota returns **402, not 403**: 403 means "never", 402 means "upgrade and you may", and the frontend needs that distinction to show an upgrade prompt rather than an error.
+- [x] **S2-5** `pauseUnsubscribedWallets` (D9) — pauses zero-subscriber wallets with no platform interest, so growth cannot multiply webhook volume indefinitely. Never pauses a wallet holding an open position (its P&L is still being marked to market) or one in a cluster (dropping it would corrupt cluster membership).
+- [x] **S2-6** Tier-based BullMQ backfill priority wired into `POST /v1/me/wallets`.
+
+  **The pause conflict, found by reading the sweep against tenancy.** `pauseUnderperformingWallets` was written for a single operator: it paused any wallet scoring below 40. Under tenancy that silently stops data for a wallet a user *explicitly chose and may be paying to track*, with no event and no way to diagnose it. Resolved by making `wallets.status` answer exactly one question — "is the platform indexing this?" — with subscriber count as the dominant input: a subscriber pins a wallet `active` regardless of score. Underperformance is *surfaced* (score and tier are already on the row), never acted on for the user. Per-user status was rejected: it multiplies rows by user count for a genuinely global fact and would make the indexer's poll query per-user.
+
+### 5.3 Routes — `/v1/me/*` *(built 2026-08-05)*
+- [x] **S2-7** … **S2-10** `apps/api/src/routes/me.ts` — wallets CRUD, history/holdings, token backfill, signals, feed. Backfill is enqueued **only when the call created the global wallet**; enqueuing on every subscribe would re-backfill each time another user tracks it, which is the exact cost the dedup model exists to avoid. Not-subscribed on history/holdings returns **404, not 403** — whether another user tracks a wallet is not this user's business, and 403 would confirm the wallet exists.
+- [x] **S2-11** Global routes are admin-only via `registerAdminOnlyGlobals`. Implemented as an **allowlist** (`/v1/auth/*`, `/v1/me/*`, `/v1/health`), not a blocklist, so a global route added later is admin-gated *by default* — a blocklist would leave every new operator route open until someone remembered it.
+- [x] **S2-12** *(deferred to Stage 6)* SSE `/v1/me/stream` — the polling it replaces lives in the frontend, which Stage 6 rebuilds. Noted so it is not lost.
+
+  **Verified against a live server:** free-tier quota blocks at exactly 3/3 with `402 QUOTA 3/3` · second subscriber to the same wallet returns `backfillQueued=false` (dedup proven) · isolation holds (alice 3, bob 1) · unsubscribe leaves the other subscriber *and* the global wallet intact · free tier `delayedSeconds=900` · token backfill 402s at 1/day and a re-request of the same token returns 200 without burning quota · free-tier polygon → 402 `chain-not-in-tier` · legacy service key → 401 on `/v1/me/*` · normal user → **403 on all six global routes** while the service key still gets 200 (internal calls unbroken).
+
+  **A real TOCTOU bug the tests caught.** The first implementation counted inside `withTransaction` and my own comment claimed that made the quota safe. It did not: `withTransaction` runs at **READ COMMITTED**, so N concurrent `COUNT(*)` reads all observe the pre-commit state — five concurrent subscribes against the 3-wallet free tier granted **all five**. Fixed with `SELECT id FROM users WHERE id = $1 FOR UPDATE` before the count, serialising one user's quota writes without contending with any other user. Chosen over `SERIALIZABLE` (needs a retry loop) and an advisory lock (the row exists; the transaction releases it). Both quota paths now hold the lock. The design doc's incorrect claim was corrected rather than left to mislead.
+
+  **A pre-existing bug found while probing:** the API error handler discarded `err.statusCode`, so Fastify's own 4xx client errors (malformed JSON, empty body, payload too large) were reported as **500**. That hides real 500s in the logs and tells clients to retry something that cannot work. Now mapped through.
+
+**Exit gate:** ✅ **met 2026-08-05.** Two users track different wallets and see disjoint feeds; quotas enforced under concurrency; cross-tenant tests green; global routes admin-only.
+Gate numbers for this stage live in §1 only. They were duplicated here and drifted; §1 is the single current baseline and a stage section is not a place to read one from.
+
+### 5.4 Attribution — parallel, non-blocking
+- [ ] **S2-13** `G6-A6` — Polymarket redemption detection and reconciliation. *(Resolution and winning-token backfill already exist; redemption does not.)*
+- [ ] **S2-14** `G6-A7` — golden test asserting the Polygon-specific resolution-aware scoring weight end to end.
+- [ ] **S2-15** `G6-A9` — make an immutable `expectancy_reports` record a database-enforced prerequisite for a threshold change, replacing today's free-text script.
+- [ ] **S2-16** `G6-A10` — expose per-chain evidence for each score in API and dashboard.
+- [ ] **S2-17** `G7-A5` — one cross-chain fixture suite proving every signal carries its chain-native context.
+- [ ] **S2-18** `G7-A6` — assert active-dimension coverage (all chains, patterns, tiers, modes) in the nightly reports.
+
+**Exit gate:** two users track different wallets and see disjoint feeds; quotas enforced; cross-tenant attack tests green; SSE feed live.
+
+---
+
+## 6. Stage 3 — Venue executors & certification *(audit Phases 2–3)*
+
+> **⚠ PARTIAL — codeable half in progress. Full gate GREEN as of 2026-08-05.**
+> Venue certification items (`(ext)`) are tracked in `docs/testing-aspects.md` and
+> cannot be closed by code. See §6.0 for what is built and what remains.
+
+### 6.0 State — verified 2026-08-05
+
+**Full gate:** see §1. It is the single current baseline. This section deliberately
+carries no gate table of its own — the duplicate that used to sit here drifted out
+of step with §1 (it still read 44/44 across 7 files while §1 read 50/50 across 8),
+and a stage section is not a place to read a gate number from.
+
+**Built and verified:**
+- `packages/shared/src/jito.ts` — Jito block-engine client: `submitJitoBundle`,
+  `getJitoBundleStatus`, `getJitoTipFloor`, `selectJitoTip`, `selectTipAccount`
+  (`S3-2`, `S3-3`). 9 tests.
+- `packages/shared/src/jupiter-swap.ts` — `buildJupiterSwap`, the `/swap`
+  transaction-build step (`S3-1`).
+- `packages/shared/src/polymarket-clob-auth.ts` — CLOB **V2** L1 typed-data +
+  L2 HMAC signing (`S3-20`). 14 tests.
+- `apps/trade-executor/src/jupiter-jito-runtime.ts` (`S3-2`–`S3-5`) — the full
+  submit/reconcile/sweep state machine, deliberately mirroring
+  `trojan-runtime.ts` so the executor's existing sweeper semantics carry over and
+  only the transport differs. Dependency-injected throughout; the signer is a
+  **parameter** (Standing Rule 2), so Stage 4 swaps the operator wallet for a
+  per-user custodial key with no call-site change. 19 tests.
+- `packages/shared/src/constants.ts` — `QUEUES.trades` / `QUEUES.alerts` **added**,
+  plus `TRADE_QUEUES_BY_CHAIN` and `tradeQueueForChain()` (`S3-25`). 5 tests.
+  **Correction:** an earlier draft called these "centralised". They are not — the
+  constants exist but **no call site references them yet**. All seven original
+  inline literals remain (4 for `swat-trades`, 3 for `swat-alerts`; the draft also
+  said four for alerts, which was wrong). Adopting the constants at each producer
+  and consumer is part of the `S3-25` cutover, and `CLAUDE.md` requires it so the
+  names cannot drift between the two ends of a queue.
+
+**`S3-25` switch is intentionally OFF.** `tradeQueueForChain()` returns the shared
+`swat-trades` for every chain. The cutover touches the money path in four services
+at once (`api`, `scorer`, `signal-engine`, `trade-executor`), and a half-migrated
+producer/consumer pair would send trade jobs into a queue nobody reads. Producers
+and consumers adopt the helper first; flipping the flag then becomes a one-line
+change. Expand-and-contract, Standing Rule 4.
+
+**Mutation-tested, so the runtime's tests are known to have teeth.** Two
+money-safety properties were deliberately broken and both turned the suite red:
+removing the resolved-order guard — which would let a redelivered queue job
+double-spend a position — failed 1 test; treating an unobservable bundle as
+`failed` — which would let the executor re-enter a position that is actually live
+— failed 2. A green suite that cannot fail is worse than none.
+
+**Verified against live Polymarket docs via MCP, not written from memory:**
+- L2 signing is `timestamp + METHOD + path + body`, HMAC-SHA256 keyed by the
+  **base64-decoded** secret, output as URL-safe base64 **with padding retained**.
+  Node's built-in `'base64url'` strips padding and would be rejected; the
+  transform is explicit and pinned by a test asserting the trailing `=`.
+- **`G3-P6`'s "venue-limited" closure re-confirmed.** The `coid` (client order ID)
+  endpoints live at `/v1/trade/*`, the **Perps** gateway. The predictions CLOB
+  (`clob.polymarket.com/orders`) still has no client-order-ID field, so idempotency
+  stays on our persisted signal/execution identity. The earlier closure was correct
+  and is not stale.
+- CLOB V2 went live 2026-04-28; V1 SDKs and V1-signed orders are rejected on
+  production. Anything written from pre-cutover memory would fail.
+
+**Not yet built:** `S3-6` (Trojan retirement) and `S3-10` — both gated on
+certification, not on code. Everything else in the codeable half has landed:
+the `S3-18` neg-risk matrix is in, `S3-12`'s matrix turned out to have already
+existed, and the Solana dispatch cutover is wired behind
+`SOLANA_EXECUTION_PATH`.
+
+**Next steps, each its own tested change:**
+1. `S3-25` queue cutover — migrate producers and consumers together, then flip
+   the flag. The mechanism and its tests exist; the switch is off, and the
+   `QUEUES.trades` / `QUEUES.alerts` constants still have **zero** call sites
+   (see the correction under `S3-25`).
+2. Stage 4 (custody + per-user execution). Its design doc is the gate.
+3. The two certification items above, which need a human reviewer and funded
+   wallets — no code will close them.
+
+
+*Pull-based. Certify a venue only when live money is wanted there. **Paper mode ships everywhere without any of this.*** Sequencing is `DG-4`, open.
+
+### 6.1 Solana — retarget to Jupiter + Jito (`DG-1` resolved 2026-07-27)
+- [x] **S3-1** Jupiter `/swap` transaction-build step — `packages/shared/src/jupiter-swap.ts`. The signer is a **parameter** (`signTransaction`), not a module-level key, so Stage 4 substitutes a per-user custodial signer with no call-site change. `apps/trade-executor/src/solana-signer.ts` is the operator implementation; the private key is loaded once into a closure and never returned, logged, or placed on a reachable object.
+- [x] **S3-2** Jito `sendBundle` with an appended tip — `packages/shared/src/jito.ts`. Never broadcasts over public RPC.
+- [x] **S3-3** Dynamic tip sizing from the block engine's tip-floor percentiles, capped by `JITO_MAX_TIP_LAMPORTS`. The cap is enforced, not advisory: without it a congestion spike or a malformed floor response spends unbounded SOL per trade. A zero/absent floor reads as *no data* and falls back, never as "free" — a zero tip never lands, which would look identical to a dead executor.
+- [x] **S3-4** Confirmation and reconciliation — `jupiter-jito-runtime.ts` `reconcile`/`sweep`, wired into the **existing** guarded `reconcilePending` loop (no second timer, per C1). A miss is declared **only** once the block height passes `lastValidBlockHeight`, which is the only point the transaction provably cannot land — and is why a retry needs a fresh quote and build rather than a blind resubmit. An unobservable bundle resolves to `null`, deliberately distinct from `failed`.
+- [x] **S3-5** Fallback policy — a Jito failure is reported honestly (`submission_unknown` when retryable, `rejected` when definitive) and never downgraded to a public RPC broadcast.
+- [ ] **S3-6** Retire Trojan: delete `TROJAN_WEBHOOK_URL` / `TROJAN_API_KEY` and the client path once the new path is certified; `TROJAN_WALLET_ADDRESS` balance reads become the parameterized operator signing wallet. `H4` is superseded with the path. **Blocked on `S3-9` certification** — both paths run side by side until then, and `clampExecutionModeForStartup` accepts either being ready.
+- [ ] **S3-7** `F-SOL2` / `F-SOL3` (retargeted) — **dispatch adapter built and now WIRED, behind a flag.** `apps/trade-executor/src/solana-dispatch.ts` (15 tests) owns the two things the runtime does not: turning a trade intent into a Jupiter quote, and flattening the submission union into the shape `persistTrade` expects.
+  **A BUY is `ExactIn` on SOL; a SELL is `ExactIn` on the token** — the proportional exit gives an exact base-unit quantity to dispose of, not a target SOL amount, and `ExactOut` would name a SOL figure we do not have while letting the venue take more tokens than the position holds. A sell quantity beyond `Number.MAX_SAFE_INTEGER` is rejected rather than rounded.
+  **A bundle id is not a transaction signature.** It exists only once the bundle lands, so `trades.signature` stays null at submit and the reconciliation sweep fills it in; persisting the bundle id there would put a value in the column that no explorer can resolve.
+  **Cutover is flag-gated, not unconditional** — `apps/trade-executor/src/solana-executor-selection.ts` (9 tests). Jupiter+Jito is unit-tested but **uncertified**, and `S3-9` requires the canary to run *before* the path carries real trades. So `handleJob` routes to it only when `SOLANA_EXECUTOR=jupiter-jito` **and** a signer plus block engine are configured; neither control implies the other. Default stays Trojan. A typo in `SOLANA_EXECUTOR` throws at startup rather than falling back, because a misrouted execution variable must not fail silently. `trades.executor` is `varchar(20)` with no CHECK constraint, so the new `'jupiter-jito'` value needed no migration — verified against the live schema.
+  **Mutation-verified:** flipping the default to the uncertified path fails 2 tests; dropping the readiness requirement fails 1.
+  **Remaining:** the fixture matrix (entry, partial exit, full exit, failure, duplicate webhook, timeout-after-submit), then `S3-9`'s canary — after which the flag becomes the default and `S3-6` retires Trojan.
+- [ ] **S3-8** `G1-S1` — measure webhook→signal→alert→execution over a real review window; hold Solana median signal-to-alert under 60s.
+- [ ] **S3-9 (ext)** Capped live canary recorded under `docs/certification/solana.md`.
+
+  **Wired 2026-08-05:** `jupiter-jito-config.ts` provides `createJupiterJitoRuntimeFromEnvironment` + `getJupiterJitoLiveReadiness`, mirroring the Trojan pattern. Startup configures it alongside Trojan; a configuration error is caught and recorded as a readiness reason rather than thrown, because taking down execution for *every* chain when one chain's optional live path is misconfigured is the wrong failure mode. `JITO_BLOCK_ENGINE_URL` has no default on purpose. All new env vars documented in `.env.example`.
+
+  **A live-money coverage hole found by mutation testing and closed.** Making the Solana readiness gate fail **open** — which would let a live trade proceed with no configured signer — passed **all 252 tests**. The clamp had no direct coverage. `solana-live-clamp.test.ts` (7 cases) now pins it; re-running the identical mutation fails 4 of them. Tests: `jupiter-jito-runtime.test.ts` (19), `jupiter-jito-config.test.ts` (14), `solana-live-clamp.test.ts` (7).
+
+
+### 6.2 Robinhood Chain
+- [ ] **S3-10** `F-RH3` — pin the deployed router ABI/version verified on-chain, with reviewed evidence.
+- [x] **S3-11** `F-RH5` — explicit fee-on-transfer coverage on proportional exits. **The implementation was already correct** — `createRobinhoodSafetyAssessment` probes `context.order.token`, and the safety gate sits in the shared submission path so it applies to sells as well as buys. The gap was purely test coverage: every existing case built its context with `direction: 'buy'`, where `tokenOut === order.token`, so no test could distinguish probing the traded token from probing `tokenOut`. Two exit cases added in `robinhood-runtime.test.ts` (11 → 13).
+  **Why this matters on an exit specifically:** V3's `exactInputSingle` credits the pool less than it was sent, so a taxed token cannot be sold through the router at all — a position entered in a taxed token is stranded. On a sell the route reverses, so a probe following `tokenIn`/`tokenOut` rather than `order.token` would check the *untaxed base asset*, pass, and strand the position at submission.
+  **Mutation-verified:** rewriting the probe to `context.tokenOut` leaves all buy-path tests green and fails exactly the new exit case.
+- [x] **S3-12** `F-RH6` — native/token **and** token/token entry-exit matrix. Already complete in `robinhood.test.ts`: the entry/exit block crosses both base-asset modes with both directions (`native-weth` / `erc20` x buy/sell) via `it.each`, and asserts the router is approved **only when an ERC-20 is being spent** — a native-weth buy sends native value and has nothing to approve; every other leg does.
+  *Previously left unchecked here because an earlier search looked for a `baseAssetMode` object property; the matrix passes it as an `it.each` tuple, so the search missed it. The coverage predates this session.*
+- [ ] **S3-13 (ext)** `G2-R3` — direction-classification accuracy >95% on an operator-reviewed production sample.
+- [ ] **S3-14 (ext)** `G2-R4` — ingestion completeness >90% on the certification sample.
+- [ ] **S3-15** `G2-R5` — verified-source and reliable holder-concentration evidence for Robinhood assets.
+- [ ] **S3-16 (ext)** `G2-R12` — tiny successful buy with receipt-derived amounts, a forced failure with released claim, an orphaned receipt resolved after restart.
+- [ ] **S3-17 (ext)** `G2-R13` — write and have reviewed `docs/certification/robinhood-chain.md`; only then add `robinhood-chain` to `LIVE_ENABLED_CHAINS`. **See S0-B1 — it is currently listed there without this.**
+
+### 6.3 Polymarket / Polygon
+- [x] **S3-18** `F-PM8` — binary + neg-risk entry-exit matrix and resolution/redemption cases.
+  **Matrix built (2026-08-05):** `apps/trade-executor/src/polymarket-negrisk.test.ts`, 16 cases. The suite is shaped around an asymmetry found while writing it: **neg-risk is a no-op axis for us**, while entry-vs-exit is the real one.
+  `PrepareMarketOrderRequest` has no field through which a caller could select the exchange — verified against the installed SDK type, whose buy/sell union is `tokenId | side | amount|shares | maxSpend | maxPrice|minPrice | orderType | builderCode` and nothing more. The SDK derives the verifying contract (standard vs neg-risk Exchange) from the token itself; both addresses are pinned and attested once at startup, not per order. So four cases assert the plan output and the signed request are **key-for-key identical** across the flag, with explicit `not.toHaveProperty` on `negRisk`/`neg_risk`/`exchange`/`adapter`/`verifyingContract`. That is a guard against a future edit, not a present defect — and it mirrors the one the redemption suite already carries for the collateral adapter.
+  The remaining twelve cover what genuinely differs by direction across both market kinds: balance source (`COLLATERAL` vs `CONDITIONAL` + tokenId), request shape (`amount`/`maxSpend`/`maxPrice` vs `shares`/`minPrice`), requested-amount units (USD off ask depth vs shares off bid depth — same book, same `10`, different results), and the directional price bounds (0.98 refused as an entry but fine as an exit; 0.005 the reverse).
+  **Mutation-verified independently, not taken on report:** leaking `negRisk` into the signed BUY request fails 1 case; branching the depth walk on it fails 5.
+  **Redemption ledger built (2026-08-05).** A genuine gap, not a test gap: `assertPolymarketMarketTradable` correctly *refuses to trade* a resolving market, but nothing ever claimed the proceeds — so a winning position stayed open in the ledger forever and its collateral was stranded. Confirmed against the live docs: `redeemPositions({conditionId})` converts each winning outcome token to 1 pUSD and each losing token to 0, with no deadline and no amount parameter.
+  `packages/db/sql/046_polymarket_redemptions.sql` + `packages/db/src/polymarket-redemptions.ts` provide the claim/confirm ledger. The split matters because `redeemPositions()` redeems the wallet's *whole* balance for both outcomes, so a second call after a successful first is an on-chain no-op that still burns gas and still returns a transaction hash a reconciler would read as a fresh fill.
+  **The first version of the exactly-once guard was INERT, and a direct SQL probe caught it.** The partial unique index was on `(user_id, condition_id)`, but `user_id` is NULL for all of Stage 3 and **NULL never conflicts with NULL** — two concurrent sweeps both claimed the same market (`INSERT 0 1` twice). Fixed with `NULLS NOT DISTINCT` (Postgres 15+; CI and prod both run 16) plus an explicit `ON CONFLICT` target, since a bare `DO NOTHING` does not engage a partial index. Now `INSERT 0 1` then `INSERT 0 0`, exactly one live row.
+  `tests/integration/polymarket-redemption.integration.test.ts` (6 cases) pins it. **Mutation-verified:** reverting the index to its original `NULLS DISTINCT` form fails 3 of the 6.
+  **Sweep built and wired (2026-08-05).** `apps/trade-executor/src/polymarket-redemption.ts` + 9 unit tests, running inside the **existing** guarded `reconcilePending` loop — no second timer — and gated on the live client existing, since redemption is a real on-chain claim with nothing to do in paper mode. Stale claims are released *before* the scan so a market wedged by a crashed sweep becomes eligible in the same pass rather than the next one. A venue error (a missing collateral-adapter approval surfaces here) releases the claim rather than wedging the market, and one bad market never abandons the sweep.
+  **Docs-verified, not written from memory** (`trading/positions/manage`): `redeemPositions({conditionId})` takes **no amount** and redeems both outcomes; `wait()` yields `{transactionHash, transactionId}`; there is **no redemption deadline**, which is what makes a retry after failure safe. The client selects the collateral adapter (`CtfCollateralAdapter` vs `NegRiskCtfCollateralAdapter`) from the condition id, so this code deliberately does **not** branch on `negRisk` — duplicating that choice would silently diverge if Polymarket changed the mapping. A test asserts no `negRisk`/`adapter` key is ever sent.
+  **`redeemedCollateral` is recorded as `0`, not a guess.** The venue returns no per-redemption payout figure; deriving one from the pre-redemption balance would be invention, and attribution reads the on-chain transfer instead.
+  **Mutation-verified:** redeeming despite a lost claim (double-redeem) and confirming without a transaction hash (unverifiable money) each fail exactly one test.
+  **Remaining:** the binary/neg-risk entry-exit matrix.
+- [x] **S3-19** `G3-P10` — rounding parity with venue precision constraints. `apps/trade-executor/src/polymarket-precision.test.ts` (16 cases) pins our behaviour against the published table in `trading/place-orders`, tick by tick.
+  **Size decimals are 2 at every tick size**, which is why the single `POLYMARKET_SHARE_DECIMALS` constant is correct rather than a lookup table. Shares round **down**: rounding up would sell shares the position does not hold, or buy more than the sized notional pays for. An order pushed under `min_order_size` *by that rounding* is refused rather than submitted to a guaranteed rejection.
+  **The price-decimals column is deliberately not implemented.** The book walk instead rejects any price off the current tick grid, which is strictly stronger — an off-grid price with a legal-looking decimal count (`0.0026` under a `0.0025` tick) is still refused, where a decimals-only check would wave it through and the CLOB would reject at submission. That equivalence is not assumed: a test enumerates **every** on-grid price for all six tick sizes and asserts none exceeds the documented decimals, so if a future tick size broke the implication the superset argument fails loudly.
+  **Mutation-verified:** disabling the tick-grid check fails all six off-grid cases.
+- [ ] **S3-20** Derive CLOB L2 credentials **as a function of an EVM signer**, so the same code serves per-user keys at Stage 4.
+- [ ] **S3-21 (ext)** `G3-P3` — authenticated production round trip, no secrets logged.
+- [ ] **S3-22 (ext)** `G3-P5` — operator account, jurisdiction, venue terms, and wallet funding eligibility confirmed.
+- [ ] **S3-23 (ext)** `G3-P11` — a tiny filled BUY, an unfillable order cancelling cleanly, a duplicate rejection.
+- [ ] **S3-24 (ext)** `G3-P12` — `docs/certification/polygon-polymarket.md` reviewed and signed off. *(The file exists and is correctly marked **NOT CERTIFIED** with every box unchecked.)*
+
+### 6.4 Isolation
+- [ ] **S3-25** `D6` — split `swat-trades` into `swat-trades-{solana,polygon,robinhood}`, one worker each, concurrency 1. Risk logic is already chain-keyed, so this is parallelism at zero logic cost and it satisfies `F-ACC2` isolation.
+- [ ] **S3-26 (ext)** `F-ACC1` / `F-ACC2` — simultaneous three-chain production-worker replay; prove one venue's RPC outage neither stalls nor corrupts the others.
+- [ ] **S3-27 (ext)** `F-ACC3` — verify production prerequisites: Postgres, Redis, Helius / Robinhood / Polymarket credentials, funded wallets.
+
+**Exit gate, per venue:** `docs/certification/<chain>.md` reviewed, canary evidence recorded, reconciliation-after-restart demonstrated — *then and only then* the chain enters `LIVE_ENABLED_CHAINS`.
+
+---
+
+## 7. Stage 4 — Custody & per-user execution *(SaaS Phase 3)*
+
+**Highest-risk stage. User funds live here.** Hard prerequisites: Stage 0 complete, Stage 2 complete, `DG-1` resolved (done), and the legal gate below.
+
+### 7.0 Stage 4 prerequisites — land these before any fan-out code
+
+*Fan-out multiplies each of these by the user count, and two of them corrupt data rather than failing loudly. `S4-P1`…`S4-P3` are defects that exist **today** with one operator; the rest are gaps fan-out opens.*
+
+- [x] **S4-P1** **Per-chain slippage resolver.** *(Built 2026-08-07.)* `packages/shared/src/slippage.ts` + 10 tests. `resolveSlippageBps(chain, userValue)` with `DEFAULT_SLIPPAGE_BPS` preserving the constants it replaces (Solana 1500, Robinhood/Polygon 300), a `MAX_SLIPPAGE_BPS` platform ceiling of 5000, and a floor of 1 because zero makes every order unfillable.
+  **The chain default is a default, never a floor** — a user asking for 50 bps on Solana gets 50, not 1500. Treating the constant as a minimum would quietly widen every cautious user's risk to the platform's own appetite. **Mutation-verified:** rewriting the clamp to use the chain default as the lower bound fails 3 tests. A fractional bps throws rather than rounding, since that is a caller bug and the venues take integers.
+  **Threaded through the executor 2026-08-07.** All 13 live venue call sites now take a `slippageBps` resolved **once per job**, replacing the literals (9 × `1500` on Solana, 4 × `300` on Robinhood). It resolves with `null` — no user preference — which returns the chain default and is byte-identical to the constants it replaces, so this is a refactor with zero behaviour change. The 150-bps Jupiter *paper quote* is deliberately untouched: it prices a simulation, not an order.
+  **A coverage hole found and closed while verifying this.** Changing the Solana default from 1500 to 777 left **all 332 executor tests green** — nothing in the suite asserted a slippage value anywhere, so the threading could have been wired to the wrong place undetected. `execution-lifecycle.test.ts` now pins `slippageBps: 1500` on the Trojan call; the same mutation fails it. This matters for migration `049`: without the pin, wiring the user's value incorrectly would be invisible.
+  Four test files mock `@swat/shared`; three spread `...actual` and were already correct. `shadow.test.ts` was converted from a sync factory to `importActual` so it uses the **real** resolver — a hand-written stub of the chain defaults would silently drift from them.
+  *Remaining for `S4-P4`: migration `049`'s `max_slippage_bps` column and the `/v1/me/*` surface to set it. The single `resolveSlippageBps(chain, null)` call site becomes `resolveSlippageBps(chain, userValue)`.*
+
+- [x] **S4-P2** **Sizing resolves the DB risk policy in every mode, and fails closed.** *(Fixed 2026-08-07.)* Two live defects in `getBalanceAwarePositionSize`:
+  (a) the policy override sat inside `if (sizingMode === 'paper')`, so **live sizing ignored the DB policy entirely** and used the env constant. Invisible with one operator whose env and DB agree; under fan-out the per-user percentage exists *only* in the database, so live sizing would size every user off one env value.
+  (b) resolution failure was a `console.warn` and a fall back to env defaults — silently substituting a risk percentage the account never agreed to, on a real trade. Now fatal: throwing costs one skipped signal, defaulting costs a wrong-sized position.
+  Also replaced the `(config as any).riskPct = …` mutation with a `{...envConfig, riskPct}` spread, removing the `any` cast (`S0-3`).
+  **The suite did not notice any of this.** All 326 tests stayed green through the behaviour change, because `getBalanceAwarePositionSize` had **no direct coverage** — `policy.test.ts` exercises the pure math helper beneath it, not the policy resolution above it. `sizing-risk-policy.test.ts` (6 cases) now pins it; **mutation-verified** by restoring the original defect, which fails 3 of the 6.
+  Introduced `RISK_POLICY_ACCOUNT` as a **separate constant from `RECONCILIATION_ACCOUNT`** even though both are `'operator'` today: this one *becomes the user id* at Stage 4, while `RECONCILIATION_ACCOUNT` must **stay** `'operator'` because `copy_executions.target_account` holds a wallet address. Collapsing them into one shared constant is exactly how that distinction gets lost.
+
+- [x] **S4-P3** **Bounded `resolveRiskPolicy` cache.** *(Fixed 2026-08-07.)* It was a module-level `Map` keyed `${account}:${chain}`, TTL-checked on read but **never swept** — so an entry for a user who never returned lived for the life of the process. With one operator that is three entries and invisible; under fan-out the key carries a user id, so it grew one entry per active user per chain and retained every user who had ever traded. Unbounded growth keyed by user id, inside the process that also holds the custody master key.
+  Now sweeps expired entries on write and enforces `RISK_POLICY_CACHE_MAX_ENTRIES` (5000) with oldest-first eviction. **Swept on write, not on a timer** — a timer keeps the process alive and fires when nothing is being cached, whereas growth only ever happens on write. The cap is a backstop rather than the primary mechanism: a fan-out burst can outrun TTL expiry entirely, so expiry alone is not a bound.
+  `risk-policy-cache.test.ts` (6 cases). **Mutation-verified:** removing the sweep fails 2 — the expired-entry case and the cap case. The 7 pre-existing `risk-policy.test.ts` cases still pass unchanged.
+
+- [ ] **S4-1 (ext)** **`DG-2` / `D13` — legal gate, non-negotiable.** Counsel opinion on custodial funds and autonomous trading in the operating jurisdiction; ToS and risk disclosures; Cloudflare geo-blocks live; stricter per-user Polymarket geo-gate inheriting venue restrictions. **Custody does not launch without this. No code workaround exists.**
+  **Scope grew with the `DG-7` decision (2026-08-07).** The risk disclosures are now a *load-bearing control*, not boilerplate: `DG-7` resolves to "serve every eligible user and disclose the consequence" instead of capping, so the text stating that later fills land at worse prices, that this is inherent to copy trading, and that the strategy is high-risk is the thing standing in for a platform limit. It must also frame the routing claim as *fastest available route* (the Jito bundle path), never as a price or latency guarantee. Counsel should review that wording specifically.
+
+- [ ] **S4-P4** **Per-user `max_slippage_bps` — hard prerequisite of the `DG-7` decision.** *(Found 2026-08-07 verifying §7.5 of the design doc; verified in source.)* Mechanism 3 of the `DG-7` resolution relies on each user's own slippage tolerance rejecting a bad fill, so that the platform never has to choose who misses a trade. **That mechanism does not exist.** Slippage is a **hard-coded per-chain constant** — `1500` bps (15%) on the Solana paths, `300` bps (3%) on the Robinhood paths, `150` on the Jupiter route (`apps/trade-executor/src/index.ts`) — absent from `packages/db/src/risk-policy.ts` and, at the time of the finding, absent from every Stage 4 settings table in `docs/plans/stage-4-design.md` §5.
+  Two consequences: **nothing bounds the fan-out tail today** (15% on Solana is wide enough that a badly degraded late fill still executes), and **a per-chain constant cannot express user intent** — two users with different appetites get the same ceiling, so "their own stated limit" is not something the system can honour.
+  **Per-chain, not global** *(operator decision, 2026-08-07)*. Users set their tolerance **per chain**, so it belongs on `user_chain_execution_settings` — already keyed `(user_id, chain)` in `docs/plans/stage-4-design.md` §5 — and **not** on the user-global `user_execution_settings`. Tolerable slippage is a property of the venue rather than the person: 3% is loose on a Polymarket CLOB book and tight on a thin Solana memecoin, so one global value would force a user to accept the loosest chain's risk everywhere. `NULL` means "use the chain default" and is deliberately distinct from a user-chosen value, so a default can be raised later for users who never set one without silently overwriting anyone who did.
+  **Done when:** `max_slippage_bps INTEGER NULL` exists on `user_chain_execution_settings`, is threaded to every venue call site listed above, and the per-chain constant acts as the **default for a user who has not set one — never as a floor overriding a tighter user value**; the `/v1/me/*` surface lets a user read and set it per chain; and a test asserts a user with a tight tolerance is *not executed* on a fill that a user with a loose tolerance accepts. **Until this lands, fan-out has no per-user downside bound and `DG-7` is not safe to ship.**
+
+- [x] ~~**S4-P5** Enforce the ADR-0002 custody migration trigger in code.~~ **RETIRED 2026-08-09** by `docs/adr/0003-delegated-execution-authority.md`. The trigger existed to time-limit the exposure of custodied user keys. There are none, so it has nothing to measure. **Returns only under ADR-0003 §6 fork (b)**, scoped to Polymarket balances.
+
+- [x] ~~**S4-P6** Bounded, swept cache of unwrapped data keys.~~ **RETIRED 2026-08-09** by ADR-0003 — no per-user data keys to unwrap. The underlying fan-out concern does not vanish, it **changes venue**: it reappears as bundler/paymaster throughput and per-user 4337 nonce management (`S4-P8`). The `S4-P3` lesson still binds any cache that replaces it.
+
+- [ ] **S4-P7** **`UserExecutionAuthority` port with per-chain adapters.** *(Created 2026-08-09 with ADR-0003.)* Three delegation mechanisms with nothing in common at the key level — a 4337/7702 session key, a Solana program delegate, and whatever Polymarket resolves to — must not leak into `handleJob`. `solana-signer.ts` already proves the seam works: it is injected as `signTransaction`/`buildTipTransaction`, so the runtime never learns where authority comes from.
+  **Done when:** one interface covers "authorize this venue action for this user", each chain has an adapter behind it, `handleJob` names no chain-specific authority type, and the existing **operator** path is one adapter among them rather than a special case. A test substitutes a stub authority and asserts the executor is unchanged.
+
+- [ ] **S4-P8** **Paymaster spend cap and per-user rate limit.** *(Created 2026-08-09 with ADR-0003 §8.)* Sponsoring gas turns every copied trade into an operating cost we pay and an attacker can spend. A user who subscribes to a hyperactive wallet drains the Gas Manager policy; nothing today bounds it. Unbounded third-party spend triggered by untrusted activity is the same defect class as unbounded memory keyed by user id (`S4-P3`).
+  **Done when:** a per-user daily sponsored-operation cap and a global policy ceiling are enforced **before** submitting a UserOperation, exhaustion degrades to skip-with-reason rather than failing the job silently, and a test asserts the cap blocks the N+1st operation.
+
+- [ ] **S4-P9** **Session-key expiry monitoring and re-consent.** *(Created 2026-08-09 with ADR-0003 §8.)* Scoped grants expire — that is the point. But an expired grant makes a user *silently stop copying*: no error at grant time, and the failure surfaces at trade time as a rejected UserOperation, by which time the trade is missed. Expiry is now a liveness dependency, which custody never was.
+  **Done when:** grant expiry is stored and indexed, a job warns users ahead of lapse, the dashboard shows remaining validity, and a lapsed grant produces an explicit skip reason distinguishable from "no signal". A test asserts an expired grant is reported as lapsed rather than as a generic execution failure.
+
+### 7.1 `packages/custody` → `packages/authority`
+
+> **Rewritten 2026-08-09 by `docs/adr/0003-delegated-execution-authority.md`.** WAKE no
+> longer generates or holds user root keys. It holds **scoped grants**. Secret storage
+> survives (a session key still lets an attacker trade as the user); what changes is the
+> blast radius — scoped trades until expiry, revocable by the user on-chain, versus all
+> funds forever with no remedy. **Build order is Robinhood Chain → Solana → Polymarket**,
+> which is the inverse of the old plan; see ADR-0003 §1.
+
+- [ ] **S4-2** ~~Per-user Solana + EVM keypair generation.~~ **Replaced:** per-user *grant*
+  issuance. Robinhood Chain: an EIP-7702 delegation or 4337 session key over the user's
+  **existing** EOA — no new address, so no deposit step and no onboarding drop-off
+  (ADR-0003 §2). Solana: a PDA delegate registration. The user's root key never reaches us.
+- [ ] **S4-3** Envelope encryption — **retained, retargeted** (ADR-0003 §5). Now seals
+  session keys, delegate keypairs, and CLOB credentials rather than root private keys. Same
+  AES-256-GCM per-secret data key; a DB dump alone stays worthless.
+- [ ] **S4-4** `KeyWrapper` interface — **retained**. Still the seam that makes env → Vault a
+  config change. Lower urgency (ADR-0003 §5 retires the "lose it and funds are gone" row),
+  and it is also what fork (b) would need if Polymarket stays custodial.
+- [ ] **S4-5** The API may request **grant issuance only, never signing**. Session keys
+  decrypt inside trade-executor at signing time, never leave the process, never appear in
+  logs or API responses. *(Unchanged in force, narrower in scope.)*
+- [ ] **S4-6** `DG-3` — price Turnkey / Privy-class vendors. **Re-scoped:** the question is
+  no longer "who custodies keys" but "who issues and stores scoped grants". Robinhood Chain
+  docs name Privy and Dynamic for embedded wallets plus AA; Alchemy and ZeroDev for
+  bundler/paymaster. Verify **before** design freeze whether the vendor supports the
+  argument-level permission policy `S4-P10` requires — not merely "session keys".
+- [ ] **S4-P10** **Argument-scoped permission policy, not `(target, selector)`.** *(ADR-0003
+  §2.1.)* A session key restricted to "the router, swap selectors only" is still drainable:
+  any ERC-20 swap needs `approve(spender, amount)`, so the policy must permit `approve` — and
+  an unconstrained `spender` lets the key approve an attacker who then drains the token
+  directly, never calling the router. "No transfer, no withdraw" is an **incomplete**
+  specification of the scope.
+  **Done when:** the policy constrains decoded arguments — `approve` only to allowlisted
+  routers with a bounded amount (never `type(uint256).max`), swap recipients pinned to the
+  user's own account — with default-deny for anything unlisted. A test asserts a UserOperation
+  approving a non-allowlisted spender is **rejected by the account**, not merely unbuilt by us.
+- [ ] **S4-P11** **Pin the EntryPoint version.** Robinhood Chain has **three** deployed
+  simultaneously — v0.6.0 `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789`, v0.7.0
+  `0x0000000071727De22E5E9d8BAf0edAc6f37da032`, v0.8.0 `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108`
+  (chain ID **4663**). Paymaster interfaces and gas accounting differ across them, so an
+  implicit default is a silent-mismatch bug. Config-pinned and asserted at startup.
+- [ ] **S4-P12** **Solana delegation program.** *(ADR-0003 §3 — the long pole.)* No off-the-shelf
+  primitive does this: native SPL `approve` bounds *how much*, never *to whom*, so a delegate
+  can transfer anywhere; Gum Protocol is unmaintained and unacceptable in the funds path.
+  **Evaluate Squads V4 first** — its spending limits carry a destination list — but verify
+  whether a member can be constrained to *swap via a program* rather than *transfer to an
+  address*; that is a different shape from what multisig spending limits are built for.
+  Absent that, this is our own audited Anchor program.
+  **Consequence:** Solana becomes the **last** chain to get per-user execution. `S3-1`…`S3-6`
+  are complete for the **operator** account only — do not read them as nearly-done for fan-out.
+- [ ] **S4-P13** **Polymarket — non-custodial is not achievable here; pick `DG-9`.** *(ADR-0003 §4.)*
+  CLOB API credentials **cannot place orders**: placement needs L2 HMAC to authenticate the
+  request **and** a per-order EIP-712 `Order` signature, fresh `salt`, from the account signer.
+  The **Builder Program** does not close this — builder credentials provision Deposit Wallets and
+  grant relayer access, but "**each wallet remains controlled by its signer**", and provisioning
+  passes a `signer` private key alongside the builder key. Builder creds are an integration
+  identity, not a delegation grant. There is no Polymarket equivalent of a 4337 session key or a
+  PDA program delegate. Also: `@polymarket/clob-client-v2` is **deprecated** (current is
+  `@polymarket/client` + `viem`, already this repo's dependency), and every account wallet
+  deployed on or after **2026-05-04** is a **Deposit Wallet** (`signatureType` 3, ERC-7739),
+  making ERC-1967 Proxy (`1`) and Safe (`2`) legacy targets.
+- [ ] **S4-P15** **Builder relayer capacity is a lead-time dependency, not a config flag.** *(ADR-0003 §4.2.4.)*
+  The daily relayer transaction limit is **100/day at Unverified**, 10,000/day at Verified,
+  unlimited at Partner — and relayer transactions cover wallet deployment, approvals, order
+  execution and CTF operations, i.e. essentially every write. **100/day is not a copy-trading
+  platform**: one signal fanning out to 100 users exhausts the day. Verified requires
+  demonstrated volume *plus* manual approval on a few-business-days turnaround, so the
+  application wants volume we can only generate after launching.
+  **Done when:** the Verified application is filed well ahead of launch; remaining daily relayer
+  budget is tracked and enforced **before** submitting, degrading to skip-with-reason rather than
+  a burst of failures at the cap; and a test asserts the N+1st operation is refused. Same defect
+  class as `S4-P8`'s paymaster cap — a third-party budget consumed by untrusted activity.
+- [ ] **S4-P16** **Geo-eligibility for a user who is not present.** *(ADR-0003 §4.2.5 — binds under
+  every `DG-9` fork, and is a `DG-2` input.)* Polymarket restricts order placement by geography and
+  assigns the duty to us: *"Builders are responsible for verifying user location before submitting
+  orders."* The check (`GET https://polymarket.com/api/geoblock`) evaluates the **requesting IP**.
+  Under unattended execution there is no user IP — the request comes from our server, so a naive
+  integration geo-checks **our datacentre**, always passes, satisfies the endpoint and fails the
+  obligation. Nothing in the API asserts a user's location while they are absent.
+  **Done when:** eligibility is captured at consent time and stored with a timestamp, re-verified
+  on each interactive session, and automated execution **halts** for an account past a staleness
+  window; the policy is reviewed under `DG-2` rather than settled in engineering; and a test
+  asserts a stale-eligibility account is skipped with a distinct reason, never silently traded.
+- [ ] **S4-P17** **Prefer `GTD` over `GTC` for copied orders.** *(ADR-0003 §4.2.6.)* A `GTC` order rests
+  until filled or cancelled, so an unattended copy can fill long after the signal that motivated it
+  has decayed — the Polymarket analogue of the stale-fill risk `S4-P4`'s slippage bound addresses
+  elsewhere. `GTD` bounds the window, but **expires one minute before its stated time** as a
+  deliberate security buffer, so expiry arithmetic must subtract it or orders die a minute early.
+- [ ] **S4-P14** **Enrol in the Builder Program — worth doing under either `DG-9` fork.** *(ADR-0003 §4.1.)*
+  Three concrete wins independent of the custody question: (1) **gasless** — the builder relayer
+  covers wallet deployment, approvals, order execution and CTF operations, so unlike Robinhood
+  Chain this venue needs **no paymaster budget and no `S4-P8` gas cap**; (2) `GET /builder/trades`
+  / `listBuilderTrades` is a **builder-wide** fills feed covering every account we serve in one
+  call — directly useful to `reconciliation-coordinator.ts`, which otherwise polls per user;
+  (3) order attribution and leaderboard visibility. Builder API key/secret/passphrase are
+  server-side secrets — they belong in the same sealed store as everything else in `S4-3`.
+  **Done when:** a builder profile exists, the code is attached to every order **before signing**
+  (it is part of the signed struct, so attaching it afterwards silently loses attribution), and
+  reconciliation reads the builder feed rather than per-user polling where it can.
+
+### 7.2 Schema — migrations `047`–`050`
+- [ ] **S4-7** `047` `user_execution_grants` *(renamed from `user_trading_wallets` by ADR-0003)* — user_id, chain, **grant_kind** (`eip7702` | `session_key_4337` | `solana_delegate` | `polymarket_*`), **account_address** (the user's own address — we no longer mint one), encrypted_secret, key_version, **scope_policy** (the argument-level allowlist of `S4-P10`), **expires_at**, revoked_at, created_at. `expires_at` is indexed: `S4-P9` needs to find lapsing grants cheaply, and a scoped grant with no expiry is not a scoped grant.
+- [ ] **S4-8** `048` `user_balances` — chain, asset, amount, usd, fetched_at; refreshed by a poller reusing parameterized `balances.ts`.
+- [ ] **S4-9** `049` `user_execution_settings` — auto_execute, per-chain mode, min_signal_score, max_position_pct, max_daily_exposure_pct, stop_loss_pct, rebuy_cooldown. Defaults from `DEFAULT_RISK_CONFIG`; live execution tier-gated to `operator+`.
+- [ ] **S4-10** `050` tenancy key on **three** tables — `trades`, `copy_executions`, and `copy_positions` — **per the S1-B5 decision**. Legacy operator rows keep `user_id NULL`. Expand-and-contract: add → dual-write → backfill → switch reads → drop later. Never a destructive statement in the same release as the code depending on it.
+  **`copy_positions` was missing from this item and is not optional** *(found 2026-08-07 while writing `docs/plans/stage-4-design.md`; verified in source, not inferred)*. Its primary key is `(target_account, chain, token_mint)` (`packages/db/sql/028_copy_trading.sql:280`). In **live** mode each user has a distinct custodial address, so the key happens to separate users by accident. In **paper** mode `resolvePaperCopyTargetAccount(chain)` (`apps/trade-executor/src/canonical-copy.ts:16`) returns **one synthetic value per chain** — an env var or a hard-coded default, with no user dimension — so **every paper user on a chain would share a single position row**: A's buy inflates B's `confirmed_quantity`, and B's exit computes P&L against A's cost basis. This is precisely the collision ADR-0001 identified for `copy_executions`, applied to a second table and missed. Paper is the default mode for every free-tier user, so this is the common path, not an edge case.
+  **Done when:** two paper users copying the same token on the same chain hold two independent `copy_positions` rows with independent quantities and cost bases, asserted by a test that fails against the current three-column key.
+
+### 7.3 Deposit and withdraw (D11 anti-theft core)
+- [ ] **S4-11** Deposit: show the user's address with a QR code.
+- [ ] **S4-12** `POST /v1/me/trading/withdraw` — signed transfer **only to a SIWE/SIWS-verified linked auth wallet**, plus email confirmation and a per-day cap. This is what makes a full account takeover unable to exfiltrate to an attacker-controlled address.
+  **Unlisted hard prerequisite: there is no email capability at all** *(verified 2026-08-07 — no `nodemailer`/`sendgrid`/`postmark`/`resend`/SES dependency anywhere in the workspace, and no SMTP or `EMAIL_*` key in `.env.example`)*. Stage 1 §8 deferred email on the reasoning that "signup works without it". **Withdrawal does not.** Choosing a provider, wiring it, and deciding the fail-closed behaviour when a send fails (a withdrawal must not proceed on an unsent confirmation) all belong to this item and are currently invisible in it.
+  **A second gap that makes the linked-wallet control bypassable on its own:** an attacker holding a session can link *their own* wallet — `S1-20` only returns 409 when the address is already linked to a *different* user, so a fresh attacker address links cleanly and becomes a valid withdrawal destination. Mitigation needs no schema change: require `user_auth_wallets.verified_at` to be older than a cooling-off window (24h suggested) before an address is spendable, and send an immediate notification on every link.
+
+### 7.4 Fan-out
+- [ ] **S4-13** On a trade-eligible signal, enumerate eligible users: subscribed to the signal's cluster ∩ auto-execute on ∩ chain enabled ∩ tier allows ∩ balance ≥ minimum.
+- [ ] **S4-14** One BullMQ job per `(signal, user)` on the per-chain queue, idempotent under the Stage-0 identity keys as re-keyed by S1-B5.
+  **Depends on `S3-25`, which is not yet done — the per-chain queue switch is currently OFF** (`tradeQueueForChain` returns `swat-trades` for all three chains). Fanning out through one concurrency-1 queue serialises every chain's users behind the slowest venue, so a Polymarket settlement delay stalls Solana copies. `S3-25` must land before this item, not alongside it.
+- [ ] **S4-15** Sizing: reuse `calculateBalanceAwareSize` parameterized by **that user's** balance and risk percentages, so exposure is always proportional to what they deposited and agreed to.
+- [ ] **S4-16** Per-user breaker, exposure cap, and paper bankroll ride the existing account-parameterized machinery unchanged — substitute the user key for `'operator'`. **Except stop-loss and `RECONCILIATION_ACCOUNT`** — see the two verified exceptions in §1.
+  **`resolveRiskPolicy`'s cache needs bounding first.** `packages/db/src/risk-policy.ts:23` is a module-level `Map` keyed `${account}:${chain}`, TTL-checked on read but never swept — so today it holds one entry, and under fan-out it grows one entry per active user per chain and retains entries for users who have churned. That growth sits in the same process that holds the custody master key, which is the last process that should have an unbounded map keyed by user id.
+- [ ] **S4-17** Platform gates (`chain_certifications` + `LIVE_ENABLED_CHAINS`) still clamp **on top of** every user setting.
+- [ ] **S4-18** `D5` step 2 — consider the dedicated hardened custody host split at this point.
+
+**Exit gate:** paper-mode fan-out proven for multiple users on one signal with disjoint sizing; withdrawal controls tested adversarially; custody keys never observed outside trade-executor (log and API scan); **Vault Transit migration path demonstrated on staging** (seal under `env:v1`, flip the active wrapper, sweep, verify only `vault:v1` remains, and prove a paper trade still executes end to end — per `docs/runbooks/custody-vault-migration.md` §6).
+
+---
+
+## 8. Stage 5 — Billing *(SaaS Phase 4)* — may overlap Stage 4
+
+- [ ] **S5-1** `051` `subscriptions` — user_id, tier, provider `stripe|usdc`, status, current_period_end, stripe_subscription_id.
+- [ ] **S5-2** `052` `payments` — provider, amount, currency, tx_hash/invoice_id, status.
+- [ ] **S5-3** Stripe Checkout + Billing portal; `POST /v1/billing/stripe/webhook`, **signature-verified**, driving tier grants and downgrades.
+- [ ] **S5-4** USDC rail: per-user deposit reference; user pays USDC (Solana or Polygon) to the treasury with a memo/reference; a billing watcher in the indexer — reusing existing Helius/viem infrastructure — confirms the transfer and grants the tier. Lifetime tier = `tier_expires_at NULL`.
+- [ ] **S5-5** Nightly job downgrading expired tiers, 3-day grace period.
+- [ ] **S5-6** Every tier change writes the audit log; billing events alert via the existing Telegram service.
+
+**Exit gate:** end-to-end tier grant from both rails on staging (Stripe test mode; USDC on testnet or a small mainnet canary); downgrade path proven.
+
+---
+
+## 9. Stage 6 — Frontend *(SaaS Phase 6)* — progressive from Stage 1 onward
+## NOTE : IN THIS DESIGN MAINTAIN EXISTING DESIGN PATTERNS INCUDING FONTS COLOURS AND ARRANGEMENT AND ENSURE SEO OPTIMIZATION
+- [ ] **S6-1** Drop the CDN Tailwind script (`apps/web/app/layout.tsx:20`) for a build-time Tailwind pipeline; add `tailwind.config` and `postcss.config` — **neither currently exists**.
+- [ ] **S6-2** `middleware.ts` route protection. **This closes S6-B7.**
+- [ ] **S6-3** Shared `lib/api.ts` — cookie auth, no API key. Delete all 8+ `NEXT_PUBLIC_API_KEY` reads.
+- [ ] **S6-4** react-query for polling and cache.
+- [ ] **S6-5** Real signup / login / forgot-password and an onboarding flow.
+- [ ] **S6-6** Wallet connect: wagmi + RainbowKit (EVM) and `@solana/wallet-adapter` — for auth-wallet linking, one-click "track my own wallet", and USDC payment.
+- [ ] **S6-7** Stage-2 UI: My Wallets (subscribe, backfill status, activity feed), My Signals on the SSE stream; the existing `SignalsView` safety drawer carries over user-scoped.
+- [ ] **S6-8** Stage-4 UI: trading wallet page (deposit QR, balances, withdraw), risk settings — `RiskExecutionView` rebuilt per-user with their exposure against their agreed risk %, plus a personal kill switch.
+- [ ] **S6-9** `G1-M8` — replace the workspace's hard-coded local-state mode toggles with the real API-backed matrix.
+- [ ] **S6-10** Stage-5 UI: billing page. Stage-7 UI: Ultra chain manager.
+- [ ] **S6-11** Admin area: today's global pages behind `role=admin` **and** an IP allowlist.
+- [ ] **S6-12** `G7-A3` — component-wide regression suite proving no uncaught promise rejection on config-load failure.
+
+**Exit gate, per slice:** the corresponding backend stage is drivable end to end in the browser with no shared secrets and no hard-coded data.
+
+---
+
+## 10. Stage 7 — Ultra dynamic chains *(SaaS Phase 5)* — strictly last
+
+*The chain-registry refactor touches audit-hardened code everywhere. The green suite from Stage 0 is the safety net. The audit's "no new chains" scope rule expires here.*
+
+- [ ] **S7-1** `053` `chains` registry — id slug PK, kind `evm|solana|polymarket`, evm_chain_id, name, rpc_urls JSONB, native_symbol, coingecko_platform, dexscreener_id, status `builtin|custom`, added_by_user_id. Seed the three built-ins.
+- [ ] **S7-2** Change `Chain` (`packages/shared/src/types.ts:2`) from a 3-value union to a registry-validated string. **20 files** carry hard-coded chain literals (see S7-B8) across `address.ts`, `validation.ts`, `execution.ts`, `prices.ts`, `scoring.ts`, `ingestion-health.ts`, `db/wallets.ts`, `execution-config.ts`, `circuit-breaker.ts`, `risk-policy.ts`, `trading-control.ts`, `api/index.ts` and their tests.
+- [ ] **S7-3** `054` convert SQL `CHECK` constraints on chain columns to foreign keys against `chains`.
+- [ ] **S7-4** `POST /v1/me/chains` (ultra only) — resolve metadata and public RPCs from Chainlist (`chainid.network/chains.json`), **verify RPC liveness**, resolve DeFi Llama for the 5 most liquid DEXes, map the CoinGecko platform id.
+- [ ] **S7-5** Parameterize `evm.ts` base-token sets and RPC by registry row; per-user tracked wallets on custom chains flow through the same backfill queue.
+- [ ] **S7-6** Custom chains are **paper-only by default**. Live requires a configured supported router plus platform certification — the same `chain_certifications` gate as everything else.
+
+**Exit gate:** an Ultra user adds an uncatalogued EVM chain, backfills a wallet on it, and receives feed events — with every built-in-chain regression test green.
+
+---
+
+## 11. Migration number ledger
+
+Highest applied: **`046`**. Next free: **`047`**. Reserved to prevent the collision that stalled the old plan (S1-B6):
+
+| Range | Stage | Contents |
+|---|---|---|
+| `039`–`043` | 1 | users, user_sessions, user_auth_wallets, user_api_keys, audit_log |
+| `044`–`045` | 2 | user_wallet_subscriptions, user_token_watches |
+| `046` | 3 | polymarket_redemptions *(taken — see the correction below)* |
+| `047`–`050` | 4 | user_trading_wallets, user_balances, user_execution_settings, tenancy key on trades/copy_executions |
+| `051`–`052` | 5 | subscriptions, payments |
+| `053`–`056` | 7 | chains registry, chain FK conversion |
+
+**Correction (2026-08-05).** Stage 3 needed a table the ledger had not anticipated — `polymarket_redemptions` — and took `046`, which was reserved for Stage 4's `user_trading_wallets`. This is the exact failure S1-B6 created the ledger to prevent, reappearing because the ledger was not updated at the moment the file was written. Stage 4 now starts at `047`. The lesson is procedural, not arithmetic: **update this table in the same commit as the migration**, never afterwards.
+
+Whoever lands first inside a range takes the next number and updates this table. Every file idempotent; `migrate.ts` re-runs all of them on every invocation and there is no applied-migrations table.
+
+---
+
+## 12. Standing rules — apply to every stage
+
+From BUILDER-GUIDE §3. These never expire.
+
+1. **Green gate.** `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm test:integration` pass at every stage exit. No stage is done with a red suite.
+2. **Account parameterization.** All execution and risk code takes an account/scope parameter. Already satisfied across the risk surface; keep it true for new code. Idempotency keys are `(signalId, target_account)` — never `signalId` alone.
+3. **Idempotency.** Source events and executions are idempotent; **never infer or fabricate a fill.** Deterministic BullMQ job IDs everywhere.
+4. **Migrations.** Idempotent, expand-and-contract for breaking changes, destructive statements never ship in the same release as dependent code.
+5. **Tenancy (from Stage 2).** `user_id` comes from the session, never the request payload; all per-user SQL goes through `forUser(userId)`.
+6. **Money safety.** Live modes stay clamped by `LIVE_ENABLED_CHAINS` **and** `chain_certifications`. Staging never holds a custody master key or a certification row. Bounded token approvals only — never infinite allowances.
+7. **Secrets.** SOPS-encrypted env files, never git. Nothing secret in `NEXT_PUBLIC_*`.
+8. **Chain-prefixed addresses.** Every wallet/transaction address is stored `${chain}:${rawAddress}`. Bare EVM addresses throw rather than defaulting.
+
+---
+
+## 13. Decision gates
+
+| ID | Decision | Blocks | Status |
 |---|---|---|---|
-| A - Repo hygiene | A1-A3 | everything | 3/3 |
-| B - Risk, account-keyed | B1-B3 | Stage 4 fan-out | 3/3 |
-| C - Canonical lifecycle | C1-C2 | Stage 4 fan-out | 2/2 |
-| D - Database prep | DB1-DB3 | Stage 2 scale | 3/3 |
-| E - Test coverage | E1-E2 | Stage 0 exit | 2/2 |
-| F - Polymarket partials | F-PM5, F-PM7, G3-P6, M14 | Polygon certification | 4/4 |
-
-Run A first. B and C both need A2 green. D and E can run any time after A.
-
----
-
-### Batch A - Repo hygiene
-
-No business logic. Makes every later result trustworthy.
-
-#### A1. Fix the build - DONE 2026-07-30 (commit `ebbed82`)
-
-**Problem:** `packages/shared/tsconfig.tsbuildinfo` was committed while `dist/` is gitignored. On a fresh checkout `tsc` read the stale cache, emitted nothing, exited 0. Every consumer then failed to resolve `@swat/shared`.
-
-**Fix applied:** untracked the buildinfo, added `*.tsbuildinfo` to `.gitignore`, changed `turbo.json` `test`/`typecheck`/`lint` to `dependsOn: ["^build"]`.
-
-**Verified:** clean tree - typecheck 13/13, 439 tests across 13/13 packages, build 11/11.
-
-#### A2. Get one green CI run - DONE 2026-07-30
-
-**Problem:** CI had never completed. Every push died at Typecheck; Test, build, and Integration never ran. So `G7-T3` was marked done on a workflow that had never proven itself.
-
-**Result:** run `30551485104` on `main` passed all five steps in 2m10s - migrate, typecheck, test, build, and `pnpm test:integration`. The integration suite executed against CI PostgreSQL 16 + Redis 7 for the first time and passed with no changes needed.
-
-**Closes:** `G7-T3` (now evidenced by a GitHub-hosted run)
-
-#### A3. Untrack committed build artifacts - DONE 2026-07-30
-
-**Problem:** `apps/discovery/dist/` (4 files), `.turbo/cache/*`, and every `apps/*/.turbo/turbo-build.log` and `packages/*/.turbo/turbo-build.log` are tracked in git. `.gitignore` lists `.turbo/` and `dist/` but has no effect on already-tracked paths.
-
-**Fix:**
-1. `git rm -r --cached apps/discovery/dist .turbo/cache`
-2. `git rm --cached apps/*/.turbo/turbo-build.log packages/*/.turbo/turbo-build.log`
-3. Commit. Do not delete from disk.
-
-**Verified:** `git ls-files | grep -E "dist/|\.turbo/"` now returns nothing.
-**Closes:** Final Repository Gate artifact row; part of Working Rule 3.
+| `DG-1` | Solana live path | Stage 3 Solana, Stage 4 Solana live | **Resolved** — direct Jupiter signing + Jito bundles; Trojan retires after the new path certifies |
+| `DG-2` | Legal opinion on custody + autonomous trading; ToS; geo-gates | **Stage 4 launch** | **Open — non-negotiable** |
+| `DG-3` | Custody build vs buy → **grant issuance build vs buy** (ADR-0003) | Stage 4 design freeze | **Re-scoped 2026-08-09.** No longer "who custodies keys". Robinhood Chain docs name Privy/Dynamic (embedded wallets + AA) and Alchemy/ZeroDev (bundler/paymaster). Verify vendor support for **argument-level** permission policies (`S4-P10`), not merely "session keys" — the `approve`-spender hole is the acceptance test. |
+| `DG-4` | Which venues certify, in what order | Stage 3 scope | Open — pull-based on product need |
+| `DG-5` | **Tenancy key** — `user_id` column vs reusing `target_account` (S1-B5) | Stage 1 schema | **Resolved 2026-08-04** — explicit `user_id`; `target_account` stays the settlement address. `docs/adr/0001-tenancy-key.md` |
+| `DG-6` | Polymarket `takerOnly` (S0-6) | Source-trade coverage | Open |
+| `DG-7` | **Fan-out market impact** — N users executing one signal against the same book degrade each other's fills, and the aggregate may exceed the liquidity the signal-engine screen validated. | **Stage 4 architecture** | **Resolved 2026-08-07 — no cap; disclosure + user-chosen targets + per-user slippage.** `docs/plans/stage-4-design.md` §7.5. Aggregation stays rejected (one order needs one signing key ⇒ pooled funds ⇒ commingled customer money, changing what `DG-2` asks). A truncating cap was *this doc's recommendation and was overridden*: it would make the platform choose who misses a trade, including paying users. Replaced by (1) disclosure of fastest-*routing* not price, (2) a per-chain discovery dashboard with bring-your-own-address so users pick targets — **load-bearing, it prevents concentration rather than mitigating it**, (3) per-user slippage limits, which bound the tail via the user's own setting rather than platform rationing. Open mechanics: order sequence (random-per-signal recommended), stagger interval. **Order sizes must not be scaled down** — that overrides agreed risk. Aggregate ratio still measured per §7.3. |
+| `DG-9` | **Polymarket under the delegated model.** CLOB API credentials **cannot place orders** — placement needs L2 HMAC to authenticate the request *and* a per-order EIP-712 `Order` signature with a fresh `salt` from the account signer. Trading for an offline user therefore requires their signer key, which is the custodial thing ADR-0003 removes. The **Builder Program** does not close the gap: builder credentials provision Deposit Wallets and grant gasless relayer access, but "each wallet remains controlled by its signer." There is no Polymarket equivalent of a 4337 session key or a PDA delegate. | **Before `S4-P13`** | **Narrowed 2026-08-09 — non-custodial is not achievable on this venue, so the question is _whether_, not _how_.** **(a) Defer** live per-user execution — signals/tracking/paper continue, architecture stays uniform. **(b) Venue-scoped custodial exception, disclosed — recommended:** provision a Deposit Wallet per user via the Builder Program and hold that signer key under ADR-0002 in full, scoped to Polymarket only, trigger measured on Polymarket balances. Blast radius is one venue's trading float, not a portfolio — Solana and Robinhood Chain stay non-custodial — and a user can withdraw to exit our custody without leaving the product. Forks (c) user-signs and (d) Deposit-Wallet delegation are **withdrawn** (ADR-0003 §6). **Awaiting your call.** |
+| `DG-8` | **Master-key backup / rotation / disaster recovery.** | Stage 4 launch | **Largely dissolved 2026-08-09 by `docs/adr/0003-delegated-execution-authority.md`.** The gate's force came from one property — *lose the master key and every user's funds are permanently unrecoverable*. WAKE no longer holds user root keys, so key loss now degrades to a **re-onboarding inconvenience**: grants are re-issued, funds never moved. **What survives:** the **operator** Solana key (`SOLANA_PRIVATE_KEY`) and the **SOPS age key** are still live secrets, still worth **Shamir 3-of-5** in **SLIP-39** format (33 words per share at 256-bit; checksummed, so a mis-transcribed word surfaces at validation rather than on the day it is needed). `docs/runbooks/custody-key-shamir-split.md` still applies to those two. **Retired:** the USD 50,000 / 100-funded-user trigger and its enforcement (`S4-P5`), and `S4-P6` — both time-limited an exposure that no longer exists. **Returns in full only under ADR-0003 §6 fork (b)**, scoped to Polymarket. **Still open:** who holds the shares, and the annual rehearsal cadence — now Sev-2, not launch-blocking. |
 
 ---
 
-### Batch B - Risk controls, account-keyed
+## 14. Explicitly deprioritized
 
-All three touch risk sizing. Do B1 first: B2 and B3 read breaker state.
+Recorded so they are not silently forgotten, and not re-litigated each planning pass. Per BUILDER-GUIDE §6.
 
-#### B1. Re-key the circuit breaker to `(account, chain)` - DONE 2026-07-31
-
-**Problem:** State is keyed `breaker:${chain}` (`packages/db/src/circuit-breaker.ts:33`). Standing Rule 2 requires `(account, chain)`. One user's failures would trip every user's breaker.
-
-**Fix:**
-1. `packages/db/src/circuit-breaker.ts:33` - change `breakerKey(chain)` to `breakerKey(account, chain)`, returning `breaker:${account}:${chain}`.
-2. Add `account: string` as the first parameter of `readCircuitBreakerState`, `recordCircuitBreakerFailure`, `recordCircuitBreakerSuccess`, `claimCircuitBreakerProbe`.
-3. Update callers in `apps/trade-executor/src/index.ts` (imports at L14, L27, L29, L30; `executeJobWithCircuitBreaker` at L680). Pass `'operator'`.
-4. Add `packages/db/sql/033_breaker_account_key.sql`: copy each `breaker:<chain>` config row to `breaker:operator:<chain>`. Idempotent (`ON CONFLICT DO NOTHING`). **Keep the old rows** - expand-and-contract, per Standing Rule 4. Delete them in a later release.
-
-**Done when:** breaker tests pass with the account parameter; migration replays twice; old keys still present.
-**Closes:** `G5-R3` (reopened under Standing Rule 2)
-
-#### B2. Resolve risk policy from the database - DONE 2026-08-01
-
-**Problem:** `resolveRiskPolicy` does not exist. The DB value `trading.max_position_pct` is read only by `apps/api/src/attribution-routes.ts:43`, for reporting. The executor sizes from environment variables instead (`apps/trade-executor/src/index.ts:341-370`: `PAPER_MAX_POSITION_PCT`, `USDC_BALANCE_RISK_PCT`, `BASE_POSITION_*`). Changing the DB value has no effect on trading.
-
-**Fix:**
-1. Add `resolveRiskPolicy({account, chain})` to `packages/db` (new file, next to `execution-config.ts`). Return one validated object: max position pct, daily exposure pct, stop loss pct, breaker threshold.
-2. Precedence, matching `execution-config.ts`: DB `config` row, then env, then `DEFAULT_RISK_CONFIG` from `packages/shared/src/constants.ts`.
-3. Cache like `getExecutionConfigSnapshot` (30s TTL) so a kill-switch-style change lands within one TTL.
-4. Call it in `apps/trade-executor/src/index.ts` **before the claim**, in every mode - not just live.
-5. Migrate existing operator config explicitly; never overwrite it (per `H15`).
-
-**Done when:** changing `trading.max_position_pct` in the DB changes position size within 30s, in paper mode, without a restart.
-**Closes:** `G5-R1`
-
-#### B3. Enforce stop-loss - DONE 2026-08-01
-
-**Problem:** `stopLossPct: 20` exists in `DEFAULT_RISK_CONFIG` (`packages/shared/src/constants.ts:25`) and `config.risk.stop_loss_pct` (migration `001`). The API and dashboard read it. **Nothing enforces it.** No code closes a position on drawdown.
-
-**Fix:**
-1. Add `stopLossPct` to the B2 policy object so there is one source.
-2. Define the contract: evaluated against which price, on what schedule, emitting which order. The scorer already runs mark-to-market every 5 minutes (`apps/scorer/src/index.ts:171`) - reuse it rather than adding a loop.
-3. Enforce it. Emit a sell through the normal canonical path so it inherits idempotency and reconciliation.
-4. Alert on trigger through the existing alert queue.
-
-**Done when:** a paper position past the threshold produces exactly one sell, and a test proves it.
-**Closes:** `L17` (the only `NOT BUILT` row in Phase 5)
-
-**As built:**
-- `packages/db/src/stop-loss.ts` - pure threshold math (`positionDrawdownPct`, `isStopLossBreached`) plus the exactly-once claim (`claimStopLossTrigger` / `releaseStopLossTrigger`).
-- `packages/db/sql/034_stop_loss_triggers.sql` - `signal_stop_losses`, primary key `(account, signal_id)`. This row **is** the claim: the entry signal is already `status = 'executed'` by the time a stop-loss fires, so `claimSignalForExecution` can never grant it.
-- `packages/db/src/pnl-queries.ts` - `markToMarketOpenPositions` now also returns the positions it priced, so the sweep reuses that pass's prices instead of adding a second polling loop or refetching quotes.
-- `apps/scorer/src/stop-loss.ts` - `runStopLossSweep`, fully dependency-injected. Queues one full-position sell on `swat-trades` per breach and publishes `STOP_LOSS_TRIGGERED`. Releases the claim if the enqueue fails so the next sweep retries; an alert failure never undoes a queued exit.
-- `apps/trade-executor/src/index.ts` - a `stopLoss` job skips the pending claim, is exempt from `AUTO_EXECUTE` (it only reduces exposure; gating it would leave every position opened while `AUTO_EXECUTE` was off permanently unprotected), and sells `sellTokenAmount` exactly rather than a bankroll-derived size. The chain execution-mode gate, including the `'*' = 'off'` kill switch, still applies.
-
-**Tests:** `packages/db/src/stop-loss.test.ts` (13), `apps/scorer/src/stop-loss.test.ts` (8, including the repeat-sweep case that proves exactly one sell), `apps/trade-executor/src/stop-loss-job.test.ts` (5).
+| Item | Why |
+|---|---|
+| `G4-S2`, `G4-S7` (shadow execution) | Internal benchmarking tool, not on the SaaS critical path. Pick up opportunistically. *(`M14` closed 2026-08-02 regardless.)* |
+| `G7-A7`, `G7-A8`, `G7-A9`, `F-ACC4` | Single-operator KPI certification goals. Retained as optional platform-health metrics, not release gates. |
+| Final Repository Gate / Definition of Done | Re-scoped from one big-bang release to **per-stage exit gates**. Artifact and secret hygiene land in Stage 0 (S0-B2). |
+| RLS for tenant isolation | Rejected for now (D12): single DB role + pooled connections make `SET LOCAL` fragile, and cross-tenant jobs would need bypasses. May return later as a backstop on custody and balance tables only. |
 
 ---
 
-### Batch C - Canonical lifecycle
-
-#### C1. Build the reconciliation coordinator - DONE 2026-08-01
-
-**Problem:** These `packages/db/src/copy-trade-lifecycle.ts` exports have **zero runtime callers**: `claimCopyExecutionsForReconciliation`, `releaseCopyExecutionReconciliationClaim`, `requestCopyExecution`, `buildCopyExecutionClientOrderId`, `advanceSourceTradeConfirmation`. Each venue reconciles itself (Trojan, Robinhood, Polymarket), but nothing sweeps *every* ambiguous canonical execution. An execution stuck in `reconciliation_required` on a venue whose own sweeper missed it is never retried.
-
-**Fix:**
-1. Add one coordinator in `apps/trade-executor` built on `claimCopyExecutionsForReconciliation`, taking `account`.
-2. Run it at startup and on a schedule. Reuse the existing guarded loop at `apps/trade-executor/src/index.ts:1830` (`reconciliationRunning` flag) - do not add a second timer.
-3. Route each claimed execution to its venue handler; release the claim on failure via `releaseCopyExecutionReconciliationClaim`.
-4. Use `buildCopyExecutionClientOrderId` for identity instead of hand-built IDs.
-
-**Done when:** an execution left in `reconciliation_required` for any chain is picked up after restart, proven by an integration test.
-**Closes:** `F-CORE7`
-
-**As built:**
-
-- `apps/trade-executor/src/reconciliation-coordinator.ts` - `runReconciliationCoordinator`, fully dependency-injected. Claims a batch, routes each row to its chain handler, and **always** releases the claim; release failures are logged, never thrown, because a held claim is the exact stuck state this exists to prevent.
-- Venue outcomes are three-way (`resolved` / `pending` / `unresolved`), not a boolean. "Still in flight" and "I could not observe it" need different retry and escalation treatment.
-- `apps/trade-executor/src/reconciliation-venues.ts` - the per-chain handlers. Deliberately narrower than the venue sweeps: the coordinator only sees executions whose venue-side pending record is *gone*, so a handler cannot reconstruct fill quantities. It settles a proven failure, reschedules a genuine in-flight, and reports `unresolved` for a success it cannot quantify. Guessing a quantity would corrupt the position ledger permanently.
-- Polygon is the exception - its pending state lives in `trades` next to `copy_execution_id`, so `reconcilePolymarketExecution` (new, `apps/trade-executor/src/polymarket.ts`) reuses the full per-order path and persists canonical state itself.
-- `apps/trade-executor/src/trojan-runtime.ts` - exposes `readConfirmation` on the runtime so a single signature can be probed without going through the pending store.
-- Wired into the **existing** `reconcilePending` guarded loop, after the venue sweeps. No second timer; two reconciliation passes can never overlap.
-- Escalation (`RECONCILIATION_EXHAUSTED` on `REDIS_CHANNELS.alertQueue`) fires when a row burns its last attempt. It does **not** resolve the execution - deciding money-moving state without venue evidence is what must not happen automatically.
-- A chain whose live runtime is absent is counted `unsupported` and rescheduled, never resolved by a process with no way to observe it.
-- `account` is a logical operator label used in escalation, **not** a DB filter: `copy_executions.target_account` holds a chain-prefixed wallet address, so filtering it by `'operator'` would have claimed zero rows forever. Scoping is by chain, via the handler set.
-- Step 4 needed no change - every identity path already reads `execution.clientOrderId`, which `packages/db` builds with `buildCopyExecutionClientOrderId`.
-- Fixed a latent bug found while standing up the integration database: `packages/db/sql/033_breaker_account_key.sql` inserted a `created_at` column that `config` does not have (see `001_init.sql`), so migrations failed on any fresh database from `033` onward. All 34 now apply cleanly.
-
-**Tests:** `apps/trade-executor/src/reconciliation-coordinator.test.ts` (27), `tests/integration/reconciliation-coordinator.integration.test.ts` (3 - pickup-after-restart, venue-proven failure resolution, and escalate-rather-than-abandon).
-
-
-#### C2. Add the copy-eligibility policy at the claim boundary - DONE 2026-08-02
-
-**Problem:** Stale-event, position, cluster, exposure, and chain-safety checks exist, but no single explicit selected-wallet / minimum-activity policy runs at the canonical claim boundary.
-
-**Fix:** add one policy function, taking `account`, called at the claim boundary in `apps/trade-executor/src/index.ts`. Gate on selected wallet/cluster and minimum activity. Reject before the claim, not after.
-
-**Done when:** an ineligible wallet's signal is rejected with a recorded reason and never claimed.
-**Closes:** `F-CORE3`
-
-**As built:**
-
-- `apps/trade-executor/src/copy-eligibility.ts` - `enforceCopyEligibility(input, dependencies)`, taking `account`, fully dependency-injected. It is the last gate before `prepareCanonicalExecutions`.
-- The gap it closes is a **timing** one, not a missing check. The signal-engine already filters candidates on `wallets.status = 'active'`, but the nightly scorer sweep pauses underperformers - so a signal queued before the sweep and executed after it would copy a wallet we had already dropped. The facts are therefore re-read at claim time, never carried on the trade job.
-- `packages/shared/src/copy-trade-lifecycle.ts` `evaluateCopyPolicy` had **zero production callers**; this is its first one. It is not re-implemented.
-- Only the gates this boundary actually owns are fed live values (selection, event age, source activity). Liquidity and token safety belong to the signal-engine screen that must pass before a trade job exists; exposure to the rolling 24h cap immediately above the call; chain readiness to `resolveChainMode` and the `execMode === 'off'` return. Passing those satisfied keeps one question to one owner rather than two thresholds giving two answers.
-- Two gates sit outside `evaluateCopyPolicy` because it has no input for them: `source-wallet-untracked` (no `wallets` row at all) and `source-trade-count-below-minimum`. The count floor exists because the USD floor alone can be cleared by a single outsized trade from a wallet with no track record.
-- **Rejection happens before the claim, not after.** Claiming first would burn the signal's one-shot canonical claim and leave a `requested` execution row to cancel.
-- `packages/db/sql/035_copy_eligibility_policy.sql` - `copy_eligibility_rejections`, primary key `(account, signal_id)`. `signals.status = 'rejected'` alone says a signal was refused but not *which* gate refused it. Both writes are one transaction: recording without marking would let the next queue retry re-run the same rejected policy; marking without recording leaves an operator with no diagnosis. The status update only moves a signal still awaiting a claim - one already `executing` or `executed` has money behind it.
-- **Fail-closed throughout.** An unreadable facts query, an absent fact set, and a job/source chain mismatch are all rejections. A failure to persist the audit row is logged but never rescues a trade the policy already refused.
-- **Stop-loss is structurally exempt.** A stop-loss job carries no `sourceTradeId`, so it never enters this branch - an exit must stay possible after its source wallet is dropped, or every position opened before a pause would be stranded.
-- The USD floor (`COPY_MIN_SOURCE_ACTIVITY_USD`) defaults to `0`, i.e. off. Notional is strategy-dependent and a surprise floor would silently drop live signals. The trade-count floor defaults to `3`.
-
-**Tests:** `apps/trade-executor/src/copy-eligibility.test.ts` (14), `tests/integration/copy-eligibility.integration.test.ts` (4 - active wallet reaches the claim, paused wallet is rejected with a persisted reason and then cannot be claimed, thin-history wallet is rejected, and a re-run overwrites rather than duplicates the reason).
-
----
-
-### Batch D - Database prep (production decision D17)
-
-None of these exist. All are cheaper now than after Stage 2 adds per-user query volume.
-
-#### DB1. Split read and write pools - DONE 2026-08-02
-
-**Problem:** `packages/db/src/client.ts:19` exports a single `pool`. Every read and write shares it. No read replica can be added without touching every call site.
-
-**Fix:** export `readPool` and `writePool` from `client.ts`, both pointing at the same URL for now. Route `query()` reads to `readPool`. Keep `pool` as an alias so nothing breaks.
-
-**Done when:** both pools exist and the db suite passes unchanged.
-
-**As built:**
-
-- `writePool` and `readPool` are exported; `pool` is an alias of `writePool`, so the ~40 sites that call `pool.connect()` for transactions are untouched.
-- `readPool` follows `DATABASE_READ_URL`. When it is unset **or equal to `DATABASE_URL`, `readPool` *is* `writePool`** - no second connection pool is opened for a deployment with no replica, and a misconfigured replica URL pointing at the primary does not silently double the connection count.
-- **Deviation from the stated fix, deliberate:** `query()` was **not** routed to `readPool`. A count of the call sites found **92 of ~204 `query()` calls are INSERT/UPDATE/DELETE** (32 in `copy-trade-lifecycle.ts` alone). Routing `query()` at large would send every one of those to a read-only endpoint the day a replica is configured - the failure would appear only in production, only after the replica landed, and would hit the canonical execution path first. The seam is instead the new **`readQuery()`**, which a caller opts into to state that a read tolerates replica lag. `query()` keeps its existing meaning.
-- `closePool()` now closes both pools, and still exactly once each.
-
-**Tests:** `packages/db/src/client-pools.test.ts` (7), including that `query()` reaches the primary while `readQuery()` reaches the replica.
-
-#### DB2. Add a BRIN index on transaction timestamps - DONE 2026-08-02
-
-**Problem:** `transactions` is append-ordered by `timestamp` but has only btree indexes (`001_init.sql:57-58`). BRIN is far smaller for this access pattern.
-
-**Fix:** add `packages/db/sql/034_*.sql` with `CREATE INDEX IF NOT EXISTS ... USING BRIN (timestamp)`. Keep the existing btrees.
-
-**Done when:** migration replays twice cleanly.
-
-**As built:** `packages/db/sql/036_transactions_brin.sql` (not `034_*` - that number was taken by the B3 stop-loss migration). `idx_tx_timestamp_brin` on `transactions USING BRIN (timestamp)`. The existing btrees are kept: they cover `(wallet_address, timestamp DESC)` and `(target_token, timestamp DESC)`, which BRIN cannot serve - it has no per-row pointers to filter a single wallet by. Verified replaying twice and by reading the index back from `pg_indexes`.
-
-#### DB3. Enable `pg_stat_statements` - DONE 2026-08-02
-
-**Problem:** No query-level visibility. Slow queries can't be found before Stage 2 multiplies them.
-
-**Fix:** add the extension to `docker-compose.yml` postgres command and a `CREATE EXTENSION IF NOT EXISTS` migration.
-
-**Done when:** `SELECT * FROM pg_stat_statements LIMIT 1` succeeds locally.
-
-**As built:**
-
-- `docker-compose.yml` - the postgres service now runs with `shared_preload_libraries=pg_stat_statements` and `pg_stat_statements.track=all`. The library must be preloaded at **server start**; `CREATE EXTENSION` alone does nothing without it, which is why the compose change is load-bearing rather than cosmetic.
-- `packages/db/sql/037_pg_stat_statements.sql` - the `CREATE EXTENSION IF NOT EXISTS` is wrapped in a `DO` block that downgrades `insufficient_privilege` / `undefined_file` / `feature_not_supported` to a `RAISE NOTICE`. On a database without the library preloaded - a managed instance, or CI's ephemeral Postgres - an unguarded `CREATE EXTENSION` would fail this migration **and every migration after it**. Losing observability must not block a schema change.
-- **Caught while verifying:** the guard initially masked a genuine miss. The container had to be recreated (not just restarted) to pick up the new `command`, and the first verification query ran against the wrong database - `.env` carries two `DATABASE_URL` lines and the last one wins, so migrations target `swat_integration`. Confirmed there: `SELECT count(*) FROM pg_stat_statements` succeeds and `idx_tx_timestamp_brin` is present.
-
----
-
-### Batch E - Test coverage
-
-Run after B and C settle, so tests exercise the account-parameterized code rather than needing a rewrite.
-
-#### E1. Chaos checks - DONE 2026-08-02
-
-**Problem:** `G7-T5` is `NOT BUILT`. No fault injection exists.
-
-**Fix:** add suites for executor death after submit, Redis restart, PostgreSQL restart, and worker reconnection. Assert no duplicate execution and no fabricated fill.
-
-**Closes:** `G7-T5`
-
-**As built:**
-
-- `tests/integration/chaos.integration.test.ts` - eight cases across the four faults. Each fault is injected at the layer where a real outage is observable to the process, **not** by stopping containers: CI runs against service containers it cannot restart, and a suite that only passes on a developer's docker-compose is a suite nobody runs. Executor death is "stop writing mid-lifecycle, then replay the job"; a PostgreSQL restart is `pg_terminate_backend` on every backend but the issuing one; a Redis restart is `CLIENT KILL TYPE normal` plus dropping the queue's keys; worker reconnection is two workers racing one signal, and a reconnecting worker resuming its own in-flight execution.
-- Every case ends in the same assertion - one `copy_executions` row, and zero on every confirmed quantity. The `copy_positions` row itself is *expected* to exist, because the claim creates it up front as the position's lock anchor; what must stay zero is the quantities on it, which is where a fabricated fill would appear.
-- The Redis case is deliberately inverted from the others: Redis is not the safety mechanism, so losing it must lose at most the job, never the ledger. The queue name is fixture-scoped (`swat-chaos-${runId}`) and `FLUSHALL` is never used, because `REDIS_URL` may point at a shared local instance.
-- `ioredis` and `bullmq` were added to root `devDependencies` - the suite needs a real client, and CI already provides Redis 7.
-- **Found a production defect while building this, now fixed.** `packages/db/src/transaction.ts` (new) hardens the transaction helper the canonical lifecycle runs on. A terminated backend emits `'error'` on the **checked-out** client, which `attachPoolErrorHandler` does not cover - it handles idle clients only - and Node turns an unlistened `'error'` into an uncaught exception. A PostgreSQL restart during any lifecycle transaction would have taken the whole service down rather than failing one transaction. Two smaller faults came with it: `ROLLBACK` on a dead backend rejects and replaced the original error, and `release()` handed the dead socket to the next caller. `withTransaction` now listens for the duration, keeps the original error, and calls `release(true)` when the rollback proves the connection is gone. `copy-trade-lifecycle.ts` and `copy-eligibility.ts` both delegate to it; `packages/db/src/transaction.test.ts` covers all three failure modes.
-- **The defect was a class, not a site, so the fix was carried across all of it.** Fixing only the two lifecycle callers would have left the claim "a PostgreSQL restart no longer kills the process" false everywhere else, and every remaining transaction was the identical `BEGIN` / `catch { ROLLBACK; throw }` / `finally { release() }` shape. All thirteen are now `withTransaction`: `clustering-queries.ts` (both cluster rebuilds, which additionally declare the `REPEATABLE READ` they always depended on), `circuit-breaker.ts` (3), `trades.ts` (2), `ingestion-health.ts`, `polymarket.ts`, `wallets.ts` `deleteWalletCascade`, `apps/mcp-server` (both blacklist mutations), and `apps/trade-executor` `transitionPendingTrade`. `pool.connect()` now appears in exactly two non-test places: inside `withTransaction` itself, and in `migrate.ts`, which deliberately holds one client across the advisory lock for the whole migration loop and so is not a transaction helper's job. Two `mcp-server` paths that used `ROLLBACK` as an early exit before writing anything now return out of the callback, which commits a read-only transaction and drops the `FOR UPDATE` lock - the same observable effect. Test doubles for a pooled client had to grow `on`/`off`, since a real `PoolClient` is an EventEmitter and the helper now listens on it.
-
-#### E2. Production-worker integration fixtures - DONE 2026-08-02
-
-**Problem:** `G7-T2` fixtures cover the PostgreSQL lifecycle but do not run the real workers from seed through attribution.
-
-**Fix:** extend `tests/integration/` to drive actual workers per chain: seed wallet, backfill, transactions, signal, paper trade, attribution.
-
-**Closes:** `G7-T2`
-
-**As built:**
-
-- `tests/integration/pipeline.integration.test.ts` - one case per chain via `describe.each`, each carrying a seeded wallet through seed -> backfill -> signal -> paper trade -> attribution. Every stage calls the function the running service calls: `upsertWallet`, then each chain's real ingestion path (`parseCanonicalSolanaSwapEvent` + `persistSolanaSourceTrade`, `persistPolymarketSourceTrade`, `persistRobinhoodSourceTrade`), then the claim/simulate/submit/evidence lifecycle, then `persistTrade` imported from `apps/trade-executor/src/index.ts` and `markToMarketOpenPositions`.
-- `apps/signal-engine/src/index.ts` is the one service module that **cannot** be imported: it opens BullMQ queues and arms `setInterval(tick, 15_000)` at module scope, so importing it would start a second signal engine against the test database. The signal stage therefore drives `listSourceTradeSignalCandidates` -> `insertSourceTradeSignal` -> `markSourceTradeSignalDispatched`, which is exactly what its `enqueueSignal` does either side of the fan-out. The fan-out and the token-metadata lookup are skipped as network calls.
-- Attribution is asserted on a **closed** ledger, so `markToMarketOpenPositions` never reaches for a live price (`fetchTokenPriceUsd` is guarded by `openQuantity > 1e-12`). The exit leg is shaped as the executor's stop-loss exit - the entry's `signalId`, no `sourceTradeId`, no canonical execution - because that is the only production shape that closes a *signal's* ledger. A source sell is its own signal with its own execution, and `fk_trades_copy_execution_identity` correctly refuses to let a trade be attributed to a signal its execution does not belong to, so a source-sell round trip leaves two one-sided ledgers rather than one closed one.
-- **Caught while verifying:** the fixture cleanup could not see rows produced by real EVM ingestion. Its selector was `source_event_id LIKE 'it:<runId>:%'`, but `buildPolymarketSourceTradeInput` and `buildRobinhoodSourceTradeInput` set `sourceEventId` to the transaction hash, so cleanup silently matched nothing and left `source_trades` and `wallet_positions` behind. `tests/integration/helpers/lifecycle-fixture.ts` now also matches on the fixture's wallet + token for the EVM chains, whose addresses are derived from `runId` and so cannot collide; the Solana fixture keeps the prefix-only selector because it reuses three constant addresses. A second gap surfaced with the exit leg: a trade with no `source_trade_id` was invisible to the teardown and held a foreign key on the signal, so cleanup now deletes signal-attributed trades as well.
-
-
----
-
-### Stage 0 exit gate
-
-CI green on every merge; risk policy DB-resolved and enforced pre-claim; one coordinator reconciling all ambiguous executions; breaker keyed `(account, chain)`; no artifacts tracked. Infrastructure decisions D1/D2/D3/D7/D10/D15 are a parallel operational track and do not block code.
-
-### After Stage 0
-
-- **Stage 1 (auth/tenancy)** can start once A2 is green - it touches no execution code. Migrations for `users`, `user_sessions`, `user_auth_wallets`, `user_api_keys`; `apps/api/src/auth/`; audit-log table. Migration numbers collide with B1/DB2 - whoever lands second renumbers.
-- **Stage 2 (per-user tracking)** carries `G6-A2`-`G6-A10` attribution as a non-blocking parallel track.
-- **Stage 3 (venue certification)** is pull-based - certify a venue only when live money is wanted there. `DG-1` resolved: direct Jupiter signing with Jito bundles, so `F-SOL2`/`F-SOL3` retarget to that path and Trojan work (`H4`, `TROJAN_*`) retires with it. Paper mode needs none of this.
-- **Stage 4 (custody)** is hard-blocked by `DG-2` (legal opinion). No code workaround.
-- **Stages 5-7** unchanged from the Builder Guide. Stage 7's chain-registry refactor stays last.
-
-### Working today - do not rebuild
-
-All nine services build and pass tests. Ingestion, scoring, clustering, signal detection, alerting, and paper execution work end to end on all three chains. The canonical source-event and execution state machine has real runtime callers in `apps/trade-executor`. Live execution is correctly gated off by two independent controls (`LIVE_ENABLED_CHAINS` empty, zero certification rows). None of the gaps above block paper-mode operation.
-
-## Full Codebase Status Review - 2026-07-27
-
-This review inspected the current source, SQL migrations, tests, CI, runtime documentation, and live-certification records. Existing checkmarks were treated as claims to verify, not as evidence. Current focused verification passed 112 database tests and 127 trade-executor tests; both packages typechecked. Migrations `001` through `032` replayed twice on a clean temporary database and twice on the upgraded local database. A real PostgreSQL breaker probe tripped on the third failure, granted one half-open lease, rejected a concurrent probe, and reset durably. No production order was submitted and no chain certification is inferred from tests.
-
-Current disposition:
-
-- **Complete implementation: 175 rows.** This includes the newly validated canonical lifecycle, Polymarket reconciliation, shadow isolation, persisted breaker/exposure controls, and latency reporting rows below.
-- **Partial implementation: 37 rows.** Named implementation gaps are `F-SOL2`, `F-SOL3`, `G1-S1`, `G2-R3`, `G2-R4`, `G2-R5`, `F-RH3`, `F-RH5`, `F-RH6`, `F-PM8`, `G3-P10`, `G4-S2`, `G4-S7`, `G5-R1`, `G5-R7`, `G6-A6`, `G6-A7`, `G6-A9`, `G6-A10`, `G7-T1`, `G7-A1`, `G7-A3`, `G7-A5`, and `G7-A6`; working-rule and final-gate gaps are also marked inline. (`F-PM5`, `F-PM7`, and `M14` closed 2026-08-02 by batch F; `G3-P6` closed the same day as venue-limited - the predictions CLOB order contract has no client-order-ID field.)
-- **Not built: 0 rows.** (`G7-T5` closed 2026-08-02 by task E1 and `G7-T2` by task E2; `L17` closed 2026-08-01 by task B3; generated-artifact cleanup closed 2026-07-30 by task A3.)
-- **External evidence required: 14 rows.** These cover authenticated round trips, eligibility, canaries, certification records, production acceptance, measured latency/expectancy/completeness targets, environment funding checks, and manual reconciliation.
-
-## Working Rules
-
-- [x] Record the initial baseline: 11/11 workspace typechecks, 31/31 tests, and a production build passed on 2026-07-15.
-- [x] Keep Solana, Polygon/Polymarket, and Robinhood ingestion and paper paths available throughout remediation.
-- [x] Keep Polygon and Robinhood live execution clamped to paper until their certification gates pass.
-- [x] Treat source events and submitted executions as idempotent; never infer or fabricate a fill.
-- [x] Use least-privilege, bounded token approvals; never grant infinite ERC-20 allowances.
-- [ ] Run focused tests after each item group and update this file immediately after validation. **PARTIAL** - focused suites are current, but this tracker was not updated immediately after every prior batch.
-- [ ] Run full `pnpm typecheck`, `pnpm test`, and `pnpm build` at every phase gate. **PARTIAL** - all three now pass from a clean tree as of 2026-07-30 (typecheck 13/13, 439 tests across 13/13 packages, build 11/11) after the A1 build fix. Prior recorded gates were unreliable: the committed `tsbuildinfo` meant a fresh checkout emitted no build output while `tsc` exited 0. One GitHub-hosted CI run must still go green (A2), and the final post-audit repository gate remains open.
-- [ ] Review each phase diff for secrets, generated artifacts, unrelated changes, and unchecked failure paths. **PARTIAL** - no secrets or private keys are tracked (verified 2026-07-30), but `apps/discovery/dist/`, `.turbo/cache/*`, and the per-package `.turbo/turbo-build.log` files are **committed**, not merely dirty; `.gitignore` cannot affect tracked paths. See task A3.
-
-Migration numbering is authoritative from `packages/db/sql/`: `015_audit_schema_repairs.sql` is followed by `016_timestamp_tz.sql`, `017_execution_config.sql`, `018_shadow_trades.sql`, and subsequent ordered migrations.
-
-Scope boundaries: do not add new chains, general Polygon DEX indexing, new signal patterns, automatic threshold tuning, or hand-written Polymarket signing during this plan. Complete and measure the existing three-chain loops first.
-
-## Independent Validation Review - 2026-07-24
-
-Items reopened by this review are **Problematic**: code, tests, runtime state, or required evidence does not support the prior completion mark. Historical verification notes remain for traceability but do not override the current repository state.
-
-Historical review result: 114 completion marks were reopened on 2026-07-24. The 2026-07-27 status ledger above supersedes those counts and the then-current implementation descriptions below.
-
-Validated after review:
-
-- 2026-07-24: **C-T1, C-T2, C-T3, L5, G1-M2, and G1-M6 / F-CORE8**. Live mode now requires both `LIVE_ENABLED_CHAINS` and a non-expired reviewed record in `chain_certifications`; no certifications are seeded. Mode values require exact lowercase input. Focused shared tests passed 46/46, execution/certification database tests passed 11/11, database typecheck and affected builds passed, migration `024_chain_certifications.sql` replayed twice, and rollback-only PostgreSQL probes rejected evidence-free certification and recognized valid reviewed evidence. The live database retained zero certification rows and resolved all chains to paper.
-- 2026-07-24: **L12**. Filled non-shadow trades are processed chronologically with average-cost accounting. Partial reductions persist separate realized and unrealized P&L, closed positions require no market quote, and oversells fail closed. P&L tests passed 16/16, the database suite passed 48/48, database typecheck/build passed, migration `025_signal_pnl_components.sql` replayed twice, and a cleaned PostgreSQL probe persisted total/realized/unrealized P&L of `32/32/0` for a multi-sale closed position.
-- 2026-07-24: **L14 and L18**. Migration `016_timestamp_tz.sql` now converts only `TIMESTAMP WITHOUT TIME ZONE`, leaves `TIMESTAMPTZ` unchanged, and raises on missing or unexpected columns. Migration `023_copy_trade_lifecycle.sql` no longer owns a nested transaction. Migration contract tests passed 2/2, database typecheck passed, the full migration set replayed twice without transaction warnings, and a rollback-only `America/New_York` probe preserved the same epoch through two timestamp-migration executions.
-- 2026-07-24: **L30**. `start.sh` now accepts an empty argument safely, validates options, tracks the exact Turbo process in a PID file, and shuts it down without broad `pkill`. Compose bind hosts and ports are configurable, and the web launcher uses dedicated `WEB_BIND_HOST`/`WEB_PORT` values instead of the API `PORT`. Shell syntax/help/error checks passed, Compose rendered custom ports `55432` and `56379`, invalid web ports failed closed, and Next.js reached ready state on temporary port `3017` before a clean interrupt.
-- 2026-07-25: **L15**. Shared chain resolution now rejects raw EVM values without an explicit chain and EVM-shaped values labelled Solana. Queue payloads and database wallet, token, transaction, signal, trade, and relationship write boundaries resolve and canonicalize chain values before persistence. Shared regressions passed 48/48, database tests passed 54/54, affected typechecks and the database build passed, and a cleaned PostgreSQL probe rejected ambiguous/misclassified writes while persisting prefixed Polygon wallet, token, and signal values in lowercase with `chain = 'polygon'`. A runtime scan found no existing `solana:0x...` rows in the affected tables.
-- 2026-07-25: **L29**. `.env.example` is now the single exhaustive environment reference; README and deployment guidance link to it and document exact mode precedence and certification gates without duplicating a stale table. A source-derived inventory currently matches all 87 runtime, indirect database, Compose, and launcher keys with no omissions or duplicates. Default-value loading, shell syntax, Compose rendering, and stale-claim scans passed; the nine execution-mode resolution tests also passed. The reference now uses runtime defaults including auto-execute score 85, documents all four modes and per-chain overrides, supplies non-empty RPC defaults, and no longer exports the unused `STOP_LOSS_PCT` variable.
-- 2026-07-25: **H1**. Static and dynamic sizing now share a floor-based cap against the currently available balance; rounding cannot produce an amount above that balance. Solana live sizing reads the exact configured Trojan wallet twice through confirmed Helius RPC and retains `SOLANA_GAS_RESERVE_SOL`; Polymarket reads collateral for buys and outcome shares for sells, then caps again before order creation; Robinhood caps exact wei immediately before simulation and retains `ROBINHOOD_GAS_RESERVE_ETH`. Persisted rows use the actual capped amount, paper modes use the virtual bankroll, and unsupported Solana/Robinhood sells fail before claiming. Executor tests passed 32/32, including a `0.25 -> 0.19 SOL`, `100 -> 5` Polymarket USD, `8 -> 3.25` share, and `0.5 -> 0.002 ETH` cap. Workspace tests, typecheck, and production build each passed 11/11 tasks; no live order was submitted during verification.
-- 2026-07-25: **G0-D11**. The production backfill processor is now directly exercised by an isolated BullMQ/PostgreSQL acceptance runner. It enqueues each production job twice, proves job-ID deduplication, waits for the real worker, and verifies one correctly chain-qualified transaction for Solana, Polygon, and Robinhood Chain. The runner closes the worker, force-obliterates only its run-specific queue, deletes fixtures, asserts zero fixture rows, and aggregates cleanup failures instead of suppressing them. `pnpm acceptance:g0-d11` passed, an independent post-run probe found zero matching Redis keys and zero transaction, wallet, or token fixtures, and indexer tests passed 38/38 with typecheck and build green.
-- 2026-07-25: **G0-H5**. The dedicated Health view and default Workspace ingestion widget now poll the authenticated `/v1/health/ingestion` endpoint every 30 seconds. Both fail closed for missing chains, malformed payloads, loading failures, stale data, and explicit `empty` state; no-data chains render as `No data` / `NO DATA`, never healthy. Fabricated chain rows, source health, timeline, uptime, and aggregate telemetry were removed from the Health view and replaced with API-derived lag, counters, ratios, timestamps, evidence, and CSV export. The live endpoint returned HTTP 200 with all three chains explicitly `empty`; web typecheck and production build passed, and `/workspace` returned HTTP 200 from the local dev server.
-- 2026-07-26: **F-PM1, F-PM2 / L22, G3-P1, and G3-P2**. Polymarket ingestion now reads only confirmed Data API `/trades`, validates the source transaction hash, and persists the exact `proxyWallet`, full decimal `asset` token ID, condition ID, side, size, price, and timestamp in immutable `polymarket_trades` rows before deriving canonical Polygon transactions. Migration `026_polymarket_context.sql` adds normalized full-token outcome mappings and complete market context including exact outcome, question, tick size, neg-risk, end date, accepting-orders flag, market state, and resolution status; incomplete Gamma/CLOB mappings fail closed and no fallback token or truncated-symbol lookup remains. Polygon signal generation now refuses missing context and includes every required field. Certification assertions require non-empty fixtures, 100% context coverage, and bounded lag. The migration replayed twice; `pnpm acceptance:polymarket-context` proved one deduplicated source trade, one derived transaction, two outcomes, 100% coverage, and 30-second lag, then an independent probe confirmed zero fixtures. Database tests passed 57/57, indexer tests 54/54, signal tests 2/2, and workspace tests, typecheck, and production build each passed all 11 tasks.
-- 2026-07-26: **Wave 1 controller validation: G1-M8, G1-M9, F-CORE1, F-SOL1, F-RH1, G2-R2, F-RH2, G2-R6-G2-R11 except proportional-exit certification, G5-R5, and G6-A2-G6-A4**. Production Solana, reviewed Robinhood receipt, and confirmed Polymarket ingestion paths persist immutable canonical source events and propagate retryable failures. Robinhood startup verifies the configured chain and contracts, exercises configured fee tiers, clamps failed readiness, supports typed BUY/SELL submission and receipt/restart reconciliation, and preserves exact quantities and unknown legacy fee tiers. Attribution now keys outcomes by signal, chain, and execution mode, preserves unknown P&L as `NULL`, persists eligible-only expectancy snapshots, and exposes database-backed reporting. Focused validation passed 97 indexer tests, 90 executor tests, 17 database attribution tests, 13 scorer/API/web tests, and five PostgreSQL lifecycle integration tests. The combined `pnpm test`, `pnpm typecheck`, and `pnpm build` gates each passed all 11 workspace tasks; the integration suite passed 5/5. No live order or certification was inferred from these tests.
-- 2026-07-26: **Alert and CI validation: G2-R1, G6-A5, and G7-T3**. Alert service now validates and bridges Robinhood/system and nightly expectancy publications from `swat:alert:queue` into the durable `swat-alerts` BullMQ worker, formats Telegram-safe messages, deduplicates publications, retries delivery failures, rejects malformed payloads, and closes bridge resources cleanly. Missing Telegram configuration now fails delivery instead of marking a signal alerted. Alert tests passed 13/13 with typecheck and build green. API, web, and MCP placeholder tests were replaced by 5, 3, and 4 real Vitest cases. The reviewed CI workflow provisions PostgreSQL 16 and Redis 7, applies migrations, clamps execution to paper, and runs typecheck, tests, build, and `pnpm test:integration`; the three package suites and five-test local integration command passed. A real Telegram credential smoke test and GitHub-hosted workflow run remain release evidence, not inferred certification.
-
-| Problematic area | Affected checklist items | Evidence | Recommended approach |
-|---|---|---|---|
-| Canonical execution lifecycle | - | Source, signal, execution, confirmed-position linkage, proportional exits, replay safety, and transition persistence are implemented. Every due ambiguous execution now runs through one startup/periodic reconciliation coordinator (C1), and one copy-eligibility policy taking `account` now gates the canonical claim boundary and records why a signal was refused (C2). | Closed. |
-| Robinhood execution and certification | G2-R3-G2-R5, F-RH3, F-RH5-F-RH6, G2-R12-G2-R13 | Typed execution, proportional exits, receipts, actual quantities, timeout/restart reconciliation, exact caps, and ops clamping exist. Reviewed metrics, fee-on-transfer coverage, full route fixtures, canaries, and certification remain open. | Complete reviewed samples and the missing fixture cases, remove premature operator allowlisting, then collect canary/restart evidence and independent review. |
-| Polymarket execution and certification | G3-P3, G3-P5-G3-P6, F-PM5, F-PM7-F-PM8, G3-P10-G3-P12 | Official SDK/Polygon/startup attestation, pUSD/onramp readiness, bounded approvals, depth walking, proportional FAK sells, confirmed partials, fees, and delayed reconciliation are implemented. Atomic market-state refresh, distinct mined state, complete neg-risk/redemption tests, authenticated canaries, and review remain open. | Finish the remaining state/test contracts, then collect authenticated account, order, cancellation, duplicate, balance, eligibility, and reviewer evidence. |
-| Shadow execution | M14, G4-S2, G4-S7 | Live-first independent shadow persistence, fill-based cost reporting, isolation, and exclusions are implemented. Polygon paper pricing still uses a top-of-book price instead of a size-aware depth walk; same-observation snapshots and simultaneous three-chain acceptance are also open. | Reuse the depth planner for Polygon simulation, persist one immutable pre-submit quote snapshot per mode pair, and run a mixed-mode three-chain acceptance fixture. |
-| Risk enforcement | G5-R7 | Balance caps, rolling exposure, deduplicated alerts, gas reserves, kill switch, and account-keyed persisted breaker/probe leasing are implemented. **G5-R1 and L17 closed 2026-08-01** - the executor now sizes from `resolveRiskPolicy` and the scorer enforces stop-loss. Multi-process restart/isolation acceptance remains open. | Add process-level risk restart/isolation tests (task E2). |
-| Attribution and cross-chain scoring | G6-A6-G6-A7, G6-A9-G6-A10 | Resolution-aware wallet math, chain/mode outcomes, expectancy, persisted reports, dashboard data, alerts, and latency percentiles exist. Redemption, Polygon-weight golden coverage, immutable threshold justification, and per-score chain evidence remain open. | Add redemption settlement, golden scoring vectors, database-linked threshold approvals, and API/dashboard chain-evidence breakdowns. |
-| Automated and release acceptance | G7-T1-G7-T2, G7-T5, F-ACC1-F-ACC4, G7-A1-G7-A9, final gates | Real package/unit/integration tests and CI infrastructure exist. Per-chain production-worker pipelines (`G7-T2`) and infrastructure chaos checks (`G7-T5`) landed 2026-08-02. External KPI, certification, and manual acceptance evidence remain absent. | Complete the inline partial test gaps, run simultaneous production-worker pipelines, and collect measured reviewer-approved evidence. |
-
-## Phase 0 - Finish the Foundation
-
-**Exit gate:** all remaining audit defects that can corrupt data, expose an unsafe API, lose jobs, or invalidate scoring are fixed. Audit items explicitly owned by later execution phases remain open until those phases.
-
-### Live-Money and Data Repairs
-
-- [x] **C-T1** Disable unsafe Robinhood live swaps until verified router execution exists.
-- [x] **C-T2** Disable fabricated Polymarket fills until signed CLOB execution exists.
-- [x] **C-T3** Parse `TRADING_MODE` strictly and require exact live opt-in.
-- [x] **C-I1** Add and use `polymarket_markets.updated_at`.
-- [x] **C-I2** Authenticate and parse Helius webhooks against supported payloads.
-- [x] **C-I3** Strip storage prefixes before Solana and Robinhood backfills.
-- [x] **C-I4** Store Polymarket condition IDs unprefixed and preserve foreign keys.
-- [x] **C-S1** Strip prefixes before chain RPC/API safety checks and remain fail-closed.
-- [x] **C-S2** Require three distinct wallets for snipe detection.
-- [x] **C-S3** Deduplicate accumulation signals across the seven-day window.
-- [x] **H1** Never size above the available chain balance.
-- [x] **H2** Use actual token decimals for Jupiter paper fills.
-- [x] **H3** Use a chain-correct native price for Robinhood trades.
-- [x] **H4** Add Trojan timeout, idempotency, and bounded retry behavior.
-- [x] **H5** Release failed execution claims to `pending`.
-- [x] **H6** Classify token-to-USDC and token-to-token exits as sells.
-- [x] **H7** Convert Polymarket Unix seconds to JavaScript milliseconds.
-- [x] **H8** Store funding relationships with chain-prefixed addresses.
-- [x] **H9** Upsert SOL before persisting sell transactions.
-- [x] **H10** Upsert the EVM native-token placeholder before native swaps.
-- [x] **H11** Store EVM raw amounts beyond PostgreSQL `BIGINT`.
-- [x] **H12** Make USD backfill prefix-aware.
-- [x] **H13** Persist cluster performance during scoring.
-- [x] **H14** Normalize blacklist comparisons.
-- [x] **H15** Stop rerun migrations from overwriting operator configuration.
-- [x] **H17** Prefix wallet history and holdings queries correctly.
-- [x] **H18** Delete wallets and dependent records transactionally.
-- [x] **H19** Prefix token mints in inline discovery queries.
-- [x] **M7** Reject manual execution without a token and preserve cluster tier.
-- [x] **M8** Propagate post-fill persistence failures for reconciliation.
-- [x] **M10** Make the current circuit breaker time-correct and delay blocked work.
-- [x] **M11** Reject unknown live-execution chains.
-- [x] **M15** Calculate holder concentration against total supply.
-- [x] **M16** Preserve wallets with open positions during pruning.
-- [x] **M17** Isolate scorer post-processing stages.
-- [x] **M18** Await every signal detector before releasing the tick guard.
-- [x] **M19** Isolate queue failures per detected signal.
-- [x] **M22** Preserve chain identity for discovered counterparties.
-- [x] **M28** Normalize EVM address casing on every write path.
-- [x] **M29** Reject mismatched and nested chain prefixes.
-- [x] **M30** Enforce prefixed asset identifiers when inserting trades.
-- [x] **M32** Claim only `pending` signals.
-- [x] **M33** Chunk EVM scans, fix metadata/pricing inputs, and remove fabricated safety flags.
-- [x] **M35** Stop migration 010 from rebuilding the dedupe index on every run.
-- [x] **L1** Reject invalid signal scores and auto-execute thresholds.
-- [x] **L4** Persist truthful slippage values for each execution path.
-- [x] **L5** Keep Robinhood live disabled while chain/router assumptions are unverified.
-- [x] **L6** Exclude null target assets from signal detection.
-- [x] **L8** Determine the safety-check chain from the prefixed asset.
-- [x] **L13** Align signal status types with the real lifecycle.
-- [x] **L21** Exclude EVM self-transfers and ERC-721 transfers from swap inference.
-
-### Discovery and Backfill
-
-- [x] **G0-D1 / M20** Honor token-seeded discovery payloads and remove duplicate generic runs.
-- [x] **G0-D2 / M21** After every discovered-wallet upsert, enqueue `swat-backfill-wallet` with raw address, resolved chain, and deterministic `backfill-${chain}-${rawAddress}` job ID.
-- [x] **G0-D3 / M23** Route scheduled discovery through the same in-flight guard as manual runs.
-- [x] **G0-D4 / M34** Preserve the existing wallet discovery method during webhook and discovery upserts.
-- [x] **G0-D5 / H24** Page starter-pack signatures back to the actual token launch window.
-- [x] **G0-D6 / M38** Search enough history to find starter-pack funding transactions.
-- [x] **G0-D7 / M39** Compute starter-pack win rate from complete wins and losses.
-- [x] **G0-D8 / L23** Accept chain-aware seed wallets and clamp Helius signature limits.
-- [x] **G0-D9 / L27** Exclude pool/program addresses and require valid token-age metadata.
-- [x] **G0-D10 / L28** Resolve scorer fixture paths robustly and validate input type and chain.
-- [x] **G0-D11** Dev acceptance: insert one discovered wallet per supported chain, observe one deduplicated backfill job, and verify resulting transaction rows.
-
-Verification on 2026-07-16: discovery runner tests 3/3, shared queue/address tests 16/16, indexer tests 27/27, PostgreSQL upsert preservation and cleanup confirmed, workspace typecheck 11/11, workspace test tasks 11/11 (64 Vitest assertions), and production build 11/11.
-
-Verification on 2026-07-19: launch/funder pagination now proves the oldest boundary or fails closed at the cap, including an exact-cap probe; starter-pack outcomes include completed wins and losses; startup and file-based wallet seeds preserve explicit chain identity and reject ambiguous EVM input; Helius signature limits are bounded to 1-1000. Focused shared tests 22/22, indexer tests 30/30, scorer tests 4/4, indexer/scorer/tool typechecks, workspace typecheck 11/11 plus the standalone tool, workspace test tasks 11/11 (77 Vitest assertions), and production build 11/11 all passed.
-
-Verification on 2026-07-25: `pnpm acceptance:g0-d11` used a run-specific queue and the production processor to deduplicate two enqueues for each chain, complete one Solana, Polygon, and Robinhood Chain backfill, and verify all three transaction rows. Cleanup force-obliterated the isolated queue and asserted zero fixture rows before closing PostgreSQL. An independent probe confirmed zero `*acceptance-g0d11*` Redis keys and zero G0-D11 transaction, wallet, and token fixtures. Indexer tests passed 38/38; indexer typecheck and build passed.
-
-### Ingestion Health
-
-- [x] **G0-H1** Add an idempotent `ingestion_health` schema keyed by chain with last event/batch times and inserted, skipped, and failed counters.
-- [x] **G0-H2** Update health atomically from Solana backfill/webhook, Polymarket Data API, and Robinhood EVM batches, including failed batches.
-- [x] **G0-H3** Add `GET /v1/health/ingestion` with per-chain lag, 24-hour counts, and insert/skip ratio.
-- [x] **G0-H4** Send a distinct Telegram ops alert when lag exceeds Solana 5 minutes, Polygon 10 minutes, or Robinhood 15 minutes; target Polygon ingestion lag below 5 minutes, deduplicate alerts, and send recovery notices.
-- [x] **G0-H5** Expose ingestion state on the dashboard without treating an empty dataset as healthy.
-- [x] **G0-H6** Add tests for counter updates, lag calculation, threshold boundaries, alert dedupe, and recovery.
-
-Verification completed 2026-07-20: all migrations through `015_audit_schema_repairs.sql` replayed successfully twice; a temporary PostgreSQL batch produced exact 24-hour deltas of 2 inserted, 1 skipped, and 1 failed before cleanup restored prior state. A live alert-state probe confirmed one stale alert, deduplication, one recovery, and final `healthy` state before restoring the prior row; missing Telegram credentials now release the reservation instead of recording false delivery. The authenticated ingestion-health API returned Solana, Polygon, and Robinhood Chain with correct thresholds and classified missing events as `empty`. Workspace tests passed 11/11 tasks with 90 Vitest assertions, including shared 25/25, database 11/11, indexer 34/34, and alert-service 3/3; workspace typecheck passed 11/11 plus root tools, and production build passed 11/11.
-
-Verification completed 2026-07-25: both dashboard ingestion surfaces now consume `/v1/health/ingestion`, preserve one fail-closed row per supported chain, and refresh every 30 seconds. The current authenticated response returned HTTP 200 and classified Solana, Polygon, and Robinhood Chain as `empty`; the UI renders that state as no data and treats API failures as unavailable. Web typecheck and production build passed, `/workspace` returned HTTP 200, and a stale-value scan found none of the removed mock ingestion metrics.
-
-### Data, Scoring, and Infrastructure
-
-- [x] **M24** Add PostgreSQL pool error handling, connection/query timeouts, and shutdown behavior.
-
-Verification on 2026-07-20: database runtime tests passed 6/6 for bounded configuration, idle-client error handling, idempotent close, clean shutdown, close failure, and shutdown timeout. Migrations replayed successfully through `015_audit_schema_repairs.sql`; a real `pg_sleep(2)` query under `DB_QUERY_TIMEOUT_MS=1000` failed with `Query read timeout` after 1.09 seconds, and a connected child process closed the pool and exited 0 on `SIGINT`. Database tests passed 17/17; workspace typecheck passed 11/11 plus root tools, workspace tests passed 11/11 tasks with 96 Vitest assertions, and production build passed 11/11.
-
-- [x] **M25** Serialize logger arguments safely when values are circular or non-JSON.
-
-Verification completed 2026-07-22: focused logger tests passed 4/4 for circular references, `BigInt`, errors, functions, getters/custom inspectors, revoked proxies, truncation, and safe console-to-Redis publication. On 2026-07-20, shared tests passed 29/29, workspace typecheck passed 11/11 plus root tools, and workspace tests passed 11/11 tasks with 100 Vitest assertions. The current production build passed 11/11 on 2026-07-22, including all nine Next.js routes.
-
-- [x] **M26** Filter DexScreener results by the requested chain before selecting liquidity.
-
-Verification completed 2026-07-22: shared pricing now maps `solana -> solana`, `polygon -> polygon`, and `robinhood-chain -> robinhood`, filters before selecting the highest-liquidity pair, and applies the same selector to price, metadata, and signal-safety liquidity lookups. Bare Solana mints remain supported while raw EVM addresses require an explicit chain. Six mocked-fetch regressions cover wrong-chain liquidity collisions, missing chain matches, metadata selection, Robinhood filtering, Solana compatibility, and ambiguous EVM input. Shared tests passed 35/35; affected package builds and typechecks passed; workspace tests passed 11/11 tasks with 106 Vitest assertions; workspace typecheck passed 11/11 plus root tools; and the production build passed 11/11, including all nine Next.js routes.
-
-- [x] **M27** Use a verified Robinhood Chain price source instead of Solana CoinGecko routes.
-
-Verification completed 2026-07-22: canonical Robinhood stock tokens now resolve through Robinhood's official asset registry and live bid/ask API, requiring an active chain-4663 deployment, a matching contract, an unhalted quote no older than two minutes, and multiplier-adjusted midpoint pricing. The asset registry is cached for five minutes. Non-stock tokens fall back only to chain-filtered DexScreener; Robinhood pricing now returns `null` when neither source succeeds and never routes through CoinGecko's Solana platform. Live read-only probes of the registry and CRWD quote returned HTTP 200 with the expected schema, and the built helper returned a positive multiplier-adjusted price. Shared tests passed 36/36; workspace tests passed 11/11 tasks with 107 Vitest assertions; workspace typecheck passed 11/11 plus root tools; and the uncached production build passed 11/11, including all nine Next.js routes.
-
-- [x] **M31** Treat only completed sell quantities as closing a position.
-
-Verification completed 2026-07-22: open-position mark-to-market now excludes a position only when a matching sell has `status = 'filled'`; pending, failed, rejected, or otherwise incomplete sell attempts no longer hide the holding. A query-contract regression locks both filled-buy and filled-sell requirements. Database tests passed 18/18. A rollback-only PostgreSQL transaction confirmed that a failed sell leaves the filled buy open and changing that sell to filled closes it, with no verification rows retained. Workspace tests passed 11/11 tasks with 108 Vitest assertions; workspace typecheck passed 11/11 plus root tools; and the production build passed 11/11, including all nine Next.js routes.
-
-- [x] **L9** Normalize PostgreSQL numeric strings at application boundaries.
-
-Verification completed 2026-07-22: node-postgres now installs precision-aware parsers for `INT8` and `NUMERIC`. Safe counts, scores, percentages, USD metrics, slots, and ordinary aggregates arrive as JavaScript numbers, while unsafe integers and decimals with more than 15 significant digits remain exact strings. Explicit `::text` contracts and large on-chain quantities therefore retain precision instead of being blindly passed through `Number`. Parser tests cover safe, unsafe, fractional, malformed, and registration cases; database tests passed 22/22. A live PostgreSQL probe confirmed signal-style metrics and all `getWalletStats` counts are numbers, while unsafe `BIGINT`, high-precision decimal, and `10^18` exact amounts remain strings. Workspace tests passed 11/11 tasks with 112 Vitest assertions; workspace typecheck passed 11/11 plus root tools; and the production build passed 11/11, including all nine Next.js routes.
-
-- [x] **L10** Remove stale cluster memberships during cluster regeneration.
-- [x] **L11** Calculate early-entry ratios only when launch metadata exists.
-- [x] **L12** Apply quantity-aware cost basis and realized P&L to partial sells.
-- [x] **L14** Standardize UTC timestamp parsing, storage, and comparison semantics.
-- [x] **L15** Infer supported EVM chains where unambiguous; never silently classify unknown EVM data as Solana.
-- [x] **L18** Serialize migrations with an advisory lock and per-file transactions.
-- [x] **L19** Limit signal dedupe checks to the intended active lifecycle states.
-- [x] **L20** Handle missing block times without inventing launch-window order.
-- [x] **L29** Reconcile all environment-variable documentation with runtime names and defaults.
-- [x] **L30** Make scripts and Compose honor configured hosts, ports, and service lifecycle.
-- [x] **L31** Remove the unused `SOL_MINT` price constant.
-
-### API, Web, Alerts, and MCP
-
-- [x] **H16** Authenticate SSE without URL-secret leakage and call Fastify `reply.hijack()`.
-- [x] **H20** Guard nullable trade token mints on the performance page.
-- [x] **H21** Query real wallet score columns and resolve prefixed wallet addresses in MCP.
-- [x] **H22** Query the actual signal/trade lifecycle and schema in MCP performance.
-- [x] **H23** Escape every dynamic Telegram HTML value.
-- [x] **M1** Align wallet dashboard fields with the API response contract.
-- [x] **M2** Normalize nullable performance aggregates to zero.
-- [x] **M3** Use one documented web API-key configuration path.
-- [x] **M4** Strip storage prefixes from display text and external links.
-- [x] **M5** Validate route params/bodies and return stable public errors without database details.
-- [x] **M6** Resolve token lookups through prefixed storage keys.
-- [x] **M12** Generate chain-correct, unprefixed explorer and market links.
-- [x] **M13** Add error listeners to every BullMQ worker and queue event stream.
-- [x] **M36** Track MCP SSE transports per session and clean them up on disconnect.
-- [x] **M37** Forward rejected async Express handlers to error middleware.
-- [x] **L2** Respect Telegram `retry_after`, bound retries, and enforce message limits.
-- [x] **L3** Set alert state only after successful delivery or roll back the claim.
-- [x] **L24** Stabilize React keys, malformed-log handling, retry cleanup, and wallet error state.
-- [x] **L25** Correct API ignore/log parsing behavior and route ordering.
-- [x] **L26** Validate MCP limits and make blacklist mutation concurrency-safe.
-
-## Phase 1 - Per-Chain Control and Canonical Execution
-
-**Depends on:** Phase 0 exit gate.
-
-**Exit gate:** one executor safely handles independent `off`, `paper`, `live`, and `live+shadow` modes, while a canonical event/position lifecycle prevents duplicate or unsupported execution.
-
-### Execution Mode Matrix
-
-- [x] **G1-M1** Add shared `ExecutionMode` and `ExecutionConfig` types for all three chains.
-- [x] **G1-M2** Implement a fail-closed parser for `off|paper|live|live+shadow`, including tested legacy `TRADING_MODE` mapping.
-- [x] **G1-M3** Add idempotent, seed-once migration `017_execution_config.sql` with paper defaults.
-- [x] **G1-M4** Resolve mode per job from DB config cached for at most 30 seconds, then chain env fallback, legacy mode, and finally paper.
-- [x] **G1-M5** In `off`, skip without claiming; in `paper`, simulate; in `live`, route to a certified executor; in `live+shadow`, persist live and shadow independently.
-- [x] **G1-M6 / F-CORE8** Enforce `LIVE_ENABLED_CHAINS`; clamp uncertified live modes to paper with an explicit warning and reason.
-- [x] **G1-M7** Add `GET /v1/trading/status` returning requested mode, effective mode, certification, and clamp reason per chain.
-- [x] **G1-M8** Add dashboard controls/status for the exact effective matrix and an all-chain emergency-off action.
-- [x] **G1-M9** Test parser failures, precedence, cache expiry, clamp logic, hot changes, and concurrent jobs on different chains.
-
-### Canonical Copy-Trade Lifecycle
-
-- [x] **F-CORE1** Persist immutable source-trade events keyed by chain plus transaction hash/order ID, with wallet, asset, side, quantity, price, timestamp, and confirmation state.
-- [x] **F-CORE2** Track per-wallet, per-asset positions across entries, transfers, partial reductions, full exits, duplicates, and out-of-order events.
-- [x] **F-CORE3** Add selected-wallet/cluster copy policy with stale-event, minimum activity, liquidity, exposure, and chain-native safety gates. Closed by C2: `enforceCopyEligibility` re-reads source selection and activity at the canonical claim boundary and rejects before the claim, persisting the reason to `copy_eligibility_rejections`. Liquidity, exposure, and chain safety keep their existing single owners (signal-engine screen, rolling 24h cap, `resolveChainMode`) rather than being duplicated with a second set of thresholds.
-- [x] **F-CORE4 / L7** Convert a source-wallet reduction into a proportional sell capped by SWAT's confirmed available balance; never sell an unheld asset.
-- [x] **F-CORE5** Route chain-native BUY and SELL jobs with stable client order IDs, bounded retries, simulation, and explicit terminal/ambiguous states.
-- [x] **F-CORE6** Persist requested, submitted, partially filled, confirmed, failed, cancelled, and reconciliation-required execution states.
-- [x] **F-CORE7** Reconcile balances, orders, and ambiguous submissions at startup and on a periodic schedule. Closed 2026-08-01 by task C1: `runReconciliationCoordinator` sweeps every due ambiguous `copy_executions` row at startup and every 60s inside the existing guarded loop, routes each to its chain handler, always releases the claim, and escalates rather than abandoning a row that exhausts its attempts. The per-venue sweeps remain the authoritative fast path.
-- [x] **G1-C1** Mark copied positions only from confirmed quantities and link each execution to its immutable source event.
-- [x] **G1-C2** Add schema constraints and tests proving duplicate source events and worker retries cannot create duplicate executions.
-
-### Solana Operational Gate
-
-- [x] **F-SOL1** Prove Helius webhook and backfill paths emit the same canonical BUY/SELL event for SOL, USDC, and supported token-to-token routes.
-- [ ] **F-SOL2** Confirm Trojan BUY and proportional SELL submissions using a stable signal ID, returned transaction identity, chain confirmation, actual balances, and truthful failure/timeout states. **PARTIAL** - the runtime and reconciliation state machine are implemented and tested, but authenticated production confirmation and balance reconciliation evidence is absent.
-- [ ] **F-SOL3** Replay entry, partial exit, full exit, failed trade, duplicate webhook, and timeout-after-submit fixtures; then record a deliberately capped live canary. **PARTIAL** - lifecycle/retry fixtures exist; the complete fixture matrix and live canary do not.
-- [x] **L16** Remove unsafe Jupiter decimal defaults and apply direction-correct ExactIn/ExactOut thresholds to paper and shadow quotes.
-- [ ] **G1-S1** Measure webhook event to signal, alert, and execution timestamps; retain the Solana median signal-to-alert target below 60 seconds. **PARTIAL** - timestamps and p50/p95 reporting exist, but the Solana production target has not been measured over a review window.
-- [x] **G1-S2** Do not treat existing Solana live capability as certified until the canary and reconciliation evidence are recorded.
-
-## Phase 2 - Robinhood Chain Live Executor
-
-**Depends on:** Phase 1 lifecycle and Robinhood ingestion correctness.
-
-**Exit gate:** `robinhood-chain` enters `LIVE_ENABLED_CHAINS` only after a receipt-verified tiny trade, failure test, and restart reconciliation.
-
-### Startup and Route Verification
-
-- [x] **F-RH1** Read chain ID and router/quoter/WETH9 addresses from configuration; verify chain ID and deployed bytecode before enabling live.
-- [x] **G2-R1** Run a known-liquid sanity quote across configured Uniswap fee tiers and clamp to paper plus an ops alert on failure.
-- [x] **G2-R2** Log the verified chain/router/quoter/WETH9 tuple without exposing signer material.
-
-### Ingestion and Safety
-
-- [x] **F-RH2** Replace transfer-only inference with router/pool/receipt decoding that rejects self-transfers, ERC-721s, airdrops, and ordinary transfers.
-- [ ] **G2-R3** Validate direction-classification accuracy above 95% on a reviewed fixture/sample set. **PARTIAL** - classification metrics and fail-closed fixture assertions exist, but no sufficiently sized operator-reviewed production sample proves the threshold.
-- [ ] **G2-R4** Expose inserted/skipped completeness and require greater than 90% on the certification sample. **PARTIAL** - ingestion counters and completeness calculations exist, but no reviewed certification sample proves greater than 90%.
-- [ ] **G2-R5** Implement EVM-native pre-trade safety checks, including sell simulation, ownership/admin powers, liquidity, verification, and holder concentration where reliable data exists. **PARTIAL** - exact simulation, owner/admin and liquidity checks exist; verified-source and reliable holder-concentration evidence is not complete for Robinhood assets.
-
-### Buy, Sell, and Reconciliation
-
-- [ ] **F-RH3** Discover liquid entry/exit routes and pin the deployed router ABI/version verified on Robinhood Chain. **PARTIAL** - configured fee-tier discovery and typed ABI/version validation exist, but the deployed tuple has no reviewed production certification evidence.
-- [x] **G2-R6** Quote configured fee tiers, derive `minOut` from bounded slippage, and skip honestly when no route exists.
-- [x] **G2-R7** Encode real typed swap calldata and simulate the exact transaction before signing.
-- [x] **F-RH4** Implement quote-sign-submit, gas/value checks, exact allowances or Permit2 where supported, receipt status checks, decoded actual amounts, and balance reconciliation.
-- [x] **G2-R8** Persist no-route and simulation failures as non-fill skips; persist RPC failures, reverts, and ambiguous confirmations distinctly.
-- [x] **G2-R9** On receipt timeout, store the hash as `pending_confirmation`; sweep for 10 minutes without resubmitting the same client order.
-- [ ] **F-RH5** Execute proportional exits into the configured base asset, capped to actual token balance, with fee-on-transfer/no-route/high-impact handling. **PARTIAL** - source-derived proportional exits, exact balance caps, no-route, simulation, and slippage handling exist; explicit fee-on-transfer exit coverage is missing.
-- [x] **G2-R10** Keep gas reserves untouched and cap estimated fees; preserve concurrency/nonce correctness.
-
-### Robinhood Verification
-
-- [ ] **F-RH6** Test native/token and token/token entry/exit, duplicate logs, no-route, simulation revert, reverted receipt, timeout, restart, and reconciliation. **PARTIAL** - entry/exit, route, revert, timeout, receipt, and restart cases exist, but the full native/token plus token/token matrix is not covered.
-- [x] **G2-R11** Add a golden-vector calldata encoding test for the certified router ABI.
-- [ ] **G2-R12** Record a tiny successful buy with receipt-derived amounts, a forced failure with released claim, and an orphaned receipt resolved after restart. **EXTERNAL EVIDENCE** - mocked/runtime tests are not a production canary record.
-- [ ] **G2-R13** Add `robinhood-chain` to `LIVE_ENABLED_CHAINS` only after `docs/certification/robinhood-chain.md` is reviewed. **EXTERNAL EVIDENCE** - the premature allowlist entry is gone: `.env:128` is `LIVE_ENABLED_CHAINS=` (empty, verified 2026-07-30). Remaining work is the reviewed certification document and canary evidence, not an env change.
-
-## Phase 3 - Polymarket Live CLOB Executor
-
-**Depends on:** Phase 1 lifecycle, verified market/outcome mapping, operator eligibility, and current Polymarket CLOB V2 documentation.
-
-**Exit gate:** Polygon enters `LIVE_ENABLED_CHAINS` only after authenticated production canaries and order-state reconciliation.
-
-### Canonical Market Data
-
-- [x] **F-PM1** Ingest confirmed Data API trades using `proxyWallet`, asset/token ID, condition ID, side, size, price, timestamp, and transaction hash; do not infer fills from generic activity.
-- [x] **F-PM2 / L22** Model positions by full outcome token ID and map each to market, outcome, tick size, neg-risk state, end date, and resolution status without truncated-symbol matching.
-- [x] **G3-P1** Ensure every Polygon signal includes market question, outcome, end date, and current market state.
-- [x] **G3-P2** Add ingestion-lag and context-coverage assertions; require 100% market context on certification fixtures.
-
-Verification completed 2026-07-26: confirmed-trade parsing and backfill tests preserve the Data API proxy and full asset ID, reject activity-shaped or incomplete rows, and refuse mismatched market mappings. The normalized database contract stores exact source trades and token-indexed outcomes; the signal helper fails closed unless all required market fields are present. Migration `026_polymarket_context.sql` replayed successfully twice. The cleaned PostgreSQL acceptance persisted one source trade, one derived transaction, and two outcomes with 100% context coverage and 30-second lag; duplicate source and derived writes were rejected, and an independent exact-identity probe found zero remaining rows. Focused database, indexer, and signal tests passed 57/57, 54/54, and 2/2; all 11 workspace test, typecheck, and build tasks passed.
-
-### Authentication and Collateral
-
-- [x] **F-PM3** Verify and pin the official production CLOB V2 client and Polygon chain ID 137; configure explicit signer, funder/proxy, signature type, and authenticated API credentials.
-- [ ] **G3-P3** Derive or load CLOB API credentials without logging secrets and validate them with an authenticated round trip. **EXTERNAL EVIDENCE** - credential derivation/loading and startup checks are implemented, but no credentialed production round-trip evidence is recorded.
-- [x] **F-PM4 / M9** Size from available pUSD with 6-decimal handling; implement and verify the current USDC.e-to-pUSD onramp/allowance path where required.
-- [x] **G3-P4** Attest current CLOB, exchange, collateral, and proxy contracts from official sources at startup; clamp to paper on mismatch.
-- [ ] **G3-P5** Confirm operator account, jurisdiction, venue terms, and wallet funding are eligible before any production order. **EXTERNAL EVIDENCE** - this requires operator/legal/account review and funded-wallet inspection.
-
-### Orders and Reconciliation
-
-- [x] **F-PM5** Re-read the book for each source BUY and reject stale, closed, resolving, paused, thin, near-certain, or excessive-deviation markets. **Closed 2026-08-02.** The depth walk already covered stale/thin/price/slippage. Market state is now re-read live immediately before every submission by `apps/trade-executor/src/polymarket-market-state.ts`, placed after the book plan and price bounds so it sits as close to the order as the code allows. It refuses closed, inactive, paused (`acceptingOrders` false), resolving (`umaResolutionStatus` other than `unresolved`), and ended markets, and treats an unreadable market as untradable rather than assuming it is open. The condition comes from the order book's own `conditionId`, so the liquidity and the state reads cannot disagree about which market they describe. The CLOB SDK has no market-state call keyed by condition - `fetchMarketInfo` returns only fees and tokens - so this reads the same Gamma endpoint the indexer uses. 12 cases in `polymarket-market-state.test.ts` plus two wiring cases in `polymarket.test.ts` (submission blocked when paused; state not queried when the book already failed).
-- [x] **G3-P6** Walk ask depth, calculate a marketable limit, round price/size to venue rules, and use `signalId` as the stable client order ID. **Closed 2026-08-02 as venue-limited.** Verified against the published contract for `POST /order` (predictions CLOB): the order payload carries `maker`, `signer`, `tokenId`, `makerAmount`, `takerAmount`, `side`, `expiration`, `timestamp`, `builder`, `signature`, `salt`, `signatureType`, and a `metadata` field documented as "reserved for future use" - **there is no client-order-ID field**. Client order IDs (`c` on create, `coid` echoed on response, `DELETE /v1/trade/orders-coid`) exist only on the Perps API, which this system does not use. The requirement is therefore unimplementable as literally written; idempotency is carried by the persisted signal/canonical execution identity instead, which is checked before submission. Depth walking and downward price/size rounding were already in place. Revisit only if the CTF order contract gains the field.
-- [x] **G3-P7** Check existing orders before posting so timeout retries cannot double-buy.
-- [x] **F-PM6** Place proportional SELL orders for the exact outcome token, capped to available confirmed shares, and reconcile/cancel unfilled remainder.
-- [x] **F-PM7** Treat submitted, matched, mined, partial, confirmed, failed, cancelled, and ambiguous orders distinctly; only confirmed quantities create fills. **Closed 2026-08-02.** Settlement states are now typed and persisted separately from the order status: migration `038_venue_settlement_status.sql` adds `trades.venue_settlement_status`, and `classifySettlementState` maps the documented set (`MATCHED`, `MATCHED_NOT_BROADCASTED` -> matched, `MINED`, `RETRYING`, `CONFIRMED`, `FAILED`). Anything outside that set is now **ambiguous** rather than silently pending - the old `else` branch parked an unrecognised status in a bucket nobody watches. Where several trades back one order, the summary reports the weakest state (`SETTLEMENT_PRECEDENCE`), because an order is only as settled as its least-settled trade: one MINED plus one RETRYING is a RETRYING position. Only `CONFIRMED` still creates quantities. Six cases in `polymarket.test.ts`.
-- [x] **G3-P8** Poll boundedly, cancel timed-out remainders, and send unresolved cancellation/order states to a sweeper without duplicate submission.
-- [x] **G3-P9** Persist CLOB order ID, actual filled size, average price, fees, and settlement identity; never synthesize a transaction signature.
-
-### Polymarket Verification
-
-- [ ] **F-PM8** Test binary and neg-risk markets, partial entry/exit, duplicate trades, resolution/redemption, thin books, and restart reconciliation. **PARTIAL** - partial/full/cancelled/ambiguous reconciliation, duplicates, and thin books are tested; the complete binary/neg-risk entry-exit plus resolution/redemption matrix is not.
-- [ ] **G3-P10** Round shares/prices downwards and limit risk exactly per exchange UI constraints. **PARTIAL** - floor-based shares, tick-grid validation, balance caps, and price bounds are tested; exact parity with all current venue UI precision cases is not demonstrated.
-- [ ] **G3-P11** Record a tiny filled BUY, an unfillable order that cancels cleanly, and a duplicate-client-ID rejection. **EXTERNAL EVIDENCE** - unit tests are not authenticated production order records.
-- [ ] **G3-P12** Add `polygon` to `LIVE_ENABLED_CHAINS` only after `docs/certification/polygon-polymarket.md` is reviewed. **EXTERNAL EVIDENCE** - no reviewed certification document or active certification row exists.
-
-## Phase 4 - Paper and Live+Shadow
-
-**Depends on:** Phase 1 modes; each live path may shadow only after that chain is certified.
-
-**Exit gate:** paper simulation is meaningful on all chains and shadow rows cannot affect positions, exposure, cooldown, or reported trading P&L.
-
-- [x] **G4-S1** Add idempotent migration `018_shadow_trades.sql` with `execution_mode='shadow'` support and `shadow_of` trade linkage.
-- [x] **M14** Persist meaningful Polygon outcome quantities/prices from an orderbook walk and Robinhood quantities/prices from a verified quoter simulation. **Closed 2026-08-02.** The Polygon paper path now walks depth through `simulatePolymarketBookFill`, which delegates to the same `planPolymarketBookOrder` the live path uses, so the two cannot drift and paper inherits the identical staleness, tick-grid, thin-book, and slippage rejections. Previously paper took the single best price for any size, which invents liquidity that is not on the book and makes paper systematically optimistic against live - the exact error a paper benchmark exists to avoid. Buys walk USD notional, sells walk the requested share count, and the near-certain price bound still reads the best price so its meaning is unchanged. Four cases including an explicit paper/live parity assertion.
-- [ ] **G4-S2** Run Solana Jupiter, Polymarket book-walk, and Robinhood quoter simulators from the same size and observation time as the live order. **PARTIAL** - all three simulators exist and use the selected size, but one immutable pre-submit observation is not shared with every live path.
-- [x] **G4-S3** In `live+shadow`, persist the live trade first, then an independently failing shadow row linked to it.
-- [x] **G4-S4** Exclude shadow rows from balances, positions, exposure, cooldown, win rate, realized P&L, and portfolio APIs.
-- [x] **G4-S5** Report per-chain live-versus-shadow execution cost in basis points using actual live fills.
-- [x] **G4-S6** Test shadow simulator failure after a confirmed live fill and prove the live trade remains committed.
-- [ ] **G4-S7** Support legal concurrent combinations such as Solana `live+shadow`, Polygon `paper`, and Robinhood `live` in one worker process. **PARTIAL** - per-chain mode resolution and concurrent worker execution exist; a simultaneous three-chain production-worker acceptance run is absent.
-
-## Phase 5 - Enforced Risk Controls
-
-**Depends on:** canonical execution states and per-chain modes.
-
-**Exit gate:** every paper and live order is checked before claim/submission, failures are isolated per chain, and emergency-off takes effect within 30 seconds.
-
-- [x] **G5-R1** Enforce per-trade `maxPositionPct` against live balance or `PAPER_BANKROLL_USD` (default USD 10,000) in paper mode. **DONE 2026-08-01 (task B2).** `packages/db/src/risk-policy.ts` `resolveRiskPolicy(account, chain)` resolves DB `config` -> env -> `DEFAULT_RISK_CONFIG` behind a 30s TTL cache keyed by `account:chain`, and the executor consumes it in `getAvailablePositionBalance` and `getBalanceAwarePositionSize`.
-- [x] **G5-R2** Enforce per-chain rolling 24-hour exposure and emit one deduplicated daily-cap alert.
-- [x] **G5-R3** Upgrade the circuit breaker to persisted, per-chain `{consecutiveFailures,trippedAt}` state that trips on the Nth failure and resets on success. **PARTIAL - reopened 2026-07-30 under Builder Guide Standing Rule 2.** The implementation is complete and durable as an audit item, but state is keyed `breaker:${chain}` (`packages/db/src/circuit-breaker.ts:33`) with no account dimension. Builder Guide Standing Rule 2 requires `(account, chain)`, and the schema already supports it via `target_account` in migration `028`. **Re-keyed 2026-07-31 (task B1)**: state is now `breaker:${account}:${chain}`, the executor passes `'operator'`, and migration `033_breaker_account_key.sql` seeds the new keys from the legacy rows without deleting them (expand-and-contract, Standing Rule 4).
-- [x] **G5-R4** Delay blocked BullMQ jobs by five minutes instead of completing or dropping them.
-- [x] **G5-R5** Honor an all-chain `{"*":"off"}` kill switch within one execution-config cache TTL.
-- [x] **G5-R6** Reserve configured native gas balances and size down or skip rather than flooring upward.
-- [x] **L17** Align stop-loss defaults across runtime, database config, environment docs, and alerts. **DONE 2026-08-01 (task B3).** One source: `resolveRiskPolicy().stopLossPct` (DB `config.risk.stop_loss_pct` -> `STOP_LOSS_PCT` -> `DEFAULT_RISK_CONFIG`). Enforced by the scorer's mark-to-market sweep, which queues one full-position sell per breach on `swat-trades` and alerts `STOP_LOSS_TRIGGERED`.
-- [ ] **G5-R7** Test cap boundaries, breaker transitions/restart persistence, chain isolation, kill-switch latency, and gas-floor behavior. **PARTIAL** - cap, gas floor, breaker persistence/lease, and kill-switch tests exist; full multi-process restart/chain-isolation acceptance is not demonstrated.
-
-## Phase 6 - Attribution and Learning Loop
-
-**Depends on:** canonical fills, quantity-aware P&L, and shadow exclusion.
-
-**Exit gate:** every actionable signal can be traced to outcome, execution quality, and latency; reports show whether each chain/pattern/tier has positive expectancy.
-
-- [x] **G6-A1** Verify or implement five-minute price snapshots required for 1-hour and 24-hour mark-to-market attribution.
-- [x] **G6-A2** Add an idempotent `signal_outcomes` schema linking signal, pattern, chain, cluster, tier, mode, entry, P&L horizons, realized P&L, and hit result.
-- [x] **G6-A3** Run nightly attribution after scoring/clustering and exclude shadow rows from trading outcomes.
-- [x] **G6-A4** Calculate count, hit rate, average win, average loss, and expectancy by pattern, tier, chain, and mode.
-- [x] **G6-A5** Persist the expectancy report, expose it in the dashboard beside manual thresholds, and send a daily Telegram digest.
-- [ ] **G6-A6** Detect Polymarket resolution/redemption, backfill realized outcomes, and calculate wallet win rate from resolved markets. **PARTIAL** - market resolution, winning-token backfill, and resolution-aware wallet P&L/win rate exist; redemption detection and reconciliation are missing.
-- [ ] **G6-A7** Add resolution-derived Polymarket skill to composite scoring with an explicit tested weight. **PARTIAL** - Polygon uses a 50% resolution-aware win-rate weight, but no golden test asserts the Polygon-specific weight and resolved-market contribution end to end.
-- [x] **G6-A8** Persist `detected_at`, `alerted_at`, `submitted_at`, `confirmed_at`, and report p50/p95 chain latency.
-- [ ] **G6-A9** Keep threshold changes manual and require the expectancy report as recorded justification. **PARTIAL** - a manual script records free-text justification, but it does not validate/store a specific immutable `expectancy_reports` record as a database-enforced prerequisite.
-- [ ] **G6-A10** Preserve chain identity in cross-chain clustering and expose each score's per-chain evidence without conflating unrelated addresses. **PARTIAL** - chain-qualified wallets and cluster chain storage exist; the dashboard/API does not expose a complete per-chain evidence breakdown for each score.
-
-## Phase 7 - System Acceptance and Release
-
-**Depends on:** all preceding phase gates.
-
-**Exit gate:** the definition of done is demonstrated, not inferred. (`gaol.md` was deleted in commit `9726756`; the Final Definition of Done section at the end of this file and `docs/plans/BUILDER-GUIDE.md` §1 now carry that contract.)
-
-### Automated Verification
-
-- [ ] **G7-T1** Add focused regression tests for every audit and goal data contract where practical. **PARTIAL** - every package now has real tests and high-risk contracts have focused suites, but several broad acceptance and external contracts below remain uncovered.
-- [x] **G7-T2** Add per-chain Docker integration fixtures: seed wallet -> backfill -> transactions -> signal -> paper trade -> attribution. Closed 2026-08-02 by task E2 - `tests/integration/pipeline.integration.test.ts` runs all three chains through the production functions end to end.
-- [x] **G7-T3** Add `pnpm test:integration` and run it in CI with PostgreSQL and Redis.
-- [x] **G7-T4** Unit-test execution config, Robinhood calldata, Polymarket rounding, risk math, breaker state, and reconciliation idempotency.
-- [x] **G7-T5** Run chaos checks for executor death after submit, Redis restart, PostgreSQL restart, and worker reconnection. Closed 2026-08-02 by task E1 - `tests/integration/chaos.integration.test.ts`. Faults are injected in-process rather than by stopping containers, because CI cannot restart its service containers.
-
-### Functional Acceptance
-
-- [ ] **F-ACC1** Replay end-to-end signal pipelines for Solana, Polygon, and Robinhood chains simultaneously. **EXTERNAL EVIDENCE** - isolated/integration paths exist, but no simultaneous production-worker replay is recorded.
-- [ ] **F-ACC2** Prove that an infrastructure failure in one executor (e.g. Robinhood rpc offline) does not stall or corrupt Solana and Polymarket pipelines. **EXTERNAL EVIDENCE** - unit-level reconciliation isolation is tested; process/infrastructure acceptance is not.
-- [ ] **F-ACC3** Verify environment prerequisites: Postgres, Redis, API keys (Helius, Robinhood API, Polymarket CLOB), funding wallets. **EXTERNAL EVIDENCE** - local Postgres/Redis are healthy; production credentials and wallet funding were not inspected.
-- [ ] **F-ACC4** Manually reconcile balances, positions, transaction/order IDs, fees, P&L, and shadow comparison before declaring three-chain live execution functional. **EXTERNAL EVIDENCE** - requires authenticated venue/chain records and operator sign-off.
-
-- [ ] **G7-A1** Add Vitest coverage for expectancy report formulas (hit rate, avg_win/loss, ROI). **PARTIAL** - SQL shape and report persistence are tested, but numeric golden vectors do not cover every listed formula including ROI.
-- [ ] **G7-A2** Verify live paper trading respects cluster latency under p95 < 2s for all 3 chains. **EXTERNAL EVIDENCE** - latency reporting exists; no three-chain measured acceptance window proves the target.
-- [ ] **G7-A3** Ensure no UI components throw uncaught promise rejections on config load failure. **PARTIAL** - primary workspace/config views catch and surface failures, but there is no component-wide rejection regression suite.
-- [ ] **G7-A4** Run a full `pnpm build` and `pnpm typecheck` to verify no remaining TypeScript `any` or strictness violations. **PARTIAL** - strict typechecks/builds have passed previously, but explicit `any` remains in source/tests and the final post-review gate is still required.
-- [ ] **G7-A5** Verify signals carry chain-native context: Solana safety, Polymarket market/outcome/end date, Robinhood contract safety. **PARTIAL** - Polymarket context is fail-closed and safety fields exist, but one cross-chain fixture suite does not prove every signal contract.
-- [ ] **G7-A6** Verify nightly expectancy and latency reports contain all active chains, patterns, tiers, and modes. **PARTIAL** - reports are chain/mode aware, but complete active-dimension coverage is not asserted from production data.
-- [ ] **G7-A7** Demonstrate Solana median snipe-to-alert latency below 60 seconds, positive 1-hour snipe expectancy net of slippage, and at least one executed signal per day from healthy clusters over the review window. **EXTERNAL EVIDENCE** - the query script exists; production KPI evidence does not.
-- [ ] **G7-A8** Demonstrate 100% Polymarket signal-context coverage, resolution-based wallet scoring, target ingestion lag below 5 minutes, and functioning lag alarms. **EXTERNAL EVIDENCE** - fixture coverage and code exist; a production review window is not recorded.
-- [ ] **G7-A9** Demonstrate Robinhood ingestion completeness above 90%, sampled direction accuracy above 95%, and a growing scored-wallet roster with at least 20 classified trades per scored wallet. **EXTERNAL EVIDENCE** - metrics exist; production sample and roster evidence do not.
-
-### Final Repository Gate
-
-- [ ] Run package-level tests after the final change in every service/package. **PARTIAL** - all database and executor package tests pass; the final all-package rerun after checklist/code stabilization remains required.
-- [ ] Run full `pnpm typecheck`, `pnpm test`, `pnpm test:integration`, and `pnpm build`. **PARTIAL** - prior full gates and current focused gates pass; one uninterrupted final four-command gate remains required.
-- [x] Run migrations twice against a clean database and once against an upgraded database.
-- [ ] Inspect queues and database constraints for duplicate-event and duplicate-execution protection. **PARTIAL** - deterministic queue IDs, source/execution unique indexes, and retry tests exist; final queue-state inspection across all running services is not recorded.
-- [ ] Confirm `.env.example` and `README.md` match the effective runtime configuration. **REOPENED 2026-07-30** - `DEPLOYMENT.md` was deleted in commit `9726756` but `README.md:67` and `README.md:333` still link to it. Either restore the file or remove both links.
-- [ ] Remove agent-generated build artifacts from the diff and review all remaining changes. **NOT BUILT** - and more serious than a dirty worktree: `apps/discovery/dist/` (4 files), `.turbo/cache/*`, and every `apps/*/.turbo/turbo-build.log` and `packages/*/.turbo/turbo-build.log` are **tracked in git**. Requires `git rm --cached`; `.gitignore` already lists `.turbo/` and `dist/` but does not apply to already-tracked paths. See task A3.
-- [ ] Confirm no secret, private key, API credential, generated wallet data, or production order artifact is committed. **PARTIAL** - no production artifact was intentionally created, but the final full-worktree secret scan/review is not recorded.
-
-## Final Definition of Done
-
-- [x] Any chain can be changed independently between `off`, `paper`, `live`, and `live+shadow` from the dashboard.
-- [ ] Every live fill is chain-receipt or venue-fill verified and reconciled after timeout/restart. **PARTIAL** - all three executors require receipt/venue evidence and have reconciliation paths; complete startup balance reconciliation and production proof remain open.
-- [ ] Every source trade, copied order, fill, position change, and outcome is traceable and idempotent. **PARTIAL** - canonical linkage and constraints are implemented, but the unresolved system-wide reconciliation and acceptance gaps prevent a final claim.
-- [x] Every chain has visible ingestion lag, completeness, failure counts, and recovery alerts.
-- [ ] Every trade participates in risk enforcement and attribution; shadow trades affect benchmarking only. **PARTIAL** - shadow exclusion and core risk/attribution are implemented; the incomplete canonical policy and production acceptance prevent a universal claim.
-- [ ] The nightly report shows actual expectancy and latency per pattern, tier, chain, and mode. **PARTIAL** - expectancy dimensions and chain/mode latency exist, but latency is not fully broken down by pattern and tier with active-dimension coverage assertions.
-- [ ] No chain is declared live-capable before its manual certification document is reviewed. **PARTIAL** - both controls are correctly closed as of 2026-07-30: `LIVE_ENABLED_CHAINS` is empty and no active certification row exists, so all three chains resolve to paper. The item stays open only until a chain is actually certified through the reviewed-document path.
-
-## Implementation References
-
-Re-check current official documentation via the included mcp server during implementation; deployment facts and venue APIs can change:
-
-- Polymarket CLOB V2 migration and current official client.
-- Polymarket contracts, proxy/signature types, pUSD collateral, and onramp.
-- Uniswap router/quoter versions and deployed Robinhood Chain contracts.
-- Helius webhook payload and authentication behavior.
+## 15. Verification cadence
+
+- **Every merge:** CI — typecheck, unit tests, migration double-replay on scratch Postgres, cross-tenant attack suite (from Stage 2), lint for `NEXT_PUBLIC_` secrets.
+- **Every stage exit:** integration suite against staging; the exit gate **demonstrated, not inferred**; diff reviewed for secrets, generated artifacts, unrelated changes, and unchecked failure paths.
+- **Before any live-money change:** certification evidence under `docs/certification/` reviewed; capped canary; reconciliation-after-restart demonstrated.
+- **Continuously:** nightly staging restore proves the backups (D15); ingestion-health alerts prove the pipeline (already shipped, `G0-H*`).
