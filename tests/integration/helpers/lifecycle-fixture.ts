@@ -224,6 +224,7 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
       copy_executions: number;
       source_positions: number;
       copy_positions: number;
+      trades: number;
     }>(
       `SELECT
          (SELECT COUNT(*)::int FROM source_trades source
@@ -234,7 +235,12 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
          (SELECT COUNT(*)::int FROM wallet_positions
            WHERE wallet_address = $2 AND chain = $3 AND token_mint = $4) AS source_positions,
          (SELECT COUNT(*)::int FROM copy_positions
-           WHERE target_account = $5 AND chain = $3 AND token_mint = $4) AS copy_positions`,
+           WHERE target_account = $5 AND chain = $3 AND token_mint = $4) AS copy_positions,
+         -- Counted on the token rather than through a join: a trade that has lost
+         -- every link is precisely the one that blocks migration 030, and a join
+         -- through source_trades would be blind to it in exactly that case.
+         (SELECT COUNT(*)::int FROM trades
+           WHERE token_mint = $4 AND chain = $3) AS trades`,
       verifyValues
     );
     const leftovers = Object.entries(result.rows[0] ?? {})
