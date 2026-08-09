@@ -88,25 +88,58 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
 }
 
 import { randomBytes } from 'node:crypto';
+import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
+import { registerAuth, registerAdminOnlyGlobals } from './auth/plugin.js';
+import { registerAuthRoutes } from './auth/routes.js';
+import { registerMeRoutes } from './routes/me.js';
 
-app.addHook('onRequest', async (request, reply) => {
-  // Let CORS preflight requests through untouched.
-  if (request.method === 'OPTIONS') return;
-  if (request.url === '/v1/health') return;
+await app.register(cookie);
 
-  // Allow ticket-based auth for SSE without leaking the API key in the URL.
-  if (request.url.startsWith('/v1/logs/stream')) {
-    const ticket = (request.query as any).ticket;
-    if (ticket && typeof ticket === 'string') {
-      // Validate and consume the one-time ticket
-      const valid = await redis.del(`swat:ticket:${ticket}`);
-      if (valid === 1) return;
+// Blunts credential stuffing at the app layer. Cloudflare supplies the edge
+// limits (D10); this is the second layer, and the one that still applies when
+// traffic reaches the box directly.
+await app.register(rateLimit, {
+  max: Number(process.env.RATE_LIMIT_MAX ?? 300),
+  timeWindow: '1 minute',
+  allowList: () => false
+});
+
+// Order matters: the auth hook must be registered BEFORE any route scope it
+// needs to serve. Fastify applies a parent's hooks only to children registered
+// after `addHook`, so registering the auth routes first would leave them without
+// a populated `request.principal` — and `POST /v1/auth/wallet/verify` would then
+// treat an authenticated link request as an anonymous wallet-only login.
+await registerAuth(app, {
+  legacyKeyHash: API_KEY_HASH,
+  isProduction: process.env.NODE_ENV === 'production',
+  // `del` returns the number of keys removed, so a ticket can only ever be
+  // consumed once even under concurrent requests.
+  consumeSseTicket: async (ticket) => (await redis.del(`swat:ticket:${ticket}`)) === 1
+});
+
+await registerAdminOnlyGlobals(app);
+
+// Stricter bucket for the credential endpoints specifically. Registered as a
+// scoped plugin so the tighter limit cannot leak onto ordinary read routes.
+await app.register(async (scope) => {
+  await scope.register(rateLimit, {
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
+    timeWindow: '15 minutes',
+    // Keyed on IP + email so one attacker cannot lock out an entire NAT, and a
+    // single account cannot be sprayed from one address.
+    keyGenerator: (request) => {
+      const body = request.body as { email?: unknown } | undefined;
+      const email = typeof body?.email === 'string' ? body.email.toLowerCase() : '';
+      return `${request.ip}:${email}`;
     }
-  }
-
-  if (!isValidApiKey(request.headers['x-api-key'])) {
-    return reply.code(401).send({ error: 'Unauthorized' });
-  }
+  });
+  await registerAuthRoutes(scope, {
+    redis,
+    isProduction: process.env.NODE_ENV === 'production',
+    domain: process.env.AUTH_DOMAIN ?? 'localhost:3000',
+    uri: process.env.AUTH_URI ?? 'http://localhost:3000'
+  });
 });
 
 app.setErrorHandler((error, request, reply) => {
@@ -121,6 +154,13 @@ app.setErrorHandler((error, request, reply) => {
   if (err.code === '22P02') {
     return reply.code(400).send({ error: 'Bad Request', message: 'Invalid parameter format' });
   }
+  // Fastify's own client errors (malformed JSON, empty body, payload too large)
+  // already carry a 4xx statusCode. Without this they fell through to the 500
+  // below, reporting the caller's mistake as a server fault — which hides real
+  // 500s in the logs and tells the client to retry something that cannot work.
+  if (typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500) {
+    return reply.code(err.statusCode).send({ error: 'Bad Request', message: err.message });
+  }
   // Return stable public error for anything else to prevent leaking DB details
   reply.code(500).send({ error: 'Internal Server Error' });
 });
@@ -131,6 +171,8 @@ app.post('/v1/auth/ticket', async () => {
   await redis.set(`swat:ticket:${ticket}`, '1', 'EX', 60);
   return { ticket };
 });
+
+await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
 // Query-string values are always strings. Coerce + bound them so a caller can't
