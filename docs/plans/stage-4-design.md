@@ -1,29 +1,31 @@
-# Stage 4 Design — Custody & Per-User Execution
+# Stage 4 Design — Delegated Authority & Per-User Execution
 
-> **PARTIALLY SUPERSEDED 2026-08-09** by `docs/adr/0003-delegated-execution-authority.md`.
-> WAKE no longer custodies user private keys; users grant scoped, revocable,
-> expiring authority per chain. Read the ADR first — on any conflict it wins.
+> **PARTIALLY SUPERSEDED 2026-08-09** by `docs/adr/0003-delegated-execution-authority.md`,
+> **gates closed 2026-08-11** by `docs/dg-8/wake-execution-decisions-report.md`.
+> WAKE no longer custodies user *root* keys; users grant scoped, revocable authority
+> per chain. Read the ADR first — on any conflict it wins.
 >
-> | Section | Status under ADR-0003 |
+> | Section | Status |
 > | --- | --- |
 > | §0 Corrections, §1 Principles | valid |
-> | §2 `packages/custody` | **renamed** `packages/authority`; boundary argument still holds |
-> | §3 Envelope encryption | **retargeted** — seals session keys / delegate keys / CLOB creds, not root keys (ADR-0003 §5) |
-> | §4 Master-key backup & DR | **largely dissolved** — key loss no longer costs user funds; survives for the operator key + SOPS age key (ADR-0002, narrowed) |
-> | §5 Schema `047`–`050` | `047` **renamed** `user_execution_grants` + `scope_policy`/`expires_at`; rest valid |
-> | §6 Deposit / withdraw | **only applies to Polymarket** under `DG-9` fork (b); the other two chains never take deposits |
-> | §7 Fan-out & `DG-7` | valid — the strongest surviving section |
+> | §2 `packages/custody` | **renamed** `packages/authority`; boundary argument holds |
+> | §3 Envelope encryption | **retargeted** — seals session keys / delegate keys / CLOB creds. **Live again in full for Polymarket** (`DG-9` fork b) |
+> | §4 Master-key backup & DR | **narrowed** — user-key loss no longer costs funds. Survives for the operator key, the (unbuilt) SOPS age key, **and the Polymarket signer keys** |
+> | §5 Schema `047`–`050` | `047` **renamed** `user_execution_grants` + `scope_policy`/`expires_at`; see §5.1 for the Polymarket + Solana columns |
+> | §6 Deposit / withdraw | **Polymarket only.** Solana withdrawal is on-chain (`withdraw`, depositor-signed); EVM never takes deposits |
+> | §7 Fan-out & `DG-7` | valid — the strongest surviving section. §7.7 adds Jito tip funding |
 > | §8 `account` → user id inventory | valid, and still the best call-site map |
-> | §9 Test plan, §10 Deferred | valid |
+> | §9 Test plan, §10 Deferred | valid; §9 gains the vault-program cases |
 >
-> Retained rather than rewritten: §7 and §8 are load-bearing and unaffected, and §3–§4
-> become live again for Polymarket alone if `DG-9` resolves to fork (b).
+> **Both blocking gates are now closed.** `DG-9` → **fork (b)**, venue-scoped custody for
+> Polymarket only. `DG-8` → dissolved for user funds, retained for three operator-side
+> secrets. Neither blocks the build any longer; `DG-2` (legal) still blocks *launch*.
 
-**Scope:** `AUDIT-FIX-CHECKLIST.md` §7 tasks `S4-1` … `S4-18`. Migrations `047`–`050`.
+**Scope:** `AUDIT-FIX-CHECKLIST.md` §7 tasks `S4-1` … `S4-18`, `S4-P7` … `S4-P18`. Migrations `047`–`050`.
 **Depends on:** Stage 0 (canonical lifecycle, DB-resolved risk policy, breaker), Stage 2 (`forUser()`, subscriptions, tiers), `docs/adr/0001-tenancy-key.md`, `DG-1` (resolved).
-**Blocked by:** `DG-2` / `D13` legal gate (`S4-1`) — **launch**, not build. Code proceeds; deployment does not.
-**Open before `S4-13`:** `DG-7` fan-out market impact. §7 gives options and a recommendation; the decision is a human's.
-**Delivers:** ~~a user deposits to a platform-managed custodial wallet~~ → *(ADR-0003)* a user **grants scoped authority over their own wallet**, sets risk, and has one signal fan out to N users with disjoint, individually-sized executions — with the granted secret never leaving `trade-executor`.
+**Blocked by:** `DG-2` / `D13` legal gate (`S4-1`) — **launch**, not build. Code proceeds; deployment does not. It now carries two extra questions: money-transmitter exposure from the venue-scoped Polymarket custody, and sign-off on the 7-day geo-staleness window.
+**Resolved since first draft:** `DG-7` (fan-out impact — no cap, disclosure, per-user slippage), `DG-8` (see §4), `DG-9` (see §3.4).
+**Delivers:** ~~a user deposits to a platform-managed custodial wallet~~ → a user **grants scoped authority over their own wallet** on Solana and EVM, **deposits to a venue-scoped wallet on Polymarket only**, sets risk, and has one signal fan out to N users with disjoint, individually-sized executions.
 
 This is the construction spec the checklist deliberately does not carry. Where it
 and the checklist disagree, the checklist's *task list* wins and this doc's
@@ -31,6 +33,12 @@ and the checklist disagree, the checklist's *task list* wins and this doc's
 
 **This is the stage where a bug loses someone else's money.** Every other stage
 fails by being unavailable or wrong; this one fails by being irreversible.
+
+**The asymmetry to hold on to:** on Solana and EVM a total compromise of WAKE
+lets an attacker make *bad trades*. On Polymarket it lets them *take funds*. That
+is not a uniform system, and the difference should show up in how the two are
+disclosed, monitored, and capped — not be smoothed over because one architecture
+diagram is tidier.
 
 ---
 
@@ -255,7 +263,112 @@ data-key cache in `S4-P6` is what keeps that practical.
 
 ---
 
-## 4. Master-key backup, rotation, and disaster recovery — **the unspecified gap**
+### 3.3 `DG-9` resolved — Polymarket is a venue-scoped custodial exception
+
+**Decision (2026-08-11): fork (b).** WAKE holds an encrypted copy of each user's
+Polymarket signer key, scoped to their Polymarket wallet only. Recorded in
+`docs/dg-8/wake-execution-decisions-report.md` §1.
+
+**Why there was no third option.** Polymarket requires a fresh EIP-712 `Order`
+signature from the user's own key on every order. L2 HMAC credentials authenticate
+the *HTTP request*, not the trade, so credentials alone cannot place an order. The
+Builder Program does not close this either — builder credentials provision Deposit
+Wallets and grant relayer access, but *"each wallet remains controlled by its
+signer"*. There is no Polymarket analogue of a 4337 session key or a PDA delegate.
+So the choice was custody or no live copy-trading on this venue.
+
+**This makes §3 and §4 live again — for one venue.** Everything below about
+envelope encryption, `KeyWrapper`, wrapper rotation, and the Vault migration path
+applies **in full** to Polymarket signer keys, and to nothing else. Solana uses a
+keyless PDA (§3.5); EVM uses a scoped session key whose theft costs bounded bad
+trades, not funds.
+
+**Consequences that must not be quietly dropped:**
+
+- **Explicit consent at Polymarket setup.** Plain language: WAKE holds this key,
+  and here is what a WAKE compromise means for the funds in this wallet. Copy
+  reviewed alongside `DG-2`. This is a UX/legal deliverable — do not let it become
+  a checkbox added the week before launch.
+- **`DG-8`'s escrow returns for this key class** (§4), because losing it now costs
+  a user their Polymarket balance again.
+- **The migration trigger returns, scoped.** ADR-0002's USD 50,000 / 100-funded-user
+  threshold is measured on **Polymarket balances only**, not total custodied value.
+- **Geo-eligibility (`S4-P16`) is a 7-day window.** Location is verified at signup
+  and at every login; automated Polymarket execution halts for an account with no
+  fresh verified login inside 7 days. This exists because the geoblock endpoint
+  reads the *requesting* IP, which under automation is our datacentre, not the
+  user — so a naive integration passes the check and fails the obligation.
+  **Provisional until counsel signs off** on the window length.
+- **Relayer capacity is 10,000/day** (granted, up from the 100/day Unverified
+  default), scaling with growth. On exhaustion: **skip with a logged reason and
+  alert — never queue to the next day.** A day-late fill is not copying the signal
+  it was meant to mirror; the tracked wallet may have already exited, so a queued
+  trade acts on a signal that no longer exists. Store the cap as config, not a
+  literal, since it moves.
+
+### 3.4 `S4-P12` — Solana uses a keyless vault, not a held key
+
+**Decision: build a custom Anchor program** (`wake-vault`), one PDA vault per
+user. A skeleton exists at `docs/dg-8/wake-vault-skeleton.rs` — **scaffold, not
+deployable**, and a design review found three flaws that each defeat its purpose.
+They are recorded here because two of them change the *instruction shape*, so they
+must be settled in the spec rather than rediscovered during implementation.
+
+The two properties worth the effort:
+
+- **No private key exists.** A PDA is mathematically keyless — nothing to steal,
+  store, wrap, rotate, or escrow. This is why `DG-8` does not apply to Solana.
+- **`withdraw` requires the original depositor's signature**, never the operator's.
+  A fully compromised WAKE backend cannot move funds out. `revoke_executor` is an
+  on-chain, user-signed kill switch, not a database flag we promise to honour —
+  which also makes `S4-P9`'s "expiry is a liveness dependency" concern moot here.
+
+**Review findings to fold into the spec (all three are `S4-P19`):**
+
+1. **The account checks don't constrain what Jupiter receives.** `execute_swap`
+   validates `source_token_account`/`destination_token_account` from named slots,
+   then forwards a *separate* `remaining_accounts` list to Jupiter under the
+   vault's signature. Nothing links the two, so a legitimate pair in the named
+   slots passes the check while an attacker-owned destination in
+   `remaining_accounts` receives the funds. **Fix: balance-delta post-conditions** —
+   snapshot vault balances, CPI, `reload()`, then assert `spent <= max_in` and
+   `received >= min_out`; plus a scan rejecting any *other* vault-owned token
+   account in `remaining_accounts`. This changes the instruction signature, hence
+   "spec, not implementation detail". **Bonus:** `min_out` puts slippage
+   enforcement on-chain, so a compromised backend can only make a *bounded* bad
+   trade — feed it from the Jupiter quote's `otherAmountThreshold`, which is where
+   `S4-P4`'s per-user slippage lands.
+2. **`WakeConfig` is unpinned.** `Account<'info, WakeConfig>` with no `seeds`
+   accepts any program-owned account with a matching discriminator, so a forged
+   config can carry `max_tip_lamports: u64::MAX` and an attacker address in
+   `tip_accounts`. **Fix: `seeds = [b"config"], bump` on every context that takes
+   it**, plus a fixed-size `[Pubkey; 8]` so space is computable. Until this lands,
+   the decisions report's claim that a stolen operator key yields "vandalism, not
+   theft" is **false** — it yields a full drain.
+3. **Executor rotation does not work.** `initialize_vault` copies
+   `config.executor` into `vault.executor_authority`, and `execute_swap` checks
+   the copy — so rotating the config leaves every existing vault on the old key.
+   This is precisely the defect the report correctly diagnosed for the tip
+   allowlist and missed for the executor. **Fix: delete
+   `vault.executor_authority`; check `config.executor` at execution time.**
+   `revoked` stays per-vault — that one *is* user-specific.
+
+Smaller: `restore_executor` must have its own context requiring the owner's
+signature (revoke failing open is safe; **restore failing open is not**);
+`Pubkey::from_str(..).unwrap()` per swap should be a const `pubkey!`; build
+`AccountMeta` explicitly rather than copying caller-supplied `is_signer` flags.
+
+**Immutable `owner`, no recovery path — deliberate.** An editable owner field
+reintroduces the redirect-withdrawal surface the program exists to remove. But be
+straight about the consequence: a user who loses their wallet has funds **frozen
+permanently** — not stolen, not recoverable by us, simply inert. That deserves the
+same disclosure prominence as the Polymarket custody notice.
+
+**Sequence before any real Rust:** (1) evaluate Squads V4 — cheap, and it may make
+this moot; (2) promote this section to ADR-0004 with findings 1–3 folded in;
+(3) book audit lead time as a *scheduled dependency*, not a post-build step.
+
+---
 
 Neither `AUDIT-FIX-CHECKLIST.md` `S4-2`…`S4-6` nor D11 says anything about this.
 D15 covers Postgres backups; the master key is not in Postgres, so **the
@@ -273,6 +386,36 @@ code change that helps. The database backup restores perfectly and is useless.
 This is the highest-severity single point of failure in the entire system, and it
 is currently undesigned.
 
+> **`DG-8` RESOLVED — 2026-08-09 (ADR-0003) and 2026-08-11.** The paragraph above
+> was written when WAKE custodied every user's root key on every chain. It no
+> longer does, so **the "every user's funds" claim is now false as stated.** What
+> survives, precisely:
+>
+> | Secret | Loss costs | Escrow? |
+> | --- | --- | --- |
+> | **Polymarket signer keys** (`DG-9` fork b) | That user's **Polymarket balance** — real funds, one venue | **Yes** — everything in §4 applies |
+> | **Operator Solana key** (`SOLANA_PRIVATE_KEY`) | The operator wallet's funds, and Jito tip payment | **Yes** |
+> | **SOPS age key** | All encrypted config. **Not built yet** — no `.sops.yaml` exists; this is `S0-10`, planned | Yes, once it exists |
+> | Solana user vaults | **Nothing.** A PDA is keyless — no key to lose | N/A |
+> | EVM session keys | Bounded bad trades until expiry; user revokes on-chain | No |
+>
+> **Escrow: Shamir 3-of-5, SLIP-39 mnemonic** (33 words/share at 256-bit).
+> Any 3 shares reconstruct; any 2 reveal mathematically nothing — which is why it
+> improves loss- *and* theft-resistance at once, where "keep N copies" trades one
+> against the other. SLIP-39 because shares are hand-transcribed and checksummed,
+> so a mis-copied word surfaces at validation rather than on the day it is needed.
+>
+> **Severity: reduced but not eliminated.** It was "every user's funds on every
+> chain, permanently." It is now "one venue's balance per user, plus operator
+> funds." That is why `DG-8` dropped from launch-blocking to Sev-2 — *not* because
+> it went away. §4 below is still the correct procedure for the three rows marked
+> Yes; read `CUSTODY_MASTER_KEY` as scoping Polymarket signer keys only.
+>
+> **Still open (neither blocks the build):** which 5 locations hold the shares —
+> five folders in one Google Drive is *one* location, since a single account
+> compromise takes all five — and the annual rehearsal cadence against a throwaway
+> key. Backups never restored are assumptions, not backups.
+
 ### 4.1 What is decided here
 
 These are design decisions, made because leaving them open would leave the
@@ -288,8 +431,10 @@ atomically — which is a flag day that touches every user's funds at once.
 
 **D-S4-B — rotation re-wraps data keys only, never private keys.**
 A `rewrapCustodyKeys` job (in `trade-executor`, never the API) iterates
-`user_trading_wallets`, unwraps the data key under its stated version, re-wraps
-under the active version, and updates the row. `key_version` on the row is the
+`user_execution_grants` **where `sealed_secret IS NOT NULL`** — i.e. Polymarket
+signer keys and EVM session keys; Solana vault rows have nothing to re-wrap and
+must be skipped rather than erroring — unwraps the data key under its stated
+version, re-wraps under the active version, and updates the row. `key_version` on the row is the
 *keypair* version and does not change; the wrapper version lives in the
 `SealedKey` string. **The private-key ciphertext is never decrypted during
 rotation** — that is the property §3 bought, and it means a crash mid-rotation
@@ -367,38 +512,102 @@ values, `CREATE … IF NOT EXISTS` only, `CREATE INDEX IF NOT EXISTS` after the
 table. Every file replays twice cleanly — `migrate.ts` re-runs all of them on
 every invocation and keeps no applied-migrations table (D16).
 
-### `047_user_trading_wallets.sql` (`S4-7`)
+### `047_user_execution_grants.sql` (`S4-7`)
+
+> **REWRITTEN 2026-08-11** by `DG-9` + `S4-P12`. Was `user_trading_wallets` —
+> one custodial keypair per user per chain. That shape no longer fits, because the
+> three chains now store **three different kinds of thing**:
+>
+> | Chain | What we store | Is there a secret? |
+> | --- | --- | --- |
+> | Solana | the user's vault **PDA address** | **No** — keyless by construction |
+> | EVM | a **session key** + its argument-level scope policy | Yes, bounded-loss |
+> | Polymarket | the user's **signer key** | Yes, funds-loss (`DG-9` fork b) |
+>
+> `sealed_key TEXT NOT NULL` is therefore wrong: Solana has nothing to seal. The
+> original `uq_utw_active_per_user_kind` is also wrong — it is keyed
+> `(user_id, chain_kind)`, and Polymarket and Robinhood Chain are **both EVM**,
+> so one user with a grant on each would collide on a single row. That is the
+> `copy_positions` collision from `S4-10` about to be repeated in a new table.
 
 ```sql
-CREATE TABLE IF NOT EXISTS user_trading_wallets (
-  id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id      UUID         NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-  chain_kind   VARCHAR(16)  NOT NULL,
-  address      VARCHAR(100) NOT NULL,
-  sealed_key   TEXT         NOT NULL,
-  key_version  INTEGER      NOT NULL DEFAULT 1,
-  status       VARCHAR(16)  NOT NULL DEFAULT 'active',
-  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  retired_at   TIMESTAMPTZ,
-  CONSTRAINT chk_utw_kind   CHECK (chain_kind IN ('evm','solana')),
-  CONSTRAINT chk_utw_status CHECK (status IN ('active','retired','compromised')),
-  CONSTRAINT chk_utw_sealed_versioned CHECK (sealed_key LIKE 'v%'),
-  CONSTRAINT uq_utw_address UNIQUE (chain_kind, address)
+CREATE TABLE IF NOT EXISTS user_execution_grants (
+  id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID         NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  chain         VARCHAR(32)  NOT NULL,
+  grant_kind    VARCHAR(24)  NOT NULL,
+  -- The account the trade settles from. The user's OWN address on Solana/EVM;
+  -- their Deposit Wallet on Polymarket. We no longer mint addresses.
+  account_address VARCHAR(100) NOT NULL,
+  -- NULL for solana_vault: a PDA has no key, so there is nothing to seal.
+  sealed_secret TEXT,
+  key_version   INTEGER,
+  -- Argument-level allowlist (S4-P10). Required for EVM session keys; the
+  -- Solana equivalent lives on-chain in the vault program, not here.
+  scope_policy  JSONB,
+  expires_at    TIMESTAMPTZ,
+  revoked_at    TIMESTAMPTZ,
+  status        VARCHAR(16)  NOT NULL DEFAULT 'active',
+  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  CONSTRAINT chk_ueg_chain  CHECK (chain IN ('solana','polygon','robinhood-chain')),
+  CONSTRAINT chk_ueg_kind   CHECK (grant_kind IN
+    ('solana_vault','eip7702','session_key_4337','polymarket_signer')),
+  CONSTRAINT chk_ueg_status CHECK (status IN ('active','retired','revoked','compromised')),
+
+  -- A keyless grant must carry no secret; a keyed grant must carry one, versioned.
+  -- Enforced in SQL rather than in application code because this is the invariant
+  -- that "the API can never decrypt" ultimately rests on.
+  CONSTRAINT chk_ueg_secret_matches_kind CHECK (
+    (grant_kind = 'solana_vault'
+      AND sealed_secret IS NULL AND key_version IS NULL)
+    OR
+    (grant_kind <> 'solana_vault'
+      AND sealed_secret IS NOT NULL AND key_version IS NOT NULL
+      AND sealed_secret LIKE 'v%')
+  ),
+  -- A session key with no expiry is not a scoped grant.
+  CONSTRAINT chk_ueg_session_expires CHECK (
+    grant_kind NOT IN ('eip7702','session_key_4337') OR expires_at IS NOT NULL
+  ),
+  CONSTRAINT uq_ueg_account UNIQUE (chain, account_address)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_utw_active_per_user_kind
-  ON user_trading_wallets(user_id, chain_kind)
+-- Keyed on (user_id, chain, grant_kind) — NOT (user_id, chain_kind).
+-- polygon and robinhood-chain are both EVM; keying on chain_kind would let one
+-- user's Polymarket grant collide with their Robinhood Chain grant.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ueg_active_per_user_chain_kind
+  ON user_execution_grants(user_id, chain, grant_kind)
   WHERE status = 'active';
 
-CREATE INDEX IF NOT EXISTS idx_utw_user ON user_trading_wallets(user_id);
+CREATE INDEX IF NOT EXISTS idx_ueg_user ON user_execution_grants(user_id);
+
+-- S4-P9 sweeps for lapsing grants. Partial, because only session keys expire.
+CREATE INDEX IF NOT EXISTS idx_ueg_expiring
+  ON user_execution_grants(expires_at)
+  WHERE status = 'active' AND expires_at IS NOT NULL;
 ```
 
-- **`ON DELETE RESTRICT`, not `CASCADE`.** Stage 1 and 2 used `CASCADE` because
-  sessions and subscriptions are preferences. This row is the only pointer to
-  funds. A cascade delete on a user with a non-zero balance destroys the key and
-  the money with it, irreversibly, from a single `DELETE FROM users`. Stage 1
-  already made deletion soft (`users.status = 'deleted'`); `RESTRICT` makes the
-  hard path fail loudly rather than depending on that discipline holding.
+- **`ON DELETE RESTRICT`, not `CASCADE`.** Unchanged and still the point. Stage 1
+  and 2 used `CASCADE` because sessions and subscriptions are preferences. A
+  Polymarket row is the only pointer to funds, and a Solana row is the only
+  pointer to a vault the user can still withdraw from. A cascade delete destroys
+  both from a single `DELETE FROM users`.
+- **`chain`, not `chain_kind`.** This is the correction above: the original
+  followed `041_user_auth_wallets.sql`, where `chain_kind` is right because an EVM
+  *auth* wallet is one signature across all EVM chains. An execution *grant* is
+  per-venue — a Polymarket signer key is useless on Robinhood Chain — so it must
+  carry the full `Chain` value. Same three-value union as everywhere else.
+- **`scope_policy JSONB`, deliberately not typed columns.** The policy is a list
+  of `(target, selector, argument constraints)` triples whose shape differs per
+  venue; a normalised table would need a migration per policy feature. It is
+  validated in application code on write and never read as authority — the
+  *on-chain* policy is the enforcement point (`S4-P10`, §3.4 finding 1). This
+  column is a record of what we asked for, not what protects the funds.
+- **No `sealed_secret` for Solana is the whole point.** A `NOT NULL` here would
+  force a placeholder, and a placeholder in a key column is how a keyless design
+  quietly acquires a key. The `CHECK` makes the absence structural.
+
+
 - **`chain_kind`, not `chain`** — matching `041_user_auth_wallets.sql`. One EVM
   keypair signs on Polygon and Robinhood Chain both; minting a separate key per
   EVM chain would double the custody surface for zero benefit and fragment a
@@ -840,12 +1049,25 @@ users
   ⋈ user_wallet_subscriptions → cluster_memberships → the signal's cluster
   ⋈ user_execution_settings          (auto_execute, min_signal_score, killed)
   ⋈ user_chain_execution_settings    (mode ≠ 'off' for the signal's chain)
-  ⋈ user_trading_wallets             (status = 'active', matching chain_kind)
+  ⋈ user_execution_grants            (status = 'active', matching chain,
+                                      not revoked, expires_at in the future)
   ⋈ user_balances                    (fresh enough, usd IS NOT NULL, ≥ minimum)
   where users.status = 'active'
     and effective tier permits live execution   -- operator+ for live, any tier for paper
     and signal.score ≥ user.min_signal_score
 ```
+
+Three joins carry per-chain conditions that are easy to get wrong:
+
+- **Match on `chain`, not `chain_kind`** (§5's `047` correction). Keying on
+  `chain_kind` would let a user's Polymarket grant satisfy eligibility for a
+  Robinhood Chain signal, since both are EVM.
+- **An expired grant must drop out here, not fail at execution.** `expires_at` is
+  in the join precisely so a lapsed session key produces "not eligible" rather
+  than a rejected UserOperation after the trade window has passed (`S4-P9`).
+- **On Polymarket, geo-staleness is an eligibility condition too** (`S4-P16`): no
+  verified login inside 7 days means not eligible. It belongs here rather than at
+  the venue call, so the skip is visible in the same place as every other skip.
 
 Two properties the enumeration must have:
 
@@ -1171,6 +1393,58 @@ in one function that takes the platform resolution from
 row together. A structure where the user's mode is read first and the platform
 gate is consulted afterwards is one refactor away from someone returning early.
 
+### 7.7 Jito tip funding under fan-out — **decided 2026-08-11**
+
+Fan-out creates a question single-operator execution never had: a Jito bundle needs
+a tip, and with N users trading one signal there are now N tips. **Decision: the
+user funds their own tip; WAKE sets the amount.**
+
+Per-user *funding* is right — it aligns cost with benefit and avoids an unbounded
+platform expense that scales with someone else's trading frequency. But the
+platform sets the *amount*, because Jito is an auction and the alternative is worse
+than it looks (see the fairness note below).
+
+Five consequences, each with its resolution:
+
+1. **A tip is a SOL transfer to an address — the exact shape `S4-P10` blocks.**
+   Bounded in the vault program by `max_tip_lamports` and an allowlist, both read
+   from `WakeConfig`. Worst case on a stolen operator key: tip-sized drains to
+   Jito's own validators — vandalism, not theft. **That claim holds only once
+   `WakeConfig` is a pinned PDA** (§3.4 finding 2); with a forgeable config it is a
+   full drain.
+2. **The allowlist must not live in a per-user grant.** Jito rotates tip addresses.
+   Baked into each grant, a rotation becomes a re-consent flow for every user;
+   in `WakeConfig` it is one admin update. **The same defect exists off-chain
+   today** — `JITO_TIP_ACCOUNTS` in `packages/shared/src/jito.ts:34` is a
+   hard-coded constant, and a stale entry fails in the worst available way: the
+   block engine ignores the bundle, nothing lands, and the executor reports
+   submission success. Tracked as `S4-P18`, and worth fixing on the operator path
+   independently of the vault timeline.
+3. **Users need SOL they do not know they need.** Someone funding USDC to copy-trade
+   has zero SOL and cannot execute. `SOLANA_GAS_RESERVE_SOL`
+   (`apps/trade-executor/src/index.ts:179`) is operator-global; this needs a
+   **per-user minimum** derived from position size and expected trade frequency,
+   checked at onboarding *and* before each trade, failing with "add SOL" rather
+   than a generic execution error. **The formula is not yet specified** — it is the
+   one genuinely unresolved piece of this subsection.
+4. **Tip fairness — platform floor, optional user boost.** Nobody can bid below the
+   floor. But state the trade-off plainly rather than burying it: **a user who adds
+   more than the floor gets systematically better inclusion than one who does not,
+   on the same signal, inside our own product.** A strictly uniform tip avoids that
+   entirely; the hybrid deliberately reopens a smaller version of it in exchange for
+   letting latency-sensitive users pay for priority. Revisit if it becomes a visible
+   complaint — and note it interacts with `DG-7`: users already compete for the same
+   liquidity, and this adds a second axis on which the better-funded win.
+5. **Tips must enter P&L, or reported returns are overstated.** Not a preference —
+   a correctness fix, and worst on small trades where a 0.005 SOL ceiling is a large
+   percentage. `tipLamports` is already computed
+   (`jupiter-jito-runtime.ts:178`) and discarded; `persistTrade` already has a
+   validated, unused `feeUsd` parameter (`packages/db/src/trades.ts:25`). The fix is
+   to thread the lamport amount through `JupiterJitoResolution`, convert at the SOL
+   price already fetched via `fetchTokenPriceUsd(SOL_MINT)`, and pass it in —
+   **only on a landed bundle.** Jito bundles are atomic, so a bundle that never
+   lands costs nothing and must not be charged. Tracked as `S4-P18`.
+
 ---
 
 ## 8. `account` → user id: verified call-site inventory
@@ -1417,10 +1691,10 @@ mutation-testing the scanner itself.
 
 | Item | Why |
 |---|---|
-| **Keypair rotation** (new address per user, funds moved on-chain) | Needs gas, an on-chain sweep, reconciliation, and a policy for dust left behind. `user_trading_wallets.key_version` and the partial unique index make it possible without a schema change later. **Wrapper** rotation (§4) is built now; **keypair** rotation is not. |
+| **Keypair rotation** (new address per user, funds moved on-chain) | Needs gas, an on-chain sweep, reconciliation, and a policy for dust left behind. `user_execution_grants.key_version` and the partial unique index make it possible without a schema change later. **Wrapper** rotation (§4) is built now; **keypair** rotation is not. Narrower than first written: it applies only to Polymarket signer keys, since Solana vaults are keyless and EVM session keys are replaced by re-consent rather than rotated. |
 | Hardware security module / MPC signing | `KeyWrapper` covers the KMS step. MPC changes the signing model, not the wrapping model, and is a `DG-3` vendor question. |
-| `VaultTransitWrapper` as production default | Built and demonstrated on staging at Stage 4; production cutover is gated on the threshold now named in `docs/adr/0002-custody-key-store.md` — USD 50,000 custodied or 100 funded users — and enforced by `S4-P5`. |
-| Turnkey / Privy vendor evaluation (`S4-6`, `DG-3`) | Must complete **before design freeze**, not before this doc. The binding constraint is raw-signing support for Polymarket L2 credential derivation — `S3-20` derives credentials as a function of an EVM signer, and a vendor that only signs transactions cannot produce them. |
+| `VaultTransitWrapper` as production default | Built and demonstrated on staging at Stage 4; production cutover is gated on the ADR-0002 threshold — USD 50,000 custodied or 100 funded users — now measured on **Polymarket balances only** (`DG-9` fork b), since no other chain custodies funds. `S4-P5` was retired by ADR-0003 and returns in this narrowed form. |
+| Turnkey / Privy vendor evaluation (`S4-6`, `DG-3`) | Must complete **before design freeze**, not before this doc. Two binding constraints now: raw-signing support for Polymarket L2 credential derivation (`S3-20` derives credentials from an EVM signer, and a vendor that only signs transactions cannot produce them), **and** argument-level permission policy — the acceptance test is whether `approve` can be constrained by *spender*, not merely by selector (`S4-P10`). A vendor advertising "session keys" does not necessarily pass it. |
 | Dedicated custody host split (`S4-18`, D5 step 2) | Operational, not code. The `packages/custody` boundary is what makes it a deployment change rather than a refactor, and that boundary lands now. |
 | Mandatory 2FA on custody accounts | Stage 1 §8 flagged it as "reconsider as mandatory at Stage 4". Deferred **only** because §6.3's destination allowlist already defeats session-only takeover. If email confirmation is ever weakened, this stops being deferrable. |
 | Aggregated/omnibus execution (`DG-7` Option A) | Rejected for Stage 4 on custody grounds (§7.5). Revisit with counsel if execution quality becomes the binding constraint. |
