@@ -51,7 +51,27 @@ bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy 
 
 **The pivot.** WAKE no longer trades on cluster consensus. A user copies **one master wallet per chain**: when it buys they buy, when it sells they sell, sized to their own balance. Read `docs/adr/0005-single-master-mirroring.md` for the reasoning — the short version is that cluster grouping and the cluster trade signal were the same predicate at two time scales, so the signal restated its own grouping criterion, and co-movement among wallets grouped *for* co-moving is evidence of shared control rather than a shared fact.
 
-**Landed and verified:** migrations `047`–`050` (execution grants, balances, settings, tenancy key); `packages/shared/src/email.ts` (Resend, three-way fail-closed result, 56 tests); `S4-P18` Jito tip accounting; cluster detectors demoted with the invariant centralized in `apps/signal-engine/src/trade-eligibility.ts`. 865+ tests pass across `@swat/db` (305), `@swat/shared` (207), `@swat/trade-executor` (343), `@swat/signal-engine` (10).
+**Landed and verified:** migrations `047`–`051` (execution grants, balances, settings, tenancy key, subscription states); `packages/shared/src/email.ts` (Resend, three-way fail-closed result, 56 tests); `S4-P18` Jito tip accounting; cluster detectors demoted with the invariant centralized in `apps/signal-engine/src/trade-eligibility.ts`.
+
+### Session of 2026-08-20 — what changed, newest last
+
+| Item | Commit | State |
+| --- | --- | --- |
+| `S3-25` per-chain trade queues | `1059531` | **Done and ticked.** Switch on, all seven inlined queue literals gone, `chainFromTokenMint` is the single definition of a job's chain |
+| `docs/stale-dist-hazards.md` | `efe018b` | Three tracked items, all one root cause. **Read it before trusting a clean `tsc` or a green app suite** |
+| `S4-M12` per-account EVM nonce lock | `5604950` | **Done.** Session advisory lock + per-account in-process chain + breaker exemption |
+| `S4-M3` subscription states (`051`) | `f09da04` | **Unticked.** Schema and state machine done; the unsubscribe *call site* is blocked — see below |
+| `S4-M16`/`S4-M17` Polymarket libs | `f47675f` | **Both unticked.** Mirror-bound planner (22 tests) and exit-escalation ladder (20 tests) |
+| `S4-M16` mirror wiring | `f210bad` | **Still unticked.** Now reachable, but the call site has no test |
+| `S4-M22` / `S4-M14` | `b7c1f77` | **Both ticked.** Latency target deleted; `docs/adr/0006-robinhood-sequencer-trust.md` written |
+
+Test counts after that session: `@swat/db` **357**, `@swat/shared` **214**, `@swat/trade-executor` **429** (see `S4-M27` for the one environmental flake), `@swat/signal-engine` 10, `@swat/alert-service` 13, `@swat/api` 17.
+
+**Three things that will bite the next session, in order:**
+
+1. **A `pnpm --filter @swat/shared build` and a `pnpm --filter @swat/db build` are now hard prerequisites, not hygiene.** `chainFromTokenMint`, `tradeQueueForTokenMint`, `withEvmNonceLock` and `getCanonicalSourceTradeById` are all new exports, and services resolve both packages to stale `dist/`. Until those builds run, `api`'s manual-execute route throws and `signal-engine` drops every signal. Full detail and a verification command in `docs/stale-dist-hazards.md`.
+2. **`S4-M3` cannot finish until a position can be attributed to a subscription.** `copy_positions` is keyed `(target_account, chain, token_mint)` + `user_id` and carries **no master-wallet column**, so choosing between `winding_down` and `ended` on unsubscribe is not answerable from the schema. Defaulting to `winding_down` would strand rows in a state nothing clears — no reaper exists. Fan-out (`S4-13`/`S4-15`) must carry the master wallet onto the position row; only then does the route switch to `beginWindDown`/`endSubscription`. Also: `pauseUnsubscribedWallets` (`packages/db/src/scoring-queries.ts`) counts an `ended` row as a subscriber, so a retained row pins a wallet to `active` forever — it needs `AND state <> 'ended'` in both `NOT EXISTS` sub-selects.
+3. **`S4-M2` must filter on `active_since`, not `created_at`.** Re-subscribe is an `ended → active` transition on the same row (the PK forbids a second one), so `created_at` still reads January for a subscription revived in August. Getting this wrong silently reintroduces catch-up buying, which is the one thing forward-only joins exist to prevent.
 
 **Already built and correct, do not rewrite:** `computeCopySellProportion` (`packages/shared/src/copy-trade-lifecycle.ts:242`) — proportional exits across all three chains, throwing rather than defaulting to sell-everything when position evidence is missing. `processSourceTradeSignals` — the per-master signal, already on the pub/sub fast path. `044_user_wallet_subscriptions` — user↔wallet with `manual | platform-signal | discovered` provenance.
 
@@ -94,13 +114,13 @@ bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy 
 Full item text is in `AUDIT-FIX-CHECKLIST.md` **§7.5** (26 items, `S4-M*`). Order below reflects what blocks what.
 
 1. ~~**`S3-25`**~~ — **DONE 2026-08-20.** Per-chain queues are live, one concurrency-1 worker each, and the seven inlined queue literals are gone. `chainFromTokenMint()` in `packages/shared/src/constants.ts` is now the single definition of a job's chain, shared by the producers and the executor — do not add a second one. **Requires `pnpm --filter @swat/shared build` before it runs** (new export, stale `dist`). Left open: delete the `swat-trades` drain worker and `QUEUES.trades` once a deploy confirms that queue is empty. Full entry in `AUDIT-FIX-CHECKLIST.md` §6.4.
-2. **`S4-M12`** — per-user nonce allocation on EVM. **A correctness bug, not an optimisation:** today one operator key with `getPendingNonce` then local `nonce++` (`robinhood.ts:670`, `:722`); two concurrent jobs for one user read the same nonce, both submit, one is silently replaced, and a fill vanishes with no error. Advisory lock on `(chain, account)` plus per-user queue concurrency. Must land *with* fan-out.
-3. **`S4-M3`** — subscription states. **Schema change that must precede fan-out**, because retrofitting requires reconstructing which open position came from which subscription, and that isn't recoverable once positions exist.
+2. ~~**`S4-M12`**~~ — **DONE 2026-08-20 (`5604950`).** Session-level `pg_try_advisory_lock` on `(chain, account)` via `withEvmNonceLock`, injected as a port so `robinhood.ts` stays free of `@swat/db`; plus the in-process submission chain re-keyed from global to per-account, so users no longer serialise behind each other. Contention throws `NonceContentionError`, which the circuit breaker exempts — counting it would turn a millisecond overlap into a five-minute chain outage. **The same port is what Polymarket's polygon signer should use; do not write a second one.**
+3. ~~**`S4-M3`**~~ — **schema DONE 2026-08-20 (`f09da04`), item still open.** See §3 point 2 for the exact blocker; the remaining work is fan-out carrying the master wallet onto the position row, not more schema.
 4. **`S4-M2`** forward-only joins, then **`S4-15`/`S4-M1`** hybrid sizing, then **`S4-M4`** position cap + the derived below-minimum warning.
 5. **`S4-M6`** price-impact capacity cap and per-master budget allocation.
-6. **`S4-M15`** pre-trade simulation; **`S4-M16`–`S4-M20`** Polymarket FAK/exit-escalation/staleness/redemption/negRisk.
+6. **`S4-M15`** pre-trade simulation; **`S4-M16`–`S4-M20`** Polymarket. **`S4-M16` and `S4-M17` are built and tested but not finished** (`f47675f`, `f210bad`): the mirror-bound planner is now reachable from the copy path, but its call site has no test because `execution-lifecycle.test.ts` has **no test that reaches the Polymarket branch of `handleJob` at all** — building that fixture is the next real piece of work there, and it unblocks ticking `S4-M16`. The exit-escalation ladder has **no caller**; wiring it must go through the existing guarded `reconcilePending` loop, never a second timer (audit `C1`).
 7. **`S4-M21`** detection tier: webhooks → LaserStream gRPC at `processed`. Note it's a **two-source design** — shreds and preprocessed transactions carry transaction data only, *not* account state, so anything reading a bonding curve or token balance still needs gRPC.
-8. **`S4-M22`** retire `SOLANA_SIGNAL_TO_ALERT_TARGET_MS = 60_000` (`solana-latency.ts:1`) — under ADR-0005 that's a defect, not a target.
+8. ~~**`S4-M22`**~~ — **DONE 2026-08-20 (`b7c1f77`).** Constant and its reporting helper deleted; no replacement number invented, because `S4-M21` hasn't landed and no observed distribution exists. A tripwire test fails if anyone re-adds one. `calculateSolanaLifecycleLatencies` is retained as the input `S4-M21` will feed.
 
 Parallel, non-blocking: `S3-9` Solana certification canary (evidence under `docs/certification/`), then `S3-6` Trojan deletion.
 
@@ -147,6 +167,13 @@ The operator has authorized subagents for build work. Use them for genuinely par
 - **"Do not edit barrel files** (`packages/db/src/index.ts`, `packages/shared/src/index.ts`) — report needed exports and the orchestrator wires them." Barrels are the one guaranteed collision point.
 - **"Do not `git commit` or `git add`."** The orchestrator reviews first.
 - **"Do not invent an endpoint, parameter, or figure. If you cannot verify it, say so and leave the existing behaviour in place."**
+
+### Infrastructure findings from 2026-08-20 — read before spawning anything
+
+1. **An over-long MCP tool name kills subagents with a 400.** `mcp__polymarket-docs__query_docs_filesystem_polymarket_documentation` is **68 characters** and the API caps tool names at **64**, so every agent handed the full tool list died with `400 tools.N.name`. It then hit the main session too. Fixed by renaming the server in `.mcp.json` from `polymarket-docs` to `pmdocs` — **11 characters is the maximum server name that fits** that tool, and `pmdocs` leaves 5 to spare. If you add an MCP server, check `len('mcp__' + server + '__' + longest_tool) <= 64` before relying on it.
+2. **Agents die to stream-idle timeouts on long thinking passes.** Four of seven agent runs this session terminated early with `StreamIdleTimeoutError` or an empty HTTP 200. Two lost everything because they had written nothing yet. **Put "write each file to disk as soon as you draft it" in every brief** — the survivors' work was recoverable precisely because it was on disk.
+3. **Inventory disk before respawning.** Of the four deaths, two had written real files and two had written nothing. Re-running an agent over completed output wastes a cycle and risks conflicting edits. `git status --porcelain` first, every time.
+4. **Do not let agents edit `AUDIT-FIX-CHECKLIST.md`.** Three concurrent agents editing one file is the only guaranteed collision point. Have them **report proposed entry text** and let the orchestrator paste it — this also forces the orchestrator to actually read what it is ticking, which caught an overclaimed `S4-M16` tick.
 
 ### Lessons from this session — each cost real debugging
 
