@@ -51,7 +51,13 @@ const REQUIRED_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> 
   ['copy_positions', 'user_id'],
   ['copy_position_applications', 'position_id'],
   ['copy_executions', 'user_id'],
-  ['trades', 'user_id']
+  ['trades', 'user_id'],
+  // 051. Same reasoning as the 050 entries above: `subscription-states.integration.test.ts`
+  // asserts the state CHECK constraints directly, so a database sitting at 050
+  // would fail it with an opaque "column state does not exist" rather than the
+  // actionable "schema is stale, run migrations" this guard exists to produce.
+  ['user_wallet_subscriptions', 'state'],
+  ['user_wallet_subscriptions', 'active_since']
 ];
 
 export async function assertIntegrationSchemaCurrent(): Promise<void> {
