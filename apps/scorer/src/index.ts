@@ -24,6 +24,12 @@ import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger, trade
 import type { Chain } from '@swat/shared';
 import { runAttributionReporting } from './expectancy.js';
 import { runStopLossSweep } from './stop-loss.js';
+import {
+  runMasterMetricsBatch,
+  listMasterCandidates,
+  fetchMasterTradeRows,
+  formatMasterMetricsLine
+} from './master-metrics.js';
 
 const redisUrlForPublish = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redisPublishClient = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
@@ -132,8 +138,37 @@ async function runScoringBatch() {
     )
   }));
 
+  console.log('[scorer] Computing out-of-sample master metrics (24h / 7d / 30d)...');
+  await runStage('master metrics', runMasterMetrics);
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`[scorer] Batch complete in ${elapsed}s.`);
+}
+
+/**
+ * S4-M8 - out-of-sample master metrics over 24h / 7d / 30d. Runs on the nightly
+ * batch because a track record does not change intraday in a way any user acts
+ * on, and the round-trip reconstruction reads up to 180 days per master.
+ */
+async function runMasterMetrics() {
+  const asOf = new Date();
+  const result = await runMasterMetricsBatch({
+    listMasters: () => listMasterCandidates({ asOf }),
+    fetchTrades: fetchMasterTradeRows,
+    asOf
+  });
+
+  console.log(
+    `[scorer] Master metrics: ${result.masters} candidates, ${result.reports.length} reported, ` +
+    `${result.decaying} decaying, ${result.improving} improving, ` +
+    `${result.insufficientEverywhere} with insufficient history in every window, ` +
+    `${result.failed} failed.`
+  );
+  // Divergence is itself the finding (ADR-0005 section 5.3), so a decaying
+  // master is logged individually rather than only counted.
+  for (const report of result.reports) {
+    if (report.trend === 'decaying') console.log(`[scorer] decaying master - ${formatMasterMetricsLine(report)}`);
+  }
 }
 
 /**
