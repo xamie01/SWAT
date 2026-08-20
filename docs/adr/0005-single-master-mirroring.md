@@ -214,7 +214,7 @@ ceiling, route-aware within it. Verify `wrapUnwrapSOL` against a live response â
 renamed parameter would be silently ignored and SOL would stop unwrapping.
 
 **7.2 EVM / Robinhood Chain.** Polygon is **not** a swap venue; every
-`chain === 'polygon'` branch is Polymarket, and `index.ts:1189` excludes polygon
+`chain === 'polygon'` branch is Polymarket, and the `liveTokenSell` predicate in `index.ts` excludes polygon
 from token sells. So EVM execution means Robinhood Chain via Uniswap V3.
 
 - **Robinhood Chain runs a single sequencer**, so there is no public mempool and no
