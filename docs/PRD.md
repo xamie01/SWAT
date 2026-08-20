@@ -9,6 +9,36 @@
 
 ---
 
+## 0. Where the build actually is
+
+Read this before anything else; it is the part that goes stale fastest.
+
+**Branch** `feat/multi-tenant-foundation`, **10 commits ahead of origin — so CI has not yet validated any of the recent work.** Pushing is what runs `db:migrate → typecheck → test → build → test:integration` against ephemeral Postgres 16 + Redis 7.
+
+**Green locally:** 865+ tests — `@swat/db` 305, `@swat/shared` 207, `@swat/trade-executor` 343, `@swat/signal-engine` 10 — with `tsc --noEmit` clean on every package.
+
+**The backend is multi-tenant; the frontend is not.** That asymmetry is the single most important thing to understand about the current state. Sessions, CSRF, `requireUser`, `requireRole`, nine `/v1/me/*` routes and a cross-tenant leakage suite all exist and are tested. `apps/web` is a single-operator **mockup** with no auth and no concept of a user.
+
+| Area | State |
+| --- | --- |
+| Auth, sessions, tenancy discipline | ✅ built and tested |
+| Ingestion across 3 chains | ✅ |
+| Per-master signal (`source_trade`) | ✅ on the pub/sub fast path |
+| Proportional exits | ✅ all three chains, refuses rather than guessing |
+| Multi-tenant schema `047`–`050` | ✅ written and reviewed; `050`'s acceptance test **written but never run** |
+| Jito tip accounting | ✅ `S4-P18` complete |
+| Transactional email | 🟡 module + 56 tests; **no caller, no credentials, never sent a real email** |
+| Cluster→mirroring pivot | ✅ decided (ADR-0005) and enforced in code; the rest of the semantics ⬜ |
+| Fan-out to multiple users | ⬜ blocked on the per-chain queue split |
+| Frontend for users | ⬜ 47 items, `AUDIT-FIX-CHECKLIST.md` §9 |
+| Withdrawal | ⬜ endpoint does not exist |
+
+**Two facts that will trip up anyone running things.** Both `dist/` directories are **stale** — `packages/shared/dist` predates six source changes, so `import { sendEmail } from '@swat/shared'` does not currently resolve; a build is needed on a machine that can run one. And Solana execution still defaults to the **third-party Trojan bot**, because the better Jupiter+Jito path is built but uncertified.
+
+**Direction, in one line:** a user copies one master wallet per chain — when it buys they buy, when it sells they sell, sized to their own balance. This replaced a cluster-consensus model; see `docs/adr/0005-single-master-mirroring.md` for why.
+
+---
+
 ## 1. What WAKE is
 
 WAKE lets a person copy a specific crypto trader's trades automatically, across
@@ -206,6 +236,23 @@ the user's behalf; each one has to be legible or the product is not trustworthy.
 | UX-5 | While history loads: *"copying now; performance history still loading."* Never promise "a few seconds" — see §9.2 | ⬜ |
 | UX-6 | Capacity refusals read as capacity, not as failure | ⬜ |
 
+### 5.8 Frontend
+
+**The existing `apps/web` is a mockup, not a product** — 9 pages, 16 `.tsx` files, no auth, no session, no concept of a user, and a user-facing `/clusters` page that now contradicts ADR-0005. Its value is the visual language, not its data flow. **47 items live in `AUDIT-FIX-CHECKLIST.md` §9**; the shape is summarised here.
+
+| # | Requirement | Status |
+| --- | --- | --- |
+| FE-1 | Two route groups: `(app)` for users, `(admin)` for the operator console. The admin surface is a **separate product** — not reachable, linkable or discoverable from the user app | ⬜ |
+| FE-2 | The operator console is **kept**, relocated behind `role=admin` + an IP allowlist. `/clusters` does not exist in the user app at all | ⬜ |
+| FE-3 | **Delete `NEXT_PUBLIC_API_KEY`.** 11 of its 13 readers are `'use client'`, so Next.js currently inlines the operator control-plane key into the browser bundle. Move to cookie sessions against the existing `/v1/auth/*` | ⬜ **launch blocker** |
+| FE-4 | Tailwind moves from a CDN `<script>` to a build-time pipeline; fonts via `next/font`; `darkMode: "class"` made reachable | ⬜ |
+| FE-5 | Reuse the existing design tokens **verbatim** — Geist / Geist Mono / Material Symbols, the Material 3 surface families, and the semantic chain accents `solana-teal #14F195`, `polymarket-violet #8B5CF6`, `robinhood-amber #FFB800`. Chain colour is semantic, not decorative | ⬜ |
+| FE-6 | The new-user journey: verify email → link wallet → grant authority per chain → fund → set risk → pick a master → live mirror feed | ⬜ |
+| FE-7 | Every screen has error, empty, loading **and offline** states as shared primitives | ⬜ |
+| FE-8 | SEO per route; everything behind a session is `noindex` | ⬜ |
+| FE-9 | Accessibility: keyboard reachable, focus visible, contrast verified against the token palette, and status never conveyed by colour alone | ⬜ |
+
+
 ---
 
 ## 6. Architecture at a glance
@@ -259,10 +306,26 @@ is no longer a target; it is a defect.
 We currently detect via Helius **webhooks**, which Helius's own documentation
 places at its highest-latency tier and recommends for "low-volume
 server-to-server work" — while listing copy trading under preconfirmations → raw
-shreds → preprocessed transactions. Moving to LaserStream gRPC at `processed` is
-a launch dependency. Note that shreds and preprocessed transactions carry
-transaction data only, not account state, so anything reading a bonding curve or
-token balance needs the gRPC path regardless.
+shreds → preprocessed transactions.
+
+**The plan we are on gates most of that ladder, so the realistic upgrade is
+narrower than it first appears.** On the **Free** tier: LaserStream **gRPC** is
+Business+, **preconfirmations** are Professional+, **preprocessed transactions**
+are Professional+, and **raw shreds** cost $1,000/month per IP seat. What is
+available is **LaserStream WebSocket** — documented as up to **200 ms** faster
+than standard Agave RPC websockets, serving `transactionSubscribe` among others,
+with **no replay**.
+
+So the v1 move is webhooks → **LaserStream WebSocket**. That is a real
+improvement at no cost, and it is the launch dependency. Two things follow: do
+not design against gRPC, preconfirmations or shreds until someone decides to pay
+for a tier; and because the Free tier has **no replay**, a dropped connection
+loses events, so the 15-second poll stays as the authoritative backstop rather
+than becoming redundant.
+
+At every tier, shreds and preprocessed transactions carry transaction data only,
+not account state — so anything reading a bonding curve or token balance needs a
+subscription path regardless. This is a two-source design, not a swap.
 
 We still will not beat dedicated snipers, and should not pretend to. The goal is
 to be fast enough that mirroring is honest, not to win a race.
@@ -280,8 +343,13 @@ Measured, not estimated:
 Solana is slowest because it has no plural `getTransaction` RPC — 200 sequential
 round trips minimum. **Backfill is not on the critical path for copying**: live
 mirroring needs the wallet subscribed to the data stream, not its history. Hence
-UX-5. A cheap win worth measuring: `BACKFILL_BATCH_SIZE=5` with a 150 ms sleep is
-conservative; if the Helius plan allows more concurrency, this drops 4–5×.
+UX-5.
+
+**A previously-noted "cheap win" here is withdrawn.** Raising
+`BACKFILL_BATCH_SIZE` above 5 and dropping the 150 ms pacing would cut this 4–5×
+*if* the plan allowed the concurrency — on the **Free** tier it does not, and the
+conservative pacing is correct rather than timid. Revisit only if the plan
+changes.
 
 ### 7.3 The Polymarket relayer quota caps user count
 
@@ -312,7 +380,8 @@ Roughly parallelisable. Ordered by what blocks what.
 | **D — Venue execution** | Solana certification + Trojan retirement; RHC approvals + confirmation; Polymarket FAK + exits | Live trading |
 | **E — Suggestions** | Metric set over three windows, independence warnings | Onboarding quality |
 | **F — Trust surface** | Withdrawal endpoint, email verification, cooling-off, skip-reason UX, tracking difference | Public launch |
-| **G — Detection tier** | Webhooks → LaserStream gRPC | Mirroring honesty |
+| **G — Detection tier** | Webhooks → LaserStream **WebSocket** (the Free-tier ceiling) | Mirroring honesty |
+| **H — Frontend** | 47 items in checklist §9. Foundation (§9.1) is unblocked **today**; everything from §9.2 onward needs the backend it renders | Public launch |
 
 **Stream A is the critical path** and currently carries ~3,500 lines of
 unreviewed schema and query code.
@@ -337,13 +406,15 @@ decisions.
 
 ## 10. Open questions
 
-| # | Question | Owner |
+**Four of the five are now closed.** Only the legal question remains open, and it is outside engineering.
+
+| # | Question | Status |
 | --- | --- | --- |
-| OQ-1 | Money-transmitter / VASP exposure, including venue-scoped custody, and sign-off on the 7-day geo-staleness window | Legal — outside engineering |
-| OQ-2 | Can a vendor policy engine be scoped so that our own signing credential cannot widen it? One empirical test decides whether Polymarket custody can become non-custodial | Engineering, ~10 min |
-| OQ-3 | Does the Robinhood Chain router support Permit2? Determines RHC-3 | ❓ |
-| OQ-4 | Actual Helius plan concurrency limit, for §7.2 | ❓ |
-| OQ-5 | ~~Copy-trading UI surface in `apps/web`~~ — **answered 2026-08-19: essentially none.** The existing app is a single-operator mockup (9 pages, 16 `.tsx`, no auth, no user concept). The operator console is kept but relocated behind `(admin)`; the user app is built new against the existing design tokens. 47 items in `AUDIT-FIX-CHECKLIST.md` §9 | Closed |
+| OQ-1 | Money-transmitter / VASP exposure, including venue-scoped custody, and sign-off on the 7-day geo-staleness window | **OPEN** — legal, outside engineering. Blocks launch, not build |
+| OQ-2 | Can a vendor policy engine be scoped so that our own signing credential cannot widen it? | **Closed by decision 2026-08-19.** Fork (b) ships; fork (c) is not pursued in v1. It is deliberately *not* blocked on the experiment, because `047`'s `grant_kind` CHECK was written as a generic keyless/keyed split, so moving to (c) later is a change inside one adapter function, not a schema migration. The 10-minute test is specified in full as `S4-P21` for whoever wants to reduce custody exposure later |
+| OQ-3 | Does the Robinhood Chain router support Permit2? | **Closed 2026-08-19 — yes**, confirmed by the operator. The rolling-bounded-allowance fallback is dropped. Permit2 removes the on-chain approve entirely, so a mirror is one transaction instead of two. Note it moves `S4-P10`'s argument-level check off `approve`'s spender and onto the permit's token/spender/amount/deadline fields |
+| OQ-4 | Actual Helius plan concurrency limit | **Closed 2026-08-19 — Free tier.** This materially re-scoped §7.1: gRPC, preconfirmations and preprocessed transactions are all above Free, so the upgrade target is **LaserStream WebSocket**, not gRPC. It also withdrew the §7.2 backfill "cheap win" — the conservative pacing is correct on this plan, not timid |
+| OQ-5 | Copy-trading UI surface in `apps/web` | **Closed 2026-08-19 — essentially none.** A single-operator mockup. Console kept but relocated behind `(admin)`; user app built new against the existing design tokens. 47 items in `AUDIT-FIX-CHECKLIST.md` §9 |
 
 ---
 

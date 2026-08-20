@@ -73,10 +73,10 @@ bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy 
 
 ## 5. Open questions — these need the human, don't invent answers
 
-- **OQ-3:** does the Robinhood Chain router support Permit2? Gates `S4-M13`.
-- **OQ-4:** actual Helius plan concurrency limit — would cut Solana backfill 4–5× (`BACKFILL_BATCH_SIZE=5` + 150 ms sleep is conservative).
-- **OQ-5:** ~~what copy-trading UI exists in `apps/web`~~ — **answered 2026-08-19: essentially none.** 9 pages, 16 `.tsx`, no auth, no user concept, one file mentioning copying. It is a single-operator mockup. Full findings and 47 items in checklist §9.
-- **DG-9 fork (c):** one ~10-minute empirical test (create a Privy policy with an owner we hold, then `PATCH /v1/policies/{id}` with app-secret only; 4xx means the boundary is real). Human-side, needs a dev app.
+- **OQ-3 — CLOSED 2026-08-19: Robinhood Chain supports Permit2.** `S4-M13` is now "use Permit2", fallback dropped. Two consequences: a mirror becomes one transaction instead of approve-then-swap, and `S4-P10`'s argument-level check moves off `approve`'s spender onto the permit's token/spender/amount/deadline fields.
+- **OQ-4 — CLOSED 2026-08-19: Helius FREE tier.** This materially re-scoped `S4-M21`. gRPC is Business+, preconfirmations and preprocessed transactions are Professional+, raw shreds are $1,000/mo per IP seat. **The available upgrade is LaserStream *WebSocket*** (Free+, up to 200 ms faster than standard Agave websockets, **no replay**). Do not design against gRPC or shreds. Also **withdraws** the backfill "cheap win" — the conservative `BACKFILL_BATCH_SIZE=5` + 150 ms pacing is correct on this plan, not timid.
+- **OQ-5 — CLOSED 2026-08-19: essentially no user UI exists.** `apps/web` is a single-operator mockup. Console kept but relocated behind `(admin)`; user app built new against the existing design tokens. 47 items in checklist §9.
+- **OQ-2 / DG-9 fork (c) — CLOSED BY DECISION 2026-08-19.** Fork (b) ships; fork (c) is not pursued in v1 and **blocks nothing**, because `047`'s `grant_kind` CHECK was written as a generic keyless/keyed split, so moving to (c) later is a change inside one adapter function rather than a schema migration. The ~10-minute test is specified in full as `S4-P21` for whoever later wants to reduce custody exposure. Do not treat it as a prerequisite.
 
 ## 6. Next work, sequenced
 
@@ -92,6 +92,8 @@ Full item text is in `AUDIT-FIX-CHECKLIST.md` **§7.5** (26 items, `S4-M*`). Ord
 8. **`S4-M22`** retire `SOLANA_SIGNAL_TO_ALERT_TARGET_MS = 60_000` (`solana-latency.ts:1`) — under ADR-0005 that's a defect, not a target.
 
 Parallel, non-blocking: `S3-9` Solana certification canary (evidence under `docs/certification/`), then `S3-6` Trojan deletion.
+
+**The frontend is a genuinely parallel workstream — checklist §9, 47 items.** `§9.1 Foundation` is unblocked **today** and is real work: move Tailwind off the CDN `<script>`, fonts to `next/font`, adopt cookie sessions against the existing `/v1/auth/*`, **delete `NEXT_PUBLIC_API_KEY`** (currently inlined into the browser bundle by 11 `'use client'` readers — a launch blocker), add `middleware.ts` route protection, and split `(app)` from `(admin)`. Everything from `§9.2` onward renders backend that does not exist yet, so do **not** start there and discover the API is missing. Reuse the existing design tokens verbatim; the palette table is in checklist §9.
 
 ## 7. Known debt — inherited, state it rather than discover it
 
