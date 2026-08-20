@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "polymarket-docs": {
+    "pmdocs": {
       "type": "http",
       "url": "https://docs.polymarket.com/mcp"
     }

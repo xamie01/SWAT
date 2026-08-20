@@ -37,6 +37,15 @@ import {
 } from '@swat/db';
 import { capPositionToAvailableBalance } from './policy.js';
 import { assertPolymarketMarketOpenForSubmission } from './polymarket-market-state.js';
+import {
+  planPolymarketMirrorBound,
+  resolvePolymarketMirrorToleranceBps,
+  type PolymarketMirrorBoundDecision
+} from './polymarket-mirror-bound.js';
+import {
+  POLYMARKET_GTD_MINIMUM_HORIZON_MS,
+  type PolymarketExitLimitRung
+} from './polymarket-exit-escalation.js';
 
 export const POLYMARKET_CLOB_HOST = 'https://clob.polymarket.com';
 export const POLYGON_CHAIN_ID = 137;
@@ -470,7 +479,9 @@ export function planPolymarketBookOrder(
     }
     const tickRatio = level.price / tickSize;
     if (Math.abs(tickRatio - Math.round(tickRatio)) > 1e-8) {
-      throw new UnrecoverableError('Polymarket order-book price is off the current tick-size grid');
+      throw new UnrecoverableError(
+        'Polymarket Protection: order-book price is off the current tick-size grid'
+      );
     }
   }
 
@@ -502,7 +513,7 @@ export function planPolymarketBookOrder(
   shares = floorDecimal(shares, POLYMARKET_SHARE_DECIMALS);
   if (shares < minimumShares) {
     throw new UnrecoverableError(
-      `Polymarket order is below the ${minimumShares}-share minimum after venue rounding`
+      `Polymarket Protection: order is below the ${minimumShares}-share minimum after venue rounding`
     );
   }
   const bestPrice = levels[0]!.price;
@@ -570,12 +581,31 @@ function collateralAvailableForPrincipal(available: number): number {
   return available * 10_000 / (10_000 + feeBufferBps);
 }
 
+/**
+ * The master-fill reference a mirrored order is bounded against (`S4-M16`).
+ *
+ * Supplied only on the mirroring path. A manual or stop-loss order has no master
+ * and legitimately carries none, which is why this is optional rather than
+ * defaulted — but when it *is* supplied and `masterFillPriceUsd` is absent, the
+ * mirror fails closed with a skip instead of falling back to a book-derived
+ * bound that nobody sanctioned.
+ */
+export interface PolymarketMirrorContext {
+  /** The canonical source event being mirrored. Present iff this is a copy. */
+  readonly sourceTradeId: string;
+  /** The tracked wallet's realized price for that event, in USD per share. */
+  readonly masterFillPriceUsd: number | null;
+  /** Per-user override; falls back to POLYMARKET_MIRROR_TOLERANCE_BPS. */
+  readonly toleranceBps?: number;
+}
+
 export async function triggerPolymarket(params: {
   signalId: string;
   tokenID: string;
   spendAmountUsd: number;
   direction: 'buy' | 'sell';
   sellShares?: number;
+  mirror?: PolymarketMirrorContext;
 }) {
   if (!liveReadiness.ready) {
     throw new UnrecoverableError(`Polymarket live execution is not ready: ${liveReadiness.reason}`);
@@ -651,6 +681,32 @@ export async function triggerPolymarket(params: {
       params.direction === 'buy' ? spendAmountUsd : requestedShares,
       maxSlippageBps
     );
+
+    // The protective bound we actually sign. On the mirroring path it comes from
+    // the master's fill (`S4-M16`); a manual or stop-loss order keeps the
+    // book-walk level, which is all the reference such an order has.
+    let mirrorDecision: PolymarketMirrorBoundDecision | null = null;
+    let boundPrice = plan.limitPrice;
+    if (params.mirror) {
+      mirrorDecision = planPolymarketMirrorBound({
+        direction: params.direction,
+        masterFillPrice: params.mirror.masterFillPriceUsd,
+        bookLimitPrice: plan.limitPrice,
+        tickSize: Number(book.tickSize),
+        shares: params.direction === 'buy' ? plan.estimatedShares : requestedShares,
+        minimumShares: Number(book.minOrderSize),
+        toleranceBps: params.mirror.toleranceBps ?? resolvePolymarketMirrorToleranceBps()
+      });
+      if (mirrorDecision.kind === 'skip') {
+        // "Polymarket Protection" is the marker the job handler matches to record
+        // a skipped trade with its reason rather than a failed one.
+        throw new UnrecoverableError(
+          `Polymarket Protection: ${mirrorDecision.reason} [${mirrorDecision.code}]`
+        );
+      }
+      boundPrice = mirrorDecision.boundPrice;
+    }
+
     const maximumEntryPrice = Number(process.env.POLYMARKET_MAX_ENTRY_PRICE ?? '0.97');
     const minimumExitPrice = Number(process.env.POLYMARKET_MIN_EXIT_PRICE ?? '0.01');
     if (
@@ -659,12 +715,14 @@ export async function triggerPolymarket(params: {
     ) {
       throw new UnrecoverableError('Polymarket entry/exit price bounds are invalid');
     }
+    // Applied to the bound we are about to sign, not to the book level, so a
+    // mirror tolerance can never widen the operator's configured safe range.
     if (
-      (params.direction === 'buy' && plan.limitPrice > maximumEntryPrice) ||
-      (params.direction === 'sell' && plan.limitPrice < minimumExitPrice)
+      (params.direction === 'buy' && boundPrice > maximumEntryPrice) ||
+      (params.direction === 'sell' && boundPrice < minimumExitPrice)
     ) {
       throw new UnrecoverableError(
-        `Polymarket Protection: Price ${plan.limitPrice} outside safe bounds configured for this executor`
+        `Polymarket Protection: Price ${boundPrice} outside safe bounds configured for this executor`
       );
     }
 
@@ -681,7 +739,7 @@ export async function triggerPolymarket(params: {
           side: OrderSide.BUY,
           amount: spendAmountUsd,
           maxSpend: spendAmountUsd,
-          maxPrice: plan.limitPrice,
+          maxPrice: boundPrice,
           orderType: OrderType.FAK,
           builderCode: identity.builderCode
         }
@@ -689,7 +747,7 @@ export async function triggerPolymarket(params: {
           tokenId: params.tokenID,
           side: OrderSide.SELL,
           shares: requestedShares,
-          minPrice: plan.limitPrice,
+          minPrice: boundPrice,
           orderType: OrderType.FAK,
           builderCode: identity.builderCode
         });
@@ -721,7 +779,9 @@ export async function triggerPolymarket(params: {
       feesUsd: null,
       requestedSpendAmountUsd: params.direction === 'buy' ? spendAmountUsd : plan.estimatedNotionalUsd,
       requestedShares: params.direction === 'buy' ? plan.estimatedShares : requestedShares,
-      slippageBps: plan.slippageBps
+      slippageBps: plan.slippageBps,
+      mirrorBoundPrice: boundPrice,
+      mirrorTrackingBps: mirrorDecision?.kind === 'submit' ? mirrorDecision.trackingBps : null
     });
     if (response.tradeIds.length === 0) {
       return pendingResult(`Polymarket order was accepted with venue status ${response.status}`);
@@ -801,13 +861,142 @@ export async function triggerPolymarket(params: {
       feesUsd,
       requestedSpendAmountUsd: params.direction === 'buy' ? spendAmountUsd : plan.estimatedNotionalUsd,
       requestedShares: requested,
-      slippageBps: plan.slippageBps
+      slippageBps: plan.slippageBps,
+      mirrorBoundPrice: boundPrice,
+      mirrorTrackingBps: mirrorDecision?.kind === 'submit' ? mirrorDecision.trackingBps : null
     };
   } catch (error: unknown) {
     if (error instanceof UnrecoverableError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new UnrecoverableError(`Polymarket execution failed: ${message}`);
   }
+}
+
+/**
+ * Submit one exit-escalation rung as a GTD limit order (`S4-M17`).
+ *
+ * Separate from `triggerPolymarket` because the two order shapes answer different
+ * questions. `triggerPolymarket` mirrors a master's trade and must not rest;
+ * this recovers an exit that already failed to fill and is allowed to rest for a
+ * bounded window.
+ *
+ * The `expiration` arrives pre-computed by `planPolymarketExitEscalation`, which
+ * owns the documented `now + 60 + N` formula and the 3-minute venue floor. It is
+ * re-checked here only for the case where a rung was planned and then sat in a
+ * queue long enough to go stale — submitting an already-expired expiration is a
+ * guaranteed rejection that would consume a rung.
+ */
+export async function submitPolymarketExitRung(params: {
+  tokenID: string;
+  rung: PolymarketExitLimitRung;
+  now?: number;
+}): Promise<{ orderId: string; status: string; expiration: number }> {
+  if (!liveReadiness.ready) {
+    throw new UnrecoverableError(`Polymarket live execution is not ready: ${liveReadiness.reason}`);
+  }
+  if (!polymarketSigner) {
+    throw new UnrecoverableError('Polymarket signer is not initialized');
+  }
+  const now = params.now ?? Date.now();
+  const horizonMs = params.rung.expiration * 1000 - now;
+  if (horizonMs < POLYMARKET_GTD_MINIMUM_HORIZON_MS) {
+    throw new UnrecoverableError(
+      `Polymarket exit rung expiration is only ${horizonMs}ms ahead; the venue rejects anything under 3 minutes`
+    );
+  }
+
+  const identity = resolvePolymarketIdentity(polymarketSigner.address);
+  const client = requireSecureClobClient();
+  const order = await client.createLimitOrder({
+    tokenId: params.tokenID,
+    side: OrderSide.SELL,
+    price: params.rung.price,
+    size: params.rung.shares,
+    expiration: params.rung.expiration,
+    builderCode: identity.builderCode
+  });
+  if (
+    typeof order.builder !== 'string'
+    || order.builder.toLowerCase() !== identity.builderCode
+  ) {
+    throw new UnrecoverableError('Polymarket signed exit rung omitted the configured builder code');
+  }
+
+  const response = await client.postOrder(order);
+  if (!response.ok) {
+    throw new UnrecoverableError(
+      `Polymarket exit rung rejected: ${response.code}: ${response.message}`
+    );
+  }
+  return {
+    orderId: response.orderId,
+    status: response.status,
+    expiration: params.rung.expiration
+  };
+}
+
+/**
+ * Build the `submitRung` port the escalation driver needs.
+ *
+ * The port's contract is "submit this rung, let it live out its window, then
+ * report what it filled", so the waiting lives here rather than in the driver —
+ * the driver stays pure enough to test without a clock, and the caller decides
+ * whether to occupy a worker for the rung's lifetime or hand it to a delayed job
+ * by supplying its own `sleep`.
+ *
+ * Cancellation after the wait is belt-and-braces: the GTD expiration already
+ * kills the remainder, but a rung whose cancellation the venue confirms is one we
+ * can be sure is not about to fill behind the next rung, and double-selling the
+ * same shares across two rungs is the failure that matters here.
+ */
+export function createPolymarketExitRungSubmitter(params: {
+  tokenID: string;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  log?: (message: string) => void;
+}): (rung: PolymarketExitLimitRung) => Promise<{ filledShares: number }> {
+  const sleep = params.sleep
+    ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  const now = params.now ?? Date.now;
+  const log = params.log ?? (() => {});
+
+  return async (rung: PolymarketExitLimitRung) => {
+    const submission = await submitPolymarketExitRung({
+      tokenID: params.tokenID,
+      rung,
+      now: now()
+    });
+    const client = requireSecureClobClient();
+
+    // The venue kills the remainder one minute before the stated expiration, so
+    // waiting the effective lifetime is exactly long enough.
+    await sleep(rung.effectiveLifetimeMs);
+
+    try {
+      await client.cancelOrder({ orderId: submission.orderId });
+    } catch (error: unknown) {
+      // A cancellation failure is not a fill failure: the expiration still
+      // applies. Logged rather than thrown so the ladder keeps its shape.
+      const message = error instanceof Error ? error.message : String(error);
+      log(`[polymarket-exit] cancelling rung ${submission.orderId} failed: ${message}`);
+    }
+
+    const order = await client.fetchOrder({ orderId: submission.orderId });
+    if (order.id !== submission.orderId) {
+      throw new UnrecoverableError(
+        `Polymarket returned order ${order.id} for exit rung ${submission.orderId}`
+      );
+    }
+    // A rung that cannot be read is treated as unfilled rather than as filled:
+    // over-reporting a fill would strand shares while telling the ledger they are
+    // gone, and the next rung re-offers what is genuinely still held.
+    const filledShares = nonNegativeDecimal(String(order.sizeMatched), 'exit rung matched size');
+    log(
+      `[polymarket-exit] rung ${submission.orderId} at ${rung.price} filled `
+      + `${filledShares} of ${rung.shares}`
+    );
+    return { filledShares };
+  };
 }
 
 type PendingPolymarketTrade = {
@@ -979,8 +1168,16 @@ function validateFetchedOrder(row: PendingPolymarketTrade, order: OpenOrder): {
   if (order.side.trim().toUpperCase() !== row.direction.toUpperCase()) {
     throw new Error(`Polymarket order ${order.id} side does not match its persisted trade`);
   }
-  if (order.orderType.trim().toUpperCase() !== OrderType.FAK) {
-    throw new Error(`Polymarket order ${order.id} is not the expected FAK order`);
+  // FAK is the entry/exit order type (`S4-M16`), and GTD is the exit-escalation
+  // rung (`S4-M17`) — a rung is deliberately allowed to rest for a bounded two
+  // minutes because an unfilled exit is worse than a late one. Any other type
+  // means an order this executor did not create is being reconciled against one
+  // of our trade rows, which is not something to paper over.
+  const reconcilableOrderTypes: string[] = [OrderType.FAK, OrderType.GTD];
+  if (!reconcilableOrderTypes.includes(order.orderType.trim().toUpperCase())) {
+    throw new Error(
+      `Polymarket order ${order.id} is not an order type this executor submits (${order.orderType})`
+    );
   }
 
   const originalSize = nonNegativeDecimal(String(order.originalSize), 'order original size');
