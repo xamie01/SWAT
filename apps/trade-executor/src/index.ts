@@ -18,6 +18,7 @@ import {
   claimSourceSignalForCopyExecution,
   claimSignalForExecution,
   getRollingExposureUsd,
+  getCanonicalSourceTradeById,
   getCopyExecutionByClientOrderIdentity,
   getCopyExecutionBySubmissionIdentity,
   getTokenDecimals,
@@ -84,7 +85,8 @@ import {
   getPolymarketAvailableBalance,
   getPolymarketLiveReadiness,
   getPolymarketClientIfReady,
-  simulatePolymarketBookFill
+  simulatePolymarketBookFill,
+  type PolymarketMirrorContext
 } from './polymarket.js';
 import { polymarketSigner, resolvePolymarketIdentity } from './polymarket.js';
 import { OrderSide } from '@polymarket/client';
@@ -1869,6 +1871,26 @@ export async function handleJob(job: { data: unknown }) {
             throw new UnrecoverableError('Canonical Polymarket SELL is missing proportional position evidence');
           }
           const submittedAt = new Date();
+          // The master-fill reference for the mirror price bound (S4-M16). Only a
+          // copy has a master: a manual execute or a stop-loss exit carries no
+          // `sourceTradeId` and legitimately gets no mirror, keeping the
+          // book-derived bound. Fetched here rather than threaded through the
+          // claim because `COPY_EXECUTION_COLUMNS` feeds several money-path
+          // queries, and widening all of them to carry one price is a larger
+          // change than one read.
+          let mirror: PolymarketMirrorContext | undefined;
+          if (payload.sourceTradeId) {
+            const sourceTrade = await getCanonicalSourceTradeById(payload.sourceTradeId);
+            // A null price is passed through as null, not omitted: the planner
+            // fails closed on an absent master price, and dropping `mirror`
+            // entirely would silently downgrade a copy to the book bound.
+            mirror = {
+              sourceTradeId: payload.sourceTradeId,
+              masterFillPriceUsd: sourceTrade?.priceUsd == null
+                ? null
+                : Number(sourceTrade.priceUsd)
+            };
+          }
           const result = await triggerPolymarket({
             signalId: canonicalExecution?.clientOrderId ?? payload.signalId,
             tokenID: cleanMint,
@@ -1876,7 +1898,8 @@ export async function handleJob(job: { data: unknown }) {
             direction,
             sellShares: canonicalExecution?.direction === 'sell'
               ? Number(canonicalExecution.requestedBaseQuantity)
-              : undefined
+              : undefined,
+            mirror
           });
           const orderId = result.orderId;
           const settlementHash = result.settlementTransactionHashes[0] ?? null;

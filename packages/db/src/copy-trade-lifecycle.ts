@@ -696,6 +696,33 @@ export async function advanceSourceTradeConfirmation(input: {
   });
 }
 
+/**
+ * The canonical source trade by id — the master's own event.
+ *
+ * Exists for the mirroring price bound (`S4-M16`): a copied order has to be
+ * bounded against the price the *master* actually got, and `copy_executions.price_usd`
+ * is **our** fill, not theirs. `source_trades.price_usd` is the master's, and this
+ * is the only read that surfaces it to the executor.
+ *
+ * A plain read rather than one of the `FOR SHARE` lookups above, because the
+ * caller is sizing a bound before submitting and is not mutating the row — taking
+ * a row lock on the money path to read one price would serialise mirrors behind
+ * each other for nothing. `price_usd` is nullable, and a null is returned as null
+ * rather than defaulted: the mirror planner fails closed on an absent master
+ * price, which is the whole point of not inventing one.
+ */
+export async function getCanonicalSourceTradeById(
+  sourceTradeId: string
+): Promise<CanonicalSourceTrade | null> {
+  const rows = await query<SourceTradeDbRow>(
+    `SELECT ${SOURCE_TRADE_COLUMNS}
+       FROM source_trades
+      WHERE id = $1`,
+    [sourceTradeId]
+  );
+  return rows[0] ? mapSourceTrade(rows[0]) : null;
+}
+
 export async function getSourceTradeByIdentity(input: {
   chain: Chain;
   sourceEventType: SourceEventType;

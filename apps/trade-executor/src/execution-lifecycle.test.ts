@@ -63,7 +63,13 @@ vi.mock('@swat/db', () => ({
   // index.ts binds this into `robinhoodNonceLock` (S4-M12). Never invoked here —
   // no case reaches a live EVM submission — but an absent barrel export is how a
   // mock drifts from the module it stands in for.
-  withEvmNonceLock: vi.fn()
+  withEvmNonceLock: vi.fn(),
+  // Supplies the master's fill price for the S4-M16 mirror bound at the Polymarket
+  // call site. Never invoked by this suite: **no test here reaches the Polymarket
+  // branch of `handleJob`** — an attempt to drive it stalled on balance-aware
+  // sizing, and building that fixture is its own piece of work. Present so the
+  // mock does not silently drift from the barrel index.ts imports.
+  getCanonicalSourceTradeById: vi.fn()
 }));
 
 vi.mock('@swat/shared', async () => {
