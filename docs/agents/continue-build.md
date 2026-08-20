@@ -2,7 +2,9 @@
 
 **How to use this:** in a fresh conversation, say *"Read `docs/agents/continue-build.md` and continue the build from there."* Reading the file beats pasting a wall of text — it stays in git, stays current, and the agent gets it at full fidelity.
 
-Written 2026-08-19, at commit `a51f83e` on branch `feat/multi-tenant-foundation`.
+Written 2026-08-19, current as of commit `0245b33` on branch `feat/multi-tenant-foundation`.
+
+**Before you start:** the branch was pushed at this point, so CI has run `db:migrate → typecheck → test → build → test:integration` against ephemeral Postgres 16 + Redis 7. **Check the CI result first** — it is the only thing that has executed `tests/integration/copy-position-tenancy.integration.test.ts`, and that run is what closes or reopens `S4-10`.
 
 ---
 
@@ -30,17 +32,19 @@ Written 2026-08-19, at commit `a51f83e` on branch `feat/multi-tenant-foundation`
 Recent commits, newest first:
 
 ```
+0245b33 docs: close OQ-2/3/4, re-scope the detection tier, and refocus the README on WAKE
+11eedd4 docs: build out the frontend section and fix a migration-number collision
+34d840a test: extend the integration schema guard through migration 050
+5e2a813 docs: add fresh-session handoff prompt for continuing the build
 a51f83e docs: re-sequence the checklist against ADR-0005
 bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy key
 30bdef7 fix(db,executor): land reviewed S4-10 tenancy and S4-P18 Jito tip accounting
 84ed4ef docs: add PRD for the single-master mirroring direction
-2c30e60 feat(signal-engine): demote cluster detectors to discovery-only per ADR-0005
-3eff476 feat(stage-4): checkpoint multi-tenant execution schema and Resend email
 ```
 
 **The pivot.** WAKE no longer trades on cluster consensus. A user copies **one master wallet per chain**: when it buys they buy, when it sells they sell, sized to their own balance. Read `docs/adr/0005-single-master-mirroring.md` for the reasoning — the short version is that cluster grouping and the cluster trade signal were the same predicate at two time scales, so the signal restated its own grouping criterion, and co-movement among wallets grouped *for* co-moving is evidence of shared control rather than a shared fact.
 
-**Landed and verified:** migrations `047`–`050` (execution grants, balances, settings, tenancy key); `packages/shared/src/email.ts` (Resend, three-way fail-closed result, 56 tests); `S4-P18` Jito tip accounting; cluster detectors demoted with the invariant centralized in `apps/signal-engine/src/trade-eligibility.ts`. 855+ tests pass across `@swat/db` (305), `@swat/shared` (207), `@swat/trade-executor` (343), `@swat/signal-engine` (10).
+**Landed and verified:** migrations `047`–`050` (execution grants, balances, settings, tenancy key); `packages/shared/src/email.ts` (Resend, three-way fail-closed result, 56 tests); `S4-P18` Jito tip accounting; cluster detectors demoted with the invariant centralized in `apps/signal-engine/src/trade-eligibility.ts`. 865+ tests pass across `@swat/db` (305), `@swat/shared` (207), `@swat/trade-executor` (343), `@swat/signal-engine` (10).
 
 **Already built and correct, do not rewrite:** `computeCopySellProportion` (`packages/shared/src/copy-trade-lifecycle.ts:242`) — proportional exits across all three chains, throwing rather than defaulting to sell-everything when position evidence is missing. `processSourceTradeSignals` — the per-master signal, already on the pub/sub fast path. `044_user_wallet_subscriptions` — user↔wallet with `manual | platform-signal | discovered` provenance.
 
