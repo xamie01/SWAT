@@ -58,6 +58,7 @@ CI (`.github/workflows/ci.yml`) runs, in order: `db:migrate` → `typecheck` →
 - API auth is a single `X-Api-Key` header compared against `API_KEY` with `timingSafeEqual`. Defaults to `swat-dev-key` in dev; the API throws at boot if `API_KEY` is unset when `NODE_ENV=production`.
 - Ports (all env-overridable): API `3001` (`PORT`), indexer webhook `3002` (`WEBHOOK_PORT`), MCP server `3005` (`MCP_PORT`), web `3000` (`WEB_PORT`). `pnpm dev:web` goes through `scripts/run-web-dev.mjs` rather than `next dev` directly, so port/host come from env.
 - `discover-starter-pack.ts` (repo root) is a standalone bootstrap tool to mine seed wallets; not part of the service graph. It's typechecked separately via `tsconfig.tools.json`.
+- **`indexer` runs two processes.** `pnpm dev:indexer` starts both the webhook server (`src/webhook.ts`, `WEBHOOK_PORT` 3002) and the poller/worker (`src/index.ts`) concurrently. Use `pnpm --filter @swat/indexer dev:webhook` or `dev:worker` to run just one half when debugging. No other service is split this way.
 - Commits follow Conventional Commits.
 - Keep `TRADING_MODE=paper` and `AUTO_EXECUTE=false` unless live execution has been explicitly reviewed.
 

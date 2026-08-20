@@ -32,8 +32,14 @@ vi.mock('@swat/db', () => ({
   recordCircuitBreakerSuccess: vi.fn(),
 }));
 
-vi.mock('@swat/shared', () => ({
+vi.mock('@swat/shared', async () => {
+  // `resolveSlippageBps` is pure resolution math with its own suite in
+  // packages/shared, so the real implementation is used rather than a stub — a
+  // hand-written stub of the chain defaults would silently drift from them.
+  const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
+  return {
   DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3, minLiquidityUsd: 50_000 },
+  resolveSlippageBps: actual.resolveSlippageBps,
   getJupiterSimulatedFill: vi.fn(),
   fetchTokenPriceUsd: vi.fn().mockResolvedValue(0.5),
   isChain: vi.fn().mockReturnValue(true),
@@ -44,7 +50,8 @@ vi.mock('@swat/shared', () => ({
     raw: value.replace(/^solana:/, ''),
     prefixed: value.startsWith('solana:') ? value : `solana:${value}`
   })),
-}));
+  };
+});
 
 vi.mock('bullmq', () => ({
   DelayedError: class DelayedError extends Error {},

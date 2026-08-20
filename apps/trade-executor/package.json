@@ -14,8 +14,10 @@
   "dependencies": {
     "@polymarket/bindings": "0.2.0",
     "@polymarket/client": "0.2.0",
+    "@solana/web3.js": "^1.98.2",
     "@swat/db": "workspace:*",
     "@swat/shared": "workspace:*",
+    "bs58": "^6.0.0",
     "bullmq": "^5.52.1",
     "ethers": "^5.7.2",
     "ethers-v5": "npm:ethers@^5.7.2",

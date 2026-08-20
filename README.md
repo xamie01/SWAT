@@ -1,6 +1,43 @@
-# SWAT: Smart Wallet Analysis & Tracking
+# WAKE
 
-**Autonomous intelligence layer for multi-chain wallet tracking (Solana, Polymarket/Polygon, Robinhood Chain)** — tracks elite wallets, detects coordinated activity patterns, generates execution-ready signals, and (optionally) auto-executes trades via integrated executors (Trojan for Solana, Uniswap V3 for Robinhood Chain, CLOB V2 for Polymarket).
+**Multi-chain copy trading, without custody.** A user picks a trader's wallet — one they already follow, or one WAKE suggests — and from that point on, when that wallet buys they buy, and when it sells they sell. Position sizes scale to the user's own balance and risk settings, never one-for-one.
+
+Supported venues: **Solana** (Jupiter + Jito), **Polymarket** (CLOB V2 on Polygon), **Robinhood Chain** (Uniswap V3).
+
+> *The repository is named `SWAT` because the codebase predates the product name. `WAKE` is the product; they are the same thing.*
+
+We call a followed wallet a **master**, and a user's replicated trade a **mirror**.
+
+---
+
+## Current direction and state
+
+**Read this before assuming what works.** Detail lives in [`docs/PRD.md`](./docs/PRD.md) §0.
+
+WAKE used to trade on *cluster consensus* — group correlated wallets, wait for several to buy the same token, then copy. That model was retired in [ADR-0005](./docs/adr/0005-single-master-mirroring.md): the clustering criterion and the trade signal were the same predicate at two time scales, so the signal largely restated its own grouping rule, and co-movement among wallets grouped *for* co-moving is evidence of shared control rather than a shared fact. The four cluster detectors still run, but for **discovery and alerting only** — they no longer trigger trades.
+
+| Area | State |
+|------|-------|
+| Ingestion across three chains | Working |
+| Per-master signal, proportional exits, position ledger | Working |
+| Auth, sessions, multi-tenant schema | Built and tested |
+| Fan-out to multiple users | Not yet — blocked on the per-chain queue split |
+| Frontend for end users | **Not built.** `apps/web` is a single-operator mockup |
+| Withdrawal | Not built |
+
+**Two things that will trip you up.** Solana execution still defaults to the third-party **Trojan** bot, because the better Jupiter+Jito path is built but not yet certified. And the compiled `packages/*/dist` may lag `src` — run `pnpm build` if an import does not resolve.
+
+**Safety defaults are deliberate:** `TRADING_MODE=paper` and `AUTO_EXECUTE=false`. A chain only executes live when it is both listed in `LIVE_ENABLED_CHAINS` *and* has a current reviewed row in `chain_certifications`. Failing either silently downgrades to paper. Do not work around this.
+
+## Documentation map
+
+| Document | What it is for |
+|----------|----------------|
+| [`docs/PRD.md`](./docs/PRD.md) | What we are building and for whom, with a status marker on every requirement |
+| [`docs/adr/`](./docs/adr/) | Why the big decisions were made, and what was rejected |
+| [`AUDIT-FIX-CHECKLIST.md`](./AUDIT-FIX-CHECKLIST.md) | The item-by-item work list. The project's memory — every fix and finding is recorded here |
+| [`docs/agents/continue-build.md`](./docs/agents/continue-build.md) | Handoff brief: constraints, decisions already made, and the build loop every contributor follows |
+| [`CLAUDE.md`](./CLAUDE.md) | Repo conventions and the invariants that bite |
 
 ---
 
@@ -146,11 +183,15 @@ Once the services are running, access the **web dashboard** at [http://localhost
 
 The web UI covers the **entire bootstrap workflow** — no terminal commands required. API endpoints are still available for automation/scripting.
 
+> **These pages are the operator console, not the product.** They have no login and authenticate with a single shared key. They are being moved behind an admin-only route group; the end-user application is built separately (see `AUDIT-FIX-CHECKLIST.md` §9). `/clusters` will not exist in the user-facing app at all, since cluster detection is discovery-only under ADR-0005.
+
 ---
 
-## Getting Your First Signal
+## Bootstrapping: finding candidate masters
 
-Signals only fire when **cluster wallets trade together**. A fresh install starts with no wallets and no clusters, so no signals will fire. Follow this guide to bootstrap your setup with high-performance wallets:
+A fresh install has no wallets, so there is nothing to copy and nothing to suggest. This guide seeds it.
+
+Note what changed under ADR-0005: this workflow is now **discovery** — it populates the pool of candidate master wallets and scores them. The clustering in Step 2 still runs, but its output feeds suggestions and an "this wallet may not be an independent actor" warning, **not** trade signals. Copy trades come from a single master's own trade.
 
 ### Step 1: Bootstrap a "Starter Pack" of profitable wallets
 
@@ -300,7 +341,7 @@ The signal-engine polls every **15 seconds** and detects 4 patterns:
 ### Run tests
 
 ```bash
-pnpm test              # All tests (27 unit tests)
+pnpm test              # All tests (865+ across db, shared, trade-executor, signal-engine)
 pnpm typecheck         # TypeScript validation
 pnpm build             # Compile all packages
 ```
@@ -366,7 +407,8 @@ Execution mode precedence is database `execution_config`, then `TRADING_MODE_SOL
 1. Branch from `main`
 2. Run `pnpm typecheck` + `pnpm test` before committing
 3. Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
-4. Co-author with Claude: `Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>`
+4. Co-author with Claude: `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
+5. **Follow the build loop** in [`docs/agents/continue-build.md`](./docs/agents/continue-build.md) §10: one checklist item at a time, a test where a test is meaningful, `tsc --noEmit` plus the relevant suite, then tick the box with the commit hash. Never batch items, and never tick one on a typecheck alone.
 
 ---
 

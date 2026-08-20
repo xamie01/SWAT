@@ -180,6 +180,7 @@ Every open checklist group, mapped to this guide:
 | Doc | Role after this guide |
 |---|---|
 | `docs/plans/BUILDER-GUIDE.md` (this) | **The build order.** Start here. |
-| `AUDIT-FIX-CHECKLIST.md` | Item-level spec + evidence log for every audit ID referenced here; keep checking items off there |
+| `AUDIT-FIX-CHECKLIST.md` | **The execution tracker.** Rewritten 2026-08-04 as stage-ordered numbered tasks (`S0-1`, `S1-2`, …) covering Stages 0–7. Check items off there. |
+| `docs/plans/audit-history.md` | Archived item-level spec + evidence log for every audit ID referenced here (`F-CORE7`, `G5-R3`, …). Read-only. |
 | `docs/plans/saas-conversion-plan.md` | Detailed design of the SaaS phases (schemas, routes, packages) |
 | `docs/plans/production-decisions.md` | D1–D18 rationale + revisit triggers |

@@ -242,6 +242,70 @@ describe('Robinhood asset-provenance and transfer-tax checks', () => {
     expect(check(assessment, 'fee_on_transfer')).toMatchObject({ status: 'pass', reliable: true });
   });
 
+  it('probes the traded token on an EXIT, not the base asset (S3-11)', async () => {
+    // The exit is where a transfer tax actually strands a position: V3's
+    // exactInputSingle credits the pool less than it was sent, so a taxed token
+    // that was somehow entered cannot be sold through this router at all.
+    //
+    // On a sell the route reverses — tokenIn is the traded token and tokenOut is
+    // the base asset. The probe must follow `order.token`, not `tokenIn`/
+    // `tokenOut`, or a sell would probe the untaxed base asset, pass, and strand
+    // the position on submission.
+    const probeFeeOnTransfer = vi.fn().mockResolvedValue(50);
+    const sellContext = {
+      order: {
+        clientOrderId: 'signal-rh-exit',
+        token: pending.token,
+        direction: 'sell' as const,
+        amountInBaseUnits: 100n,
+        slippageBps: 300
+      },
+      route: { status: 'route' as const, fee: 3000, amountOut: 100n },
+      // Reversed relative to a buy.
+      tokenIn: pending.token,
+      tokenOut: pending.baseAsset
+    };
+
+    const assessment = await createRobinhoodSafetyAssessment({
+      quote: vi.fn().mockResolvedValue(90n),
+      liquidityLookup: vi.fn().mockResolvedValue(1_000_000),
+      minimumLiquidityUsd: 50_000,
+      probeFeeOnTransfer
+    })(sellContext);
+
+    expect(probeFeeOnTransfer).toHaveBeenCalledWith(pending.token);
+    expect(probeFeeOnTransfer).not.toHaveBeenCalledWith(pending.baseAsset);
+    expect(check(assessment, 'fee_on_transfer')).toMatchObject({ status: 'fail', reliable: true });
+    expect(evaluateRobinhoodSafety(assessment)[0]).toContain(
+      'Uniswap V3 cannot route fee-on-transfer tokens'
+    );
+  });
+
+  it('lets an untaxed token exit cleanly', async () => {
+    const sellContext = {
+      order: {
+        clientOrderId: 'signal-rh-exit-ok',
+        token: pending.token,
+        direction: 'sell' as const,
+        amountInBaseUnits: 100n,
+        slippageBps: 300
+      },
+      route: { status: 'route' as const, fee: 3000, amountOut: 100n },
+      tokenIn: pending.token,
+      tokenOut: pending.baseAsset
+    };
+
+    const assessment = await createRobinhoodSafetyAssessment({
+      quote: vi.fn().mockResolvedValue(90n),
+      liquidityLookup: vi.fn().mockResolvedValue(1_000_000),
+      minimumLiquidityUsd: 50_000,
+      probeFeeOnTransfer: vi.fn().mockResolvedValue(0)
+    })(sellContext);
+
+    expect(check(assessment, 'fee_on_transfer')).toMatchObject({ status: 'pass', reliable: true });
+    expect(evaluateRobinhoodSafety(assessment)).toEqual([]);
+  });
+
   it('rejects a negative tolerance at construction', () => {
     expect(() => createRobinhoodSafetyAssessment({
       quote: vi.fn(),

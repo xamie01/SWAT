@@ -1,0 +1,55 @@
+[project]
+name = "pattern-ml"
+version = "0.1.0"
+description = "KOL trade pattern discovery across Solana and Polymarket"
+requires-python = ">=3.11"
+
+dependencies = [
+    # storage / compute
+    "duckdb>=1.1",
+    "polars>=1.0",
+    "pyarrow>=17.0",
+    # sourcing
+    "httpx>=0.27",
+    "tenacity>=9.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    # modelling
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "scikit-learn>=1.5",
+    "lightgbm>=4.5",
+    # CLI
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# The HTTP surface is optional: a box that only runs the batch pipeline
+# (pull → mine) has no reason to install a web stack.
+service = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.8",
+]
+# Network tests stub transport with httpx's own MockTransport rather than
+# respx, which pins httpx below the version the rest of the stack resolves to.
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+pattern-ml = "pattern_ml.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"

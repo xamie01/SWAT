@@ -10,9 +10,11 @@
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "migrate": "tsx --env-file=../../.env src/migrate.ts"
+    "migrate": "tsx --env-file=../../.env src/migrate.ts",
+    "seed:admin": "tsx --env-file=../../.env src/seed-admin-cli.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@swat/shared": "workspace:*",
     "pg": "^8.15.6",
     "zod": "^3.24.4"

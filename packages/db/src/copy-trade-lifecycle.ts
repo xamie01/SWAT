@@ -77,6 +77,13 @@ export interface CopyExecutionRecord {
   sourceTradeId: string;
   chain: Chain;
   targetAccount: string;
+  /**
+   * Owning tenant, or `null` for the pre-multi-tenant operator account.
+   *
+   * This is the dimension that separates two users in paper mode, where they
+   * share one synthetic `targetAccount` per chain (S4-10, migration 050).
+   */
+  userId: string | null;
   tokenMint: string;
   direction: 'buy' | 'sell';
   executionMode: CopyExecutionMode;
@@ -117,9 +124,13 @@ export interface SourceTradeSignalCandidate {
 }
 
 export interface CopyPositionRecord {
+  /** Surrogate key added by migration 050; the natural key is no longer unique. */
+  id: string;
   targetAccount: string;
   chain: Chain;
   tokenMint: string;
+  /** Owning tenant, or `null` for the pre-multi-tenant operator account. */
+  userId: string | null;
   confirmedQuantity: string;
   reservedSellQuantity: string;
   costBasisUsd: string;
@@ -154,6 +165,7 @@ type CopyExecutionDbRow = QueryResultRow & {
   source_trade_id: string;
   chain: Chain;
   target_account: string;
+  user_id: string | null;
   token_mint: string;
   direction: 'buy' | 'sell';
   execution_mode: CopyExecutionMode;
@@ -201,6 +213,7 @@ const COPY_EXECUTION_COLUMNS = `
   source_trade_id,
   chain,
   target_account,
+  user_id,
   token_mint,
   direction,
   execution_mode,
@@ -235,6 +248,45 @@ function assertDate(name: string, value: Date): Date {
     throw new Error(`${name} must be a valid date`);
   }
   return value;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Field separator used when hashing a tuple into a stable identity string.
+ *
+ * MUST stay equal to the separator `buildCopyExecutionClientOrderId` passes to
+ * `Array.prototype.join`, or the tenant-scoped digest stops matching the
+ * unscoped one for the same tuple. NUL is safe as a separator because no field
+ * being joined can contain it: `assertIdentifier` rejects untrimmed input, and
+ * the values are UUIDs, chain names, addresses and a fixed mode enum.
+ */
+const COPY_IDENTITY_SEPARATOR = String.fromCharCode(0);
+
+/**
+ * Normalise an acting tenant id to either a canonical UUID or `null`.
+ *
+ * `null` is a real, load-bearing value here, not a missing one: migration 050
+ * gives every legacy operator row `user_id NULL`, and the tenancy-aware unique
+ * indexes are declared `NULLS NOT DISTINCT` so those rows still collide with
+ * each other. That means a caller that has no user in scope MUST reach `null`
+ * and not some placeholder string — a placeholder would be a distinct tenant
+ * and would silently fork the operator's position ledger.
+ *
+ * `users.id` is a UUID (039_users.sql:22), so anything that is not
+ * UUID-shaped is a bug in the caller rather than a tenant we have never seen.
+ * Rejecting it here keeps a stray account label (`'operator'`, an email, a
+ * chain-prefixed address) from being written into the tenancy column, where it
+ * would fail the foreign key at a confusing distance from its origin.
+ */
+export function normalizeTenantId(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (!UUID_PATTERN.test(trimmed)) {
+    throw new Error(`userId must be a UUID or null, received ${JSON.stringify(value)}`);
+  }
+  return trimmed.toLowerCase();
 }
 
 function decimal(name: string, value: DecimalInput, allowZero = false): string {
@@ -284,6 +336,7 @@ function mapCopyExecution(row: CopyExecutionDbRow): CopyExecutionRecord {
     sourceTradeId: row.source_trade_id,
     chain: row.chain,
     targetAccount: row.target_account,
+    userId: row.user_id ?? null,
     tokenMint: row.token_mint,
     direction: row.direction,
     executionMode: row.execution_mode,
@@ -1030,45 +1083,97 @@ export function buildCopyExecutionClientOrderId(input: {
   chain: Chain;
   targetAccount: string;
   executionMode: CopyExecutionMode;
+  /** Acting tenant; `null` for the pre-multi-tenant operator account. */
+  userId?: string | null;
 }): string {
-  const identity = [
+  const parts = [
     assertIdentifier('sourceTradeId', input.sourceTradeId, 128),
     input.chain,
     assertIdentifier('targetAccount', input.targetAccount, 128),
     input.executionMode
   ].join('\u0000');
+  const tenantId = normalizeTenantId(input.userId);
+  // Appended only when a tenant is present, never for `null`. That is what
+  // keeps the digest byte-identical to the pre-050 derivation for every
+  // operator row: `client_order_id` is a stored, indexed identity that
+  // in-flight executions are looked up by (`getCopyExecutionByClientOrderId`),
+  // so unconditionally reserving a tenant slot in the hash input would re-hash
+  // every existing row's identity and orphan every open execution on deploy.
+  //
+  // With a tenant present the digest differs per user, which is what keeps two
+  // paper users off each other's `UNIQUE (chain, target_account,
+  // client_order_id)` row while they share one synthetic target account.
+  //
+  // Appending to the joined string rather than pushing into the array above is
+  // equivalent, because `COPY_IDENTITY_SEPARATOR` is the same separator that
+  // join used.
+  const identity = tenantId === null
+    ? parts
+    : parts + COPY_IDENTITY_SEPARATOR + tenantId;
   return `swat-${createHash('sha256').update(identity).digest('hex')}`;
 }
 
+/**
+ * Create the tenant's position row if absent, lock it, and return its id.
+ *
+ * The `ON CONFLICT` target is the four-column `NULLS NOT DISTINCT` index from
+ * migration 050. Including `user_id` is what makes two paper users sharing one
+ * synthetic `targetAccount` resolve to two different rows; `NULLS NOT DISTINCT`
+ * is what stops the operator's own `NULL` row being duplicated on every call.
+ */
 async function ensureCopyPosition(
   client: PoolClient,
   targetAccount: string,
   chain: Chain,
-  tokenMint: string
-): Promise<void> {
+  tokenMint: string,
+  userId: string | null
+): Promise<string> {
   await client.query(
-    `INSERT INTO copy_positions (target_account, chain, token_mint)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (target_account, chain, token_mint) DO NOTHING`,
-    [targetAccount, chain, tokenMint]
+    `INSERT INTO copy_positions (target_account, chain, token_mint, user_id)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (target_account, chain, token_mint, user_id) DO NOTHING`,
+    [targetAccount, chain, tokenMint, userId]
   );
-  await client.query(
-    `SELECT target_account
+  const locked = await client.query<{ id: string }>(
+    `SELECT id
        FROM copy_positions
-      WHERE target_account = $1 AND chain = $2 AND token_mint = $3
+      WHERE target_account = $1
+        AND chain = $2
+        AND token_mint = $3
+        AND user_id IS NOT DISTINCT FROM $4
       FOR UPDATE`,
-    [targetAccount, chain, tokenMint]
+    [targetAccount, chain, tokenMint, userId]
   );
+  const id = locked.rows[0]?.id;
+  if (!id) throw new Error('Copy position ensure did not return a row');
+  return id;
 }
 
+/**
+ * Recompute a position from its evidence ledger.
+ *
+ * Every one of the three sub-selects below is scoped by `user_id`, not just the
+ * `copy_positions` row this UPDATE targets. That is the whole point: splitting
+ * `copy_positions` per tenant while still aggregating `copy_position_applications`
+ * across tenants would produce two rows holding identical, doubled quantities —
+ * a cosmetic split. Two paper users share one synthetic `target_account`, so
+ * the triple (target_account, chain, token_mint) does NOT identify a tenant's
+ * evidence on its own.
+ *
+ * `IS NOT DISTINCT FROM` rather than `=` so the operator's legacy `NULL` tenant
+ * matches its own rows; `=` would evaluate to NULL and select nothing, silently
+ * zeroing every legacy position.
+ */
 async function rebuildCopyPosition(
   client: PoolClient,
-  execution: Pick<CopyExecutionDbRow, 'target_account' | 'chain' | 'token_mint'>
+  execution: Pick<CopyExecutionDbRow, 'target_account' | 'chain' | 'token_mint' | 'user_id'>
 ): Promise<CopyPositionRecord> {
   const result = await client.query<QueryResultRow & {
+    id: string;
     target_account: string;
     chain: Chain;
     token_mint: string;
+    user_id: string | null;
     confirmed_quantity: string;
     reserved_sell_quantity: string;
     cost_basis_usd: string;
@@ -1091,6 +1196,7 @@ async function rebuildCopyPosition(
        WHERE application.target_account = $1
          AND application.chain = $2
          AND application.token_mint = $3
+         AND application.user_id IS NOT DISTINCT FROM $4
          AND application.active
      ), ledger AS (
        SELECT
@@ -1101,7 +1207,10 @@ async function rebuildCopyPosition(
          0::numeric AS reduced,
          0::numeric AS unmatched
        FROM copy_positions position
-       WHERE position.target_account = $1 AND position.chain = $2 AND position.token_mint = $3
+       WHERE position.target_account = $1
+         AND position.chain = $2
+         AND position.token_mint = $3
+         AND position.user_id IS NOT DISTINCT FROM $4
 
        UNION ALL
 
@@ -1139,6 +1248,7 @@ async function rebuildCopyPosition(
            WHERE reserved.target_account = $1
              AND reserved.chain = $2
              AND reserved.token_mint = $3
+             AND reserved.user_id IS NOT DISTINCT FROM $4
              AND reserved.direction = 'sell'
          ), 0) AS reserved_sell_quantity
        FROM ordered_events
@@ -1156,10 +1266,13 @@ async function rebuildCopyPosition(
       WHERE position.target_account = $1
         AND position.chain = $2
         AND position.token_mint = $3
+        AND position.user_id IS NOT DISTINCT FROM $4
      RETURNING
+       position.id,
        position.target_account,
        position.chain,
        position.token_mint,
+       position.user_id,
        position.confirmed_quantity::text AS confirmed_quantity,
        position.reserved_sell_quantity::text AS reserved_sell_quantity,
        position.cost_basis_usd::text AS cost_basis_usd,
@@ -1167,14 +1280,16 @@ async function rebuildCopyPosition(
        position.total_reduced_quantity::text AS total_reduced_quantity,
        position.unmatched_reduction_quantity::text AS unmatched_reduction_quantity,
        position.last_evidence_at`,
-    [execution.target_account, execution.chain, execution.token_mint]
+    [execution.target_account, execution.chain, execution.token_mint, execution.user_id ?? null]
   );
   const row = result.rows[0];
   if (!row) throw new Error('Copy position rebuild did not return a row');
   return {
+    id: row.id,
     targetAccount: row.target_account,
     chain: row.chain,
     tokenMint: row.token_mint,
+    userId: row.user_id ?? null,
     confirmedQuantity: row.confirmed_quantity,
     reservedSellQuantity: row.reserved_sell_quantity,
     costBasisUsd: row.cost_basis_usd,
@@ -1215,6 +1330,12 @@ async function setCopyExecutionState(
 export interface CopyExecutionRequestInput {
   sourceTradeId: string;
   targetAccount: string;
+  /**
+   * Acting tenant. Omit or pass `null` for the pre-multi-tenant operator
+   * account — `null` is a real value here (see `normalizeTenantId`), not a
+   * missing one, and is what every legacy row carries.
+   */
+  userId?: string | null;
   executionMode: CopyExecutionMode;
   requestedBaseQuantity?: DecimalInput | null;
   requestedQuoteQuantity?: DecimalInput | null;
@@ -1227,6 +1348,7 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
   created: boolean;
 }> {
   const sourceTradeId = assertIdentifier('sourceTradeId', input.sourceTradeId, 128);
+  const userId = normalizeTenantId(input.userId);
   const requestedBase = input.requestedBaseQuantity === null || input.requestedBaseQuantity === undefined
     ? null
     : decimal('requestedBaseQuantity', input.requestedBaseQuantity);
@@ -1270,14 +1392,19 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
       sourceTradeId,
       chain: source.chain,
       targetAccount: target.prefixed,
-      executionMode: input.executionMode
+      executionMode: input.executionMode,
+      userId
     });
 
+    // The advisory lock guards the position row this transaction is about to
+    // create and read, so its key has to have the same shape as that row's
+    // uniqueness key. Without `userId` two tenants touching the same token on
+    // the same chain would serialise against each other for no reason.
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-      [JSON.stringify([target.prefixed, source.chain, source.token_mint])]
+      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId])]
     );
-    await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint);
+    await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint, userId);
 
     const existing = await client.query<CopyExecutionDbRow>(
       `SELECT ${COPY_EXECUTION_COLUMNS},
@@ -1294,6 +1421,7 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
         WHERE source_trade_id = $1
           AND target_account = $2
           AND execution_mode = $3
+          AND user_id IS NOT DISTINCT FROM $8
         FOR UPDATE`,
       [
         sourceTradeId,
@@ -1302,7 +1430,8 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
         source.direction,
         requestedBase,
         requestedQuote,
-        clientOrderId
+        clientOrderId,
+        userId
       ]
     );
     if (existing.rows[0]) {
@@ -1321,9 +1450,12 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
                   ELSE LEAST($4::numeric, confirmed_quantity - reserved_sell_quantity)::text
                 END AS capped
            FROM copy_positions
-          WHERE target_account = $1 AND chain = $2 AND token_mint = $3
+          WHERE target_account = $1
+            AND chain = $2
+            AND token_mint = $3
+            AND user_id IS NOT DISTINCT FROM $5
           FOR UPDATE`,
-        [target.prefixed, source.chain, source.token_mint, requestedBase]
+        [target.prefixed, source.chain, source.token_mint, requestedBase, userId]
       );
       cappedBase = available.rows[0]?.capped ?? null;
       if (!cappedBase) {
@@ -1336,10 +1468,10 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
          source_trade_id, chain, target_account, token_mint, direction,
          execution_mode, client_order_id, requested_base_quantity,
          requested_quote_quantity, reserved_base_quantity,
-         max_submission_attempts, max_reconciliation_attempts
+         max_submission_attempts, max_reconciliation_attempts, user_id
        ) VALUES (
          $1, $2, $3, $4, $5::text, $6::text, $7, $8::numeric, $9::numeric,
-         CASE WHEN $5::text = 'sell' THEN $8::numeric ELSE 0 END, $10, $11
+         CASE WHEN $5::text = 'sell' THEN $8::numeric ELSE 0 END, $10, $11, $12
        )
        RETURNING ${COPY_EXECUTION_COLUMNS}`,
       [
@@ -1353,7 +1485,8 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
         cappedBase,
         requestedQuote,
         maxSubmissionAttempts,
-        maxReconciliationAttempts
+        maxReconciliationAttempts,
+        userId
       ]
     );
     const execution = inserted.rows[0] as CopyExecutionDbRow;
@@ -1383,6 +1516,13 @@ type SourceSignalDbRow = QueryResultRow & {
 export async function claimSourceSignalForCopyExecution(input: {
   signalId: string;
   targetAccount: string;
+  /**
+   * Acting tenant. Omit or pass `null` for the pre-multi-tenant operator
+   * account. In paper mode `targetAccount` is one synthetic address shared by
+   * every user on the chain, so this is the ONLY thing separating two users'
+   * positions and executions (S4-10, migration 050).
+   */
+  userId?: string | null;
   executionMode: CopyExecutionMode;
   requestedBaseQuantity?: DecimalInput | null;
   requestedQuoteQuantity?: DecimalInput | null;
@@ -1397,6 +1537,7 @@ export async function claimSourceSignalForCopyExecution(input: {
   reason?: string;
 }> {
   const signalId = assertIdentifier('signalId', input.signalId, 128);
+  const userId = normalizeTenantId(input.userId);
   const requestedBase = input.requestedBaseQuantity === null || input.requestedBaseQuantity === undefined
     ? null
     : decimal('requestedBaseQuantity', input.requestedBaseQuantity);
@@ -1454,14 +1595,21 @@ export async function claimSourceSignalForCopyExecution(input: {
       throw new Error('Source signal direction no longer matches its immutable source event');
     }
     const target = resolveChainAddress(input.targetAccount, source.chain);
+    // Tenant-scoped, mirroring `uq_copy_executions_source_target_mode_user`
+    // (050_copy_tenancy.sql). Unscoped, tenant B's claim for a shared paper
+    // `target_account` would find tenant A's row and return it as B's own
+    // execution — B's fills would then be recorded against A's ledger.
+    // `IS NOT DISTINCT FROM` because the operator's rows carry `user_id NULL`
+    // and `= NULL` never matches.
     const existingResult = await client.query<CopyExecutionDbRow>(
       `SELECT ${COPY_EXECUTION_COLUMNS}
        FROM copy_executions
        WHERE source_trade_id = $1
          AND target_account = $2
          AND execution_mode = $3
+         AND user_id IS NOT DISTINCT FROM $4
        FOR UPDATE`,
-      [source.id, target.prefixed, input.executionMode]
+      [source.id, target.prefixed, input.executionMode, userId]
     );
     const existing = existingResult.rows[0];
     if (existing) {
@@ -1471,6 +1619,12 @@ export async function claimSourceSignalForCopyExecution(input: {
       return { execution: mapCopyExecution(existing), created: false, claimed: false };
     }
 
+    // Deliberately NOT tenant-scoped. A signal is a shared detection, not a
+    // per-tenant object: once ANY tenant has claimed it the signal sits in
+    // 'executing', so scoping this by user_id would make the second tenant's
+    // legitimate claim look like an attempt against a stale signal and reject
+    // it with "Source signal is executing, not eligible". The tenant-scoped
+    // `existingResult` lookup above is what prevents double-claiming.
     const resumable = signal.status === 'executing' && (await client.query<{ exists: boolean }>(
       `SELECT EXISTS(
          SELECT 1 FROM copy_executions WHERE signal_id = $1
@@ -1555,11 +1709,13 @@ export async function claimSourceSignalForCopyExecution(input: {
       throw new Error('Buy executions require a requested base or quote quantity');
     }
 
+    // Keyed the same way as the position's uniqueness key — see the matching
+    // note in `requestCopyExecution`.
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-      [JSON.stringify([target.prefixed, source.chain, source.token_mint])]
+      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId])]
     );
-    await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint);
+    await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint, userId);
 
     let executionBase = requestedBase;
     let executionQuote = requestedQuote;
@@ -1572,9 +1728,12 @@ export async function claimSourceSignalForCopyExecution(input: {
                   )::text
                 END AS requested_base
          FROM copy_positions
-         WHERE target_account = $1 AND chain = $2 AND token_mint = $3
+         WHERE target_account = $1
+           AND chain = $2
+           AND token_mint = $3
+           AND user_id IS NOT DISTINCT FROM $5
          FOR UPDATE`,
-        [target.prefixed, source.chain, source.token_mint, sourceSellFraction]
+        [target.prefixed, source.chain, source.token_mint, sourceSellFraction, userId]
       );
       executionBase = availableResult.rows[0]?.requested_base ?? null;
       executionQuote = null;
@@ -1592,7 +1751,8 @@ export async function claimSourceSignalForCopyExecution(input: {
       sourceTradeId: source.id,
       chain: source.chain,
       targetAccount: target.prefixed,
-      executionMode: input.executionMode
+      executionMode: input.executionMode,
+      userId
     });
     const inserted = await client.query<CopyExecutionDbRow>(
       `INSERT INTO copy_executions (
@@ -1600,11 +1760,11 @@ export async function claimSourceSignalForCopyExecution(input: {
          direction, execution_mode, client_order_id, requested_base_quantity,
          requested_quote_quantity, reserved_base_quantity,
          max_submission_attempts, max_reconciliation_attempts,
-         source_position_before_quantity, source_sell_fraction
+         source_position_before_quantity, source_sell_fraction, user_id
        ) VALUES (
          $1, $2, $3, $4, $5, $6::text, $7::text, $8, $9::numeric,
          $10::numeric, CASE WHEN $6::text = 'sell' THEN $9::numeric ELSE 0 END,
-         $11, $12, $13::numeric, $14::numeric
+         $11, $12, $13::numeric, $14::numeric, $15
        )
        RETURNING ${COPY_EXECUTION_COLUMNS}`,
       [
@@ -1621,7 +1781,8 @@ export async function claimSourceSignalForCopyExecution(input: {
         maxSubmissionAttempts,
         maxReconciliationAttempts,
         sourcePositionBefore,
-        sourceSellFraction
+        sourceSellFraction,
+        userId
       ]
     );
     const execution = inserted.rows[0] as CopyExecutionDbRow;
@@ -1755,7 +1916,13 @@ export async function transitionCopyExecution(input: {
     );
     execution = updated.rows[0] as CopyExecutionDbRow;
     if (terminal && execution.direction === 'sell') {
-      await ensureCopyPosition(client, execution.target_account, execution.chain, execution.token_mint);
+      await ensureCopyPosition(
+        client,
+        execution.target_account,
+        execution.chain,
+        execution.token_mint,
+        execution.user_id ?? null
+      );
       await rebuildCopyPosition(client, execution);
     }
     if (terminal && execution.signal_id && execution.execution_mode !== 'shadow') {
@@ -1912,13 +2079,30 @@ export async function recordCopyExecutionEvidence(input: {
       }
     }
 
-    await ensureCopyPosition(client, execution.target_account, execution.chain, execution.token_mint);
+    // The tenancy key is read off the execution row rather than taken as an
+    // argument: the execution is the authority on who this fill belongs to, and
+    // evidence arrives from reconcilers and webhooks that have no user in scope.
+    const evidenceUserId = execution.user_id ?? null;
+    const positionId = await ensureCopyPosition(
+      client,
+      execution.target_account,
+      execution.chain,
+      execution.token_mint,
+      evidenceUserId
+    );
+    // `user_id` on the application row is what makes the copy_positions split
+    // real rather than cosmetic: `rebuildCopyPosition` aggregates the ledger
+    // from this table, so without the tenancy column here both paper users'
+    // evidence would land in each user's position (see 050_copy_tenancy.sql).
     await client.query(
       `INSERT INTO copy_position_applications (
-         evidence_id, execution_id, target_account, chain, token_mint, active
-       ) VALUES ($1, $2, $3, $4, $5, $6)
+         evidence_id, execution_id, target_account, chain, token_mint, active,
+         user_id, position_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (evidence_id) DO UPDATE
          SET active = EXCLUDED.active,
+             user_id = EXCLUDED.user_id,
+             position_id = EXCLUDED.position_id,
              updated_at = NOW()`,
       [
         evidence.id,
@@ -1926,7 +2110,9 @@ export async function recordCopyExecutionEvidence(input: {
         execution.target_account,
         execution.chain,
         execution.token_mint,
-        isAppliedSourceConfirmation(evidence.confirmation_state)
+        isAppliedSourceConfirmation(evidence.confirmation_state),
+        evidenceUserId,
+        positionId
       ]
     );
 

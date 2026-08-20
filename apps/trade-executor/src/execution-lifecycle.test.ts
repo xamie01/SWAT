@@ -69,6 +69,8 @@ vi.mock('@swat/shared', async () => {
   return {
     DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3 },
     evaluateCopyPolicy: actual.evaluateCopyPolicy,
+    // Pure resolution math with its own suite; a stub would test the stub.
+    resolveSlippageBps: actual.resolveSlippageBps,
     fetchTokenPriceUsd: vi.fn().mockResolvedValue(0.5),
     getJupiterSimulatedFill: vi.fn(),
     initLogger: vi.fn(),
@@ -446,7 +448,14 @@ describe('executor trade-state routing', () => {
       signalId: 'sell-signal',
       direction: 'sell',
       sellProportionBps: 10_000,
-      amountSol: 0
+      amountSol: 0,
+      // Pins the `S4-P4` threading. The 1500 that used to be a literal at this
+      // call site now comes from `resolveSlippageBps('solana', null)`, and
+      // nothing else in the suite asserts a slippage value — verified by
+      // changing the Solana default and watching all 332 tests stay green.
+      // Without this, migration `049` could wire the user's value to the wrong
+      // place and no test would notice.
+      slippageBps: 1500
     }));
     expect(db.insertTrade).toHaveBeenCalledWith(expect.objectContaining({
       direction: 'sell',

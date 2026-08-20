@@ -160,15 +160,65 @@ export async function updateWalletScore(address: string, score: number, tier: Wa
   ]);
 }
 
+/**
+ * Pauses wallets the platform no longer wants to index for performance reasons.
+ *
+ * **A subscribed wallet is never paused here.** This sweep was written for a
+ * single operator; under tenancy, pausing a wallet a user explicitly chose (and
+ * may be paying to track) would silently stop their data with no event and no
+ * way to diagnose it. Underperformance is *surfaced* to the user — score and tier
+ * are already on the wallet row — not acted on for them.
+ *
+ * `wallets.status` answers one question: "is the platform indexing this?" A
+ * subscriber pins it to `active` regardless of score. The zero-subscriber
+ * direction is `pauseUnsubscribedWallets` (D9).
+ */
 export async function pauseUnderperformingWallets() {
   await query(`
     UPDATE wallets SET status = 'paused'
     WHERE status = 'active'
+      AND NOT EXISTS (
+        SELECT 1 FROM user_wallet_subscriptions uws
+         WHERE uws.wallet_address = wallets.address
+      )
       AND (
         (total_trades >= 50 AND composite_score < 40)
         -- last_active < ... already excludes NULLs, so no explicit NULL guard needed.
         OR (last_active < NOW() - INTERVAL '30 days')
       )
+  `);
+}
+
+/**
+ * Pauses wallets nobody subscribes to and the platform has no interest in (D9).
+ *
+ * Without this, every wallet ever discovered stays in the polling set forever and
+ * webhook volume grows monotonically with user churn rather than with active use.
+ *
+ * "Platform interest" is deliberately broad — clustered, scored, or high-priority
+ * wallets stay active even with zero subscribers, because dropping them would
+ * corrupt cluster membership and the discovery pipeline's own inputs.
+ */
+export async function pauseUnsubscribedWallets() {
+  await query(`
+    UPDATE wallets SET status = 'paused'
+    WHERE status = 'active'
+      AND NOT EXISTS (
+        SELECT 1 FROM user_wallet_subscriptions uws
+         WHERE uws.wallet_address = wallets.address
+      )
+      AND priority <> 'high'
+      AND NOT EXISTS (
+        SELECT 1 FROM cluster_memberships cm
+         WHERE cm.wallet_address = wallets.address
+      )
+      -- Never pause a wallet holding an open position: its P&L is still
+      -- being marked to market, and pausing it would freeze that mid-flight.
+      AND NOT EXISTS (
+        SELECT 1 FROM wallet_positions wp
+         WHERE wp.wallet_address = wallets.address AND wp.balance > 0
+      )
+      AND (composite_score IS NULL OR composite_score < 40)
   `);
 }
 

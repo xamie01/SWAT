@@ -18,6 +18,7 @@ import {
 } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
+import { mayPatternTrade } from './trade-eligibility.js';
 
 initLogger('signal-engine');
 
@@ -210,7 +211,13 @@ async function enqueueSignal(opts: {
     backoff: { type: 'exponential', delay: 2000 }
   });
 
-  if (!opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
+  // Two independent gates, deliberately. `mayPatternTrade` is the ADR-0005
+  // invariant and lives in one place; `suppressTrade` stays as a per-call-site
+  // statement of intent. Either one alone blocks the trade, so deleting a flag
+  // from a detector changes a log line rather than whether money moves.
+  const patternMayTrade = mayPatternTrade(opts.patternType);
+
+  if (patternMayTrade && !opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
     const clusterTier = opts.clusterId
       ? await getClusterTier(opts.clusterId)
       : scoreToTier(opts.signalScore);
@@ -228,10 +235,12 @@ async function enqueueSignal(opts: {
       attempts: 4,
       backoff: { type: 'exponential', delay: 5000 }
     });
+  } else if (!patternMayTrade) {
+    console.log(`[signal-engine] ⏭️ ${opts.patternType} is discovery-only (ADR-0005) | token: ${opts.tokenMint}`);
   } else if (!safety.isSafe) {
     console.log(`[signal-engine] ❌ trade blocked — safety flags: ${safety.flags.join(', ')} | token: ${opts.tokenMint}`);
   } else if (opts.suppressTrade) {
-    console.log(`[signal-engine] ⏭️ trade suppressed (exit signal) | token: ${opts.tokenMint}`);
+    console.log(`[signal-engine] ⏭️ trade suppressed by call site | token: ${opts.tokenMint}`);
   } else {
     console.log(`[signal-engine] ⏭️ trade skipped — score ${opts.signalScore} < 80 | token: ${opts.tokenMint}`);
   }
@@ -311,6 +320,21 @@ async function detectSnipePattern() {
       tokenMint:   row.token_mint,
       confidence:  row.cluster_confidence,
       signalScore,
+      // Discovery and alerting only — never a trade (ADR-0005 §6.1).
+      //
+      // This detector's trigger *is* its cluster's definition. A `behavioral`
+      // cluster is built from wallets that repeatedly buy the same tokens
+      // together (`clustering-queries.ts:125`), and this fires when they buy the
+      // same token together. The grouping predicate and the signal predicate are
+      // one statement at two time scales, so firing carries almost no
+      // information beyond "this group did what defines it".
+      //
+      // Worse, a `funding` cluster is a shared-funder hub — the code that builds
+      // it calls that "the Sybil/coordination signal" — and this query does not
+      // filter `cluster_type`, so co-movement here is evidence of shared
+      // *control*, not of a shared fact. Trading it made us exit liquidity for
+      // whoever controls the group. Copy trades now come from `source_trade`.
+      suppressTrade: true,
       triggerData: { buyerCount: row.buyer_count, window: '5m', clusterRoi: row.cluster_roi }
     }).catch((error) => {
       console.error(`[signal-engine] failed to enqueue snipe for ${row.token_mint}`, error);
@@ -357,6 +381,12 @@ async function detectAccumulationPattern() {
       confidence:    row.cluster_confidence,
       signalScore,
       dedupeMinutes: 7 * 24 * 60,
+      // Discovery and alerting only — never a trade (ADR-0005 §6.1). Same
+      // cluster-dependence problem as `snipe`, plus a horizon mismatch: the
+      // real-world strategies this shape borrows from (insider cluster buys,
+      // 13F consensus cloning) are multi-month anomalies where a filing lag is
+      // immaterial. A 7-day accumulation window is not that market.
+      suppressTrade: true,
       triggerData:   {
         buyVolume:    row.buy_volume,
         buySessions:  row.buy_sessions,
@@ -419,6 +449,10 @@ async function detectRotationPattern() {
       confidence:    row.cluster_confidence,
       signalScore,
       dedupeMinutes: 60,
+      // Discovery and alerting only — never a trade (ADR-0005 §6.1). A rotation
+      // is two co-movements rather than one, so it compounds the dependence
+      // problem instead of corroborating anything.
+      suppressTrade: true,
       triggerData:   {
         soldToken:   row.token_out,
         boughtToken: row.token_in,
@@ -485,7 +519,10 @@ async function detectExitPattern() {
       tokenMint:     row.token_mint,
       confidence:    row.cluster_confidence,
       signalScore,
-      suppressTrade: true,  // Exit signals do not trigger buys
+      suppressTrade: true,  // Discovery and alerting only (ADR-0005 §6.1). Copy
+                            // exits come from the master's own sell, mirrored
+                            // proportionally by `source_trade` — not from a
+                            // cluster's aggregate behaviour.
       dedupeMinutes: 60,
       triggerData:   {
         sellerCount:   row.seller_count,

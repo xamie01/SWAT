@@ -73,6 +73,9 @@ jobs:
       - name: Migrate integration database
         run: pnpm db:migrate
 
+      - name: Check for browser-exposed secrets
+        run: pnpm check:secrets
+
       - name: Typecheck
         run: pnpm typecheck
 

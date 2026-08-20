@@ -7,6 +7,31 @@ const PAPER_TARGETS: Record<Chain, string> = {
   'robinhood-chain': '0x0000000000000000000000000000000000000001'
 };
 
+/**
+ * The synthetic account paper executions settle "from".
+ *
+ * ONE address per chain, shared by every paper user — deliberately, and this is
+ * now correct rather than merely tolerated. Paper mode has no counterparty, so
+ * there is no real address to name; minting a per-user fake address would
+ * invent one, and every downstream consumer that reasonably assumes an address
+ * corresponds to something on-chain (grant lookups, reconcilers, explorer
+ * links, user_execution_grants.uq_ueg_account) would then be reading a fiction.
+ *
+ * Before migration 050_copy_tenancy.sql the sharing WAS a bug, because
+ * copy_positions was keyed (target_account, chain, token_mint): every paper
+ * user on a chain collapsed onto one row, so A's buy inflated B's
+ * confirmed_quantity and B's exit computed P&L against A's cost basis. The fix
+ * was to put user_id in the key, not to make the address per-user.
+ *
+ * So: do NOT make this per-user. If two paper users appear to share a position,
+ * the missing piece is a userId that was not threaded to
+ * requestCopyExecution / claimSourceSignalForCopyExecution, not this address.
+ *
+ * NOT YET PROVEN: S4-10's acceptance test — two paper users on one chain and
+ * token holding independent quantities and cost bases, written so that it fails
+ * against the old three-column key — has not been written. Until it exists this
+ * comment describes the intent of 050, not a verified property.
+ */
 const PAPER_TARGET_ENV: Record<Chain, string> = {
   solana: 'PAPER_COPY_ACCOUNT_SOLANA',
   polygon: 'PAPER_COPY_ACCOUNT_POLYGON',
