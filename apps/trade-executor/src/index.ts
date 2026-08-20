@@ -3,6 +3,7 @@ import { DelayedError, UnrecoverableError, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
   DEFAULT_RISK_CONFIG,
+  chainFromTokenMint,
   fetchTokenPriceUsd,
   getJupiterSimulatedFill,
   initLogger,
@@ -129,6 +130,7 @@ import {
   createPolymarketReconciler,
   createSolanaConfirmationReconciler
 } from './reconciliation-venues.js';
+import { misroutedJobWarning, tradeWorkerSpecs } from './trade-workers.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
@@ -791,12 +793,15 @@ const failedBreakerOutcomes = new Set(['failed', 'rejected']);
 function chainFromJob(job: { data: unknown }): Chain {
   const payload = job.data as { tokenMint?: unknown } | null;
   const tokenMint = typeof payload?.tokenMint === 'string' ? payload.tokenMint : '';
-  const separator = tokenMint.indexOf(':');
-  const chain = separator >= 0 ? tokenMint.slice(0, separator) : 'solana';
-  if (!isChain(chain)) {
-    throw new UnrecoverableError(`Unsupported trade chain: ${chain}`);
+  // Shared with the producers (`tradeQueueForTokenMint`) rather than
+  // reimplemented here: since S3-25 the producer picks the queue with this same
+  // derivation, and the two ends disagreeing would put a job on a queue whose
+  // worker serves a different venue.
+  try {
+    return chainFromTokenMint(tokenMint);
+  } catch (error) {
+    throw new UnrecoverableError(error instanceof Error ? error.message : String(error));
   }
-  return chain;
 }
 
 async function delayForCircuitBreaker(
@@ -2350,18 +2355,34 @@ export async function main() {
   await reconcilePending().catch((error) => {
     console.error('[trade-executor] startup reconciliation failed', error);
   });
-  const tradeWorker = new Worker(
-    'swat-trades',
-    (job) => executeJobWithCircuitBreaker(job),
-  { connection: redisClient, concurrency: 3, autorun: true }
-);
+  // One worker per chain at concurrency 1, plus a drain worker on the pre-split
+  // queue (D6 / S3-25). Before the split a single concurrency-3 worker served
+  // every chain, so a slow venue held a slot the other two needed; now a
+  // Polymarket settlement delay or a Robinhood RPC outage cannot stall Solana
+  // copies. Total concurrency is unchanged — the three slots are just no longer
+  // shared. See `trade-workers.ts` for why concurrency stays at 1.
+  for (const spec of tradeWorkerSpecs()) {
+    const tradeWorker = new Worker(
+      spec.queue,
+      (job) => {
+        const misroute = misroutedJobWarning(spec, chainFromJob(job));
+        if (misroute) console.error(misroute);
+        return executeJobWithCircuitBreaker(job);
+      },
+      { connection: redisClient, concurrency: spec.concurrency, autorun: true }
+    );
 
-tradeWorker.on('failed', (_job, err) => {
-  console.error('[trade-executor] job failed', err?.message);
-});
-tradeWorker.on('error', (err) => {
-  console.error('[trade-executor] worker error', err);
-});
+    tradeWorker.on('failed', (_job, err) => {
+      console.error(`[trade-executor] job failed on ${spec.queue}`, err?.message);
+    });
+    tradeWorker.on('error', (err) => {
+      console.error(`[trade-executor] worker error on ${spec.queue}`, err);
+    });
+    console.log(
+      `[trade-executor] worker listening on ${spec.queue}`
+      + ` (chain: ${spec.chain ?? 'any — drain only'}, concurrency: ${spec.concurrency})`
+    );
+  }
 
 setInterval(() => {
   reconcilePending().catch((error) => {

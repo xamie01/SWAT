@@ -63,7 +63,8 @@ describe('runStopLossSweep', () => {
         stopLoss: true,
         sellTokenAmount: 100
       },
-      'stop-loss-operator-signal-1'
+      'stop-loss-operator-signal-1',
+      'solana'
     );
     expect(dependencies.claim).toHaveBeenCalledWith({
       account: 'operator',
@@ -77,6 +78,33 @@ describe('runStopLossSweep', () => {
       priceUsd: 7.5
     });
     expect(dependencies.release).not.toHaveBeenCalled();
+  });
+
+  it('routes each chain’s exit to that chain, not to a shared queue (S3-25)', async () => {
+    // The queue is chosen from this argument, so a wrong chain here sends a
+    // stop-loss exit to a worker that serves a different venue.
+    const dependencies = deps({
+      positions: [
+        position({ signalId: 'signal-sol' }),
+        position({ signalId: 'signal-poly', chain: 'polygon', tokenMint: 'polygon:token-2' }),
+        position({
+          signalId: 'signal-rh',
+          chain: 'robinhood-chain',
+          tokenMint: 'robinhood-chain:0xtoken3'
+        })
+      ]
+    });
+
+    await expect(runStopLossSweep(dependencies)).resolves.toMatchObject({ queued: 3, failed: 0 });
+
+    const routed = (dependencies.enqueueSell as ReturnType<typeof vi.fn>).mock.calls.map(
+      ([job, , chain]) => [job.signalId, chain]
+    );
+    expect(routed).toEqual([
+      ['signal-sol', 'solana'],
+      ['signal-poly', 'polygon'],
+      ['signal-rh', 'robinhood-chain']
+    ]);
   });
 
   it('queues nothing on a repeat sweep of the same position', async () => {

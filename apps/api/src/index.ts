@@ -17,6 +17,7 @@ import {
 } from '@swat/db';
 import {
   buildIngestionHealthSnapshots,
+  chainFromTokenMint,
   chainSchema,
   createWalletBackfillJob,
   initLogger,
@@ -24,9 +25,11 @@ import {
   prefixChainValue,
   QUEUES,
   REDIS_CHANNELS,
+  tradeQueueForChain,
   walletAddressSchema,
   walletInputSchema
 } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 import {
   emergencyOff,
   executionModeUpdateSchema,
@@ -40,7 +43,17 @@ initLogger('api');
 const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const tradeQueue = new Queue('swat-trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+const tradeQueueConnection = new Redis(redisUrl, { maxRetriesPerRequest: null });
+// One trade queue per chain (D6 / S3-25). Manual executions route by the
+// signal's own chain-prefixed mint, using the same derivation the executor
+// applies — a mismatch would enqueue onto a queue whose worker serves a
+// different venue.
+const tradeQueues = new Map<Chain, Queue>(
+  (['solana', 'polygon', 'robinhood-chain'] as const).map((chain) => [
+    chain,
+    new Queue(tradeQueueForChain(chain), { connection: tradeQueueConnection })
+  ])
+);
 const backfillQueue = new Queue(QUEUES.walletBackfill, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
 // On-chain token discovery: the indexer's tokenDiscovery worker consumes this.
 const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
@@ -539,7 +552,23 @@ app.post('/v1/signals/:id/execute', async (req, reply) => {
     return reply.code(409).send({ error: 'Signal has no executable token' });
   }
 
-  // Enqueue to trade executor via BullMQ (not redis pubsub)
+  // Enqueue to trade executor via BullMQ (not redis pubsub), on the queue for
+  // this signal's own chain (S3-25). An unsupported prefix is refused here
+  // rather than enqueued: before the split it reached the shared queue and died
+  // in the executor, which reported a failed job instead of a bad request.
+  let chain: Chain;
+  try {
+    chain = chainFromTokenMint(signal.token_mint);
+  } catch (error) {
+    return reply.code(409).send({
+      error: error instanceof Error ? error.message : 'Unsupported trade chain'
+    });
+  }
+  const tradeQueue = tradeQueues.get(chain);
+  if (!tradeQueue) {
+    return reply.code(409).send({ error: `No trade queue configured for chain ${chain}` });
+  }
+
   await tradeQueue.add('signal-trade', {
     signalId: id,
     score: signal.signal_score,

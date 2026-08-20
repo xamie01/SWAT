@@ -36,7 +36,13 @@ export type StopLossSweepDependencies = {
   resolvePolicy: (account: string, chain: Chain) => Promise<{ stopLossPct: number }>;
   claim: (input: StopLossClaimInput) => Promise<boolean>;
   release: (account: string, signalId: string) => Promise<void>;
-  enqueueSell: (job: StopLossSellJob, jobId: string) => Promise<unknown>;
+  /**
+   * `chain` is passed explicitly rather than left for the caller to re-derive
+   * from `job.tokenMint`: since S3-25 the queue is chosen per chain, and the
+   * position already carries the authoritative chain. Re-deriving it would be a
+   * second implementation of the same decision.
+   */
+  enqueueSell: (job: StopLossSellJob, jobId: string, chain: Chain) => Promise<unknown>;
   publishAlert: (alert: StopLossAlert) => Promise<unknown>;
   account?: string;
 };
@@ -145,7 +151,8 @@ export async function runStopLossSweep(
           stopLoss: true,
           sellTokenAmount: position.openQuantity
         },
-        `stop-loss-${account}-${position.signalId}`
+        `stop-loss-${account}-${position.signalId}`,
+        position.chain
       );
     } catch (error) {
       console.error(`[scorer] stop-loss sell enqueue failed for ${position.signalId}`, error);

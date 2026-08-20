@@ -20,19 +20,27 @@ import {
   claimStopLossTrigger,
   releaseStopLossTrigger
 } from '@swat/db';
-import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger } from '@swat/shared';
+import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger, tradeQueueForChain } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 import { runAttributionReporting } from './expectancy.js';
 import { runStopLossSweep } from './stop-loss.js';
 
 const redisUrlForPublish = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redisPublishClient = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
 
-// Stop-loss exits go through the same durable queue the signal engine uses, so
+// Stop-loss exits go through the same durable queues the signal engine uses, so
 // they inherit the executor's mode gating, circuit breaker and reconciliation.
-const tradeQueue = new Queue('swat-trades', {
-  connection: new Redis(redisUrlForPublish, { maxRetriesPerRequest: null })
-});
-tradeQueue.on('error', (error) => console.error('[scorer] trade queue error', error));
+// One queue per chain since S3-25, so a stalled venue cannot hold up another
+// chain's exits — which for a stop-loss is the difference between a bounded loss
+// and an unbounded one.
+const tradeQueueConnection = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
+const tradeQueues = new Map<Chain, Queue>(
+  (['solana', 'polygon', 'robinhood-chain'] as const).map((chain) => {
+    const queue = new Queue(tradeQueueForChain(chain), { connection: tradeQueueConnection });
+    queue.on('error', (error) => console.error(`[scorer] ${chain} trade queue error`, error));
+    return [chain, queue];
+  })
+);
 
 initLogger('scorer');
 
@@ -152,12 +160,18 @@ async function runMarkToMarket() {
       resolvePolicy: resolveRiskPolicy,
       claim: claimStopLossTrigger,
       release: releaseStopLossTrigger,
-      enqueueSell: (job, jobId) => tradeQueue.add('stop-loss-sell', job, {
-        jobId,
-        removeOnComplete: true,
-        attempts: 4,
-        backoff: { type: 'exponential', delay: 5000 }
-      }),
+      enqueueSell: (job, jobId, chain) => {
+        const queue = tradeQueues.get(chain);
+        // Refuse rather than fall back to another chain's queue: the sweep
+        // releases the claim on a throw, so the next pass retries the exit.
+        if (!queue) throw new Error(`No trade queue configured for chain ${chain}`);
+        return queue.add('stop-loss-sell', job, {
+          jobId,
+          removeOnComplete: true,
+          attempts: 4,
+          backoff: { type: 'exponential', delay: 5000 }
+        });
+      },
       publishAlert: (alert) => redisPublishClient.publish(
         REDIS_CHANNELS.alertQueue,
         JSON.stringify(alert)

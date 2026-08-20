@@ -31,7 +31,7 @@ Resolving the billing lock is operator-side and outside engineering. Until it is
 - **Chain-prefixed addresses:** every wallet/transaction address is `${chain}:${rawAddress}`; `Chain = 'solana' | 'polygon' | 'robinhood-chain'`. Never write a bare address into a prefixed column. `packages/shared/src/address.ts` is pure/sync and **throws** on a bare `0x...` rather than defaulting; `resolvePrefixedAddress()` in `packages/db/src/wallets.ts` is the async probe for untrusted API input.
 - **Migrations replay.** `packages/db/src/migrate.ts` has no applied-migrations table — every `.sql` file re-runs on every invocation under an advisory lock. Every statement must be idempotent. Guard constraint drops on `pg_constraint.conkey` **shape**, not name (names truncate at 63 bytes, and replacement keys often reuse the old name — see `050_copy_tenancy.sql` for the established idiom).
 - **Fastify route order:** static paths register before parameterized ones.
-- **Two messaging mechanisms, don't conflate:** Redis pub/sub for fire-and-forget control signals (`REDIS_CHANNELS` in `packages/shared/src/constants.ts`), BullMQ for durable work. `swat-trades` and `swat-alerts` are string-inlined at call sites, not centralized — grep before assuming.
+- **Two messaging mechanisms, don't conflate:** Redis pub/sub for fire-and-forget control signals (`REDIS_CHANNELS` in `packages/shared/src/constants.ts`), BullMQ for durable work. Queue names are all centralized as of `S3-25` (2026-08-20) — `QUEUES` and `TRADE_QUEUES_BY_CHAIN`; trades are per-chain, resolved with `tradeQueueForChain()` / `tradeQueueForTokenMint()`. Never inline a queue name.
 - **`packages/shared/dist` is what services import.** Both `dist/` dirs are currently **stale** (see §8).
 
 ## 3. Where the build stands
@@ -93,7 +93,7 @@ bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy 
 
 Full item text is in `AUDIT-FIX-CHECKLIST.md` **§7.5** (26 items, `S4-M*`). Order below reflects what blocks what.
 
-1. **`S3-25`** — split `swat-trades` into per-chain queues, one worker each, concurrency 1. Currently `tradeQueueForChain` returns `swat-trades` for all three chains (asserted in `packages/shared/src/trade-queues.test.ts`). **Blocks `S4-14`.** Without it, fan-out serialises every chain behind the slowest venue.
+1. ~~**`S3-25`**~~ — **DONE 2026-08-20.** Per-chain queues are live, one concurrency-1 worker each, and the seven inlined queue literals are gone. `chainFromTokenMint()` in `packages/shared/src/constants.ts` is now the single definition of a job's chain, shared by the producers and the executor — do not add a second one. **Requires `pnpm --filter @swat/shared build` before it runs** (new export, stale `dist`). Left open: delete the `swat-trades` drain worker and `QUEUES.trades` once a deploy confirms that queue is empty. Full entry in `AUDIT-FIX-CHECKLIST.md` §6.4.
 2. **`S4-M12`** — per-user nonce allocation on EVM. **A correctness bug, not an optimisation:** today one operator key with `getPendingNonce` then local `nonce++` (`robinhood.ts:670`, `:722`); two concurrent jobs for one user read the same nonce, both submit, one is silently replaced, and a fill vanishes with no error. Advisory lock on `(chain, account)` plus per-user queue concurrency. Must land *with* fan-out.
 3. **`S4-M3`** — subscription states. **Schema change that must precede fan-out**, because retrofitting requires reconstructing which open position came from which subscription, and that isn't recoverable once positions exist.
 4. **`S4-M2`** forward-only joins, then **`S4-15`/`S4-M1`** hybrid sizing, then **`S4-M4`** position cap + the derived below-minimum warning.
@@ -155,10 +155,10 @@ The operator has authorized subagents for build work. Use them for genuinely par
 
 ### A good fan-out for the next phase
 
-`S3-25` (queues) → `S4-M12` (nonce) are sequential; don't parallelise them. Genuinely disjoint candidates, ~3 agents:
+`S3-25` (queues) landed 2026-08-20, so `S4-M12` (nonce) is the head of the sequential chain now. Genuinely disjoint candidates, ~3 agents:
 
 - **Agent 1:** `S4-M3` subscription states — migration `051` + `packages/db/src/subscriptions.ts` + tests.
-- **Agent 2:** `S4-M16`–`S4-M20` Polymarket — `apps/trade-executor/src/polymarket*.ts` only.
+- **Agent 2:** `S4-M16`–`S4-M20` Polymarket — `apps/trade-executor/src/polymarket*.ts` only the session has the polymarket mcp server connected untilize it when necessary.
 - **Agent 3:** `S4-M8` master metrics over three windows — `apps/scorer/src/` only.
 
 ## 10. The build loop — mandatory, and it binds orchestrators too

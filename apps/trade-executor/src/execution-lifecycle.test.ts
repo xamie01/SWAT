@@ -66,8 +66,17 @@ vi.mock('@swat/shared', async () => {
   // evaluateCopyPolicy is pure decision math with its own suite in
   // packages/shared; stubbing it would only test the stub.
   const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
+  // Imported from source rather than from `actual`, because `@swat/shared`
+  // resolves to its built `dist` here and that artifact lags the source (see the
+  // handoff's stale-dist note). Re-implementing the derivation in this mock would
+  // let it drift from the one the producers route on, which is the whole point of
+  // S3-25 having a single definition.
+  const { chainFromTokenMint } = await vi.importActual<
+    typeof import('../../../packages/shared/src/constants.js')
+  >('../../../packages/shared/src/constants.js');
   return {
     DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3 },
+    chainFromTokenMint,
     evaluateCopyPolicy: actual.evaluateCopyPolicy,
     // Pure resolution math with its own suite; a stub would test the stub.
     resolveSlippageBps: actual.resolveSlippageBps,

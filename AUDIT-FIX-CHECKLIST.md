@@ -241,19 +241,23 @@ and a stage section is not a place to read a gate number from.
   per-user custodial key with no call-site change. 19 tests.
 - `packages/shared/src/constants.ts` — `QUEUES.trades` / `QUEUES.alerts` **added**,
   plus `TRADE_QUEUES_BY_CHAIN` and `tradeQueueForChain()` (`S3-25`). 5 tests.
-  **Correction:** an earlier draft called these "centralised". They are not — the
-  constants exist but **no call site references them yet**. All seven original
-  inline literals remain (4 for `swat-trades`, 3 for `swat-alerts`; the draft also
-  said four for alerts, which was wrong). Adopting the constants at each producer
-  and consumer is part of the `S3-25` cutover, and `CLAUDE.md` requires it so the
-  names cannot drift between the two ends of a queue.
+  **Correction:** an earlier draft called these "centralised". They were not — the
+  constants existed but **no call site referenced them**. All seven original
+  inline literals remained (4 for `swat-trades`, 3 for `swat-alerts`; the draft also
+  said four for alerts, which was wrong). **Closed 2026-08-20:** the `S3-25` cutover
+  adopted the constants at every producer and consumer and added
+  `chainFromTokenMint()`; the seven literals are gone and the test file is now 12
+  cases. Full entry in §6.4.
 
-**`S3-25` switch is intentionally OFF.** `tradeQueueForChain()` returns the shared
-`swat-trades` for every chain. The cutover touches the money path in four services
-at once (`api`, `scorer`, `signal-engine`, `trade-executor`), and a half-migrated
-producer/consumer pair would send trade jobs into a queue nobody reads. Producers
-and consumers adopt the helper first; flipping the flag then becomes a one-line
-change. Expand-and-contract, Standing Rule 4.
+**`S3-25` switch is ON as of 2026-08-20.** `tradeQueueForChain()` returns the
+per-chain queue for every chain, and the `enablePerChainQueues` parameter is
+deleted rather than defaulted. The cutover touched the money path in four services
+at once (`api`, `scorer`, `signal-engine`, `trade-executor`), which is exactly why
+producers and consumers migrated in one commit — a half-migrated pair would send
+trade jobs into a queue nobody reads. Expand-and-contract, Standing Rule 4: the
+expand half has landed (per-chain queues live, `swat-trades` kept alive by a
+drain-only fourth worker); the contract half — deleting that worker and
+`QUEUES.trades` — waits on a deploy confirming the queue is empty.
 
 **Mutation-tested, so the runtime's tests are known to have teeth.** Two
 money-safety properties were deliberately broken and both turned the suite red:
@@ -282,10 +286,10 @@ existed, and the Solana dispatch cutover is wired behind
 `SOLANA_EXECUTION_PATH`.
 
 **Next steps, each its own tested change:**
-1. `S3-25` queue cutover — migrate producers and consumers together, then flip
-   the flag. The mechanism and its tests exist; the switch is off, and the
-   `QUEUES.trades` / `QUEUES.alerts` constants still have **zero** call sites
-   (see the correction under `S3-25`).
+1. ~~`S3-25` queue cutover~~ — **done 2026-08-20.** Producers and consumers
+   migrated together, the flag is gone, and the seven inline literals are gone
+   with it. The one piece left is the contract half: delete the `swat-trades`
+   drain worker and `QUEUES.trades` once a deploy confirms that queue is empty.
 2. Stage 4 (custody + per-user execution). Its design doc is the gate.
 3. The two certification items above, which need a human reviewer and funded
    wallets — no code will close them.
@@ -354,7 +358,22 @@ existed, and the Solana dispatch cutover is wired behind
 - [ ] **S3-24 (ext)** `G3-P12` — `docs/certification/polygon-polymarket.md` reviewed and signed off. *(The file exists and is correctly marked **NOT CERTIFIED** with every box unchecked.)*
 
 ### 6.4 Isolation
-- [ ] **S3-25** `D6` — split `swat-trades` into `swat-trades-{solana,polygon,robinhood}`, one worker each, concurrency 1. Risk logic is already chain-keyed, so this is parallelism at zero logic cost and it satisfies `F-ACC2` isolation.
+- [x] **S3-25** `D6` — split `swat-trades` into `swat-trades-{solana,polygon,robinhood}`, one worker each, concurrency 1. Risk logic is already chain-keyed, so this is parallelism at zero logic cost and it satisfies `F-ACC2` isolation.
+  **DONE 2026-08-20 (commit `PENDING`).** The switch is **on** and all seven inlined queue literals are gone: `tradeQueueForChain(chain)` now returns the per-chain name unconditionally (the `enablePerChainQueues` parameter is deleted, not defaulted), and the four trade producers plus the three alert sites reference the constants.
+  **Producers:** `apps/signal-engine/src/index.ts` (a `Map<Chain, Queue>` built eagerly, so a chain's first signal doesn't pay connection setup on the money path), `apps/api/src/index.ts` (`/v1/signals/:id/execute`), `apps/scorer/src/index.ts` (stop-loss exits). **Consumer:** `apps/trade-executor/src/trade-workers.ts` + the loop in `index.ts`.
+  **Total concurrency is unchanged at 3** — what changes is that the three slots are no longer shared, which is the whole point (`F-ACC2`). Concurrency stays at **1 per chain** deliberately: ordering within a chain matters because exposure caps, the circuit breaker and the EVM nonce are all chain-keyed, and two concurrent jobs for one chain is exactly the `S4-M12` race. A test pins it at 1 so raising it can't happen quietly.
+  **The derivation is now defined once.** `chainFromTokenMint()` in `packages/shared/src/constants.ts` is the single definition of a job's chain; the executor's `chainFromJob` calls it instead of reimplementing the `indexOf(':')` split, and the producers pick their queue with the same function. Before the split the two ends could disagree harmlessly — there was one queue. Now a disagreement puts a job on a queue whose worker serves a different venue, so it has to be one function.
+  **Two behaviour changes fell out of that, both improvements, both deliberate:**
+  1. An **unsupported prefix now fails at the producer**, not in the executor. `signal-engine`'s old inline `tokenMint.split(':')[0]` accepted *any* prefix, so an `ethereum:`-prefixed mint wrote a bogus `tokens.chain` row and then queued a job no venue adapter serves; it now logs and returns before any write. `/v1/signals/:id/execute` returns **409** instead of enqueueing a job destined to die.
+  2. `runStopLossSweep`'s `enqueueSell` dependency takes **`(job, jobId, chain)`**. The position already carries the authoritative chain; re-deriving it from `job.tokenMint` at the call site would be a second implementation of the same decision. The scorer throws on an unconfigured chain rather than falling back to another chain's queue — the sweep releases the claim on a throw, so the next pass retries the exit.
+  **The pre-split queue is drained, not abandoned.** `tradeWorkerSpecs()` adds a fourth, chain-agnostic, concurrency-1 worker on `swat-trades` so jobs enqueued by the *previous* release are still consumed at cutover. Nothing writes there. Deleting that worker and `QUEUES.trades` together, once a deploy confirms the queue is empty, is the "contract" half of expand-and-contract and is the one piece of this item still outstanding.
+  **Verified against installed source, not assumed:** the four workers share one ioredis instance, which would deadlock if BullMQ used it for its blocking reads. It does not — `bullmq/dist/cjs/classes/worker.js:120` calls `opts.connection.duplicate({ connectionName })`, so every worker gets its own blocking connection. The three producer `Queue`s per service likewise share one connection, which is safe because only workers block.
+  **Found while verifying, worth carrying forward:** the drain worker is chain-agnostic, so while `swat-trades` still holds jobs it can run a `robinhood-chain` job concurrently with `swat-trades-robinhood`'s own worker. Concurrency 1 per chain therefore does not fully serialise a chain until the drain worker is gone — a second reason to complete the contract half promptly, and a caveat on treating concurrency 1 as protection against the `S4-M12` nonce race.
+  **A misrouted job is logged, not refused.** `misroutedJobWarning` returns a message and the worker executes the job anyway: a misroute is a producer bug that costs isolation, and refusing the job would cost a real fill. Losing the mirror of a master's trade is strictly worse than losing head-of-line separation for one job.
+  **Tests: 21 new, all run.** 12 in `packages/shared/src/trade-queues.test.ts` (rewritten — its old three assertions pinned the switch *off*), 9 in `apps/trade-executor/src/trade-workers.test.ts`, plus a new per-chain routing case in `apps/scorer/src/stop-loss.test.ts`. Suites green: shared 214, trade-executor 352, scorer 18, signal-engine 10, alert-service 13, api 17.
+  **Mutation-verified — four properties broken, each turned the suite red:** `tradeQueueForChain` returning the shared queue again (3 failures); concurrency back to 3 (1); the misroute guard always silent (1); the stop-loss sweep hardcoding `'solana'` (1).
+  **Not covered by a test:** the worker-construction loop in `trade-executor/src/index.ts`, because that module opens Redis connections and starts timers at import and cannot be loaded from a unit test. That is why `trade-workers.ts` is a separate module — the topology and the guard are testable, the `new Worker(...)` call is not. `misroutedJobWarning` takes an already-derived `Chain` rather than the raw payload for the same reason: a payload-parsing version would have needed the new shared export at runtime, which the stale `dist` cannot provide (see below).
+  **Requires `pnpm --filter @swat/shared build` before it runs.** `chainFromTokenMint` is a new export and services (and their vitest runs) resolve `@swat/shared` to `dist`, which is stale. Until that rebuild: `api`'s manual-execute route throws and `signal-engine` skips every signal. `tradeQueueForChain` degrades benignly by comparison — the stale `dist` copy still has the old two-arg signature and returns `swat-trades`, which the drain worker consumes. `apps/trade-executor/src/execution-lifecycle.test.ts` works around this by `importActual`-ing the derivation from `packages/shared/src/constants.js` directly rather than re-implementing it in the mock.
 - [ ] **S3-26 (ext)** `F-ACC1` / `F-ACC2` — simultaneous three-chain production-worker replay; prove one venue's RPC outage neither stalls nor corrupts the others.
 - [ ] **S3-27 (ext)** `F-ACC3` — verify production prerequisites: Postgres, Redis, Helius / Robinhood / Polymarket credentials, funded wallets.
 
@@ -585,7 +604,7 @@ existed, and the Solana dispatch cutover is wired behind
 - [ ] **S4-13** On a trade-eligible signal, enumerate eligible users: **subscribed to the signal's master wallet** ∩ auto-execute on ∩ chain enabled ∩ tier allows ∩ balance ≥ minimum ∩ position cap not reached ∩ capacity not exhausted.
   **Rewritten by ADR-0005 (2026-08-19).** This said "subscribed to the signal's *cluster*". Under single-master mirroring the join is `user_wallet_subscriptions` on the **source wallet** of a `source_trade` signal, not cluster membership — and only `source_trade` reaches this path at all now, because `mayPatternTrade` (`apps/signal-engine/src/trade-eligibility.ts`) refuses every cluster pattern. Two enumeration terms are new and neither is optional: a subscription in `winding_down` state is eligible for **sells only** (§7.5 `S4-M3`), and a user already at their concurrent-position cap is eligible for sells only too. Getting either wrong opens positions a user cannot exit or has explicitly stopped opening.
 - [ ] **S4-14** One BullMQ job per `(signal, user)` on the per-chain queue, idempotent under the Stage-0 identity keys as re-keyed by S1-B5.
-  **Depends on `S3-25`, which is not yet done — the per-chain queue switch is currently OFF** (`tradeQueueForChain` returns `swat-trades` for all three chains). Fanning out through one concurrency-1 queue serialises every chain's users behind the slowest venue, so a Polymarket settlement delay stalls Solana copies. `S3-25` must land before this item, not alongside it.
+  **`S3-25` unblocked this on 2026-08-20.** The per-chain queues are live with one concurrency-1 worker each, so fan-out no longer serialises every chain's users behind the slowest venue and a Polymarket settlement delay no longer stalls Solana copies. Resolve the queue with `tradeQueueForTokenMint()`; do not add a second derivation of a job's chain. Concurrency 1 per chain serialises a chain's jobs **within one executor process**, so it incidentally masks the `S4-M12` nonce race in the single-process case — but it is not a fix, and two windows remain open: the chain-agnostic `swat-trades` drain worker can pick a same-chain job concurrently with that chain's own worker (transient, only while the pre-split queue still has jobs), and a second executor replica reopens it permanently. `S4-M12` still has to land with this item.
 - [ ] **S4-15** Sizing: reuse `calculateBalanceAwareSize` parameterized by **that user's** balance and risk percentages, so exposure is always proportional to what they deposited and agreed to.
   **Extended by ADR-0005 §3.1 — flat-percentage sizing is no longer sufficient.** Buy sizing is now `min(max_position_pct, master_fraction × scale)`. The existing behaviour (`apps/trade-executor/src/index.ts:508`, `riskPct` of the user's balance) is the `max_position_pct` half only, which flattens the master's conviction: a 2% speculative punt and a 40% core position produce the same allocation for the follower. `master_fraction` is computed over the assets we index, and below a coverage threshold it falls back to flat `max_position_pct` **and marks the trade sized-without-conviction** — presenting a fraction derived from a portfolio we cannot see would be a fabricated input to a real position size. Sells stay as they are: `computeCopySellProportion` is already correct.
 - [ ] **S4-16** Per-user breaker, exposure cap, and paper bankroll ride the existing account-parameterized machinery unchanged — substitute the user key for `'operator'`. **Except stop-loss and `RECONCILIATION_ACCOUNT`** — see the two verified exceptions in §1.

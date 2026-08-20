@@ -10,12 +10,16 @@ import {
   type SourceTradeSignalCandidate
 } from '@swat/db';
 import {
+  QUEUES,
   REDIS_CHANNELS,
   scoreToTier,
+  chainFromTokenMint,
   fetchTokenMetadata,
   initLogger,
-  stripChainPrefix
+  stripChainPrefix,
+  tradeQueueForChain
 } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
 import { mayPatternTrade } from './trade-eligibility.js';
@@ -39,8 +43,25 @@ async function getClusterTier(clusterId: string): Promise<'elite' | 'pro' | 'pro
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const alertQueue = new Queue('swat-alerts', { connection: redis });
-const tradeQueue = new Queue('swat-trades', { connection: redis });
+const alertQueue = new Queue(QUEUES.alerts, { connection: redis });
+
+/**
+ * One trade queue per chain (D6 / S3-25). Created eagerly so a chain's first
+ * signal does not pay connection setup on the money path, and keyed by `Chain`
+ * so `tradeQueueFor` cannot resolve a name the executor is not listening on.
+ */
+const tradeQueues = new Map<Chain, Queue>(
+  (['solana', 'polygon', 'robinhood-chain'] as const).map((chain) => [
+    chain,
+    new Queue(tradeQueueForChain(chain), { connection: redis })
+  ])
+);
+
+function tradeQueueFor(chain: Chain): Queue {
+  const queue = tradeQueues.get(chain);
+  if (!queue) throw new Error(`No trade queue configured for chain ${chain}`);
+  return queue;
+}
 
 const MIN_SIGNAL_SCORE = Number(process.env.MIN_SIGNAL_SCORE ?? 70);
 const SOURCE_COPY_MAX_EVENT_AGE_MS = Number(
@@ -115,7 +136,21 @@ async function enqueueSignal(opts: {
   // 2. Fetch token metadata (Name & Symbol) from Helius / DexScreener
   let tokenName = 'Unknown';
   let tokenSymbol = 'UNKNOWN';
-  let chain = opts.tokenMint.includes(':') ? opts.tokenMint.split(':')[0] : 'solana';
+
+  // Resolved once, before any write, and shared with the executor (S3-25): this
+  // picks both the `tokens.chain` value and the trade queue, and the previous
+  // inline `split(':')[0]` accepted any prefix — an unsupported one wrote a
+  // bogus chain into `tokens` and then queued a job no venue adapter serves.
+  let chain: Chain;
+  try {
+    chain = chainFromTokenMint(opts.tokenMint);
+  } catch (error) {
+    console.error(
+      `[signal-engine] SKIPPED: cannot resolve a chain for ${opts.tokenMint}:`,
+      error instanceof Error ? error.message : error
+    );
+    return;
+  }
 
   try {
     const meta = await fetchTokenMetadata(opts.tokenMint);
@@ -221,8 +256,8 @@ async function enqueueSignal(opts: {
     const clusterTier = opts.clusterId
       ? await getClusterTier(opts.clusterId)
       : scoreToTier(opts.signalScore);
-    console.log(`[signal-engine] ✅ TRADE QUEUED: ${opts.tokenMint} | score: ${opts.signalScore} | tier: ${clusterTier}`);
-    await tradeQueue.add('signal-trade', {
+    console.log(`[signal-engine] ✅ TRADE QUEUED: ${opts.tokenMint} | score: ${opts.signalScore} | tier: ${clusterTier} | chain: ${chain}`);
+    await tradeQueueFor(chain).add('signal-trade', {
       signalId:    signal.id,
       score:       opts.signalScore,
       tokenMint:   opts.tokenMint,

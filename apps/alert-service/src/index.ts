@@ -7,7 +7,7 @@ import {
   releaseIngestionHealthAlert,
   reserveIngestionHealthAlert
 } from '@swat/db';
-import { clampInteger, initLogger, REDIS_CHANNELS } from '@swat/shared';
+import { clampInteger, initLogger, QUEUES, REDIS_CHANNELS } from '@swat/shared';
 import { createRedisAlertBridge } from './alert-bridge.js';
 import { deliverQueuedAlert } from './alert-delivery.js';
 import type { SignalAlertPayload } from './alert-payload.js';
@@ -19,7 +19,7 @@ const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const bridgeRedis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const subscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const alertQueue = new Queue('swat-alerts', { connection: bridgeRedis });
+const alertQueue = new Queue(QUEUES.alerts, { connection: bridgeRedis });
 redis.on('error', (error) => console.error('[alert-service] worker Redis error', error));
 bridgeRedis.on('error', (error) => console.error('[alert-service] bridge Redis error', error));
 alertQueue.on('error', (error) => console.error('[alert-service] alert queue error', error));
@@ -373,7 +373,7 @@ async function deliverSignal(payload: SignalAlertPayload) {
 }
 
 const worker = new Worker(
-  'swat-alerts',
+  QUEUES.alerts,
   (job) => deliverQueuedAlert(job.data, {
     deliverSignal,
     sendOperational: sendOperationalTelegram
