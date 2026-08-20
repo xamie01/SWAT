@@ -4,7 +4,14 @@
 
 Written 2026-08-19, current as of commit `0245b33` on branch `feat/multi-tenant-foundation`.
 
-**Before you start:** the branch was pushed at this point, so CI has run `db:migrate → typecheck → test → build → test:integration` against ephemeral Postgres 16 + Redis 7. **Check the CI result first** — it is the only thing that has executed `tests/integration/copy-position-tenancy.integration.test.ts`, and that run is what closes or reopens `S4-10`.
+**CI IS NOT RUNNING — do not rely on it.** The branch is pushed, but every GitHub Actions run fails in ~4 seconds with *"The job was not started because your account is locked due to a billing issue."* The same failure appears on the 2026-08-09 run, so **nothing has been CI-validated since at least then** — no `db:migrate`, no `test:integration`, no cross-tenant suite, no `NEXT_PUBLIC_` secret lint.
+
+Two consequences you must carry:
+
+1. **`tests/integration/copy-position-tenancy.integration.test.ts` has still never executed anywhere.** `S4-10` stays open. The same is true of every other integration suite, including the cross-tenant leakage tests that Stage 1 relies on.
+2. **Local verification is the only verification.** Per-package `tsc --noEmit` plus the unit suites are it. Say so when you report — never write "CI will catch it".
+
+Resolving the billing lock is operator-side and outside engineering. Until it is fixed, treat the §10 build loop's local checks as the whole safety net rather than a first pass.
 
 ---
 

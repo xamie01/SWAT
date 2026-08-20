@@ -13,7 +13,7 @@
 
 Read this before anything else; it is the part that goes stale fastest.
 
-**Branch** `feat/multi-tenant-foundation`, **10 commits ahead of origin — so CI has not yet validated any of the recent work.** Pushing is what runs `db:migrate → typecheck → test → build → test:integration` against ephemeral Postgres 16 + Redis 7.
+**Branch** `feat/multi-tenant-foundation`, pushed. **CI is not running at all:** every Actions run fails in ~4 seconds with *"your account is locked due to a billing issue"*, and the same failure appears on the 2026-08-09 run — so nothing has been CI-validated since at least then. No integration suite has ever executed, including the cross-tenant leakage tests. Local `tsc --noEmit` and the unit suites are currently the only verification. Unblocking this is operator-side.
 
 **Green locally:** 865+ tests — `@swat/db` 305, `@swat/shared` 207, `@swat/trade-executor` 343, `@swat/signal-engine` 10 — with `tsc --noEmit` clean on every package.
 
