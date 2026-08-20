@@ -66,12 +66,16 @@ bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy 
 | Email provider | Resend |
 | Polymarket custody | ADR-0003 fork (b): venue-scoped signer key, disclosed |
 | Legal / `DG-2` | Out of engineering scope. Leave it alone |
+| Existing `apps/web` | A **mockup**, not production code — 9 pages, 16 `.tsx`, no auth, no user concept. Harvest its visual language; do not preserve its data flow |
+| Operator console | **Kept, but relocated** into an `(admin)` route group behind `role=admin` + IP allowlist. A separate product from the user app — not reachable, linkable, or discoverable from it. `/clusters` must not exist in the user app at all |
+| `NEXT_PUBLIC_API_KEY` | **Delete it.** 11 of 13 readers are `'use client'`, so the operator control-plane key is currently inlined into the browser bundle. Move to cookie sessions against the existing `/v1/auth/*`. Remove the variable from `.env.example` rather than leave a footgun |
+| Frontend design system | **Reuse the existing tokens verbatim** — Geist / Geist Mono / Material Symbols, the Material 3 surface families, and the semantic chain accents `solana-teal #14F195`, `polymarket-violet #8B5CF6`, `robinhood-amber #FFB800`. Full table in checklist §9 |
 
 ## 5. Open questions — these need the human, don't invent answers
 
 - **OQ-3:** does the Robinhood Chain router support Permit2? Gates `S4-M13`.
 - **OQ-4:** actual Helius plan concurrency limit — would cut Solana backfill 4–5× (`BACKFILL_BATCH_SIZE=5` + 150 ms sleep is conservative).
-- **OQ-5:** what copy-trading UI exists in `apps/web` today. Nobody has confirmed.
+- **OQ-5:** ~~what copy-trading UI exists in `apps/web`~~ — **answered 2026-08-19: essentially none.** 9 pages, 16 `.tsx`, no auth, no user concept, one file mentioning copying. It is a single-operator mockup. Full findings and 47 items in checklist §9.
 - **DG-9 fork (c):** one ~10-minute empirical test (create a Privy policy with an owner we hold, then `PATCH /v1/policies/{id}` with app-secret only; 4xx means the boundary is real). Human-side, needs a dev app.
 
 ## 6. Next work, sequenced
@@ -120,6 +124,7 @@ Two rules: **look at the target before deleting**, and **never delete something 
 The operator has authorized subagents for build work. Use them for genuinely parallel, file-disjoint tasks. Every brief must contain:
 
 - **The §1 hard constraints, verbatim.** Agents will otherwise run `pnpm build`.
+- **The §10 build loop, verbatim.** One item, then a test where meaningful, then `tsc --noEmit` and the suite, then tick the box. A subagent that returns five finished items and no tests has done the wrong job even if the code is right.
 - **An explicit allowlist of files it may create or edit, and an explicit list of files it must NOT touch** (naming the other agents' files). File-level ownership is what makes parallelism safe.
 - **"Do not edit barrel files** (`packages/db/src/index.ts`, `packages/shared/src/index.ts`) — report needed exports and the orchestrator wires them." Barrels are the one guaranteed collision point.
 - **"Do not `git commit` or `git add`."** The orchestrator reviews first.
@@ -143,10 +148,26 @@ The operator has authorized subagents for build work. Use them for genuinely par
 - **Agent 2:** `S4-M16`–`S4-M20` Polymarket — `apps/trade-executor/src/polymarket*.ts` only.
 - **Agent 3:** `S4-M8` master metrics over three windows — `apps/scorer/src/` only.
 
-## 10. Before claiming anything is done
+## 10. The build loop — mandatory, and it binds orchestrators too
+
+**One item at a time. Never batch.** This is the project's working method, not a suggestion, and it applies identically to a lead agent and to every subagent it spawns. An orchestrator that fans out five agents and ticks five boxes at the end has violated it just as much as an agent that skips a test.
+
+For each checklist item, in this order:
+
+1. **Implement that one item.** Not the item plus two neighbours that looked related.
+2. **Write a test where a test is meaningful.** Meaningful means: behaviour that can regress silently — an auth guard, a state transition, a formatter, a fail-closed branch, a constraint the database is supposed to reject. Not meaningful: pixel snapshots, or a test that restates the implementation. If an item genuinely needs no test, say why in the commit rather than staying quiet about it.
+3. **Check for errors.** `./node_modules/.bin/tsc --noEmit -p <pkg>/tsconfig.json` for every package touched, plus the relevant vitest file or suite. Fix what breaks before moving on.
+4. **Only then tick the box** in `AUDIT-FIX-CHECKLIST.md`, and record the commit hash next to it.
+5. **Record what you found, not only what you fixed.** A defect discovered and worked around is worth more to the next person than a clean diff. The checklist is this project's memory; an unrecorded fix gets re-litigated in three weeks.
+
+**Never tick an item whose test has not run.** If no database is available and the test is an integration test, the item stays unticked and the entry says "written, not run" — see `S4-10`, which is deliberately open for exactly this reason.
+
+**Do not tick an item because it typechecks.** A whole workstream in this session reported done while its new code path was never called; it typechecked because unused imports are not errors.
+
+## 11. Before claiming anything is done
 
 - Per-package `tsc --noEmit` clean for every package touched.
 - The relevant test suites run and passing, with counts stated.
 - The checklist item's **done-when** re-read and each clause addressed, or explicitly noted as not met.
 - Anything written-but-unrun said plainly.
-- `AUDIT-FIX-CHECKLIST.md` updated — mark items done with the commit hash, and record defects found rather than only fixes made. The checklist is the memory of this project; a fix that isn't recorded there gets re-litigated in three weeks.
+- `AUDIT-FIX-CHECKLIST.md` updated per §10 step 4 and 5.

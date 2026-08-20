@@ -599,13 +599,13 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 **Mirroring semantics:**
 - [ ] **S4-M1** Hybrid buy sizing — see `S4-15`, which this rewrites rather than duplicating.
 - [ ] **S4-M2** **Forward-only joins.** A user subscribing to a master already holding twelve tokens mirrors only trades from subscription onward. No catch-up buying: entering an existing position at an unknown cost basis is how followers become exit liquidity. **Done when:** a test asserts a new subscriber receives no position for a token the master held before subscription.
-- [ ] **S4-M3** **Subscription states `active` / `winding_down` / `ended`.** Unsubscribe means **exits-only wind-down**, not liquidation and not abandonment. Both simpler options are wrong: auto-selling is a market action the user never requested — taxable, fee-bearing, slippage-bearing, and at scale 500 users unsubscribing from one master is a coordinated sell *we* caused — while stopping outright orphans positions whose exit was going to arrive as the master's sell mirror. So: stop entries immediately, keep honouring the master's sells until each open position closes, and offer an explicit "close all now".
+- [ ] **S4-M3** **`051` — subscription states `active` / `winding_down` / `ended`.** Unsubscribe means **exits-only wind-down**, not liquidation and not abandonment. Both simpler options are wrong: auto-selling is a market action the user never requested — taxable, fee-bearing, slippage-bearing, and at scale 500 users unsubscribing from one master is a coordinated sell *we* caused — while stopping outright orphans positions whose exit was going to arrive as the master's sell mirror. So: stop entries immediately, keep honouring the master's sells until each open position closes, and offer an explicit "close all now".
   **Schema change required before fan-out ships, not after.** Retrofitting this means reconstructing which open position came from which subscription, and that information is not recoverable once positions exist. `044_user_wallet_subscriptions` has no state column today.
 - [ ] **S4-M4** **Per-user concurrent-position cap**, in `049`, API → UI, with a platform hard ceiling. Plus a *derived* warning at the point of configuration: beyond N positions at the user's balance, each copy falls below venue minimum order size and every trade is skipped. Better said at the slider than discovered in a skip reason.
 - [ ] **S4-M5** **Mirrorable-activity filter** — buys and sells above a minimum notional only. Transfers, LP, staking and dust excluded. Without this, a master moving funds between their own wallets triggers copies.
 
 **Capacity:**
-- [ ] **S4-M6** **Per-master capacity cap, denominated in price impact:** aggregate copy notional per `(master, token, window)` as a fraction of usable liquidity. Follower count is the wrong unit — 500 followers buying a deep pair is harmless, 50 buying a fresh memecoin is not. A follower soft-cap remains as a crude secondary so no single master becomes an operational concentration risk regardless of what they trade.
+- [ ] **S4-M6** **`053` — per-master capacity cap, denominated in price impact:** aggregate copy notional per `(master, token, window)` as a fraction of usable liquidity. Follower count is the wrong unit — 500 followers buying a deep pair is harmless, 50 buying a fresh memecoin is not. A follower soft-cap remains as a crude secondary so no single master becomes an operational concentration risk regardless of what they trade.
   **The harm being capped:** our own cohort is the adverse selection. User #900 eats the impact users #1–899 created, and a master who notices can farm it — buy small, wait for copy flow to lift the price, sell into their own followers. Also carries the per-master budget allocation that `S4-P15` depends on.
 - [ ] **S4-M7** **Uniform skip and generic capacity messaging** — see `S4-P15`, where the decision is recorded.
 
@@ -642,8 +642,8 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 
 ## 8. Stage 5 — Billing *(SaaS Phase 4)* — may overlap Stage 4
 
-- [ ] **S5-1** `051` `subscriptions` — user_id, tier, provider `stripe|usdc`, status, current_period_end, stripe_subscription_id.
-- [ ] **S5-2** `052` `payments` — provider, amount, currency, tx_hash/invoice_id, status.
+- [ ] **S5-1** `054` `subscriptions` — user_id, tier, provider `stripe|usdc`, status, current_period_end, stripe_subscription_id.
+- [ ] **S5-2** `055` `payments` — provider, amount, currency, tx_hash/invoice_id, status.
 - [ ] **S5-3** Stripe Checkout + Billing portal; `POST /v1/billing/stripe/webhook`, **signature-verified**, driving tier grants and downgrades.
 - [ ] **S5-4** USDC rail: per-user deposit reference; user pays USDC (Solana or Polygon) to the treasury with a memo/reference; a billing watcher in the indexer — reusing existing Helius/viem infrastructure — confirms the transfer and grants the tier. Lifetime tier = `tier_expires_at NULL`.
 - [ ] **S5-5** Nightly job downgrading expired tiers, 3-day grace period.
@@ -655,20 +655,103 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 
 ## 9. Stage 6 — Frontend *(SaaS Phase 6)* — progressive from Stage 1 onward
 ## NOTE : IN THIS DESIGN MAINTAIN EXISTING DESIGN PATTERNS INCUDING FONTS COLOURS AND ARRANGEMENT AND ENSURE SEO OPTIMIZATION
-- [ ] **S6-1** Drop the CDN Tailwind script (`apps/web/app/layout.tsx:20`) for a build-time Tailwind pipeline; add `tailwind.config` and `postcss.config` — **neither currently exists**.
-- [ ] **S6-2** `middleware.ts` route protection. **This closes S6-B7.**
-- [ ] **S6-3** Shared `lib/api.ts` — cookie auth, no API key. Delete all 8+ `NEXT_PUBLIC_API_KEY` reads.
-- [ ] **S6-4** react-query for polling and cache.
-- [ ] **S6-5** Real signup / login / forgot-password and an onboarding flow.
-- [ ] **S6-6** Wallet connect: wagmi + RainbowKit (EVM) and `@solana/wallet-adapter` — for auth-wallet linking, one-click "track my own wallet", and USDC payment.
-- [ ] **S6-7** Stage-2 UI: My Wallets (subscribe, backfill status, activity feed), My Signals on the SSE stream; the existing `SignalsView` safety drawer carries over user-scoped.
-- [ ] **S6-8** Stage-4 UI: trading wallet page (deposit QR, balances, withdraw), risk settings — `RiskExecutionView` rebuilt per-user with their exposure against their agreed risk %, plus a personal kill switch.
-- [ ] **S6-9** `G1-M8` — replace the workspace's hard-coded local-state mode toggles with the real API-backed matrix.
-- [ ] **S6-10** Stage-5 UI: billing page. Stage-7 UI: Ultra chain manager.
-- [ ] **S6-11** Admin area: today's global pages behind `role=admin` **and** an IP allowlist.
-- [ ] **S6-12** `G7-A3` — component-wide regression suite proving no uncaught promise rejection on config-load failure.
 
-**Exit gate, per slice:** the corresponding backend stage is drivable end to end in the browser with no shared secrets and no hard-coded data.
+**What exists today is a MOCKUP, not a product** *(verified 2026-08-19; this section rewritten against ADR-0005)*. `apps/web` is 9 pages and 16 `.tsx` files with **no auth, no session, and no concept of a user** — a single-operator console. Only `app/workspace/views/WalletIntelView.tsx` mentions copying at all, and there is a user-facing `/clusters` page, which now contradicts ADR-0005. Treat the existing tree as a **design reference to harvest, not production code to preserve** — its value is the visual language, not its data flow.
+
+**Five mockup markers that must not reach production:** Tailwind loaded from a **CDN `<script>`** (`app/layout.tsx:20`); its config injected via `dangerouslySetInnerHTML` onto a `window.tailwindConfigInit` global; `app/globals.css` is a **single blank comment line**; Google Fonts via `<link>` rather than `next/font`; and `<html className="light">` hardcoded, so the configured `darkMode: "class"` is unreachable.
+
+**The security finding that gates the whole section.** `.env.example:73` sets `NEXT_PUBLIC_API_KEY=swat-dev-key`, and **11 of the 13 files that read it are `'use client'`** — `/setup`, `/wallets`, `/logs`, `/clusters`, and every `workspace/views/*`. Next.js inlines `NEXT_PUBLIC_*` into the browser bundle, so **the operator control-plane key is shipped to every visitor**; the API compares it against `API_KEY` with `timingSafeEqual` and it grants full access. Survivable with one operator and no public deployment; a total authorisation bypass the moment a second user exists. Note `.env.example:107` already states the rule — "Never mirror it into a `NEXT_PUBLIC_*` name" — for the Resend key. **Operator decision 2026-08-19: adopt cookie sessions and delete `NEXT_PUBLIC_API_KEY` outright rather than leave a footgun in `.env.example`.**
+
+**The good news, and the right framing:** the backend is already multi-tenant and the frontend is one rewrite behind it. `apps/api/src/auth/plugin.ts` has cookie sessions, CSRF, `requireUser`, `requireRole` and `USER_REACHABLE_PREFIXES = ['/v1/auth/', '/v1/me/']`; `apps/api/src/routes/me.ts` has nine `/v1/me/*` routes; `tests/integration/cross-tenant.integration.test.ts` already makes tenant leakage a test failure. This section is *adopt what exists*, not *invent auth*.
+
+**Design system — reuse verbatim, do not reinvent.** Harvest these from `app/layout.tsx` into a real build-time config (`S6-1`) without changing a single value:
+
+| Token group | Values |
+| --- | --- |
+| Chain accents | `solana-teal #14F195` · `polymarket-violet #8B5CF6` · `robinhood-amber #FFB800` |
+| Status | `status-success #10B981` · `status-warning #F59E0B` · `status-error #EF4444` · `status-neutral #64748B` · `error #ba1a1a` |
+| Surfaces | Material 3 families — `background #fdf8f8`, `on-background #1c1b1b`, `surface-container-{lowest,high,highest}`, `surface-dim`, `on-surface-variant`, `inverse-primary`, `surface-tint` |
+| Type | **Geist** for all named scales (`headline-lg`, `headline-md`, `body-md`, `body-sm`, `label-caps`, `mono-data`); **Geist Mono**; **Material Symbols Outlined** for icons |
+| Modes | `darkMode: "class"` already configured — make it reachable (`S6-15`) |
+
+Chain accents are semantic, not decorative: the same colour means the same chain everywhere, including in the admin console.
+
+**Build discipline — every item in this section, and every agent working on it, follows this loop.** One item at a time: implement it → write a test where a test is meaningful (component behaviour, auth guards, state transitions, formatters — not pixel snapshots) → run `tsc --noEmit` for the package and the relevant vitest file → fix what breaks → **then tick the box here and record the commit**. Do not batch several items and tick them together; do not tick an item whose test has not run. This binds subagents **and** the agent orchestrating them.
+
+### 9.0 Route architecture — the user app and the admin console are separate products
+- [ ] **S6-13** **Split into two route groups: `(app)` for users and `(admin)` for the operator console.** *(Operator decision 2026-08-19: keep the operator console's code, move it entirely out of what users see.)* Different navigation, different information density, different landing pages — an admin surface is a different product from a copy-trading dashboard and should not be reachable, linkable, or discoverable from the user app.
+- [ ] **S6-14** **Relocate today's 9 pages into `(admin)` as the starting point for the admin dashboard.** They keep their value as operator tooling. **`/clusters` must not exist in the user app at all** — cluster detection is discovery-only under ADR-0005, and a user-facing cluster page would advertise a signal we deliberately stopped trading.
+
+### 9.1 Foundation — blocks every item below it
+- [ ] **S6-1** Drop the CDN Tailwind script (`apps/web/app/layout.tsx:20`) for a build-time Tailwind pipeline; add `tailwind.config` and `postcss.config` — **neither currently exists**. Port the token palette above verbatim; a CDN script has no purge step, causes FOUC, and makes every page load depend on a third party.
+- [ ] **S6-15** Replace the `<link>` Google Fonts with `next/font` (self-hosted, no layout shift), move styling out of `dangerouslySetInnerHTML`, give `globals.css` real content, and make `darkMode: "class"` reachable instead of hardcoding `light`.
+- [ ] **S6-3** Shared `lib/api.ts` — cookie auth, CSRF header, no API key. **Delete every `NEXT_PUBLIC_API_KEY` read (13 files) and the variable itself from `.env.example`.** CI already lints for `NEXT_PUBLIC_` secrets (§15) — make that lint fail on this.
+- [ ] **S6-2** `middleware.ts` route protection: unauthenticated users never reach `(app)`, non-admins never reach `(admin)`. **This closes S6-B7.**
+- [ ] **S6-4** react-query for polling and cache. Needed before the mirror feed, or every view invents its own refetch.
+- [ ] **S6-16** Error, empty, loading and **offline** states as shared primitives. Every screen below has all four; specifying them once is the difference between a product and a demo.
+
+### 9.2 Auth and onboarding
+- [ ] **S6-5** Real signup / login / forgot-password and an onboarding flow.
+- [ ] **S6-17** **`052` `users.email_verified_at` + email verification UI** — send, resend with cooldown, confirm, and a blocked state. `users` has no `email_verified_at` yet (`S4-12` prerequisite); withdrawal's entire security rests on the address being genuinely the user's, so this cannot be skipped to ship faster.
+- [ ] **S6-18** Onboarding checklist component that survives reload and resumes mid-flow: verify email → link wallet → grant authority → fund → set risk → pick a master. A user who closes the tab at step 4 must not restart at step 1.
+
+### 9.3 Granting execution authority — per chain, and not uniform
+- [ ] **S6-6** Wallet connect: wagmi + RainbowKit (EVM) and `@solana/wallet-adapter` — auth-wallet linking, one-click "track my own wallet", USDC payment.
+- [ ] **S6-19** **A grant flow per chain, because the mechanisms differ** (ADR-0003): Solana is a keyless PDA vault, EVM is a scoped session key with an expiry, Polymarket is a **venue-scoped key WAKE holds**. Show scope, expiry, and revocation for each.
+- [ ] **S6-20** **Polymarket custody disclosure — an explicit, unskippable consent step**, stating plainly that WAKE holds this key, that the blast radius is that venue's trading float, and that withdrawal exits custody without leaving the product. ADR-0003 §4 requires this before the fork ships; copy is reviewed with `DG-2`.
+- [ ] **S6-21** **Revocation is a first-class control, not buried in settings.** Solana revocation is on-chain and immediate; the UI must not imply the others are equally instant when they are not.
+
+### 9.4 Funding and balances
+- [ ] **S6-8** Stage-4 UI: trading wallet page (deposit QR, balances, withdraw), risk settings — `RiskExecutionView` rebuilt per-user with their exposure against their agreed risk %, plus a personal kill switch.
+- [ ] **S6-22** **Per-chain gas minimum, displayed in the native unit but denominated in USD** — the `S4-P20` decision is USD 10 of SOL priced live, so the figure must be **recomputed on render, never cached at signup**, and shown as the SOL amount the user must actually hold. When the price is unavailable, say so; never present a stale number as current.
+- [ ] **S6-23** Balance staleness is visible — `user_balances.fetched_at` surfaced, not silently presented as live.
+
+### 9.5 Risk settings
+- [ ] **S6-24** `max_position_pct`, `max_slippage_bps` (bounded per `packages/shared/src/slippage.ts`), auto-execute toggle, per-chain mode, and the **per-user concurrent-position cap** (`S4-M4`).
+- [ ] **S6-25** **The derived below-minimum warning at the position-cap control** (`S4-M4`): at this balance, beyond N positions each copy falls below venue minimum order size and every trade will be skipped. Said at the slider, not discovered later in a skip reason.
+- [ ] **S6-9** `G1-M8` — replace the workspace's hard-coded local-state mode toggles with the real API-backed matrix.
+
+### 9.6 Master discovery and selection
+- [ ] **S6-26** **Paste-an-address path.** Accepts a chain-prefixed or bare address, resolves the chain, and starts copying immediately — backfill is **not** on the critical path. Copy is *"copying now; performance history still loading"* (`S4-M8`/PRD UX-5). Never "a few seconds": Solana takes **90 s – 2.5 min** for an active wallet because it has no plural `getTransaction` RPC.
+- [ ] **S6-27** **Suggestions list** showing out-of-sample metrics over **24h / 7d / 30d** — PnL net of fees, max drawdown, hit rate, median hold, capacity estimate. **"Insufficient history" instead of a computed number** where the per-window trade count is too low, and **window divergence surfaced as a finding** (strong 30d, weak 24h means decaying).
+- [ ] **S6-28** **No follower counts, no popularity ranking, no leaderboard** (`S4-M9`). Reflexive crowding, and it tells a master exactly when farming their followers pays. This is a deliberate omission — a future contributor will read its absence as an oversight, so the component carries a comment saying it is not.
+- [ ] **S6-29** **Independence warning** when a candidate sits in a funding or behavioural cluster (`S4-M10`) — the surviving high-value use of the clustering work.
+- [ ] **S6-30** **Masters are per-chain and the UI must not imply otherwise** (PRD MS-4). A wallet address is chain-scoped; a user may run one master per chain. No cross-chain master identity exists.
+
+### 9.7 Subscription lifecycle
+- [ ] **S6-7** Stage-2 UI: My Wallets (subscribe, backfill status, activity feed), My Signals on the SSE stream; the existing `SignalsView` safety drawer carries over user-scoped.
+- [ ] **S6-31** **Forward-only notice at subscribe time** (`S4-M2`): *"we will not buy into positions this wallet already holds."* Users will otherwise read a flat first day as a broken integration.
+- [ ] **S6-32** **Wind-down UI for unsubscribe** (`S4-M3`) — three states `active` / `winding_down` / `ended`. Explain that entries stop immediately while exits keep mirroring until each open position closes, and offer an explicit **"close all now"**. Do not present unsubscribe as a single destructive button; auto-liquidation is exactly what the decision rejected.
+
+### 9.8 The mirror feed — where trust is won or lost
+- [ ] **S6-33** **Tracking difference per mirror** (PRD UX-3) — the user's fill against the master's fill. Entering after the master is structurally worse; showing it is what makes the product honest rather than making the number disappear.
+- [ ] **S6-34** **Every skip carries an actionable reason** (PRD UX-1), never a generic error. Reasons already have distinct meanings and must not be collapsed: underfunded, below venue minimum, stale signal, safety flag, position cap reached, geo-ineligible, gas below minimum, **capacity**.
+- [ ] **S6-35** **Capacity refusals read as capacity, not failure** (PRD UX-6) — "at capacity, scaling infrastructure". The specific constraint stays in the internal reason code, per the `S4-P15` decision.
+- [ ] **S6-36** **`sized-without-conviction` is labelled** (PRD UX-2) — a mirror sized on the flat risk percentage because master portfolio coverage was too low to infer allocation (`S4-M1`).
+- [ ] **S6-37** Fees are visible as real costs — Jito tips and gas in the per-trade view, not just netted into P&L (`S4-P18` populates `feeUsd`).
+
+### 9.9 Positions and performance
+- [ ] **S6-38** Open positions with cost basis, unrealised P&L, and which master and subscription each came from. `copy_positions` now carries the tenancy key (`050`) so this is per-user for the first time.
+- [ ] **S6-39** Performance view: realised P&L net of fees, per master and per chain. **Consult the `dataviz` skill before writing chart code or choosing chart colours** — and note the chain accents above are already semantic, so series colour is constrained, not free.
+- [ ] **S6-40** Paper vs live is unmistakable everywhere a number appears. Paper is the default for every free-tier user, so an ambiguous figure is the common case, not the edge case.
+
+### 9.10 Withdrawal — the anti-theft surface
+- [ ] **S6-41** Withdraw flow: destination limited to a **verified linked wallet**, email confirmation, per-day cap, and the linked-wallet **cooling-off window** made visible (`S4-12`). An address that is linked but not yet spendable must say when it becomes spendable.
+- [ ] **S6-42** **Email-send failure blocks the withdrawal and says so.** `sendEmail` returns sent / not_sent / **unknown**, and only `sent` may proceed; the UI must distinguish "we could not send" from "we do not know whether we sent" without inviting a retry that double-sends a code.
+
+### 9.11 Admin console — kept, relocated, hardened
+- [ ] **S6-11** Admin area: today's global pages behind `role=admin` **and** an IP allowlist.
+- [ ] **S6-43** Admin-only surfaces the user app must never expose: capacity and relayer-budget headroom with the real constraint named, per-master copy concentration (`S4-M6`), certification status per chain, ingestion health, and the skip-reason breakdown across all users.
+- [ ] **S6-44** Admin actions are audited (`audit_log`) and the kill switches are reachable — global `'*' = 'off'`, per-chain mode, per-master pause.
+
+### 9.12 Quality bars
+- [ ] **S6-10** Stage-5 UI: billing page. Stage-7 UI: Ultra chain manager.
+- [ ] **S6-12** `G7-A3` — component-wide regression suite proving no uncaught promise rejection on config-load failure.
+- [ ] **S6-45** SEO per the section NOTE: metadata per route, Open Graph, sitemap, robots. Marketing and auth pages are indexable; **everything behind a session is `noindex`**.
+- [ ] **S6-46** Accessibility: keyboard reachable, focus visible, form labels bound, and contrast checked against the token palette — Material 3 `on-*` pairs are designed for it, so verify rather than assume. Status must never be conveyed by colour alone; `status-success` and `status-error` need an icon or text partner.
+- [ ] **S6-47** Responsive down to mobile. A user checking whether their copy filled will do it on a phone.
+
+**Exit gate, per slice:** the corresponding backend stage is drivable end to end in the browser with no shared secrets and no hard-coded data — **and** no `NEXT_PUBLIC_*` secret appears in the built bundle, asserted by the §15 lint rather than by inspection.
 
 ---
 
@@ -676,9 +759,9 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 
 *The chain-registry refactor touches audit-hardened code everywhere. The green suite from Stage 0 is the safety net. The audit's "no new chains" scope rule expires here.*
 
-- [ ] **S7-1** `053` `chains` registry — id slug PK, kind `evm|solana|polymarket`, evm_chain_id, name, rpc_urls JSONB, native_symbol, coingecko_platform, dexscreener_id, status `builtin|custom`, added_by_user_id. Seed the three built-ins.
+- [ ] **S7-1** `056` `chains` registry — id slug PK, kind `evm|solana|polymarket`, evm_chain_id, name, rpc_urls JSONB, native_symbol, coingecko_platform, dexscreener_id, status `builtin|custom`, added_by_user_id. Seed the three built-ins.
 - [ ] **S7-2** Change `Chain` (`packages/shared/src/types.ts:2`) from a 3-value union to a registry-validated string. **20 files** carry hard-coded chain literals (see S7-B8) across `address.ts`, `validation.ts`, `execution.ts`, `prices.ts`, `scoring.ts`, `ingestion-health.ts`, `db/wallets.ts`, `execution-config.ts`, `circuit-breaker.ts`, `risk-policy.ts`, `trading-control.ts`, `api/index.ts` and their tests.
-- [ ] **S7-3** `054` convert SQL `CHECK` constraints on chain columns to foreign keys against `chains`.
+- [ ] **S7-3** `057` convert SQL `CHECK` constraints on chain columns to foreign keys against `chains`.
 - [ ] **S7-4** `POST /v1/me/chains` (ultra only) — resolve metadata and public RPCs from Chainlist (`chainid.network/chains.json`), **verify RPC liveness**, resolve DeFi Llama for the 5 most liquid DEXes, map the CoinGecko platform id.
 - [ ] **S7-5** Parameterize `evm.ts` base-token sets and RPC by registry row; per-user tracked wallets on custom chains flow through the same backfill queue.
 - [ ] **S7-6** Custom chains are **paper-only by default**. Live requires a configured supported router plus platform certification — the same `chain_certifications` gate as everything else.
@@ -689,18 +772,21 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 
 ## 11. Migration number ledger
 
-Highest applied: **`046`**. Next free: **`047`**. Reserved to prevent the collision that stalled the old plan (S1-B6):
+Highest applied: **`050`**. Next free: **`051`**. Reserved to prevent the collision that stalled the old plan (S1-B6):
 
 | Range | Stage | Contents |
 |---|---|---|
 | `039`–`043` | 1 | users, user_sessions, user_auth_wallets, user_api_keys, audit_log |
 | `044`–`045` | 2 | user_wallet_subscriptions, user_token_watches |
 | `046` | 3 | polymarket_redemptions *(taken — see the correction below)* |
-| `047`–`050` | 4 | user_trading_wallets, user_balances, user_execution_settings, tenancy key on trades/copy_executions |
-| `051`–`052` | 5 | subscriptions, payments |
-| `053`–`056` | 7 | chains registry, chain FK conversion |
+| `047`–`050` | 4 | user_execution_grants, user_balances, user_execution_settings + user_chain_execution_settings, tenancy key on trades/copy_executions/copy_positions *(all written 2026-08-18/19)* |
+| `051`–`053` | 4 (ADR-0005) | subscription states (`active`/`winding_down`/`ended`, `S4-M3`), `users.email_verified_at` (`S6-17`), per-master capacity accounting (`S4-M6`) |
+| `054`–`055` | 5 | subscriptions, payments |
+| `056`–`059` | 7 | chains registry, chain FK conversion |
 
 **Correction (2026-08-05).** Stage 3 needed a table the ledger had not anticipated — `polymarket_redemptions` — and took `046`, which was reserved for Stage 4's `user_trading_wallets`. This is the exact failure S1-B6 created the ledger to prevent, reappearing because the ledger was not updated at the moment the file was written. Stage 4 now starts at `047`. The lesson is procedural, not arithmetic: **update this table in the same commit as the migration**, never afterwards.
+
+**Correction (2026-08-19).** ADR-0005 introduced schema work with no reserved range, and `S4-M3` was briefly written against `051` — already reserved for Stage 5 billing. Caught before either file existed. Since everything from `051` up was unwritten, the reservations were renumbered rather than the new work pushed to the end, so numeric order still matches build order: ADR-0005 takes `051`–`053`, billing moves to `054`–`055`, Stage 7 to `056`–`059`. `S5-1`, `S5-2`, `S7-1` and `S7-3` were updated in the same commit. **Second time this ledger has caught a collision — the range table is doing its job, but only because it was checked before writing the file, which is the habit to keep.**
 
 Whoever lands first inside a range takes the next number and updates this table. Every file idempotent; `migrate.ts` re-runs all of them on every invocation and there is no applied-migrations table.
 

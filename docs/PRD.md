@@ -343,7 +343,7 @@ decisions.
 | OQ-2 | Can a vendor policy engine be scoped so that our own signing credential cannot widen it? One empirical test decides whether Polymarket custody can become non-custodial | Engineering, ~10 min |
 | OQ-3 | Does the Robinhood Chain router support Permit2? Determines RHC-3 | ❓ |
 | OQ-4 | Actual Helius plan concurrency limit, for §7.2 | ❓ |
-| OQ-5 | Copy-trading UI surface in `apps/web` — what exists today | ❓ frontend owner |
+| OQ-5 | ~~Copy-trading UI surface in `apps/web`~~ — **answered 2026-08-19: essentially none.** The existing app is a single-operator mockup (9 pages, 16 `.tsx`, no auth, no user concept). The operator console is kept but relocated behind `(admin)`; the user app is built new against the existing design tokens. 47 items in `AUDIT-FIX-CHECKLIST.md` §9 | Closed |
 
 ---
 
