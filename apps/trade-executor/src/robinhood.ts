@@ -447,16 +447,69 @@ export type RobinhoodOrder = {
   slippageBps: number;
 };
 
-let submissionTail: Promise<void> = Promise.resolve();
-async function withSubmissionLock<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = submissionTail;
+/**
+ * In-process submission serialisation, **keyed by account** (`S4-M12`).
+ *
+ * This was a single global chain, which was correct for one operator key and
+ * becomes wrong the moment fan-out gives each user their own: every user's
+ * mirror would queue behind every other user's, on a venue where being late is
+ * the whole risk. Keyed by account, two users proceed concurrently while one
+ * user's two overlapping signals still serialise — which is the only ordering
+ * that nonce allocation actually requires.
+ *
+ * This layer is **necessary but not sufficient.** It is process-local, so two
+ * executor replicas would each hold their own chain and both read the same
+ * pending nonce. `EvmNonceLock` below is the cross-process half.
+ */
+const submissionTails = new Map<string, Promise<void>>();
+async function withSubmissionLock<T>(account: string, operation: () => Promise<T>): Promise<T> {
+  const key = account.toLowerCase();
+  const previous = submissionTails.get(key) ?? Promise.resolve();
   let release!: () => void;
-  submissionTail = new Promise<void>((resolve) => { release = resolve; });
+  const mine = new Promise<void>((resolve) => { release = resolve; });
+  submissionTails.set(key, mine);
   await previous;
   try {
     return await operation();
   } finally {
     release();
+    // Drop the entry once nothing is queued behind us, or the map grows one
+    // permanently-resolved promise per account seen — a slow leak that only
+    // shows up at fan-out scale, which is exactly when it would matter.
+    if (submissionTails.get(key) === mine) submissionTails.delete(key);
+  }
+}
+
+/**
+ * Cross-process nonce lock, injected rather than imported (`S4-M12`).
+ *
+ * A port, not a database call, for the same reason the signer is a parameter
+ * (Standing Rule 2): this module stays free of `@swat/db` and therefore testable
+ * without one. The provider binds the chain and is wired in `index.ts`.
+ *
+ * Returns `{acquired: false}` rather than blocking. A blocking wait would sit
+ * past the BullMQ job's lock duration and get the job declared stalled, which is
+ * a worse outcome than a clean retry once the current holder has submitted and
+ * the node's pending nonce has advanced.
+ */
+export type EvmNonceLock = <T>(
+  account: string,
+  run: () => Promise<T>
+) => Promise<{ acquired: true; result: T } | { acquired: false; result?: undefined }>;
+
+/**
+ * Raised when the cross-process nonce lock is held elsewhere.
+ *
+ * A distinct class because the circuit breaker must **not** count this. Nothing
+ * is wrong with the venue — another process is mid-submission — and three
+ * unlucky collisions in a row would otherwise trip the breaker and halt all
+ * Robinhood trading for `CIRCUIT_BREAKER_RESET_MS`. Deliberately NOT an
+ * `UnrecoverableError`: the job should be retried, not buried.
+ */
+export class NonceContentionError extends Error {
+  constructor(public readonly account: string) {
+    super(`EVM nonce lock for ${account} is held by another process; retry`);
+    this.name = 'NonceContentionError';
   }
 }
 
@@ -583,8 +636,29 @@ export async function executeRobinhoodOrder(input: {
   }) => Promise<RobinhoodSafetyAssessment>;
   now?: () => number;
   requireReadiness?: boolean;
+  /**
+   * Cross-process nonce lock (`S4-M12`). **Required, not optional** — an absent
+   * lock is indistinguishable from a working one until two processes race, and
+   * the failure is a vanished fill with no error anywhere. Tests pass a
+   * pass-through; `index.ts` passes the Postgres-backed one.
+   */
+  nonceLock: EvmNonceLock;
 }): Promise<RobinhoodExecutionResult> {
-  return withSubmissionLock(async () => {
+  // Two layers, innermost last: the per-account in-process chain orders this
+  // process's work, then the cross-process lock excludes other replicas. The
+  // whole order is inside the lock rather than just the nonce read — the nonce is
+  // read, then incremented locally across an approval receipt wait, so releasing
+  // any earlier would let a second process claim the nonce this one is about to
+  // use for the swap. Over-locking costs latency; under-locking loses a fill.
+  return withSubmissionLock(input.account, async () => {
+    const lease = await input.nonceLock(input.account, async () => await runRobinhoodOrder(input));
+    if (!lease.acquired) throw new NonceContentionError(input.account);
+    return lease.result;
+  });
+}
+
+async function runRobinhoodOrder(input: Parameters<typeof executeRobinhoodOrder>[0]): Promise<RobinhoodExecutionResult> {
+  return (async () => {
     if (input.requireReadiness !== false && !getRobinhoodLiveReadiness().ready) {
       return { status: 'skipped', state: 'safety_rejected', reason: getRobinhoodLiveReadiness().reason };
     }
@@ -809,7 +883,7 @@ export async function executeRobinhoodOrder(input: {
     };
     await input.pendingStore.resolve(input.order.clientOrderId, result);
     return result;
-  });
+  })();
 }
 
 export type RobinhoodReconciliationResult =
@@ -824,6 +898,13 @@ export async function reconcileRobinhoodPending(input: {
   pendingStore: RobinhoodPendingStore;
   config: RobinhoodExecutionConfig;
   safetyAssessment?: Parameters<typeof executeRobinhoodOrder>[0]['safetyAssessment'];
+  /**
+   * Needed because a confirmed approval **resumes into a swap** below, and that
+   * swap allocates a nonce like any other. Optional only in the sense that
+   * `safetyAssessment` is: without both, the resume is skipped rather than run
+   * unserialised.
+   */
+  nonceLock?: EvmNonceLock;
   now?: Date;
 }): Promise<RobinhoodReconciliationOutcome[]> {
   const now = input.now ?? new Date();
@@ -862,8 +943,9 @@ export async function reconcileRobinhoodPending(input: {
       const result = { status: 'approval_confirmed' as const, clientOrderId: pending.clientOrderId };
       await input.pendingStore.resolve(pending.clientOrderId, result);
       results.push(result);
-      if (input.safetyAssessment) {
+      if (input.safetyAssessment && input.nonceLock) {
         const resumed = await executeRobinhoodOrder({
+          nonceLock: input.nonceLock,
           order: {
             clientOrderId: pending.clientOrderId,
             token: pending.token,
@@ -983,12 +1065,20 @@ export function createViemRobinhoodAdapter(
 
 let configuredPendingStore: RobinhoodPendingStore | null = null;
 let configuredSafetyAssessment: Parameters<typeof executeRobinhoodOrder>[0]['safetyAssessment'] | null = null;
+let configuredNonceLock: EvmNonceLock | null = null;
 export function configureRobinhoodRuntime(input: {
   pendingStore: RobinhoodPendingStore;
   safetyAssessment: Parameters<typeof executeRobinhoodOrder>[0]['safetyAssessment'];
+  nonceLock: EvmNonceLock;
 }): void {
   configuredPendingStore = input.pendingStore;
   configuredSafetyAssessment = input.safetyAssessment;
+  configuredNonceLock = input.nonceLock;
+}
+
+/** The configured cross-process nonce lock, for the reconciliation resume path. */
+export function getConfiguredRobinhoodNonceLock(): EvmNonceLock | null {
+  return configuredNonceLock;
 }
 
 export async function getRobinhoodSpendableEth(): Promise<number> {
@@ -1014,8 +1104,11 @@ export async function triggerRobinhood(params: {
   proportionBps?: number;
 }): Promise<RobinhoodExecutionResult> {
   if (!evmAccount || !robinhoodWalletClient) throw new UnrecoverableError('EVM_PRIVATE_KEY is not configured for Robinhood Chain live execution');
-  if (!configuredPendingStore || !configuredSafetyAssessment) {
-    throw new UnrecoverableError('Robinhood restart-safe pending store and safety adapter are not configured');
+  if (!configuredPendingStore || !configuredSafetyAssessment || !configuredNonceLock) {
+    // Fails closed on a missing nonce lock for the same reason as the pending
+    // store: submitting without it is silently unserialised, and the symptom is
+    // a fill that never happens rather than an error anyone sees.
+    throw new UnrecoverableError('Robinhood restart-safe pending store, safety adapter and nonce lock are not configured');
   }
   const direction = params.direction ?? 'buy';
   if (direction === 'buy' && (!Number.isFinite(params.amountEth) || params.amountEth <= 0)) {
@@ -1034,7 +1127,8 @@ export async function triggerRobinhood(params: {
     account: evmAccount.address,
     adapter: createViemRobinhoodAdapter(),
     pendingStore: configuredPendingStore,
-    safetyAssessment: configuredSafetyAssessment
+    safetyAssessment: configuredSafetyAssessment,
+    nonceLock: configuredNonceLock
   });
   return result;
 }

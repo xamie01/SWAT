@@ -134,6 +134,7 @@ async function executeBuy(options: {
   clientOrderId?: string;
 } = {}) {
   return executeRobinhoodOrder({
+      nonceLock: passThroughNonceLock,
     order: {
       clientOrderId: options.clientOrderId ?? 'signal-buy-1',
       token,
@@ -207,6 +208,7 @@ async function executeOrder(options: {
       : {}
   );
   return executeRobinhoodOrder({
+      nonceLock: passThroughNonceLock,
     order: {
       clientOrderId: options.clientOrderId ?? `signal-${options.direction}-matrix`,
       token,
@@ -224,6 +226,15 @@ async function executeOrder(options: {
     requireReadiness: false
   });
 }
+
+/**
+ * Pass-through nonce lock for cases that are not about serialisation (S4-M12).
+ * `executeRobinhoodOrder` requires the dependency rather than defaulting it,
+ * because a silently-absent lock is the bug the item exists to close — so every
+ * call site has to state which behaviour it wants.
+ */
+const passThroughNonceLock = async <T,>(_account: string, run: () => Promise<T>) =>
+  ({ acquired: true as const, result: await run() });
 
 describe('Robinhood entry and exit matrix', () => {
   // Both base-asset modes crossed with both directions. Previously only the
@@ -498,6 +509,7 @@ describe('Robinhood execution state machine', () => {
       waitForReceipt: vi.fn().mockResolvedValueOnce(approvalReceipt).mockResolvedValueOnce(sellReceipt)
     });
     const result = await executeRobinhoodOrder({
+      nonceLock: passThroughNonceLock,
       order: {
         clientOrderId: 'signal-sell-1',
         token,

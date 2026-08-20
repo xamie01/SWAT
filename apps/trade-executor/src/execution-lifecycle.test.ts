@@ -59,7 +59,11 @@ vi.mock('@swat/db', () => ({
   recordCopyExecutionEvidence: vi.fn(),
   releaseSignalClaim: vi.fn(),
   resolveChainMode: vi.fn(),
-  transitionCopyExecution: vi.fn()
+  transitionCopyExecution: vi.fn(),
+  // index.ts binds this into `robinhoodNonceLock` (S4-M12). Never invoked here —
+  // no case reaches a live EVM submission — but an absent barrel export is how a
+  // mock drifts from the module it stands in for.
+  withEvmNonceLock: vi.fn()
 }));
 
 vi.mock('@swat/shared', async () => {
@@ -122,6 +126,13 @@ vi.mock('./robinhood.js', () => ({
   reconcileRobinhoodPending: vi.fn(),
   robinhoodPublicClient: {},
   triggerRobinhood: vi.fn(),
+  // `index.ts` does `error instanceof NonceContentionError` (S4-M12). Omitting it
+  // from this mock makes the right-hand side `undefined`, and the resulting
+  // TypeError replaces whatever error the case under test threw — which is how
+  // this mock silently broke the breaker-counting case. A stand-in class is
+  // enough because only `instanceof` is used; the real class is exercised in
+  // `robinhood-nonce.test.ts`.
+  NonceContentionError: class NonceContentionError extends Error {},
   WETH_ROBINHOOD: '0x0000000000000000000000000000000000000001'
 }));
 
@@ -161,6 +172,7 @@ vi.mock('./trojan-runtime.js', () => ({
 
 import * as db from '@swat/db';
 import * as polymarket from './polymarket.js';
+import { NonceContentionError } from './robinhood.js';
 import {
   clampExecutionModeForStartup,
   executeJobWithCircuitBreaker,
@@ -392,6 +404,26 @@ describe('executor trade-state routing', () => {
       'robinhood-chain',
       3
     );
+  });
+
+  it('does NOT count nonce contention against the breaker (S4-M12)', async () => {
+    // Contention means another process holds the account's nonce lock — nothing
+    // is wrong with the venue. Counting it would let three unlucky millisecond
+    // overlaps trip the breaker and halt every trade on the chain for five
+    // minutes, converting a retryable collision into an outage.
+    const job = {
+      data: { tokenMint: 'robinhood-chain:0x0000000000000000000000000000000000000001' },
+      token: 'lock-token',
+      moveToDelayed: vi.fn()
+    };
+
+    await expect(executeJobWithCircuitBreaker(
+      job,
+      vi.fn().mockRejectedValue(new NonceContentionError('contended'))
+    )).rejects.toBeInstanceOf(NonceContentionError);
+
+    expect(db.recordCircuitBreakerFailure).not.toHaveBeenCalled();
+    expect(db.recordCircuitBreakerSuccess).not.toHaveBeenCalled();
   });
 
   it('delays a tripped chain unless it owns the half-open probe lease', async () => {

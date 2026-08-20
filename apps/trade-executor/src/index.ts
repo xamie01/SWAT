@@ -37,6 +37,7 @@ import {
   releaseCopyExecutionReconciliationClaim,
   resolveChainMode,
   transitionCopyExecution,
+  withEvmNonceLock,
   withTransaction,
   type CopyExecutionRecord
 } from '@swat/db';
@@ -59,7 +60,9 @@ import {
   robinhoodPublicClient,
   triggerRobinhood,
   evmAccount,
+  NonceContentionError,
   WETH_ROBINHOOD,
+  type EvmNonceLock,
   type RobinhoodExecutionAdapter,
   type RobinhoodExecutionConfig,
   type RobinhoodPendingStore,
@@ -531,7 +534,18 @@ type RobinhoodRuntime = {
   config: RobinhoodExecutionConfig;
   pendingStore: RobinhoodPendingStore;
   safetyAssessment: ReturnType<typeof createRobinhoodSafetyAssessment>;
+  nonceLock: EvmNonceLock;
 };
+
+/**
+ * Binds the chain to the Postgres advisory lock (`S4-M12`).
+ *
+ * The chain is bound here rather than inside `robinhood.ts` so that module stays
+ * free of `@swat/db` and chain constants — and so the identical port serves
+ * Polymarket's `polygon` signer later without a second implementation.
+ */
+const robinhoodNonceLock: EvmNonceLock = (account, run) =>
+  withEvmNonceLock({ chain: 'robinhood-chain', account, run });
 
 const ownerAbi = parseAbi(['function owner() view returns (address)']);
 
@@ -555,8 +569,8 @@ export function createRobinhoodRuntime(redisClient: Redis): RobinhoodRuntime {
     // that is needed to turn any of them into a hard gate — see G2-R5.
     maxTransferFeeBps: Number(process.env.ROBINHOOD_MAX_TRANSFER_FEE_BPS ?? '0')
   });
-  configureRobinhoodRuntime({ pendingStore, safetyAssessment });
-  return { adapter, config, pendingStore, safetyAssessment };
+  configureRobinhoodRuntime({ pendingStore, safetyAssessment, nonceLock: robinhoodNonceLock });
+  return { adapter, config, pendingStore, safetyAssessment, nonceLock: robinhoodNonceLock };
 }
 
 function configureRobinhoodOpsAlerts(redisClient: Redis): void {
@@ -630,7 +644,8 @@ export async function runRobinhoodReconciliation(runtime: RobinhoodRuntime): Pro
     adapter: runtime.adapter,
     pendingStore: runtime.pendingStore,
     config: runtime.config,
-    safetyAssessment: runtime.safetyAssessment
+    safetyAssessment: runtime.safetyAssessment,
+    nonceLock: runtime.nonceLock
   });
   for (const outcome of outcomes) {
     if (outcome.status === 'filled') {
@@ -859,6 +874,16 @@ export async function executeJobWithCircuitBreaker(
     return result;
   } catch (error) {
     if (error instanceof UnrecoverableError || error instanceof DelayedError) throw error;
+    // Nonce contention is not a venue failure (S4-M12). Another process holds the
+    // account's nonce lock, so this job simply has not run yet — counting it
+    // would let three unlucky collisions trip the breaker and halt every trade on
+    // the chain for CIRCUIT_BREAKER_RESET_MS, turning a retryable millisecond
+    // overlap into a five-minute outage. BullMQ retries the job with backoff, by
+    // which time the holder has submitted and the pending nonce has advanced.
+    if (error instanceof NonceContentionError) {
+      console.warn(`[trade-executor] ${error.message}`);
+      throw error;
+    }
     const failed = await recordCircuitBreakerFailure(
       'operator',
       chain,
