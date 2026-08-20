@@ -115,6 +115,11 @@ Parallel, non-blocking: `S3-9` Solana certification canary (evidence under `docs
 - **`users` has no `email_verified_at`.** The withdrawal control rests on the email being genuinely the user's, and nothing establishes that. Mitigating fact, verified: the only `UPDATE users` in `packages/db` touches `password_hash`, and no `/v1/me` route changes the email — so the circular attack is closed.
 - **A linked wallet is spendable immediately.** Needs a cooling-off window before it can be a withdrawal destination.
 
+**All three stale-`dist` hazards are now measured and tracked in
+`docs/stale-dist-hazards.md`** — read it before trusting a clean `tsc --noEmit` or a
+green app suite. Item 1 there (`pnpm --filter @swat/shared build`) is a **deploy
+blocker** for `S3-25`, not a tidy-up.
+
 ## 8. Cleanup mandate — delete dead code, but verify before deleting
 
 Two rules: **look at the target before deleting**, and **never delete something merely because nothing references it in one grep** — check tests, barrels, SQL, and env references too.
