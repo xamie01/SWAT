@@ -18,6 +18,7 @@ import {
 } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
+import { mayPatternTrade } from './trade-eligibility.js';
 
 initLogger('signal-engine');
 
@@ -210,7 +211,13 @@ async function enqueueSignal(opts: {
     backoff: { type: 'exponential', delay: 2000 }
   });
 
-  if (!opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
+  // Two independent gates, deliberately. `mayPatternTrade` is the ADR-0005
+  // invariant and lives in one place; `suppressTrade` stays as a per-call-site
+  // statement of intent. Either one alone blocks the trade, so deleting a flag
+  // from a detector changes a log line rather than whether money moves.
+  const patternMayTrade = mayPatternTrade(opts.patternType);
+
+  if (patternMayTrade && !opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
     const clusterTier = opts.clusterId
       ? await getClusterTier(opts.clusterId)
       : scoreToTier(opts.signalScore);
@@ -228,10 +235,12 @@ async function enqueueSignal(opts: {
       attempts: 4,
       backoff: { type: 'exponential', delay: 5000 }
     });
+  } else if (!patternMayTrade) {
+    console.log(`[signal-engine] ⏭️ ${opts.patternType} is discovery-only (ADR-0005) | token: ${opts.tokenMint}`);
   } else if (!safety.isSafe) {
     console.log(`[signal-engine] ❌ trade blocked — safety flags: ${safety.flags.join(', ')} | token: ${opts.tokenMint}`);
   } else if (opts.suppressTrade) {
-    console.log(`[signal-engine] ⏭️ trade suppressed (exit signal) | token: ${opts.tokenMint}`);
+    console.log(`[signal-engine] ⏭️ trade suppressed by call site | token: ${opts.tokenMint}`);
   } else {
     console.log(`[signal-engine] ⏭️ trade skipped — score ${opts.signalScore} < 80 | token: ${opts.tokenMint}`);
   }
