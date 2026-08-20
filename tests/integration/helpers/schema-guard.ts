@@ -33,12 +33,25 @@ const REQUIRED_TABLES = [
   'user_api_keys',               // 042
   'audit_log',                   // 043
   'user_wallet_subscriptions',   // 044
-  'user_token_watches'           // 045
+  'user_token_watches',          // 045
+  'user_execution_grants',       // 047
+  'user_balances',               // 048
+  'user_execution_settings',     // 049
+  'user_chain_execution_settings' // 049
 ] as const;
 
 /** Columns whose absence would otherwise surface as an opaque SQL error. */
 const REQUIRED_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> = [
-  ['trades', 'venue_settlement_status'] // 038
+  ['trades', 'venue_settlement_status'], // 038
+  // 050. The newest entry is what actually catches staleness, and this one is
+  // load-bearing twice over: `copy-position-tenancy.integration.test.ts` asserts
+  // the tenancy key directly, so without this guard a database sitting at 046
+  // fails that suite with an opaque "column user_id does not exist" — exactly
+  // the misdirected investigation this file was written after.
+  ['copy_positions', 'user_id'],
+  ['copy_position_applications', 'position_id'],
+  ['copy_executions', 'user_id'],
+  ['trades', 'user_id']
 ];
 
 export async function assertIntegrationSchemaCurrent(): Promise<void> {
