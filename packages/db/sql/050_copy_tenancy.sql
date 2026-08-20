@@ -212,17 +212,32 @@ ALTER TABLE copy_position_applications
 ALTER TABLE copy_position_applications
   ADD COLUMN IF NOT EXISTS position_id UUID;
 
--- Backfill: only fills NULLs, so replaying it is a no-op. The join is
--- unambiguous because the primary key dropped above guaranteed exactly one
--- position per (target_account, chain, token_mint), and every position at this
--- point still has user_id NULL.
+-- Backfill: only fills NULLs, so replaying it is a no-op.
+--
+-- `position.user_id IS NOT DISTINCT FROM application.user_id` makes the join key
+-- exactly mirror `uq_copy_positions_account_chain_token_user`, which is what
+-- keeps this correct on replay. Without it the join is
+-- (target_account, chain, token_mint) only, which is unambiguous *today* —
+-- every position still has user_id NULL — but stops being so the moment real
+-- tenants exist: several positions would then match, and `UPDATE ... FROM`
+-- picks one of them nondeterministically, silently attaching one tenant's
+-- evidence row to another tenant's position. That is reachable rather than
+-- theoretical, because the expand phase deliberately tolerates an old executor
+-- still writing application rows without `position_id` (see the note above).
+--
+-- `IS NOT DISTINCT FROM` treats NULL as a value, so a legacy application row
+-- matches the legacy position and a tenant's row matches that tenant's
+-- position. Since the unique index guarantees at most one position per
+-- (target_account, chain, token_mint, user_id) with NULLS NOT DISTINCT, there
+-- can never be more than one match.
 UPDATE copy_position_applications application
    SET position_id = position.id
   FROM copy_positions position
  WHERE application.position_id IS NULL
    AND position.target_account = application.target_account
    AND position.chain = application.chain
-   AND position.token_mint = application.token_mint;
+   AND position.token_mint = application.token_mint
+   AND position.user_id IS NOT DISTINCT FROM application.user_id;
 
 DO $$
 BEGIN

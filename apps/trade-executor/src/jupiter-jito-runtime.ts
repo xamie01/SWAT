@@ -1,7 +1,10 @@
 import {
   buildJupiterSwap,
+  fetchTokenPriceUsd,
   getJitoBundleStatus,
+  getJitoTipAccounts,
   getJitoTipFloor,
+  lamportsToUsd,
   selectJitoTip,
   selectTipAccount,
   submitJitoBundle,
@@ -30,6 +33,15 @@ import {
 
 const DEFAULT_STORE_KEY = 'swat:trade-executor:pending:jupiter-jito:v1';
 
+/**
+ * Wrapped SOL. The tip is paid in lamports; `feeUsd` needs a USD price for them.
+ *
+ * Duplicated rather than imported from `solana-dispatch.ts`, which already exports
+ * the same constant — that module imports *this* one, so importing back would
+ * close an import cycle.
+ */
+const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
+
 export interface JupiterJitoSubmitInput {
   /** Stable idempotency key. Must be `(signalId, target_account)`-derived. */
   readonly clientOrderId: string;
@@ -44,8 +56,39 @@ export type JupiterJitoSubmission =
   | { readonly status: 'submission_unknown'; readonly clientOrderId: string; readonly reason: string }
   | { readonly status: 'already_resolved'; readonly clientOrderId: string; readonly resolution: JupiterJitoResolution };
 
+/**
+ * Terminal outcomes.
+ *
+ * **Only `filled` carries a tip** (checklist S4-P18). Jito bundles are atomic and
+ * all-or-nothing, so a bundle that never landed was never charged a tip, and
+ * booking one against a `failed` or `ambiguous` outcome would fabricate a cost
+ * against a position that does not exist. Keeping the fields off the non-landed
+ * variants makes that a type-level guarantee rather than a convention a future
+ * call site can forget.
+ *
+ * `ambiguous` is the case worth being explicit about: it covers a confirmation
+ * timeout and a bundle that landed without an observable signature. Neither is a
+ * *free* outcome — the second one almost certainly did pay a tip — but neither is
+ * an observed one either, and there is no position to attribute a cost to. The
+ * cost of an ambiguous outcome is settled by an operator reading the chain, not
+ * guessed here.
+ */
 export type JupiterJitoResolution =
-  | { readonly status: 'filled'; readonly clientOrderId: string; readonly signature: string; readonly slot: number | null }
+  | {
+      readonly status: 'filled';
+      readonly clientOrderId: string;
+      readonly signature: string;
+      readonly slot: number | null;
+      /** Tip actually paid by the landed bundle. Absent on records written before S4-P18. */
+      readonly tipLamports?: number | null;
+      /**
+       * The tip in USD, for `persistTrade`'s `feeUsd`.
+       *
+       * `null` when the SOL price was unavailable: a missing fee is visibly
+       * absent, a guessed one silently misstates P&L.
+       */
+      readonly feeUsd?: number | null;
+    }
   | { readonly status: 'failed'; readonly clientOrderId: string; readonly reason: string }
   | { readonly status: 'ambiguous'; readonly clientOrderId: string; readonly reason: string };
 
@@ -55,6 +98,14 @@ export interface PendingJupiterJitoSubmission {
   /** Beyond this block height the transaction can never land — see below. */
   readonly lastValidBlockHeight: number;
   readonly expiresAt: Date;
+  /**
+   * Tip carried by the submitted bundle, in lamports.
+   *
+   * Optional because records already in Redis when this shipped do not have it,
+   * and an in-flight bundle must reconcile normally rather than crash the sweep.
+   * A missing value resolves to no fee rather than to a guessed one.
+   */
+  readonly tipLamports?: number | null;
 }
 
 type StoredState =
@@ -181,7 +232,10 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
       maxTipLamports: options.maxTipLamports,
       fallbackTipLamports: options.fallbackTipLamports
     });
-    const tipAccount = selectTipAccount(input.clientOrderId);
+    // Resolved at runtime, TTL-cached, and falling back to the hard-coded set
+    // (S4-P18). Never empty, so `selectTipAccount` always has something to pick.
+    const tipAccounts = await getJitoTipAccounts(options.jito);
+    const tipAccount = selectTipAccount(input.clientOrderId, tipAccounts);
 
     let signedSwap: string;
     let signedTip: string;
@@ -224,7 +278,13 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
       clientOrderId: input.clientOrderId,
       bundleId: result.bundleId,
       lastValidBlockHeight: built.lastValidBlockHeight,
-      expiresAt: new Date(now().getTime() + options.pendingTtlMs)
+      expiresAt: new Date(now().getTime() + options.pendingTtlMs),
+      // Carried on the pending record because reconciliation happens in a later
+      // process tick — often a later process — and the block engine's status
+      // response does not report what the bundle tipped. Recomputing it at
+      // reconcile time would re-read a tip floor that has since moved and book a
+      // number the chain never saw.
+      tipLamports
     });
 
     return {
@@ -233,6 +293,27 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
       bundleId: result.bundleId,
       lastValidBlockHeight: built.lastValidBlockHeight
     };
+  }
+
+  /**
+   * Prices a landed bundle's tip in USD, for `persistTrade`'s `feeUsd`.
+   *
+   * Only ever called once a bundle is known to have landed — see `reconcile`.
+   *
+   * Returns `null` on every path where the number would be a guess: a pending
+   * record from before S4-P18 that carries no tip, a nonsensical tip, or an
+   * unavailable SOL price. `fetchTokenPriceUsd` answers `null` when every one of
+   * its upstreams fails, and that must not collapse into a zero fee — zero is a
+   * claim that the trade cost nothing, which is a different and false statement.
+   */
+  async function priceLandedTip(
+    tipLamports: number | null | undefined
+  ): Promise<number | null> {
+    if (typeof tipLamports !== 'number' || !Number.isFinite(tipLamports) || tipLamports <= 0) {
+      return null;
+    }
+    const solPriceUsd = await fetchTokenPriceUsd(WRAPPED_SOL_MINT).catch(() => null);
+    return lamportsToUsd(tipLamports, solPriceUsd);
   }
 
   /**
@@ -261,11 +342,16 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
           reason: 'landed-without-signature'
         };
       }
+      // The one branch that books a cost. Everything below either never paid a
+      // tip (atomic bundle, never landed) or cannot be observed to have paid one.
+      const tipLamports = pending.tipLamports ?? null;
       return {
         status: 'filled',
         clientOrderId: pending.clientOrderId,
         signature,
-        slot: status.slot
+        slot: status.slot,
+        tipLamports,
+        feeUsd: await priceLandedTip(tipLamports)
       };
     }
 

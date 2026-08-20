@@ -1,5 +1,6 @@
 import { query } from './client.js';
 import { withTransaction } from './transaction.js';
+import { normalizeTenantId } from './copy-trade-lifecycle.js';
 import { resolveChainAddress, resolveChainValue } from '@swat/shared';
 import type { Chain } from '@swat/shared';
 
@@ -7,6 +8,13 @@ export type TradeInsert = {
   signalId?: string | null;
   sourceTradeId?: string | null;
   copyExecutionId?: string | null;
+  /**
+   * Owning tenant. Omit or pass `null` for the pre-multi-tenant operator
+   * account — `null` is a real, meaningful value here, not a missing one
+   * (S4-10, migration 050_copy_tenancy.sql). Do not substitute a placeholder
+   * uuid: `normalizeTenantId` rejects anything that is not a uuid or null.
+   */
+  userId?: string | null;
   walletAddress?: string | null;
   tokenMint: string;
   chain?: Chain | null;
@@ -89,9 +97,10 @@ const INSERT_TRADE_SQL = `INSERT INTO trades (
    confirmed_at,
    source_trade_id,
    copy_execution_id,
-   target_amount_usd
+   target_amount_usd,
+   user_id
  )
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
  ON CONFLICT (copy_execution_id) WHERE copy_execution_id IS NOT NULL
  DO UPDATE SET
    signature = COALESCE(EXCLUDED.signature, trades.signature),
@@ -108,6 +117,14 @@ const INSERT_TRADE_SQL = `INSERT INTO trades (
    venue_trade_ids = EXCLUDED.venue_trade_ids,
    settlement_transaction_hashes = EXCLUDED.settlement_transaction_hashes,
    target_amount_usd = COALESCE(trades.target_amount_usd, EXCLUDED.target_amount_usd),
+   -- Tenant order is deliberate: trades.user_id first, so a re-upsert can only
+   -- ever FILL IN a missing tenant (an expand-phase operator row) and can never
+   -- silently reattribute financial history from one user to another. The
+   -- conflict target copy_execution_id is already tenant-scoped, so a differing
+   -- EXCLUDED.user_id would mean corruption upstream, not an update.
+   -- (No backticks in this comment: the whole statement is a TS template
+   -- literal, and a backtick here terminates it.)
+   user_id = COALESCE(trades.user_id, EXCLUDED.user_id),
    submitted_at = COALESCE(trades.submitted_at, EXCLUDED.submitted_at),
    confirmed_at = COALESCE(EXCLUDED.confirmed_at, trades.confirmed_at)
  RETURNING id`;
@@ -158,7 +175,8 @@ function getTradeValues(input: TradeInsert) {
     input.confirmedAt ?? null,
     input.sourceTradeId ?? null,
     input.copyExecutionId ?? null,
-    input.targetAmountUsd ?? null
+    input.targetAmountUsd ?? null,
+    normalizeTenantId(input.userId)
   ];
 }
 
@@ -193,6 +211,12 @@ export async function insertTradeAndMarkSignalExecuted(
       throw new Error(`Signal ${input.signalId} does not exist`);
     }
 
+    // Tenant-scoped. A signal is a shared detection that more than one tenant
+    // may copy, so without `user_id` here tenant B's fill would find tenant A's
+    // trade, skip its own insert, and return A's trade id — B's position would
+    // never be recorded and A's P&L would absorb it. `IS NOT DISTINCT FROM`
+    // because operator rows carry `user_id NULL` and `= NULL` never matches
+    // (S4-10, migration 050_copy_tenancy.sql).
     const existing = await client.query<{ id: string }>(
       `SELECT id
          FROM trades
@@ -200,9 +224,10 @@ export async function insertTradeAndMarkSignalExecuted(
           AND direction = $2
           AND status IN ('filled', 'partial')
           AND (execution_mode IS NULL OR execution_mode != 'shadow')
+          AND user_id IS NOT DISTINCT FROM $3
         ORDER BY executed_at DESC
         LIMIT 1`,
-      [input.signalId, input.direction]
+      [input.signalId, input.direction, normalizeTenantId(input.userId)]
     );
 
     let trade = existing.rows[0] ?? null;
@@ -305,6 +330,13 @@ export async function releaseSignalClaim(signalId: string) {
  * Whether a filled buy for this token was placed within the last N minutes.
  * Used by the executor to suppress re-buying a token the system just bought
  * (a held position keeps re-triggering snipe signals after the dedupe window).
+ *
+ * Deliberately NOT tenant-scoped, and this is a known gap rather than an
+ * oversight: with more than one tenant, user A's buy currently suppresses
+ * user B's legitimate entry into the same token. Scoping it by `user_id` is a
+ * change to a live risk/dedupe control, not a tenancy plumbing change, so
+ * S4-10 leaves the semantics exactly as they are. Whoever owns the per-user
+ * risk limits decides whether the window is per tenant, global, or both.
  */
 export async function hasRecentBuy(tokenMint: string, withinMinutes: number): Promise<boolean> {
   const rows = await query<{ exists: boolean }>(
@@ -323,6 +355,13 @@ export async function hasRecentBuy(tokenMint: string, withinMinutes: number): Pr
 
 /**
  * Calculates the total USD exposure traded on a given chain in the last 24 hours.
+ *
+ * Deliberately NOT tenant-scoped, same reasoning as `hasRecentBuy`: this backs
+ * an operator-wide risk cap. Left global on purpose so S4-10 cannot silently
+ * loosen a live limit — as written, every tenant's volume counts against one
+ * shared budget, which is conservative (it blocks too early) rather than unsafe
+ * (it would never let a tenant exceed the cap). Splitting it into a per-tenant
+ * cap plus a global one is a risk-policy decision and a separate change.
  */
 export async function getRollingExposureUsd(chain: string): Promise<number> {
   const rows = await query<{ total_usd: string | null }>(

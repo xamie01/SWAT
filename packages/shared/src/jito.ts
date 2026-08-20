@@ -30,7 +30,20 @@ async function fetchWithTimeout(
   }
 }
 
-/** Jito tip accounts. A tip must go to one of these or the bundle is ignored. */
+const LAMPORTS_PER_SOL = 1_000_000_000;
+
+/**
+ * Fallback tip accounts — **not** the source of truth (checklist S4-P18).
+ *
+ * A tip must go to one of Jito's *current* tip accounts or the bundle is silently
+ * ignored: nothing lands and the executor still reports a successful submission.
+ * Jito rotates these addresses, so a hard-coded array is a liveness fuse whose
+ * only repair is a code deploy.
+ *
+ * `getJitoTipAccounts` resolves the live set at runtime and falls back here when
+ * it cannot. This array is the floor of that arrangement, kept because an
+ * unreadable endpoint must never block an otherwise-valid trade.
+ */
 export const JITO_TIP_ACCOUNTS = [
   '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
   'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
@@ -73,7 +86,21 @@ export interface JitoTipFloor {
 }
 
 function lamportsFromSol(sol: number): number {
-  return Math.round(sol * 1_000_000_000);
+  return Math.round(sol * LAMPORTS_PER_SOL);
+}
+
+/**
+ * Converts a lamport amount to USD.
+ *
+ * Returns `null` when the price is unusable rather than substituting a guess.
+ * This value becomes `feeUsd` on a trade row and feeds cost-basis arithmetic, so
+ * a wrong number is strictly worse than a missing one: a missing fee is visibly
+ * absent, a wrong fee silently misstates realised P&L forever.
+ */
+export function lamportsToUsd(lamports: number, solPriceUsd: number | null): number | null {
+  if (!Number.isFinite(lamports) || lamports < 0) return null;
+  if (solPriceUsd === null || !Number.isFinite(solPriceUsd) || solPriceUsd <= 0) return null;
+  return (lamports / LAMPORTS_PER_SOL) * solPriceUsd;
 }
 
 /**
@@ -135,14 +162,256 @@ export function selectJitoTip(input: TipSizingInput): number {
   return Math.max(1, Math.min(Math.round(candidate), input.maxTipLamports));
 }
 
-/** Deterministically picks a tip account, spreading load across the set. */
-export function selectTipAccount(seed: string): string {
+// ─── Tip-account resolution (checklist S4-P18) ───────────────────────────────
+
+/**
+ * JSON-RPC method that returns the live tip-account list.
+ *
+ * **Verified**, not guessed. Jito's own client — `jito-labs/jito-js-rpc`,
+ * `src/index.ts` — implements `getTipAccounts` by posting
+ * `{jsonrpc, id, method: 'getTipAccounts', params: []}` to the `/bundles`
+ * endpoint, the *same* endpoint its `sendBundle` and `getBundleStatuses` use, on a
+ * base URL its examples give as `https://mainnet.block-engine.jito.wtf/api/v1`.
+ * Its README lists the method as "get accounts eligible for tips".
+ *
+ * The separate `bundles.jito.wtf` REST host that `getJitoTipFloor` reads serves
+ * tip *percentiles*, not tip *accounts*, and is not an alternative here.
+ */
+const TIP_ACCOUNTS_RPC_METHOD = 'getTipAccounts';
+
+/**
+ * Resolves the bundle endpoint to ask, or `null` when there is nothing to ask.
+ *
+ * Derived from the already-configured `JITO_BLOCK_ENGINE_URL` rather than from a
+ * tip-account-specific setting. That is deliberate: this list is a payment
+ * allowlist, and a second, separately-settable source for it would let anything
+ * with environment access redirect every tip this executor pays without touching
+ * the block-engine URL an operator actually reviews.
+ */
+function tipAccountsEndpoint(options: JitoClientOptions): string | null {
+  const base = options.baseUrl?.trim().replace(/\/+$/, '') ?? '';
+  return base ? `${base}/api/v1/bundles` : null;
+}
+
+/** Base58 without the ambiguous characters Solana omits (`0`, `O`, `I`, `l`). */
+const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * Keeps only plausible base58 addresses, or `null` if none survive.
+ *
+ * A tip is an unconditional SOL transfer, so this list is a payment allowlist:
+ * anything that lands in it gets paid on every trade until the TTL expires.
+ * A malformed or hostile response must therefore never widen it, and a wholly
+ * unusable response must resolve to `null` so the caller keeps the known-good
+ * fallback rather than an empty set it would then have to special-case.
+ */
+function sanitizeTipAccounts(values: unknown): readonly string[] | null {
+  if (!Array.isArray(values)) return null;
+  const accounts = values.filter(
+    (value): value is string => typeof value === 'string' && BASE58_ADDRESS.test(value)
+  );
+  return accounts.length > 0 ? [...new Set(accounts)] : null;
+}
+
+/**
+ * Reads the live tip-account set.
+ *
+ * Returns `null` rather than throwing, exactly like `getJitoTipFloor`: the
+ * caller's correct response to an unreadable set is the hard-coded fallback, not
+ * abandoning the trade.
+ */
+export async function fetchJitoTipAccounts(
+  options: JitoClientOptions
+): Promise<readonly string[] | null> {
+  const url = tipAccountsEndpoint(options);
+  if (!url) return null;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (options.apiKey) headers['x-jito-auth'] = options.apiKey;
+
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: TIP_ACCOUNTS_RPC_METHOD,
+          params: []
+        })
+      },
+      options.timeoutMs ?? 5_000
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { result?: unknown; error?: unknown };
+    if (payload.error) return null;
+    return sanitizeTipAccounts(payload.result);
+  } catch {
+    return null;
+  }
+}
+
+/** How long a successfully resolved set is trusted. */
+export const JITO_TIP_ACCOUNTS_CACHE_TTL_MS = 300_000;
+
+/**
+ * How long a *failed* resolution is remembered.
+ *
+ * Shorter than the success TTL so a transient outage recovers quickly, but
+ * non-zero so an endpoint that is simply misconfigured does not add a failing
+ * round trip to the latency of every single trade.
+ */
+export const JITO_TIP_ACCOUNTS_FALLBACK_TTL_MS = 60_000;
+
+/**
+ * Hard entry cap, following the `S4-P3` discipline in
+ * `packages/db/src/risk-policy.ts`.
+ *
+ * The key is derived from the block-engine endpoint, which is operator config
+ * today and per-tenant config under fan-out. An unbounded module-level `Map`
+ * keyed by anything caller-derived is the defect class that fix exists to close,
+ * so this one is swept on write and capped — 64 distinct endpoints is far past
+ * any plausible deployment.
+ */
+export const JITO_TIP_ACCOUNTS_CACHE_MAX_ENTRIES = 64;
+
+interface CachedTipAccounts {
+  accounts: readonly string[];
+  /** False when this entry is the fallback, which expires sooner. */
+  resolved: boolean;
+  timestamp: number;
+}
+
+const cachedTipAccounts = new Map<string, CachedTipAccounts>();
+const tipAccountLoads = new Map<
+  string,
+  { generation: number; promise: Promise<readonly string[]> }
+>();
+let tipAccountsGeneration = 0;
+
+function tipAccountsCacheKey(options: JitoClientOptions): string {
+  return tipAccountsEndpoint(options) ?? 'unconfigured';
+}
+
+function tipAccountsTtlMs(entry: CachedTipAccounts): number {
+  return entry.resolved ? JITO_TIP_ACCOUNTS_CACHE_TTL_MS : JITO_TIP_ACCOUNTS_FALLBACK_TTL_MS;
+}
+
+/**
+ * Drops expired entries, then evicts oldest-first if still over the cap.
+ *
+ * Eviction is by insertion order, which `Map` preserves — a free approximation of
+ * LRU, adequate because every entry expires within its TTL anyway. The cap is the
+ * backstop for a burst that outruns expiry, not the primary mechanism.
+ */
+function pruneTipAccountsCache(now: number): void {
+  for (const [key, entry] of cachedTipAccounts) {
+    if (now - entry.timestamp >= tipAccountsTtlMs(entry)) cachedTipAccounts.delete(key);
+  }
+  if (cachedTipAccounts.size <= JITO_TIP_ACCOUNTS_CACHE_MAX_ENTRIES) return;
+  const excess = cachedTipAccounts.size - JITO_TIP_ACCOUNTS_CACHE_MAX_ENTRIES;
+  let removed = 0;
+  for (const key of cachedTipAccounts.keys()) {
+    if (removed >= excess) break;
+    cachedTipAccounts.delete(key);
+    removed += 1;
+  }
+}
+
+/**
+ * The tip-account set to pay into, resolved at runtime and cached with a TTL.
+ *
+ * Never returns an empty set and never rejects: an unresolvable endpoint yields
+ * `JITO_TIP_ACCOUNTS`, so the worst case is the behaviour that shipped before
+ * this seam existed. Concurrent callers share one in-flight lookup rather than
+ * each firing their own — a batch of submits arriving together would otherwise
+ * stampede the block engine on every cold cache.
+ */
+export async function getJitoTipAccounts(
+  options: JitoClientOptions
+): Promise<readonly string[]> {
+  const key = tipAccountsCacheKey(options);
+  const cached = cachedTipAccounts.get(key);
+  if (cached && Date.now() - cached.timestamp < tipAccountsTtlMs(cached)) {
+    return cached.accounts;
+  }
+
+  const inFlight = tipAccountLoads.get(key);
+  if (inFlight?.generation === tipAccountsGeneration) return inFlight.promise;
+
+  const generation = tipAccountsGeneration;
+  const promise = Promise.resolve()
+    .then(() => fetchJitoTipAccounts(options))
+    // `fetchJitoTipAccounts` already swallows its own failures; this is the
+    // backstop for anything it cannot (a `fetch` global that throws
+    // synchronously, say). Propagating would fail a trade over a tip-address
+    // lookup, which is never the right trade-off.
+    .catch(() => null)
+    .then((resolved) => {
+      const accounts = resolved ?? JITO_TIP_ACCOUNTS;
+      if (generation === tipAccountsGeneration) {
+        const now = Date.now();
+        cachedTipAccounts.set(key, { accounts, resolved: resolved !== null, timestamp: now });
+        // Swept on write rather than on a timer: a timer keeps the process alive
+        // and runs when nothing is being cached, whereas growth only happens here.
+        pruneTipAccountsCache(now);
+      }
+      return accounts;
+    });
+  tipAccountLoads.set(key, { generation, promise });
+
+  try {
+    return await promise;
+  } finally {
+    if (tipAccountLoads.get(key)?.promise === promise) tipAccountLoads.delete(key);
+  }
+}
+
+/** Drops every cached set, invalidating in-flight lookups. */
+export function clearJitoTipAccountsCache(): void {
+  tipAccountsGeneration += 1;
+  cachedTipAccounts.clear();
+  tipAccountLoads.clear();
+}
+
+/** Entry count. Test-only — lets a test assert the cache is actually bounded. */
+export function jitoTipAccountsCacheSize(): number {
+  return cachedTipAccounts.size;
+}
+
+/**
+ * Deterministically picks one tip account out of a **caller-supplied** set.
+ *
+ * `accounts` is required, and deliberately has no default (checklist S4-P18).
+ * It used to close over `JITO_TIP_ACCOUNTS` directly; a default parameter would
+ * preserve that for any call site that forgot to pass the live set, and the
+ * failure mode is the one this item exists to remove — a tip to a rotated-away
+ * address means the block engine ignores the bundle, nothing lands, and the
+ * executor still reports a successful submission. A required parameter turns that
+ * omission into a compile error instead. Pass the result of
+ * `getJitoTipAccounts`, which is never empty.
+ *
+ * **Determinism is per-set, not absolute.** The index is `hash % accounts.length`,
+ * so the same seed can map to a different account after a refresh changes the set
+ * (or its length). That is intentional and harmless: nothing downstream keys off
+ * *which* tip account was used, only that it is a currently-valid one, and the
+ * property that does matter — one stable account for the single bundle being
+ * built, since this is called once per submission — is unaffected. A seed-stable
+ * mapping across refreshes would be strictly worse, because it could only be
+ * achieved by pinning to a set that may already be stale.
+ */
+export function selectTipAccount(seed: string, accounts: readonly string[]): string {
+  // An empty set would make the modulo below produce NaN and the lookup
+  // undefined — a tip to no one. Fall back rather than emit that.
+  const set = accounts.length > 0 ? accounts : JITO_TIP_ACCOUNTS;
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   }
-  const index = Math.abs(hash) % JITO_TIP_ACCOUNTS.length;
-  return JITO_TIP_ACCOUNTS[index]!;
+  const index = Math.abs(hash) % set.length;
+  return set[index]!;
 }
 
 export type JitoSubmitResult =
