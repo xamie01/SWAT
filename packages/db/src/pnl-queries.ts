@@ -4,6 +4,13 @@ import { calculateAverageCostPnl } from './pnl-math.js';
 import type { OpenPositionSnapshot } from './stop-loss.js';
 
 export { calculateAverageCostPnl, markToMarketPnl } from './pnl-math.js';
+// The argument and result types, not just the functions (`S4-M28`). Re-exporting
+// only the functions left every consumer outside this package unable to name what
+// `calculateAverageCostPnl` takes -- `apps/scorer/src/master-metrics.test.ts` had to
+// carry a hand-rolled structural copy of `PositionLedgerTrade`, which is free to
+// drift from the real one with nothing to catch it. Not a stale-dist symptom: the
+// gap was in `src` too.
+export type { PositionLedgerTrade, PositionPnl } from './pnl-math.js';
 
 type PositionTrade = {
   signal_id: string;

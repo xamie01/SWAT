@@ -97,3 +97,77 @@ CREATE TABLE IF NOT EXISTS user_chain_execution_settings (
     OR (max_slippage_bps >= 1 AND max_slippage_bps <= 5000)
   )
 );
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Per-user concurrent-position cap (S4-M4), added 2026-08-21
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Added by ALTER rather than as a column in the CREATE TABLE above, and that is
+-- not a style choice. This file is CREATE TABLE IF NOT EXISTS, and migrate.ts
+-- replays every file on every invocation with no applied-migrations table. On
+-- any database where 049 has already run the table exists, so the CREATE is
+-- skipped in full -- a column added inside its body would be created on fresh
+-- databases only and would never appear on an existing one. The two would then
+-- disagree, and the disagreement would surface as a 42703 in production while
+-- CI (which builds from empty) stayed green.
+--
+-- Stating the column once, in an ALTER ... IF NOT EXISTS, makes fresh and
+-- existing databases converge on the same shape. Same idiom as 043 and 050.
+--
+-- It lands in 049 rather than in a new file because the cap is a per-user
+-- execution setting and this is the per-user execution settings table. The
+-- ledger reserves 052-053 for S6-17 and S4-M6, so taking a number here would
+-- either collide or push reserved work along for no gain.
+
+ALTER TABLE user_execution_settings
+  ADD COLUMN IF NOT EXISTS max_concurrent_positions SMALLINT NOT NULL DEFAULT 5;
+
+-- The CHECK is added separately, under an existence guard, for the same reason
+-- the column is: an inline CHECK inside the CREATE TABLE body would only ever
+-- exist on fresh databases. Guarded by name here rather than by conkey shape --
+-- unlike the keys 050 rewrites, this name is chosen (not generated), is well
+-- under the 63-byte truncation limit, and no other constraint on this table will
+-- ever be given it, so the name IS the identity.
+--
+-- Bounds:
+--   * Floor 1, not 0. A cap of 0 means "never open a position", which this row
+--     already says twice and more legibly -- `killed`, and a per-chain `mode` of
+--     'off'. A third spelling that reads to a skimming operator as "unlimited"
+--     rather than "halted" is a footgun, and MIN_CONCURRENT_POSITIONS in
+--     packages/db/src/position-cap.ts says the same 1.
+--   * Ceiling 50 == PLATFORM_MAX_CONCURRENT_POSITIONS in that same module, whose
+--     doc comment carries the derivation and is explicit that the shape of the
+--     argument is sound and the exact number is a judgement. Restated as a
+--     literal because a migration cannot import TypeScript; position-cap.test.ts
+--     asserts the constant against this literal so the two cannot drift, the
+--     same guard 049's risk defaults already use against DEFAULT_RISK_CONFIG.
+--
+-- Deliberately NOT cross-checked against max_position_pct. It is tempting to
+-- reject max_concurrent_positions * max_position_pct > 100 the way
+-- chk_ues_position_within_daily rejects an unordered pair, but that would be
+-- wrong: a cap of 20 with 5% per position is a coherent, fully-invested
+-- portfolio, and a cap higher than 100/max_position_pct is not incoherent
+-- either -- it just means the per-position size binds before the cap does. That
+-- interaction is what the derived warning explains at the slider; it is not a
+-- representable-state violation, so it does not belong in a CHECK.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conrelid = 'user_execution_settings'::regclass
+       AND conname = 'chk_ues_max_concurrent_positions'
+  ) THEN
+    ALTER TABLE user_execution_settings
+      ADD CONSTRAINT chk_ues_max_concurrent_positions
+      CHECK (max_concurrent_positions BETWEEN 1 AND 50);
+  END IF;
+END $$;
+
+COMMENT ON COLUMN user_execution_settings.max_concurrent_positions IS
+  'Per-user cap on simultaneously open copied positions (S4-M4). Clamped to the '
+  'platform ceiling PLATFORM_MAX_CONCURRENT_POSITIONS = 50 by '
+  'chk_ues_max_concurrent_positions. Stored and exposed by this release; '
+  'ENFORCEMENT belongs to the fan-out eligibility predicate (S4-13), which does '
+  'not exist yet, so nothing reads this column to refuse a trade today.';

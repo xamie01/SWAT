@@ -22,6 +22,7 @@ export * from './circuit-breaker.js';
 export * from './risk-policy.js';
 export * from './stop-loss.js';
 export * from './evm-nonce.js';
+export * from './position-cap.js';
 export * from './credentials.js';
 export * from './tenancy.js';
 export * from './users.js';

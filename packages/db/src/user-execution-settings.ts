@@ -11,6 +11,10 @@ import {
 } from '@swat/shared';
 import { query } from './client.js';
 import { withTransaction } from './transaction.js';
+import {
+  DEFAULT_MAX_CONCURRENT_POSITIONS,
+  clampConcurrentPositionCap
+} from './position-cap.js';
 import type { UserScope } from './tenancy.js';
 
 /**
@@ -76,6 +80,14 @@ export interface UserExecutionSettings {
   readonly stopLossPct: number;
   readonly rebuyCooldownSeconds: number;
   readonly maxDailyWithdrawalUsd: number;
+  /**
+   * How many positions the user may hold open at once (`S4-M4`).
+   *
+   * Read through here rather than left as a bare column because the platform
+   * ceiling is enforced on write: a stored value is always already clamped, so a
+   * consumer never has to wonder whether it is a user wish or an allowed limit.
+   */
+  readonly maxConcurrentPositions: number;
   /** The per-user kill switch (`S6-8`). When true, no chain executes. */
   readonly killed: boolean;
   /**
@@ -105,6 +117,7 @@ export const DEFAULT_USER_EXECUTION_SETTINGS: UserExecutionSettings = Object.fre
   stopLossPct: DEFAULT_RISK_CONFIG.stopLossPct,
   rebuyCooldownSeconds: DEFAULT_REBUY_COOLDOWN_SECONDS,
   maxDailyWithdrawalUsd: DEFAULT_MAX_DAILY_WITHDRAWAL_USD,
+  maxConcurrentPositions: DEFAULT_MAX_CONCURRENT_POSITIONS,
   killed: false,
   persisted: false,
   updatedAt: null
@@ -126,6 +139,8 @@ interface SettingsRow {
   stop_loss_pct: number | string;
   rebuy_cooldown_seconds: number;
   max_daily_withdrawal_usd: number | string;
+  // SMALLINT, so always a number — no NUMERIC text fallback to guard against.
+  max_concurrent_positions: number;
   killed: boolean;
   updated_at: Date;
 }
@@ -139,7 +154,7 @@ interface ChainSettingsRow {
 
 const SETTINGS_COLUMNS = `auto_execute, min_signal_score, max_position_pct,
        max_daily_exposure_pct, stop_loss_pct, rebuy_cooldown_seconds,
-       max_daily_withdrawal_usd, killed, updated_at`;
+       max_daily_withdrawal_usd, max_concurrent_positions, killed, updated_at`;
 
 const CHAIN_SETTINGS_COLUMNS = 'chain, mode, max_slippage_bps, updated_at';
 
@@ -170,6 +185,7 @@ function toSettings(row: SettingsRow): UserExecutionSettings {
       row.max_daily_withdrawal_usd,
       'max_daily_withdrawal_usd'
     ),
+    maxConcurrentPositions: row.max_concurrent_positions,
     killed: row.killed,
     persisted: true,
     updatedAt: row.updated_at
@@ -253,6 +269,12 @@ export interface UserExecutionSettingsPatch {
   readonly stopLossPct?: number;
   readonly rebuyCooldownSeconds?: number;
   readonly maxDailyWithdrawalUsd?: number;
+  /**
+   * Clamped into the platform range on write rather than rejected (`S4-M4`), so
+   * the UI can show what the user will actually get. A non-integer still throws —
+   * that is not a wish about position counts.
+   */
+  readonly maxConcurrentPositions?: number;
   readonly killed?: boolean;
 }
 
@@ -275,6 +297,12 @@ function assertPercent(value: number, field: string): void {
  * patch is being applied to — `upsertUserExecutionSettings` does that under lock.
  */
 export function assertValidExecutionSettingsPatch(patch: UserExecutionSettingsPatch): void {
+  if (patch.maxConcurrentPositions !== undefined) {
+    // Throws on a non-integer and clamps an out-of-range integer. Called here so a
+    // bad *shape* is refused before the transaction opens, while an out-of-range
+    // but coherent number is still accepted and clamped on write (S4-M4).
+    clampConcurrentPositionCap(patch.maxConcurrentPositions);
+  }
   if (patch.minSignalScore !== undefined) {
     const score = patch.minSignalScore;
     if (!Number.isInteger(score) || score < 0 || score > 100) {
@@ -396,7 +424,8 @@ export async function upsertUserExecutionSettings(
               stop_loss_pct            = $6,
               rebuy_cooldown_seconds   = $7,
               max_daily_withdrawal_usd = $8,
-              killed                   = $9,
+              max_concurrent_positions = $9,
+              killed                   = $10,
               updated_at               = NOW()
         WHERE user_id = $1
         RETURNING ${SETTINGS_COLUMNS}`,
@@ -409,6 +438,10 @@ export async function upsertUserExecutionSettings(
         merged.stopLossPct,
         merged.rebuyCooldownSeconds,
         merged.maxDailyWithdrawalUsd,
+        // Clamped here, not merely validated: the platform ceiling is a platform
+        // decision, so a caller that skips the clamp helper still cannot store a
+        // value past it. `049` mirrors this with a CHECK, making it two layers.
+        clampConcurrentPositionCap(merged.maxConcurrentPositions).cap,
         merged.killed
       ]
     );

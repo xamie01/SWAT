@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { PLATFORM_MAX_CONCURRENT_POSITIONS } from './position-cap.js';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -75,6 +76,11 @@ function settingsRow(overrides: Record<string, unknown> = {}) {
     stop_loss_pct: 20,
     rebuy_cooldown_seconds: 3600,
     max_daily_withdrawal_usd: 1000,
+    // S4-M4. NOT NULL DEFAULT 5 in 049, so a real row always carries it; the
+    // fixture omitting it made `toSettings` yield undefined and the write-time
+    // clamp throw, which is the right failure for a row that genuinely lacks the
+    // column and the wrong one for a fixture that just had not been updated.
+    max_concurrent_positions: 5,
     killed: false,
     updated_at: new Date('2026-08-18T12:00:00.000Z'),
     ...overrides
@@ -223,14 +229,36 @@ describe('upsertUserExecutionSettings', () => {
   it('writes the merged row and leaves unnamed fields alone', async () => {
     await upsertUserExecutionSettings(scope, { maxPositionPct: 10 });
     const [, values] = mocks.clientQuery.mock.calls[3] as [string, unknown[]];
-    expect(values).toEqual([scope.userId, false, 80, 10, 25, 20, 3600, 1000, false]);
+    // max_concurrent_positions sits at $9 (S4-M4), so `killed` moved to $10.
+    expect(values).toEqual([scope.userId, false, 80, 10, 25, 20, 3600, 1000, 5, false]);
   });
 
   it('ignores explicitly undefined patch keys rather than nulling the column', async () => {
     await upsertUserExecutionSettings(scope, { killed: undefined, minSignalScore: 90 });
     const [, values] = mocks.clientQuery.mock.calls[3] as [string, unknown[]];
     expect(values[2]).toBe(90);
-    expect(values[8]).toBe(false);
+    expect(values[9]).toBe(false);
+  });
+
+  it('clamps the position cap on write, so the ceiling cannot be bypassed (S4-M4)', async () => {
+    // The clamp is applied at the write, not only in the validator, so a caller
+    // that reaches this function with an out-of-range integer still cannot store
+    // it. 049 mirrors it with a CHECK, making two independent layers.
+    await upsertUserExecutionSettings(scope, { maxConcurrentPositions: 500 });
+    const [, values] = mocks.clientQuery.mock.calls[3] as [string, unknown[]];
+    expect(values[8]).toBe(PLATFORM_MAX_CONCURRENT_POSITIONS);
+  });
+
+  it('refuses a non-integer position cap before opening a transaction (S4-M4)', async () => {
+    await expect(
+      upsertUserExecutionSettings(scope, { maxConcurrentPositions: 2.5 })
+    ).rejects.toThrow(/must be an integer/);
+  });
+
+  it('leaves the stored position cap alone when the patch omits it', async () => {
+    await upsertUserExecutionSettings(scope, { minSignalScore: 90 });
+    const [, values] = mocks.clientQuery.mock.calls[3] as [string, unknown[]];
+    expect(values[8]).toBe(5);
   });
 
   it('rejects a patch that lifts the position cap past the stored daily cap', async () => {
