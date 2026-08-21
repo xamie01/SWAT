@@ -1,4 +1,5 @@
 import type { RedisHashClient } from './runtime-codec.js';
+import { createSolanaSimulationGateFromEnvironment } from './solana-simulation.js';
 import {
   createJupiterJitoRuntime,
   createRedisJupiterJitoStore,
@@ -121,7 +122,13 @@ export function createJupiterJitoRuntimeFromEnvironment(
     ),
     tipPercentile: readTipPercentile(),
     pendingTtlMs: readPositiveInt('JITO_PENDING_TTL_MS', DEFAULT_PENDING_TTL_MS),
-    jupiterApiKey: process.env.JUPITER_API_KEY
+    jupiterApiKey: process.env.JUPITER_API_KEY,
+    // S4-M15. Without this the runtime's simulation branch is dead code on a live
+    // box: `submit()` guards on `options.simulation` being present, so an absent
+    // gate means every Solana bundle goes out unsimulated exactly as before. The
+    // factory returns null when unconfigured, which is the same
+    // explicitly-disabled shape `createSolanaSignerFromEnvironment` uses.
+    simulation: createSolanaSimulationGateFromEnvironment() ?? undefined
   });
 
   configureJupiterJitoRuntime(runtime, environmentSigner);

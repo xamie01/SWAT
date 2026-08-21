@@ -270,3 +270,51 @@ describe('dispatchSolanaTrade', () => {
     });
   });
 });
+
+describe('simulation skip codes (S4-M15)', () => {
+  it('carries the simulation reason code onto the dispatch outcome', () => {
+    const submission: JupiterJitoSubmission = {
+      status: 'rejected',
+      clientOrderId: 'order-sim',
+      reason: 'solana-simulation-reverted: simulation reverted: "AccountNotFound"',
+      code: 'solana-simulation-reverted'
+    };
+
+    expect(mapSubmissionToOutcome(submission)).toEqual({
+      kind: 'rejected',
+      reason: 'solana-simulation-reverted: simulation reverted: "AccountNotFound"',
+      code: 'solana-simulation-reverted'
+    });
+  });
+
+  it('distinguishes an unreachable simulator from a reverted route', () => {
+    const submission: JupiterJitoSubmission = {
+      status: 'rejected',
+      clientOrderId: 'order-sim',
+      reason: 'solana-simulator-unreachable: simulateTransaction failed: fetch failed',
+      code: 'solana-simulator-unreachable'
+    };
+
+    const outcome = mapSubmissionToOutcome(submission);
+    expect(outcome.kind).toBe('rejected');
+    if (outcome.kind !== 'rejected') throw new Error('expected a rejection');
+    expect(outcome.code).toBe('solana-simulator-unreachable');
+  });
+
+  it('omits the code entirely for rejections that have none', () => {
+    const submission: JupiterJitoSubmission = {
+      status: 'rejected',
+      clientOrderId: 'order-x',
+      reason: 'swap-build-failed'
+    };
+
+    // No `code: undefined` key: the executor's existing persistence path reads
+    // `reason` only, and an undefined property would show up in a strict equality
+    // assertion elsewhere.
+    expect(mapSubmissionToOutcome(submission)).toEqual({
+      kind: 'rejected',
+      reason: 'swap-build-failed'
+    });
+    expect('code' in mapSubmissionToOutcome(submission)).toBe(false);
+  });
+});

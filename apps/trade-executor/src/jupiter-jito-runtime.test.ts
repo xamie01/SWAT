@@ -5,6 +5,7 @@ import {
   type JupiterJitoResolution,
   type PendingJupiterJitoSubmission
 } from './jupiter-jito-runtime.js';
+import type { SolanaSimulationGate } from './solana-simulation.js';
 import type { JupiterQuote } from '@swat/shared';
 import { JITO_TIP_ACCOUNTS } from '@swat/shared';
 
@@ -579,5 +580,166 @@ describe('tip accounting', () => {
     expect(resolution).toMatchObject({ status: 'filled', tipLamports: 20_000 });
     expect(feeUsdOf(resolution)).toBeCloseTo(0.004, 12);
     expect(await store.findResolution('order-e2e')).toMatchObject({ feeUsd: expect.any(Number) });
+  });
+});
+
+describe('pre-trade simulation gate (S4-M15)', () => {
+  function runtimeWithGate(gate: SolanaSimulationGate) {
+    return createJupiterJitoRuntime({
+      pendingStore: memoryStore(),
+      jito: { baseUrl: 'https://block-engine.test' },
+      signTransaction: async (tx) => `signed:${tx}`,
+      buildTipTransaction: async ({ tipAccount, lamports }) => `tip:${tipAccount}:${lamports}`,
+      maxTipLamports: 1_000_000,
+      fallbackTipLamports: 10_000,
+      pendingTtlMs: 600_000,
+      simulation: gate,
+      now: () => new Date('2026-08-05T00:00:00Z')
+    });
+  }
+
+  it('simulates the transaction that was actually built', async () => {
+    const evaluate = vi.fn(async () => ({ kind: 'submit' as const, outcome: { kind: 'proceed' as const, unitsConsumed: 1, slot: 2 } }));
+    const runtime = runtimeWithGate({ evaluate });
+
+    await runtime.submit({ clientOrderId: 'order-sim-1', quote: QUOTE, signerPublicKey: 'signer' });
+
+    expect(evaluate).toHaveBeenCalledWith({
+      transactionBase64: 'base64-swap',
+      clientOrderId: 'order-sim-1'
+    });
+  });
+
+  it('rejects without submitting, tipping, or signing when the simulation refuses', async () => {
+    const runtime = runtimeWithGate({
+      evaluate: async () => ({
+        kind: 'skip',
+        code: 'solana-simulation-reverted',
+        reason: 'simulation reverted: {"InstructionError":[3,{"Custom":6001}]}'
+      })
+    });
+
+    const submission = await runtime.submit({
+      clientOrderId: 'order-sim-2',
+      quote: QUOTE,
+      signerPublicKey: 'signer'
+    });
+
+    expect(submission.status).toBe('rejected');
+    if (submission.status !== 'rejected') throw new Error('expected a rejection');
+    expect(submission.code).toBe('solana-simulation-reverted');
+    expect(submission.reason).toContain('solana-simulation-reverted');
+    expect(submission.reason).toContain('InstructionError');
+    // A refused route must not cost a tip lookup, a signature, or a bundle. This
+    // is the whole point of the item: discovering the failure without paying.
+    expect(mocks.getJitoTipFloor).not.toHaveBeenCalled();
+    expect(mocks.getJitoTipAccounts).not.toHaveBeenCalled();
+    expect(mocks.submitJitoBundle).not.toHaveBeenCalled();
+  });
+
+  it('rejects rather than submitting when the simulator is unavailable and policy is skip', async () => {
+    const runtime = runtimeWithGate({
+      evaluate: async () => ({
+        kind: 'skip',
+        code: 'solana-simulator-unreachable',
+        reason: 'simulateTransaction failed: fetch failed'
+      })
+    });
+
+    const submission = await runtime.submit({
+      clientOrderId: 'order-sim-3',
+      quote: QUOTE,
+      signerPublicKey: 'signer'
+    });
+
+    expect(submission.status).toBe('rejected');
+    if (submission.status !== 'rejected') throw new Error('expected a rejection');
+    // Distinct from a revert so an operator triaging skips is pointed at the RPC,
+    // not at the route.
+    expect(submission.code).toBe('solana-simulator-unreachable');
+    expect(mocks.submitJitoBundle).not.toHaveBeenCalled();
+  });
+
+  it('never marks a simulation skip as submission_unknown', async () => {
+    const runtime = runtimeWithGate({
+      evaluate: async () => ({
+        kind: 'skip',
+        code: 'solana-simulation-transaction-undecodable',
+        reason: 'built swap transaction did not decode'
+      })
+    });
+
+    const submission = await runtime.submit({
+      clientOrderId: 'order-sim-4',
+      quote: QUOTE,
+      signerPublicKey: 'signer'
+    });
+
+    // Nothing was transmitted, so there is no venue state to reconcile and the
+    // job must not be routed to the ambiguous path.
+    expect(submission.status).not.toBe('submission_unknown');
+    expect(submission.status).toBe('rejected');
+  });
+
+  it('does not run the gate for an order that is already terminal', async () => {
+    const store = memoryStore();
+    await store.resolve('order-sim-5', {
+      status: 'filled',
+      clientOrderId: 'order-sim-5',
+      signature: 'sig-5',
+      slot: 10
+    });
+    const evaluate = vi.fn();
+    const runtime = createJupiterJitoRuntime({
+      pendingStore: store,
+      jito: { baseUrl: 'https://block-engine.test' },
+      signTransaction: async (tx) => `signed:${tx}`,
+      buildTipTransaction: async () => 'tip',
+      maxTipLamports: 1_000_000,
+      fallbackTipLamports: 10_000,
+      pendingTtlMs: 600_000,
+      simulation: { evaluate: evaluate as never }
+    });
+
+    const submission = await runtime.submit({
+      clientOrderId: 'order-sim-5',
+      quote: QUOTE,
+      signerPublicKey: 'signer'
+    });
+
+    expect(submission.status).toBe('already_resolved');
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(mocks.buildJupiterSwap).not.toHaveBeenCalled();
+  });
+
+  it('submits unsimulated when no gate is supplied, preserving prior behaviour', async () => {
+    const runtime = makeRuntime(memoryStore());
+
+    const submission = await runtime.submit({
+      clientOrderId: 'order-sim-6',
+      quote: QUOTE,
+      signerPublicKey: 'signer'
+    });
+
+    expect(submission.status).toBe('submitted');
+    expect(mocks.submitJitoBundle).toHaveBeenCalledTimes(1);
+  });
+
+  it('proceeds to submission when the simulation is clean', async () => {
+    const runtime = runtimeWithGate({
+      evaluate: async () => ({
+        kind: 'submit',
+        outcome: { kind: 'proceed', unitsConsumed: 210_000, slot: 300_000_500 }
+      })
+    });
+
+    const submission = await runtime.submit({
+      clientOrderId: 'order-sim-7',
+      quote: QUOTE,
+      signerPublicKey: 'signer'
+    });
+
+    expect(submission.status).toBe('submitted');
+    expect(mocks.submitJitoBundle).toHaveBeenCalledTimes(1);
   });
 });
