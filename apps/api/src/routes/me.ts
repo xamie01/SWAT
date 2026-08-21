@@ -311,6 +311,13 @@ export async function registerMeRoutes(
          JOIN user_wallet_subscriptions uws
            ON uws.wallet_address = cm.wallet_address
         WHERE uws.user_id = $1
+          -- Migration 051 retains an ended subscription, so without this a user
+          -- keeps receiving a master's signals after unsubscribing. winding_down
+          -- is deliberately still included: entries have stopped, but the user
+          -- holds positions whose exits arrive as that master's sells, and hiding
+          -- the activity would leave them unable to see their own exit coming.
+          -- No backticks here -- this SQL is a TS template literal.
+          AND uws.state <> 'ended'
           AND s.detected_at <= NOW() - ($2::int * interval '1 second')
         ORDER BY s.detected_at DESC
         LIMIT 100`,
@@ -330,6 +337,9 @@ export async function registerMeRoutes(
          JOIN user_wallet_subscriptions uws
            ON uws.wallet_address = st.wallet_address
         WHERE uws.user_id = $1
+          -- Same as /v1/me/signals: an ended subscription is a retained record,
+          -- not a live feed. A winding_down subscription stays visible.
+          AND uws.state <> 'ended'
         ORDER BY st.event_at DESC
         LIMIT 100`,
       [scope.userId]
