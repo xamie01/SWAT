@@ -23,6 +23,10 @@ import type { Chain } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
 import { mayPatternTrade } from './trade-eligibility.js';
+import {
+  evaluateMirrorableActivity,
+  resolveMinimumMirrorableNotionalUsd
+} from './mirrorable-activity.js';
 
 initLogger('signal-engine');
 
@@ -69,6 +73,14 @@ const SOURCE_COPY_MAX_EVENT_AGE_MS = Number(
 );
 const SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS = Number(
   process.env.SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS ?? 10 * 60_000
+);
+/**
+ * Minimum USD notional a master's trade must carry to be mirrored (`S4-M5`).
+ * Resolved once here, so the filter itself stays pure and `process.env` cannot
+ * change what mirrors mid-run. `0` disables the floor and is the default.
+ */
+const SOURCE_COPY_MIN_NOTIONAL_USD = resolveMinimumMirrorableNotionalUsd(
+  process.env.SOURCE_COPY_MIN_NOTIONAL_USD
 );
 
 for (const [name, value] of [
@@ -292,6 +304,25 @@ export async function processSourceTradeSignals(sourceTradeId?: string): Promise
     limit: sourceTradeId ? 1 : 100
   });
   for (const candidate of candidates) {
+    // `S4-M5`. The only place a master's own event becomes a copy, so the only
+    // place this belongs. `listSourceTradeSignalCandidates` already restricts
+    // `direction IN ('buy','sell')` in SQL, which is why this reads as a guard
+    // rather than a repair — but the column admits `transfer_in`/`transfer_out`
+    // (028:77) and the candidate's `side` is narrowed by assertion only, so the
+    // filter is what keeps a future transfer writer from silently mirroring a
+    // master shuffling their own wallets. The notional floor is genuinely new:
+    // nothing on this path had one.
+    const mirrorable = evaluateMirrorableActivity({
+      side: candidate.side,
+      amountUsd: candidate.amountUsd,
+      minimumNotionalUsd: SOURCE_COPY_MIN_NOTIONAL_USD
+    });
+    if (mirrorable.kind === 'skip') {
+      console.log(
+        `[signal-engine] not mirrorable (${mirrorable.code}) | source ${candidate.sourceTradeId} | ${mirrorable.reason}`
+      );
+      continue;
+    }
     await enqueueSignal({
       patternType: 'source_trade',
       clusterId: candidate.clusterId,
