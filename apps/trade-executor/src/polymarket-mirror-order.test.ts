@@ -257,3 +257,97 @@ describe('polymarket mirrored order submission', () => {
     expect(client.createMarketOrder).not.toHaveBeenCalled();
   });
 });
+
+describe('polymarket staleness at the submission boundary (S4-M18)', () => {
+  const NOW = 1_760_000_000_000;
+  const MINUTE = 60_000;
+
+  function marketResolvingIn(ms: number) {
+    marketStateMocks.assertPolymarketMarketOpenForSubmission.mockResolvedValue({
+      conditionId: CONDITION_ID,
+      active: true,
+      closed: false,
+      acceptingOrders: true,
+      resolutionStatus: 'unresolved',
+      endDate: new Date(NOW + ms),
+      secondsDelay: null
+    });
+  }
+
+  // The item's whole claim, pinned at the wiring rather than in the library:
+  // `polymarket-staleness.test.ts` proves the budget curve, this proves a real
+  // order is measured against it. The same signal age must survive on a
+  // long-dated market and be refused near resolution.
+  it('accepts a signal age on a long-dated market that it refuses near resolution', async () => {
+    const client = clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+    const signalAt = new Date(NOW - 5 * MINUTE);
+
+    marketResolvingIn(30 * 24 * 60 * MINUTE);
+    await triggerPolymarket({
+      signalId: 'sig-fresh-long-dated',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy',
+      mirror: { sourceTradeId: 'src-1', masterFillPriceUsd: 0.44, toleranceBps: 500 },
+      sourceEventAt: signalAt,
+      now: () => NOW
+    });
+    expect(client.createMarketOrder).toHaveBeenCalledTimes(1);
+
+    vi.clearAllMocks();
+    const nearClient = clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+    actionMocks.fetchBalanceAllowance.mockResolvedValue({ balance: '1000000000', allowances: {} });
+    dbMocks.query.mockResolvedValue([]);
+    marketResolvingIn(10 * MINUTE);
+
+    await expect(triggerPolymarket({
+      signalId: 'sig-stale-near-resolution',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy',
+      mirror: { sourceTradeId: 'src-2', masterFillPriceUsd: 0.44, toleranceBps: 500 },
+      sourceEventAt: signalAt,
+      now: () => NOW
+    })).rejects.toThrow(/Polymarket Protection/);
+
+    // Nothing may reach the venue once the budget is exceeded.
+    expect(nearClient.createMarketOrder).not.toHaveBeenCalled();
+    expect(nearClient.postOrder).not.toHaveBeenCalled();
+  });
+
+  it('carries the reason code, so the skip is actionable rather than generic', async () => {
+    // S4-M24: a skip reason has to name what happened. The marker is what makes
+    // the executor record a skipped trade instead of failing the job and retrying
+    // into an even older signal.
+    clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+    marketResolvingIn(10 * MINUTE);
+
+    await expect(triggerPolymarket({
+      signalId: 'sig-stale-code',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy',
+      mirror: { sourceTradeId: 'src-3', masterFillPriceUsd: 0.44, toleranceBps: 500 },
+      sourceEventAt: new Date(NOW - 5 * MINUTE),
+      now: () => NOW
+    })).rejects.toThrow(/signal-age-exceeds/);
+  });
+
+  it('leaves an order with no source event alone', async () => {
+    // A manual execute or a stop-loss exit has no master and no source event.
+    // Gating those on a timestamp that does not exist would refuse every one of
+    // them, which is why `sourceEventAt` is optional rather than defaulted.
+    const client = clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+    marketResolvingIn(10 * MINUTE);
+
+    await triggerPolymarket({
+      signalId: 'sig-manual-no-source',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy',
+      now: () => NOW
+    });
+
+    expect(client.createMarketOrder).toHaveBeenCalledTimes(1);
+  });
+});

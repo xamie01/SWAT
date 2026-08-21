@@ -1879,8 +1879,14 @@ export async function handleJob(job: { data: unknown }) {
           // queries, and widening all of them to carry one price is a larger
           // change than one read.
           let mirror: PolymarketMirrorContext | undefined;
+          // S4-M18 needs the same row: the staleness budget is measured from when
+          // the master's event actually happened, against the market's remaining
+          // time to resolution. Read once and used for both, rather than a second
+          // query for a second field of the same row.
+          let sourceEventAt: Date | undefined;
           if (payload.sourceTradeId) {
             const sourceTrade = await getCanonicalSourceTradeById(payload.sourceTradeId);
+            sourceEventAt = sourceTrade?.eventAt;
             // A null price is passed through as null, not omitted: the planner
             // fails closed on an absent master price, and dropping `mirror`
             // entirely would silently downgrade a copy to the book bound.
@@ -1899,7 +1905,8 @@ export async function handleJob(job: { data: unknown }) {
             sellShares: canonicalExecution?.direction === 'sell'
               ? Number(canonicalExecution.requestedBaseQuantity)
               : undefined,
-            mirror
+            mirror,
+            sourceEventAt
           });
           const orderId = result.orderId;
           const settlementHash = result.settlementTransactionHashes[0] ?? null;

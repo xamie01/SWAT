@@ -46,6 +46,26 @@ import {
   POLYMARKET_GTD_MINIMUM_HORIZON_MS,
   type PolymarketExitLimitRung
 } from './polymarket-exit-escalation.js';
+import {
+  evaluatePolymarketSignalStaleness,
+  resolvePolymarketStalenessPolicy,
+  type PolymarketStalenessPolicy
+} from './polymarket-staleness.js';
+
+/**
+ * The staleness policy, resolved once (`S4-M18`).
+ *
+ * Memoised rather than read per order: `resolvePolymarketStalenessPolicy` parses
+ * and validates environment, and doing that on the money path would repeat the
+ * work and let a mid-run environment change silently alter what is refused. Lazy
+ * rather than at import so a malformed value surfaces on the first Polymarket
+ * order with a clear error, instead of during module load of an unrelated test.
+ */
+let cachedStalenessPolicy: PolymarketStalenessPolicy | null = null;
+function defaultStalenessPolicy(): PolymarketStalenessPolicy {
+  if (!cachedStalenessPolicy) cachedStalenessPolicy = resolvePolymarketStalenessPolicy();
+  return cachedStalenessPolicy;
+}
 
 export const POLYMARKET_CLOB_HOST = 'https://clob.polymarket.com';
 export const POLYGON_CHAIN_ID = 137;
@@ -606,6 +626,20 @@ export async function triggerPolymarket(params: {
   direction: 'buy' | 'sell';
   sellShares?: number;
   mirror?: PolymarketMirrorContext;
+  /**
+   * When the source event this order copies actually happened (`S4-M18`).
+   *
+   * Optional for the same reason `mirror` is: only a copy has a source event. A
+   * manual execute or a stop-loss exit has none, and gating those on a timestamp
+   * that does not exist would refuse every one of them. Present-but-unusable
+   * still fails closed — the staleness rule below refuses rather than falling
+   * back to the flat ceiling.
+   */
+  sourceEventAt?: Date;
+  /** Per-user override; falls back to the POLYMARKET_STALENESS_* environment. */
+  stalenessPolicy?: Partial<PolymarketStalenessPolicy>;
+  /** Injected clock, so the staleness boundary is testable without faking time. */
+  now?: () => number;
 }) {
   if (!liveReadiness.ready) {
     throw new UnrecoverableError(`Polymarket live execution is not ready: ${liveReadiness.reason}`);
@@ -730,7 +764,38 @@ export async function triggerPolymarket(params: {
     // the market will still accept an order at all. Deliberately placed after
     // the depth walk and price bounds so the state read is as close to the
     // submission as the code allows.
-    await assertPolymarketMarketOpenForSubmission({ conditionId: String(book.conditionId) });
+    const nowMs = (params.now ?? Date.now)();
+    const marketState = await assertPolymarketMarketOpenForSubmission({
+      conditionId: String(book.conditionId),
+      now: nowMs
+    });
+
+    // `S4-M18`: a copy's signal age is measured against the market's remaining
+    // time-to-resolution, not against a flat ceiling. Evaluated here, after the
+    // live market-state read, because `endDate` and `secondsDelay` are what that
+    // read returns and both are inputs to the budget — a second Gamma call to get
+    // them would be a second, later view of the same market.
+    //
+    // Only a copy carries `sourceEventAt`. A manual execute or a stop-loss exit
+    // has no source event and keeps today's behaviour, exactly as it keeps the
+    // book-derived bound when `mirror` is absent.
+    if (params.sourceEventAt) {
+      const staleness = evaluatePolymarketSignalStaleness({
+        signalAt: params.sourceEventAt,
+        resolutionAt: marketState.endDate,
+        now: nowMs,
+        matchingDelaySeconds: marketState.secondsDelay,
+        policy: params.stalenessPolicy ?? defaultStalenessPolicy()
+      });
+      if (staleness.kind === 'stale') {
+        // Same marker as the mirror skip: the job handler matches
+        // "Polymarket Protection" to record a skipped trade carrying this reason
+        // rather than a failed job that would retry into an even older signal.
+        throw new UnrecoverableError(
+          `Polymarket Protection: ${staleness.reason} [${staleness.code}]`
+        );
+      }
+    }
 
     const tradeSide = params.direction === 'buy' ? OrderSide.BUY : OrderSide.SELL;
     const order = await client.createMarketOrder(params.direction === 'buy'
