@@ -86,6 +86,7 @@ import {
   getPolymarketLiveReadiness,
   getPolymarketClientIfReady,
   simulatePolymarketBookFill,
+  runPolymarketExitEscalationSweep,
   type PolymarketMirrorContext
 } from './polymarket.js';
 import { polymarketSigner, resolvePolymarketIdentity } from './polymarket.js';
@@ -2402,6 +2403,52 @@ export async function main() {
         }
       } catch (error) {
         console.error('[trade-executor] canonical reconciliation failed', error);
+      }
+
+      // Escalate Polymarket exits reconciliation has already declared unfilled
+      // (S4-M17). An unfilled sell leaves the user holding a position their
+      // master has left, which is worse than a missed entry, so the ladder in
+      // `polymarket-exit-escalation.ts` re-offers it at progressively deeper
+      // limits and then hands the decision to a human.
+      //
+      // Last in the pass, and inside this guard rather than on a timer of its
+      // own (C1): a rung rests for its full lifetime inside this call, so
+      // running it earlier would delay the fast per-venue sweeps above, and a
+      // second timer could overlap a ladder with the reconciliation that
+      // classifies its own rungs.
+      try {
+        const exits = await runPolymarketExitEscalationSweep({
+          emitAlert: async (alert, candidate) => {
+            console.error(
+              `[trade-executor] polymarket exit escalation ${alert.code} on trade `
+              + `${candidate.id}: ${alert.reason}`
+            );
+            await redisClient.publish(REDIS_CHANNELS.alertQueue, JSON.stringify({
+              type: 'POLYMARKET_EXIT_ESCALATION',
+              title: 'Polymarket exit could not be completed',
+              message:
+                `Trade ${candidate.id} (sell ${candidate.token_mint}) still holds `
+                + `${alert.remainingShares} shares after the exit escalation ladder.\n`
+                + `Venue order: ${candidate.venue_order_id}\n`
+                + `Code: ${alert.code}\n`
+                + `Reason: ${alert.reason}\n`
+                + 'It will not be escalated further automatically. Redeem, hold, or unwind by hand.',
+              severity: alert.severity === 'critical' ? 'high' : 'medium',
+              chain: 'polygon'
+            }));
+          },
+          log: (message) => console.log(message)
+        });
+        if (exits.escalated > 0 || exits.alerted > 0 || exits.failed > 0 || exits.skipped > 0) {
+          console.log(
+            `[trade-executor] polymarket exit escalation: scanned ${exits.scanned}, `
+            + `escalated ${exits.escalated}, completed ${exits.completed}, `
+            + `alerted ${exits.alerted}, redeemed ${exits.redeemed}, `
+            + `failed ${exits.failed}, skipped ${exits.skipped}`
+          );
+        }
+      } catch (error) {
+        console.error('[trade-executor] polymarket exit escalation failed', error);
       }
     } finally {
       reconciliationRunning = false;
