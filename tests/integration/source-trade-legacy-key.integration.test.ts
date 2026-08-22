@@ -1,5 +1,9 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { query } from '@swat/db';
+// Relative deep import, matching every other suite in this directory. The repo
+// root has no `@swat/db` dependency (only `@swat/shared`), so the bare specifier
+// is unresolvable when vitest runs this file from the root — it would throw
+// ERR_MODULE_NOT_FOUND before a single assertion ran.
+import { query } from '../../packages/db/src/index.js';
 import { assertIntegrationSchemaCurrent } from './helpers/schema-guard.js';
 
 /**

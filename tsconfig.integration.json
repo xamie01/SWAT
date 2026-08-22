@@ -1,0 +1,71 @@
+{
+  // Typechecks `tests/integration/`, which no other tsconfig covers: the app and
+  // package configs `include: ["src"]`, and `tsconfig.tools.json` lists only
+  // `discover-starter-pack.ts`. Without this file the suites can only fail against
+  // a live database (S4-M25).
+  //
+  // This is a separate config rather than extra entries in `tsconfig.tools.json`
+  // because every option below would change what that file checks: `paths` would
+  // repoint `discover-starter-pack.ts` at package sources, and the module settings
+  // would change its inferred module format. `tsconfig.tools.json` checks a
+  // standalone script; this checks a cross-package test program.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Never emit. The base config turns on `declaration`/`sourceMap` for the
+    // package builds; switch all three off so this config cannot write anything.
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+
+    // NOT NodeNext, deliberately, for two reasons:
+    //
+    // 1. The root `package.json` has no `"type": "module"`, so under NodeNext
+    //    every `.ts` file directly under the repo root is inferred CommonJS and
+    //    `import.meta` is TS1470. Two files here use it:
+    //    `helpers/schema-guard.ts` and `master-capacity.integration.test.ts`.
+    // 2. `paths` below has to reach inside `node_modules` to dedupe `fastify`.
+    //    Under NodeNext the mapping does not apply to the `declare module 'fastify'`
+    //    augmentation inside `@fastify/cookie`, so the dedupe half-applies and
+    //    produces 13 errors (7 of them inside `apps/api/src`). Under Bundler the
+    //    mapping applies uniformly and the program holds exactly one fastify.
+    //
+    // Bundler resolution is also the closer match to what actually runs these
+    // files: vitest, not node.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+
+    "baseUrl": ".",
+    "paths": {
+      // `@swat/shared` and `@swat/db` resolve to `dist/` through their
+      // `package.json` `types` field, and both `dist/` directories lag `src/`.
+      // Checking these suites against `dist` would report errors that are
+      // artifacts of staleness, and hide the ones that are real. See
+      // `docs/stale-dist-hazards.md`; this is the `paths`-to-source recipe from
+      // its item 2, applied permanently rather than as a throwaway probe.
+      "@swat/shared": ["packages/shared/src/index.ts"],
+      "@swat/db": ["packages/db/src/index.ts"],
+
+      // Two fastify copies are installed: `fastify@5.11.2` (root devDependency,
+      // what these suites import) and `fastify@5.8.5` (`apps/api`'s dependency,
+      // also pnpm's hoisted copy, which is the one `@fastify/cookie` augments).
+      // A program containing both has two unrelated `FastifyInstance` types, only
+      // one carrying `setCookie`/`cookies`, so `cross-tenant.integration.test.ts`
+      // cannot pass its own Fastify instance to the real `apps/api` auth plugin.
+      // Pin the whole program to the copy that actually runs.
+      "fastify": ["node_modules/fastify"],
+      "fastify/*": ["node_modules/fastify/*"]
+    },
+
+    // The suites import every test helper explicitly (`vitest.integration.config.ts`
+    // does not set `globals: true`), so node is the only global type set needed.
+    "types": ["node"]
+  },
+  "include": [
+    "tests/integration/**/*.ts",
+    // The runner config sits in the same blind spot: a root-level `.ts` file that
+    // no other tsconfig includes. It defines the database guard and the paper-mode
+    // forcing, so a type error in it is as consequential as one in a suite.
+    "vitest.integration.config.ts"
+  ]
+}

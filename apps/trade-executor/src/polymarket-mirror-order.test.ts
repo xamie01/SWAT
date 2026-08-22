@@ -129,7 +129,13 @@ describe('polymarket mirrored order submission', () => {
       tokenID: TOKEN_ID,
       spendAmountUsd: 20,
       direction: 'buy',
-      mirror: { sourceTradeId: 'src-1', masterFillPriceUsd: 0.44, toleranceBps: 500 }
+      mirror: { sourceTradeId: 'src-1', masterFillPriceUsd: 0.44, toleranceBps: 500 },
+      // A copy always carries an event time in production: `index.ts` sets `mirror`
+      // and `sourceEventAt` from the same `getCanonicalSourceTradeById` read. Omitting
+      // it here would exercise a shape the executor cannot produce, and since a copy
+      // with no readable event time is now refused, it would refuse for the wrong
+      // reason and this test would stop covering the bound.
+      sourceEventAt: new Date()
     });
 
     expect(client.createMarketOrder).toHaveBeenCalledWith(expect.objectContaining({
@@ -150,7 +156,8 @@ describe('polymarket mirrored order submission', () => {
       spendAmountUsd: 0,
       direction: 'sell',
       sellShares: 50,
-      mirror: { sourceTradeId: 'src-2', masterFillPriceUsd: 0.62, toleranceBps: 500 }
+      mirror: { sourceTradeId: 'src-2', masterFillPriceUsd: 0.62, toleranceBps: 500 },
+      sourceEventAt: new Date()
     });
 
     expect(client.createMarketOrder).toHaveBeenCalledWith(expect.objectContaining({
@@ -255,6 +262,60 @@ describe('polymarket mirrored order submission', () => {
       mirror: { sourceTradeId: 'src-7', masterFillPriceUsd: 0.42 }
     })).rejects.toThrow(/Polymarket Protection: order-book price is off the current tick-size grid/);
     expect(client.createMarketOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('a copy with no readable source event time (S4-M18 fail-closed)', () => {
+  it('refuses rather than silently skipping the staleness budget', async () => {
+    // Both `mirror` and `sourceEventAt` come from the one
+    // `getCanonicalSourceTradeById` read, so a missing source row leaves the price
+    // half failing closed and the timing half failing OPEN — the copy would look
+    // exactly like a manual order that never had a source event, and would submit
+    // with no age check at all. A signal whose age cannot even be established is
+    // precisely the one the budget exists to refuse.
+    const client = clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+
+    await expect(triggerPolymarket({
+      signalId: 'sig-no-event-time',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy',
+      mirror: { sourceTradeId: 'src-missing', masterFillPriceUsd: 0.44, toleranceBps: 500 }
+      // sourceEventAt deliberately absent
+    })).rejects.toThrow(/source-event-time-unavailable/);
+
+    expect(client.createMarketOrder).not.toHaveBeenCalled();
+  });
+
+  it('carries the Polymarket Protection marker, so it records a skip and not a job failure', async () => {
+    // The marker is load-bearing: `index.ts` matches on it to persist a skipped
+    // trade with this reason instead of failing the job, which would retry into an
+    // even older signal.
+    const client = clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+
+    await expect(triggerPolymarket({
+      signalId: 'sig-no-event-time-2',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy',
+      mirror: { sourceTradeId: 'src-missing', masterFillPriceUsd: 0.44, toleranceBps: 500 }
+    })).rejects.toThrow(/Polymarket Protection/);
+    expect(client.createMarketOrder).not.toHaveBeenCalled();
+  });
+
+  it('still submits a manual order, which legitimately has no source event', async () => {
+    // The discriminator is `mirror`, not `sourceEventAt` — otherwise this refusal
+    // would block every manual execute and every stop-loss exit.
+    const client = clientWithBook(orderBook({ asks: [{ price: '0.40', size: '1000' }] }));
+
+    await triggerPolymarket({
+      signalId: 'sig-manual-no-event',
+      tokenID: TOKEN_ID,
+      spendAmountUsd: 20,
+      direction: 'buy'
+    });
+
+    expect(client.createMarketOrder).toHaveBeenCalled();
   });
 });
 

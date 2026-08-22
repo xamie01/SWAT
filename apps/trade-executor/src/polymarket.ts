@@ -787,6 +787,23 @@ export async function triggerPolymarket(params: {
     // Only a copy carries `sourceEventAt`. A manual execute or a stop-loss exit
     // has no source event and keeps today's behaviour, exactly as it keeps the
     // book-derived bound when `mirror` is absent.
+    //
+    // **A copy with no readable event time is refused, not waved through.** Both
+    // `mirror` and `sourceEventAt` come from the one `getCanonicalSourceTradeById`
+    // read in `index.ts`, so when that row is missing the price half fails closed
+    // (a null master price skips) while the timing half would fail *open* — the
+    // `if` below simply would not run, and the copy would be indistinguishable
+    // from a manual order that never had a source event. That asymmetry is the
+    // wrong way round for a safety control: a signal whose age we cannot even
+    // establish is exactly the one this budget exists to refuse. `mirror` is the
+    // discriminator because it is present iff `payload.sourceTradeId` was.
+    if (params.mirror && !params.sourceEventAt) {
+      throw new UnrecoverableError(
+        'Polymarket Protection: this copy has no readable source event time, so its '
+        + 'age against the market\'s remaining time-to-resolution cannot be checked '
+        + '[source-event-time-unavailable]'
+      );
+    }
     if (params.sourceEventAt) {
       const staleness = evaluatePolymarketSignalStaleness({
         signalAt: params.sourceEventAt,

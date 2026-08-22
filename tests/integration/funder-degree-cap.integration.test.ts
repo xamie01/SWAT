@@ -2,15 +2,11 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   closePool,
   generateFundingClusters,
+  MAX_FUNDER_DEGREE,
+  MIN_FUNDED_WALLETS,
   pool,
   query
 } from '../../packages/db/src/index.js';
-// Deep import: `independence.ts` is not re-exported from the `@swat/db` barrel yet
-// (the barrel is owned elsewhere this session). Switch to the barrel once it is.
-import {
-  MAX_FUNDER_DEGREE,
-  MIN_FUNDED_WALLETS
-} from '../../packages/db/src/independence.js';
 
 /**
  * S4-M11: the funder degree cap and hub exclusion, against real SQL.

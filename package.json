@@ -7,7 +7,7 @@
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck && pnpm typecheck:tools",
+    "typecheck": "turbo run typecheck && pnpm typecheck:tools && tsc --noEmit -p tsconfig.integration.json",
     "typecheck:tools": "tsc -p tsconfig.tools.json",
     "db:migrate": "pnpm --filter @swat/db migrate",
     "acceptance:g0-d11": "pnpm --filter @swat/indexer acceptance:g0-d11",
