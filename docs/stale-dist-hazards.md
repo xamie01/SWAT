@@ -78,7 +78,8 @@ grep -c "export \* from './email.js'" packages/shared/dist/index.d.ts
 
 ## 2. `packages/db/dist` hides three real type errors
 
-- [ ] **Add `userId` to three fixtures in `execution-lifecycle.test.ts`.** Commit: ____
+- [x] **Add `userId` to three fixtures in `execution-lifecycle.test.ts`.** Commit: `PENDING-H2`. **Done 2026-08-21 — and it was one fix, not three:** all three errors came from the shared `canonicalExecution` helper, so adding `userId: null` there closed them together. `null` rather than a placeholder id, because those fixtures are operator-mode executions and there is no user behind them; inventing one would make a single-tenant path look multi-tenant.
+  **Fixing it exposed two more errors the same blindness was hiding** — `jupiter-jito-simulation-wiring.test.ts` indexed `vi.fn().mock.calls`, which TypeScript types as an empty tuple, and cast it directly between unrelated types. Both were invisible because vitest does not typecheck. `apps/trade-executor` now typechecks **clean against source**, which it never had before. 488/488.
 
 `CopyExecutionRecord` gained `userId: string | null` under the `S4-10` tenancy work
 (`packages/db/src/copy-trade-lifecycle.ts:86,133`). The field appears **27×** in
@@ -113,7 +114,10 @@ rm -f apps/trade-executor/tsconfig.srccheck.json
 
 Worth running against **every** app before trusting a clean `tsc --noEmit`. On
 2026-08-20 the other four (`api`, `scorer`, `signal-engine`, `alert-service`) were
-clean this way; only `trade-executor` was not.
+clean this way; only `trade-executor` was not. **As of 2026-08-21 all five are clean
+against source**, so this recipe is now a regression check rather than a discovery
+tool — run it after any change that touches a `packages/*` type, because the
+dist-based check will not tell you.
 
 ---
 

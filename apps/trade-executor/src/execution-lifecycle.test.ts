@@ -214,6 +214,15 @@ function canonicalExecution(
     signalId: 'source-signal',
     sourceTradeId: 'source-trade',
     chain: 'solana' as const,
+    // The S4-10 tenancy key. `null` rather than a placeholder id because these
+    // fixtures are operator-mode executions and there is no user behind them —
+    // inventing one would make a single-tenant path look multi-tenant.
+    //
+    // This was missing, and invisible: `@swat/db` resolves to a stale `dist` that
+    // predates `userId`, so the omission only surfaces when typechecking against
+    // source. It would have appeared as three unexplained TS2741 errors the moment
+    // the operator rebuilt the package. See docs/stale-dist-hazards.md item 2.
+    userId: null,
     targetAccount: 'solana:11111111111111111111111111111111',
     tokenMint: 'solana:token-1',
     direction: 'sell' as const,

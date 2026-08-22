@@ -67,9 +67,19 @@ afterEach(() => {
   resetJupiterJitoRuntimeForTests();
 });
 
-function optionsPassedToRuntime() {
+function optionsPassedToRuntime(): { simulation?: unknown } {
   expect(runtimeMock.createJupiterJitoRuntime).toHaveBeenCalledTimes(1);
-  return runtimeMock.createJupiterJitoRuntime.mock.calls[0]![0] as { simulation?: unknown };
+  // `vi.fn()` with no declared signature types `mock.calls` as an empty tuple, so
+  // indexing it is a type error and the direct `as` is an unrelated-types
+  // conversion. Widening through `unknown` first is what the compiler asks for.
+  // Invisible under vitest, which does not typecheck — it only surfaced when this
+  // package was checked against `packages/db/src` rather than its stale `dist`.
+  const calls = runtimeMock.createJupiterJitoRuntime.mock.calls as unknown as Array<
+    [{ simulation?: unknown }]
+  >;
+  const first = calls[0];
+  if (!first) throw new Error('createJupiterJitoRuntime was not called');
+  return first[0];
 }
 
 describe('Solana simulation gate reaches the Jito runtime (S4-M15)', () => {
