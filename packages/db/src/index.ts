@@ -24,6 +24,8 @@ export * from './stop-loss.js';
 export * from './evm-nonce.js';
 export * from './position-cap.js';
 export * from './forward-only.js';
+export * from './independence.js';
+export * from './master-capacity.js';
 export * from './credentials.js';
 export * from './tenancy.js';
 export * from './users.js';

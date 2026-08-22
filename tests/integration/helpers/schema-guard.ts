@@ -57,6 +57,9 @@ const REQUIRED_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> 
   // would fail it with an opaque "column state does not exist" rather than the
   // actionable "schema is stale, run migrations" this guard exists to produce.
   ['user_wallet_subscriptions', 'state'],
+  // 053. Without this a database at 051 fails the capacity suite with an opaque
+  // "relation master_capacity_ledger does not exist".
+  ['master_capacity_ledger', 'notional_basis'],
   ['user_wallet_subscriptions', 'active_since']
 ];
 

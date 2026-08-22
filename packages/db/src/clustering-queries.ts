@@ -1,15 +1,51 @@
 import { query } from './client.js';
 import { withTransaction } from './transaction.js';
+import { MAX_FUNDER_DEGREE, MIN_FUNDED_WALLETS } from './independence.js';
+
+/**
+ * Funding-cluster eligibility, as one SQL fragment.
+ *
+ * Single-sourced deliberately. The rule is evaluated twice per run -- once to
+ * create/refresh the cluster rows, once to compute the expected membership set
+ * -- and the two diverging would delete every member of a cluster it had just
+ * created. Both call sites interpolate this same string, so they cannot drift.
+ *
+ * Two halves, mirroring assessFunderIndependence in ./independence.ts:
+ *
+ *  1. A DEGREE BAND, not just a floor. The previous rule was
+ *     HAVING COUNT(DISTINCT wr.wallet_b) >= 2 with no ceiling, so an exchange
+ *     hot wallet that funded millions of addresses became a single Funding
+ *     Group holding a large slice of the chain -- a cluster whose members
+ *     co-move with everything trending, which is no evidence at all. See
+ *     MAX_FUNDER_DEGREE for how the ceiling was chosen.
+ *
+ *  2. A HUB EXCLUSION. The band is necessary but not sufficient: the count is
+ *     degree as observed in OUR index, so an exchange four of whose recipients
+ *     we happen to track has an observed degree of 4 and clears any ceiling.
+ *     wallets.status = 'blacklisted' is the one operator-controlled role
+ *     channel the schema carries today (there is no wallets.role and no
+ *     wallet_labels table), so this half is exactly as complete as that column
+ *     -- inert until an operator populates it.
+ *
+ * A funder that was eligible and has since crossed the ceiling needs no extra
+ * cleanup: it drops out of expected_memberships, the DELETE below strips its
+ * members, wallet_count falls to 0, and the final DELETE drops the cluster.
+ */
+const eligibleFundersCte = `
+    eligible_funders AS (
+      SELECT wr.wallet_a
+      FROM wallet_relationships wr
+      JOIN wallets funder ON funder.address = wr.wallet_a
+      WHERE wr.relationship_type = 'funding'
+        AND funder.status <> 'blacklisted'
+      GROUP BY wr.wallet_a
+      HAVING COUNT(DISTINCT wr.wallet_b)
+             BETWEEN ${MIN_FUNDED_WALLETS} AND ${MAX_FUNDER_DEGREE}
+    )`;
 
 export async function generateFundingClusters() {
   const expectedMembershipsCte = `
-    WITH eligible_funders AS (
-      SELECT wr.wallet_a
-      FROM wallet_relationships wr
-      WHERE wr.relationship_type = 'funding'
-      GROUP BY wr.wallet_a
-      HAVING COUNT(DISTINCT wr.wallet_b) >= 2
-    ),
+    WITH ${eligibleFundersCte},
     expected_memberships AS (
       SELECT DISTINCT c.id AS cluster_id, edge.wallet_address
       FROM eligible_funders ef
@@ -25,23 +61,25 @@ export async function generateFundingClusters() {
 
   await withTransaction(async (client) => {
 
-  // Create a cluster per funder that funded >= 2 distinct wallets (a hub — the
-  // Sybil/coordination signal). A lone A→B funding pair is too weak to be a
-  // "group" and previously produced a constant-0.85 cluster from a single dust
-  // transfer. Confidence is now derived from the actual edge confidences
+  // Create a cluster per eligible funder (see eligibleFundersCte: a funded-wallet
+  // count inside the band, and not an excluded hub). A lone A->B funding pair is
+  // too weak to be a "group" and previously produced a constant-0.85 cluster from
+  // a single dust transfer. Confidence is derived from the actual edge confidences
   // (which scale with transfer size) plus a small bonus per extra funded wallet.
     await client.query(`
+      WITH ${eligibleFundersCte}
       INSERT INTO wallet_clusters (name, cluster_type, confidence, chain)
       SELECT
         'Funding Group ' || wr.wallet_a,
         'funding',
         LEAST(0.95, AVG(wr.confidence) + 0.05 * (COUNT(DISTINCT wr.wallet_b) - 1)),
         MAX(w.chain)
-      FROM wallet_relationships wr
+      FROM eligible_funders ef
+      JOIN wallet_relationships wr
+        ON wr.wallet_a = ef.wallet_a
+       AND wr.relationship_type = 'funding'
       JOIN wallets w ON w.address = wr.wallet_a
-      WHERE wr.relationship_type = 'funding'
       GROUP BY wr.wallet_a
-      HAVING COUNT(DISTINCT wr.wallet_b) >= 2
       -- Refresh confidence on re-run so it tracks current evidence instead of
       -- being frozen at first-creation (DO NOTHING).
       ON CONFLICT (name) DO UPDATE SET confidence = EXCLUDED.confidence, updated_at = NOW()
@@ -82,7 +120,10 @@ export async function generateFundingClusters() {
       WHERE cluster_type = 'funding'
     `);
 
-    // Remove clusters that no longer have enough members
+    // Remove clusters that no longer have enough members. This is also how a
+    // funder that grew past MAX_FUNDER_DEGREE, or was newly blacklisted, gets
+    // its cluster torn down: it stops appearing in expected_memberships, so the
+    // DELETE above empties it and it lands here at wallet_count = 0.
     await client.query(`
       DELETE FROM wallet_clusters
       WHERE cluster_type = 'funding' AND wallet_count < 2
