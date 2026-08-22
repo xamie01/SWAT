@@ -12,12 +12,92 @@
 
 Audit IDs are kept inline for traceability. `S<n>-<k>` is this document's own task numbering.
 
+## Where the project stands — 2026-08-22
+
+Counts are generated from this file, not maintained by hand. Regenerate with the snippet at the
+end of this block after any batch of ticks.
+
+| Stage | Done | Open | `(ext)` | Read this as |
+|---|---:|---:|---:|---|
+| 2. Blockers and corrections | 6 | 0 | 0 | **closed** |
+| 3. Stage 0 — close out the engine | 2 | 11 | 0 | mostly infrastructure/operational |
+| 4. Stage 1 — auth & tenancy | 22 | 0 | 0 | **closed** |
+| 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
+| 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
+| 7. Stage 4 — custody & per-user execution | 19 | 50 | 1 | **the live front** |
+| 8. Stage 5 — billing | 0 | 6 | 0 | not started; needs the Stripe MCP server first |
+| 9. Stage 6 — frontend | 0 | 46 | 0 | separate workstream; §9.1 is the only unblocked part |
+| 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
+| **Total** | **68** | **131** | **12** | |
+
+**How to read the open column, because the raw number misleads.** Of 131 open:
+
+- **12 are `(ext)`** — funded wallets, a human reviewer, a canary. **No amount of engineering closes
+  these**, and 11 of the 12 sit in Stage 3 certification, which is why Stage 3 looks unfinished
+  while its code is largely written.
+- **46 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
+  means discovering the API is missing.
+- **6 are billing (§8)**, blocked on the Stripe MCP server being added.
+- That leaves roughly **67 backend/infra items**, and Stage 4 §7.5 is where the work actually is.
+
+**What is NOT in the open column any more**, because it was never buildable work: standing
+constraints (`[=]`) and pointers (`[→]`). See the legend. Four items moved out of `[ ]` on
+2026-08-22 for that reason, and one (`S4-M12`) was ticked because it had shipped without being
+marked.
+
+### Items that are built and tested but deliberately NOT ticked
+
+The distinction that matters most for cross-checking: **code exists and passes tests, but the item
+is not done.** Each names its single blocker.
+
+| Item | What exists | What it needs to be ticked |
+|---|---|---|
+| `S4-M2` forward-only joins | Predicate + 21 tests, mutation-verified | A **per-user enumeration to call it from**. Today's signal path is per-master; the call site is fan-out (`S4-13`/`S4-14`), which does not exist. |
+| `S4-M3` subscription states | `051` + state machine + 38 tests | `copy_positions` carries **no master-wallet column**, so unsubscribe cannot tell `winding_down` from `ended`. Fan-out must put the master on the position row first. |
+| `S4-M4` position cap | `049` column, clamp, warning, 23 tests | **An API route.** `apps/api` exposes no execution-settings endpoint at all, so `upsertUserExecutionSettings` is unreachable over HTTP for every field. Then the UI (`S6-25`). |
+| `S4-M6` capacity cap | `053` + 52 tests, mutation-verified | Four things, all in `apps/`: a pre-fan-out liquidity read (**new work for Polymarket**), a cohort notional, a follower count, and **the ledger writer**. Until the writer runs, an empty ledger reads as "no capacity used" and **the cap permits everything**. |
+| `S4-M10` independence warning | — | Depends on `S4-M11`'s label source below. |
+| `S4-M11` funder degree | Band `2..25` wired in SQL + 43 tests | **A wallet label source.** Nothing ever sets `wallets.status = 'blacklisted'`, and observed degree alone cannot catch a quiet exchange. Needs a `wallet_labels` table or `wallets.role` — a schema change. |
+| `S4-M16` mirror price bound | Planner + 22 tests, reachable from the copy path | **A test at the call site.** No test reaches the Polymarket branch of `handleJob`; building that fixture is its own piece of work. |
+| `S4-M17` exit escalation | Rung ladder + 20 tests | **A caller.** `polymarket.ts` imports one constant from it and invokes none of its functions. Must go through the existing guarded `reconcilePending` loop, never a second timer (`C1`). |
+
+<details>
+<summary>Regenerate the counts</summary>
+
+```bash
+python3 - <<'EOF'
+import re, pathlib
+lines = pathlib.Path('AUDIT-FIX-CHECKLIST.md').read_text().split('\n')
+stage, rows = None, {}
+for ln in lines:
+    m = re.match(r'^## (\d+)\.\s*(.*)', ln)
+    if m: stage = f"{m.group(1)}. {m.group(2)[:44]}"
+    if stage and re.match(r'^- \[[ x]\]', ln):
+        d = rows.setdefault(stage, [0,0,0])
+        if ln.startswith('- [x]'): d[0] += 1
+        elif '(ext)' in ln: d[2] += 1
+        else: d[1] += 1
+for k in sorted(rows, key=lambda x: int(x.split('.')[0])):
+    print(f"{k:<48} {rows[k]}")
+EOF
+```
+</details>
+
+---
 ## Status legend
 
 - `[x]` — implemented, focused tests pass, evidence in the repo.
 - `[ ]` — not started or partial; the **Done when** line is the acceptance test.
 - `[!]` — **blocker or correction.** Do these before the stage they sit in.
 - `(ext)` — needs credentials, funded wallets, a canary, or a human reviewer. Cannot be closed by code.
+- `[=]` — **standing constraint.** A rule every other item must honour, not a task. It has no done
+  state; it is listed so nobody re-opens it as a gap or builds against it by accident.
+- `[→]` — **pointer.** Not separate work. Closes when the item it names closes.
+
+**Classification added 2026-08-22, nothing deleted.** One unchecked box had been doing four
+different jobs — buildable work, work blocked on a human, a rule that can never be "done", and a
+cross-reference — which made the open count useless as a measure of remaining work. The items are
+unchanged; only their kind is now visible.
 
 ---
 
@@ -622,7 +702,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 - [x] **S4-M0** Demote the four cluster detectors to discovery-only. *(Done 2026-08-19, commits `2c30e60`, `bb0fbf5`.)* `suppressTrade: true` on snipe, accumulation and rotation; exit was already suppressed and its comment corrected. The invariant then moved into `apps/signal-engine/src/trade-eligibility.ts` as a single frozen list consulted by `enqueueSignal`, because four independent literals at four call sites is a decision nothing can test — the detectors query the database directly and `index.ts` starts timers at import, so a test cannot reach them. A frozen array rather than an exported `Set`: `ReadonlySet` is a compile-time claim only, and one stray `.add()` would have re-enabled cluster trading process-wide with no diff to review. Fails closed on unrecognised patterns, which is reachable because `patternType` is typed `string`. 8 tests.
 
 **Mirroring semantics:**
-- [ ] **S4-M1** Hybrid buy sizing — see `S4-15`, which this rewrites rather than duplicating.
+- `[→]` **S4-M1** Hybrid buy sizing — **pointer, not separate work.** `S4-15` is the item; this entry only records that ADR-0005 rewrote it. Closes when `S4-15` does.
 - [ ] **S4-M2** **Forward-only joins.** A user subscribing to a master already holding twelve tokens mirrors only trades from subscription onward. No catch-up buying: entering an existing position at an unknown cost basis is how followers become exit liquidity. **Done when:** a test asserts a new subscriber receives no position for a token the master held before subscription.
   **Predicate built and tested 2026-08-21, commit `420b2d9`; not wired — unticked.** `packages/db/src/forward-only.ts`, 21 tests. The done-when clause is satisfied *at the predicate*: a buy an hour before `active_since` returns `skip / source-event-precedes-active-since`. It is not satisfied end to end, because nothing calls the predicate.
   **It filters on `active_since`, never `created_at`, and that is the whole point.** The PK is `(user_id, wallet_address)`, so re-subscribe is an `ended → active` transition on the same row: a subscription created in January, ended in March and revived in August still reads `created_at = January`. Filtering on it would mirror eight months of history on every re-subscribe — catch-up buying in the one case nobody would think to test. A test pins exactly that scenario.
@@ -662,7 +742,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **One frozen user message for every cause**, digit-free, with tests asserting it matches no `\d`, `/follower/i`, `/liquidity/i`, `/impact/i` or `/bps/i` — because differing wording would itself distinguish "impact cap" from "follower cap", and the latter is a headcount signal (`S4-M9`). The specific code and figures travel beside it in a nested `internal`, so rendering them to a user is visible in review.
   **Mutation-verified:** disabling the follower soft-cap fails 6 tests; fabricating a liquidity figure fails 1; appending the reason code to the user message fails 3; disabling the per-user input guard fails 2.
   **Why unticked, and the trap in wiring it:** four things must land, all in `apps/` — a pre-fan-out liquidity fetch (new work for Polymarket), a cohort-level projected notional, an active-follower count per `(master, chain)`, and **the ledger writer**. Until the writer is wired, an empty ledger returns "no capacity used" and **the cap permits everything**, so the writer is part of the wiring rather than an optional extra.
-- [ ] **S4-M7** **Uniform skip and generic capacity messaging** — see `S4-P15`, where the decision is recorded.
+- `[→]` **S4-M7** **Uniform skip and generic capacity messaging** — **pointer, not separate work.** The decision is recorded in `S4-P15`; the mechanism landed with `S4-M6` (one frozen, digit-free user message, tested against `/follower/i` and friends). Closes when `S4-M6` is wired.
 
 **Suggestion engine:**
 - [x] **S4-M8** **Out-of-sample master metrics over 24h / 7d / 30d** *(Done 2026-08-20, commit `7f644df`.)* `apps/scorer/src/master-metrics.ts` + 44 tests, **called** from the nightly batch via `runStage('master metrics', ...)` — verified at the call site, not inferred. Pure/DB split as in `stop-loss.ts`: round-trip reconstruction, windowing, gating and divergence are pure and tested on fixture rows; only `listMasterCandidates` / `fetchMasterTradeRows` touch Postgres, and neither has ever been executed.
@@ -673,7 +753,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Mutation-verified:** zeroing the per-window minimums, and leaking one figure into the insufficient-history variant, each turned the suite red.
   **Two gaps, verified rather than assumed.** (1) **PnL is net of fees arithmetically but not in the data:** `fee_usd` exists only on `trades` (`031_execution_fees.sql`); `source_trades` and `polymarket_trades` have none, so `netOfFees` is `false` for every master and the figure is **gross of the master's own fees**. `fetchMasterTradeRows` selects `NULL::numeric AS fee_usd` with the comment where the gap enters, and `MasterTradeRow.feeUsd` is already threaded, so closing it needs a fee column plus indexer capture and no arithmetic change. (2) **Reports are logged, not persisted** — `S6-27`'s suggestion list needs a table in the `052`/`053` band; the batch exposes an unwired `persistReport` seam.
   **Found while reviewing the agent's output:** the module was written with **two literal NUL bytes** as a group-key delimiter inside a template literal. Valid JS, which is why 44 tests passed — but it made the file `data` rather than text, so `grep`, `git diff` and every other text tool silently skipped it. Replaced with `\u0000` escapes. **A passing suite is not evidence that a file is readable.** Original text: out-of-sample master metrics over 24h / 7d / 30d: PnL net of fees, max drawdown, hit rate, median hold time, capacity estimate. **Never raw ROI** — it ranks the luckiest. Minimum trade count enforced **per window**, showing "insufficient history" rather than a number we do not trust. Divergence across windows is itself a finding: strong on 30d and weak on 24h means decaying, which is more actionable than either figure alone.
-- [ ] **S4-M9** **Never display follower counts or popularity.** They create reflexive crowding and tell a master precisely when farming their own followers pays.
+- `[=]` **S4-M9** **STANDING CONSTRAINT — never display follower counts or popularity.** They create reflexive crowding and tell a master precisely when farming their own followers pays.
 - [ ] **S4-M10** **Independence warning** when a chosen wallet sits in a funding or behavioural cluster. This is the highest-value surviving use of the clustering work — the same detection that was wrong as a trade trigger is right as a caution.
 - [ ] **S4-M11** **Cap funder degree and exclude exchange hubs.** `HAVING COUNT(DISTINCT wr.wallet_b) >= 2` (`clustering-queries.ts:44`) sets a minimum and no maximum, so a CEX hot wallet funding millions of addresses becomes one enormous "Funding Group" whose members trivially satisfy any co-movement test for anything trending. A bug under either model.
   **Degree cap fixed and wired 2026-08-21 (commit `69f3cb1`); hub exclusion is a mechanism with no input — unticked.** `generateFundingClusters` now bounds degree as a **band**, `BETWEEN 2 AND 25`, plus `funder.status <> 'blacklisted'`, single-sourced as one SQL fragment interpolated by all three funding statements. The rule is also stated as a pure DB-free predicate `assessFunderIndependence` (`packages/db/src/independence.ts`, 43 tests) with a four-way verdict.
@@ -685,7 +765,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Mutation-verified:** removing the ceiling fails 2 tests. **Why unticked:** half the item (hub exclusion) has no data source, and the SQL half is covered only by query-text assertions — `tests/integration/funder-degree-cap.integration.test.ts` (8 cases) is the real coverage and has **never been executed**.
 
 **Execution — see `docs/adr/0005-single-master-mirroring.md` §7 for the reasoning:**
-- [ ] **S4-M12** **Per-user nonce allocation on EVM** — advisory lock on `(chain, account)` plus per-user queue concurrency. **A correctness bug under fan-out, not an optimisation:** today one operator key with `getPendingNonce` then local `nonce++` (`robinhood.ts:670`, `:722`). Two concurrent jobs for one user read the same pending nonce, both submit it, one is silently replaced, and a fill vanishes with **no error anywhere**. Must land with the fan-out.
+- [x] **S4-M12** **Per-user nonce allocation on EVM** *(Done 2026-08-20, commit `5604950`.)* — advisory lock on `(chain, account)` plus per-user queue concurrency. **A correctness bug under fan-out, not an optimisation:** today one operator key with `getPendingNonce` then local `nonce++` (`robinhood.ts:670`, `:722`). Two concurrent jobs for one user read the same pending nonce, both submit it, one is silently replaced, and a fill vanishes with **no error anywhere**. Must land with the fan-out.
 - [ ] **S4-M13** **EVM approvals: Permit2. Decided 2026-08-19 — the operator confirms Robinhood Chain supports it, so the fallback is dropped.** Today `allowance !== amountIn` approves the exact amount on essentially every trade (`robinhood.ts:683`), which means approve-then-swap on every mirror: two blocks of latency and 2× gas between the user and their fill. Permit2 removes the on-chain approve entirely — the user signs an off-chain permit and the swap is one transaction.
   **Two consequences worth stating.** It changes what `S4-P10`'s policy layer inspects: there is no longer an `approve` call to constrain by spender, so the argument-level check moves onto the Permit2 signature's token/spender/amount/deadline fields. And the permit is a **signature**, so it flows through the same `UserExecutionAuthority` port as everything else rather than being a special-cased transaction — which is the seam `S4-P7` exists to provide.
   **Done when:** a mirror executes in one transaction with no separate approve; a test asserts no `approve` calldata is emitted on the happy path; and the residual-allowance posture is documented (Permit2 leaves no standing ERC-20 allowance to the router, which is strictly better than the bounded-allowance fallback we no longer need).
@@ -739,7 +819,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 
 **Observability the user sees (PRD §5.7):**
 - [ ] **S4-M23** **Tracking difference** — the user's fill versus the master's fill, surfaced per trade. Entering after the master is structurally worse and the product should say so rather than hide it.
-- [ ] **S4-M24** **Skip reasons are always actionable**, never a generic error; and a trade sized without conviction data is **labelled** as such.
+- `[=]` **S4-M24** **STANDING CONSTRAINT — skip reasons are always actionable**, never a generic error; and a trade sized without conviction data is **labelled** as such.
 
 **Testing debt found while landing the above:**
 - [ ] **S4-M25** `tests/integration/` is **not typechecked by CI at all** — `tsconfig.tools.json` includes only `discover-starter-pack.ts`. Wiring it in needs real config work rather than a one-line include, because the Fastify cookie type augmentation in `cross-tenant.integration.test.ts` needs the right module-resolution context. Integration tests can therefore drift into type errors that only surface when run against a database.
@@ -761,7 +841,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 ---
 
 ## 8. Stage 5 — Billing *(SaaS Phase 4)* — may overlap Stage 4
-
+## REQUEST FOR THE STRIPE MCP SERVER TO BE ADDED BEFORE WORK BEGINS HERE
 - [ ] **S5-1** `054` `subscriptions` — user_id, tier, provider `stripe|usdc`, status, current_period_end, stripe_subscription_id.
 - [ ] **S5-2** `055` `payments` — provider, amount, currency, tx_hash/invoice_id, status.
 - [ ] **S5-3** Stripe Checkout + Billing portal; `POST /v1/billing/stripe/webhook`, **signature-verified**, driving tier grants and downgrades.
@@ -774,7 +854,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 ---
 
 ## 9. Stage 6 — Frontend *(SaaS Phase 6)* — progressive from Stage 1 onward
-## NOTE : IN THIS DESIGN MAINTAIN EXISTING DESIGN PATTERNS INCUDING FONTS COLOURS AND ARRANGEMENT AND ENSURE SEO OPTIMIZATION
+## NOTE : IN THIS DESIGN MAINTAIN EXISTING DESIGN PATTERNS INCUDING FONTS COLOURS AND ARRANGEMENT AND ENSURE SEO OPTIMIZATION AND MOBILE RESPONSIVENESS ACROSS ALL SCREENS
 
 **What exists today is a MOCKUP, not a product** *(verified 2026-08-19; this section rewritten against ADR-0005)*. `apps/web` is 9 pages and 16 `.tsx` files with **no auth, no session, and no concept of a user** — a single-operator console. Only `app/workspace/views/WalletIntelView.tsx` mentions copying at all, and there is a user-facing `/clusters` page, which now contradicts ADR-0005. Treat the existing tree as a **design reference to harvest, not production code to preserve** — its value is the visual language, not its data flow.
 
@@ -834,7 +914,7 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 ### 9.6 Master discovery and selection
 - [ ] **S6-26** **Paste-an-address path.** Accepts a chain-prefixed or bare address, resolves the chain, and starts copying immediately — backfill is **not** on the critical path. Copy is *"copying now; performance history still loading"* (`S4-M8`/PRD UX-5). Never "a few seconds": Solana takes **90 s – 2.5 min** for an active wallet because it has no plural `getTransaction` RPC.
 - [ ] **S6-27** **Suggestions list** showing out-of-sample metrics over **24h / 7d / 30d** — PnL net of fees, max drawdown, hit rate, median hold, capacity estimate. **"Insufficient history" instead of a computed number** where the per-window trade count is too low, and **window divergence surfaced as a finding** (strong 30d, weak 24h means decaying).
-- [ ] **S6-28** **No follower counts, no popularity ranking, no leaderboard** (`S4-M9`). Reflexive crowding, and it tells a master exactly when farming their followers pays. This is a deliberate omission — a future contributor will read its absence as an oversight, so the component carries a comment saying it is not.
+- `[=]` **S6-28** **STANDING CONSTRAINT — no follower counts, no popularity ranking, no leaderboard** (`S4-M9`). The UI half of that constraint; listed here so a frontend reviewer meets it in their own section. Reflexive crowding, and it tells a master exactly when farming their followers pays. This is a deliberate omission — a future contributor will read its absence as an oversight, so the component carries a comment saying it is not.
 - [ ] **S6-29** **Independence warning** when a candidate sits in a funding or behavioural cluster (`S4-M10`) — the surviving high-value use of the clustering work.
 - [ ] **S6-30** **Masters are per-chain and the UI must not imply otherwise** (PRD MS-4). A wallet address is chain-scoped; a user may run one master per chain. No cross-chain master identity exists.
 
