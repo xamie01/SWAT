@@ -65,6 +65,32 @@ bb0fbf5 test(signal-engine,db): cover the ADR-0005 trade gate and S4-10 tenancy 
 | `S4-M16` mirror wiring | `f210bad` | **Still unticked.** Now reachable, but the call site has no test |
 | `S4-M22` / `S4-M14` | `b7c1f77` | **Both ticked.** Latency target deleted; `docs/adr/0006-robinhood-sequencer-trust.md` written |
 
+### Session of 2026-08-21/22 — second wave
+
+| Item | Commit | State |
+| --- | --- | --- |
+| `S4-M4` position cap, data layer | `346bcc9` | **unticked** — no API route existed |
+| `S4-M4` API routes | `28c8dfd` | **unticked** — routes 503 until `@swat/db` rebuilds |
+| `S4-M2` forward-only predicate | `420b2d9` | **unticked** — no per-user enumeration to call it from |
+| `S4-M11` funder degree band | `69f3cb1` | **unticked** — hub half has no label source |
+| `S4-M6` capacity cap + `053` | `69f3cb1` | **unticked** — unwired; see the trap below |
+| `S4-M17` exit escalation | `13dacb2` | **wired and running**, still unticked |
+| `S4-M23` tracking difference | `730e7a3` | **unticked** — unwired |
+| `S4-M32` `028` constraint drop | `da33a89` | **fixed** — see below, this one was live |
+| `S4-M27`, `S4-M28`, `S4-M33`, stale-dist item 2 | `ec76161`, `346bcc9`, `69f3cb1`, `48017fd` | fixed |
+| `S4-M12` | `5604950` | **ticked late** — it had shipped and was never marked |
+
+**Four findings from this wave that you cannot re-derive cheaply:**
+
+1. **`028`'s `DROP CONSTRAINT` had never run** (`S4-M32`). Its guard named a **76-character** constraint; PostgreSQL truncates identifiers at **63**, so the equality test could never be true. `023`'s `UNIQUE(chain, transaction_hash, wallet_address, token_mint, direction)` therefore survives on every database that applied `023` — and it forbids two fills of the same token in one transaction, which is a shape real ingestion produces. `source_event_index` exists in the replacement key *precisely* to allow it. Fixed by matching on `conkey` shape. **Every migration was swept: this was the only over-63 identifier literal.** This is why the checklist's rule says shape, not name.
+2. **The barrel silently omitted whole modules.** `packages/db/src/index.ts` never exported `user-execution-settings` or `user-balances`, so that entire layer *and its tests* were dead code to any consumer — the real reason the per-user cap was unreachable, not "the API doesn't expose it". `execution-grants` and `tracking-difference` were missing too. All four added. **Check the barrel before concluding a layer is unbuilt.**
+3. **`copy_execution_evidence.quote_quantity` is mixed-unit** (`S4-M35`): USD on Polymarket and paper, **SOL** on Solana live, **ETH** on robinhood live — and `rebuildCopyPosition` *prefers* it over the USD fallback, so `copy_positions.cost_basis_usd` holds native tokens on two of three chains. **Today's risk controls are NOT affected** — stop-loss and mark-to-market read `trades`, and `persistTrade` converts per chain. But `cost_basis_usd` becomes the per-user basis under fan-out, so **a column now costs less than a backfill of wrong money numbers later.**
+4. **An agent's defect report is a hypothesis.** `S4-M29` was a **false positive** — the `tokenMint` it reported as unprefixed was already prefixed, and applying the "fix" produced `polygon:polygon:...` and turned a passing test red. `S4-M32` was the opposite: reported as cosmetic churn, actually live data loss. And `S4-M35`'s blast radius was overstated. **Verify the claim, not the confidence.**
+
+**Checklist structure changed 2026-08-22.** Two new markers, because one unchecked box was doing four jobs: `[=]` standing constraint (no done state — `S4-M9`, `S4-M24`, `S6-28`) and `[→]` pointer (closes with the item it names — `S4-M1`, `S4-M7`). Added **§0 Information needed**: nine items blocked on a fact or a decision rather than effort, each with what would close it. `(ext)` now covers those too. **Read §0 and the dashboard before planning a session** — the raw open count is not a measure of remaining work.
+
+**The trap in wiring `S4-M6`:** until its ledger *writer* is connected, an empty ledger returns "no capacity used" and **the cap permits everything.** A half-wired capacity cap is worse than none, because it looks like a control.
+
 Test counts after that session: `@swat/db` **357**, `@swat/shared` **214**, `@swat/trade-executor` **429** (see `S4-M27` for the one environmental flake), `@swat/signal-engine` 10, `@swat/alert-service` 13, `@swat/api` 17.
 
 **Three things that will bite the next session, in order:**
