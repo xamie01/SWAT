@@ -78,7 +78,7 @@ grep -c "export \* from './email.js'" packages/shared/dist/index.d.ts
 
 ## 2. `packages/db/dist` hides three real type errors
 
-- [x] **Add `userId` to three fixtures in `execution-lifecycle.test.ts`.** Commit: `PENDING-H2`. **Done 2026-08-21 — and it was one fix, not three:** all three errors came from the shared `canonicalExecution` helper, so adding `userId: null` there closed them together. `null` rather than a placeholder id, because those fixtures are operator-mode executions and there is no user behind them; inventing one would make a single-tenant path look multi-tenant.
+- [x] **Add `userId` to three fixtures in `execution-lifecycle.test.ts`.** Commit: `48017fd`. **Done 2026-08-21 — and it was one fix, not three:** all three errors came from the shared `canonicalExecution` helper, so adding `userId: null` there closed them together. `null` rather than a placeholder id, because those fixtures are operator-mode executions and there is no user behind them; inventing one would make a single-tenant path look multi-tenant.
   **Fixing it exposed two more errors the same blindness was hiding** — `jupiter-jito-simulation-wiring.test.ts` indexed `vi.fn().mock.calls`, which TypeScript types as an empty tuple, and cast it directly between unrelated types. Both were invisible because vitest does not typecheck. `apps/trade-executor` now typechecks **clean against source**, which it never had before. 488/488.
 
 `CopyExecutionRecord` gained `userId: string | null` under the `S4-10` tenancy work
