@@ -106,6 +106,7 @@ import rateLimit from '@fastify/rate-limit';
 import { registerAuth, registerAdminOnlyGlobals } from './auth/plugin.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerMeRoutes } from './routes/me.js';
+import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 
 await app.register(cookie);
 
@@ -186,6 +187,7 @@ app.post('/v1/auth/ticket', async () => {
 });
 
 await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
+await registerExecutionSettingsRoutes(app);
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
 // Query-string values are always strings. Coerce + bound them so a caller can't
