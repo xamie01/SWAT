@@ -47,15 +47,44 @@ ALTER TABLE source_trades
   ALTER COLUMN confirmation_updated_at SET DEFAULT NOW();
 
 DO $$
+DECLARE
+  legacy_source_trade_key text;
 BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conrelid = 'source_trades'::regclass
-      AND conname = 'source_trades_chain_transaction_hash_wallet_address_token_mint_direction_key'
-  ) THEN
-    ALTER TABLE source_trades
-      DROP CONSTRAINT source_trades_chain_transaction_hash_wallet_address_token_mint_direction_key;
+  -- Drop 023's UNIQUE(chain, transaction_hash, wallet_address, token_mint,
+  -- direction), matched by COLUMN SHAPE rather than by name.
+  --
+  -- This was name-matched against a 76-character literal. PostgreSQL truncates
+  -- identifiers at 63 bytes, so the constraint it actually created is named
+  -- source_trades_chain_transaction_hash_wallet_address_token_mint_ and the
+  -- equality test could never be true. The guard silently did nothing, the DROP
+  -- never ran, and 023's key survived on every database that applied 023 -- while
+  -- this file went on to install the replacement identity
+  -- (unq_source_trades_canonical_event) as though the old one were gone.
+  --
+  -- The consequence is not cosmetic. That key forbids two rows sharing
+  -- (chain, transaction_hash, wallet_address, token_mint, direction), which is a
+  -- shape real ingestion produces: one transaction carrying two fills of the same
+  -- token in the same direction. source_event_index exists in the replacement key
+  -- precisely to tell those apart, so the collision is expected -- and was being
+  -- rejected with a 23505 instead.
+  --
+  -- Shape matching is what this repo's migration rule asks for, for exactly this
+  -- reason. It stays idempotent: once dropped, the SELECT finds nothing.
+  SELECT c.conname INTO legacy_source_trade_key
+  FROM pg_constraint c
+  WHERE c.conrelid = 'source_trades'::regclass
+    AND c.contype = 'u'
+    AND (
+      SELECT array_agg(a.attname::text ORDER BY a.attname)
+      FROM unnest(c.conkey) AS k(attnum)
+      JOIN pg_attribute a
+        ON a.attrelid = c.conrelid
+       AND a.attnum = k.attnum
+    ) = ARRAY['chain', 'direction', 'token_mint', 'transaction_hash', 'wallet_address']
+  LIMIT 1;
+
+  IF legacy_source_trade_key IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE source_trades DROP CONSTRAINT %I', legacy_source_trade_key);
   END IF;
 
   IF EXISTS (
