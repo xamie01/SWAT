@@ -42,6 +42,43 @@ const balanceMocks = vi.hoisted(() => ({
 }));
 vi.mock('./balances.js', () => balanceMocks);
 
+/**
+ * `S4-M27`. Without these two mocks this file reached the real network.
+ *
+ * `index.ts`'s `getCachedSolPrice` asks Redis and then falls through to
+ * `fetchTokenPriceUsd`, which calls DexScreener. In isolation the request usually
+ * completed, so the file passed 6/6 on its own; under a full-suite run it
+ * contended for the network and timed out at vitest's 5 s default, logging
+ * `[prices] DexScreener error ... TypeError: fetch failed`. That reads exactly like
+ * a real regression, and a suite that flakes for environmental reasons trains
+ * everyone to re-run rather than read the failure.
+ *
+ * `evaluateCopyPolicy` and `resolveSlippageBps` come from `importActual` because
+ * both are pure decision math with their own suites in `packages/shared`; stubbing
+ * them would only test the stub. Same reasoning, and same shape, as
+ * `execution-lifecycle.test.ts`.
+ */
+vi.mock('@swat/shared', async () => {
+  const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
+  return {
+    ...actual,
+    fetchTokenPriceUsd: vi.fn().mockResolvedValue(150),
+    getJupiterSimulatedFill: vi.fn()
+  };
+});
+
+// `getRedis()` constructs a real client and would try to connect. Nothing here
+// asserts cache behaviour: the price above is what the assertions turn on.
+vi.mock('ioredis', () => ({
+  Redis: class Redis {
+    get = vi.fn().mockResolvedValue(null);
+    setex = vi.fn().mockResolvedValue('OK');
+    set = vi.fn().mockResolvedValue('OK');
+    publish = vi.fn().mockResolvedValue(1);
+    on = vi.fn();
+  }
+}));
+
 const { getBalanceAwarePositionSize } = await import('./index.js');
 
 /**
