@@ -1,10 +1,13 @@
+
+// Re-exported from the authority module rather than redeclared. Two independent
+// literals for the same chain id in one package is exactly what drifts: a future
+// testnet or chain-id change would be applied to one and not the other, and the
+// symptom (prices resolve, permissions deny) would look unrelated to the cause.
+import { ROBINHOOD_CHAIN_ID } from './authority/permission-policy.js';
 import { resolveChainValue } from './address.js';
 import type { Chain } from './types.js';
 
-
-
 const PRICE_FETCH_TIMEOUT_MS = Number(process.env.PRICE_FETCH_TIMEOUT_MS ?? 8000);
-const ROBINHOOD_CHAIN_ID = 4663;
 const ROBINHOOD_API_BASE_URL = 'https://api.robinhood.com/rhj';
 const ROBINHOOD_ASSET_CACHE_MS = 5 * 60 * 1000;
 const ROBINHOOD_PRICE_MAX_AGE_MS = 2 * 60 * 1000;

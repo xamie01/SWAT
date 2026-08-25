@@ -17,3 +17,13 @@ export * from './jupiter-swap.js';
 export * from './polymarket-clob-auth.js';
 export * from './slippage.js';
 export * from './email.js';
+
+/**
+ * Argument-scoped execution permission policy (S4-P10).
+ *
+ * Lives under `src/authority/` and moves to `packages/authority` when that
+ * package is created (checklist §7.1) -- it is here rather than in a new
+ * workspace package only because a new package needs `pnpm install` to link
+ * before its tests can run.
+ */
+export * from './authority/index.js';
