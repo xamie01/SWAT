@@ -96,7 +96,7 @@ function csrfValid(request: FastifyRequest): boolean {
  */
 const USER_REACHABLE_PREFIXES = ['/v1/auth/', '/v1/me/'] as const;
 
-function isUserReachable(path: string): boolean {
+export function isUserReachable(path: string): boolean {
   if (path === '/v1/health') return true;
   return USER_REACHABLE_PREFIXES.some((prefix) => path.startsWith(prefix));
 }

@@ -80,7 +80,17 @@ const corsOrigin = process.env.CORS_ORIGIN;
 await app.register(cors, {
   origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'X-Api-Key']
+  // x-csrf-token is required, not optional: cookie auth means the browser
+  // attaches credentials to cross-site requests automatically, so the API
+  // rejects a cookie-authenticated mutation without the double-submit header.
+  // Omitting it here makes the preflight fail and every login-then-POST break
+  // with a CORS error that looks nothing like the auth problem it is.
+  allowedHeaders: ['Content-Type', 'X-Api-Key', 'x-csrf-token'],
+  // Without this the browser discards Set-Cookie on the login response and
+  // never sends the session back, so cookie auth cannot work cross-origin at
+  // all. Note `origin: true` reflects the caller's origin rather than sending
+  // `*`, which is what makes credentialed CORS legal here.
+  credentials: true
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -103,7 +113,7 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
 import { randomBytes } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import { registerAuth, registerAdminOnlyGlobals } from './auth/plugin.js';
+import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerMeRoutes } from './routes/me.js';
 import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
@@ -179,7 +189,25 @@ app.setErrorHandler((error, request, reply) => {
   reply.code(500).send({ error: 'Internal Server Error' });
 });
 
-app.post('/v1/auth/ticket', async () => {
+/**
+ * Issues a one-time ticket for `GET /v1/logs/stream`, which is an admin surface.
+ *
+ * The role check is not decoration. This route sits under the `/v1/auth/` prefix,
+ * which `isUserReachable` admits for **any** authenticated principal -- that
+ * allowlist exists so a user can log in and read their own account, not so they
+ * can mint credentials. And a consumed ticket is upgraded to a `service`
+ * principal by the auth hook, which `registerAdminOnlyGlobals` admits
+ * unconditionally. So without this line any ordinary signed-up user could POST
+ * here and read the operator log stream: a privilege escalation that goes live
+ * the moment a second, non-admin account exists.
+ *
+ * The narrower fix would be to have the ticket carry the issuing principal and
+ * restore it on consumption, rather than conferring `service` on a credential a
+ * user can obtain. That is the right shape and is worth doing when SSE gains a
+ * second consumer; gating issuance is what closes the hole today.
+ */
+app.post('/v1/auth/ticket', async (request, reply) => {
+  if (!requireRole(request, reply, 'admin')) return;
   const ticket = randomBytes(16).toString('hex');
   // Ticket expires in 60 seconds
   await redis.set(`swat:ticket:${ticket}`, '1', 'EX', 60);
