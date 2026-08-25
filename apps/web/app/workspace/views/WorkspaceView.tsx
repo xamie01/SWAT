@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { api } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
 
 type IngestionChain = 'solana' | 'polygon' | 'robinhood-chain';
 type IngestionStatus = 'healthy' | 'stale' | 'empty';
@@ -10,13 +12,6 @@ type WorkspaceIngestionItem = {
   status: IngestionStatus;
   lagSeconds: number | null;
 };
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 const INGESTION_CHAINS: Array<{
   chain: IngestionChain;
@@ -76,13 +71,10 @@ export default function WorkspaceView() {
     const controller = new AbortController();
     const loadIngestionHealth = async () => {
       try {
-        const response = await fetch(`${API_BASE}/v1/health/ingestion`, {
-          cache: 'no-store',
-          headers: { 'X-Api-Key': API_KEY },
-          signal: controller.signal
-        });
-        if (!response.ok) throw new Error(`Health endpoint returned ${response.status}`);
-        const data = await response.json() as { generatedAt?: unknown; items?: unknown };
+        const data = await api.get<{ generatedAt?: unknown; items?: unknown }>(
+          '/v1/health/ingestion',
+          { signal: controller.signal }
+        );
         const generatedAt = typeof data.generatedAt === 'string' ? new Date(data.generatedAt) : null;
         setIngestionItems(normalizeIngestionItems(data));
         setIngestionGeneratedAt(
@@ -91,7 +83,7 @@ export default function WorkspaceView() {
         setIngestionError(false);
       } catch (error) {
         if (controller.signal.aborted) return;
-        console.error('[web] workspace ingestion health request failed', error);
+        console.error(describeApiError(error, '[web] workspace ingestion health request failed'), error);
         setIngestionItems(emptyIngestionItems());
         setIngestionGeneratedAt(null);
         setIngestionError(true);

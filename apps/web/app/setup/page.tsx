@@ -1,16 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-// Derive the API host from how the page is being viewed, so it works both on
-// the dev machine (localhost) and from another device on the LAN (the host's IP).
-// NEXT_PUBLIC_API_URL overrides this when set.
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+import { api } from '../../lib/api.js';
+import { describeApiError } from '../../lib/api-error-message.js';
 
 export default function SetupPage() {
   const [loading, setLoading] = useState(false);
@@ -25,33 +17,31 @@ export default function SetupPage() {
   useEffect(() => {
     async function fetchConfig() {
       try {
-        const res = await fetch(`${API_BASE}/v1/config`, {
-          headers: { 'x-api-key': API_KEY }
-        });
-        if (res.ok) {
-          const config = await res.json();
-          const rawValue = config.blacklist;
-          if (rawValue) {
-            let parsedList: string[] = [];
-            if (Array.isArray(rawValue)) {
-              parsedList = rawValue;
-            } else if (typeof rawValue === 'string') {
-              try {
-                const parsed = JSON.parse(rawValue);
-                parsedList = Array.isArray(parsed) ? parsed : [parsed];
-              } catch {
-                parsedList = rawValue.trim().startsWith('[') 
-                  ? [] 
-                  : rawValue.split(',').map((s: string) => s.trim());
-              }
+        const config = await api.get<{ blacklist?: unknown }>('/v1/config');
+        const rawValue = config?.blacklist;
+        if (rawValue) {
+          let parsedList: string[] = [];
+          if (Array.isArray(rawValue)) {
+            parsedList = rawValue;
+          } else if (typeof rawValue === 'string') {
+            try {
+              const parsed = JSON.parse(rawValue);
+              parsedList = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              parsedList = rawValue.trim().startsWith('[')
+                ? []
+                : rawValue.split(',').map((s: string) => s.trim());
             }
-            setBlacklist(parsedList);
-          } else {
-            setBlacklist([]);
           }
+          setBlacklist(parsedList);
+        } else {
+          setBlacklist([]);
         }
-      } catch (err) {
-        console.error('Failed to fetch config', err);
+      } catch (err: unknown) {
+        // Surfaced in the error banner rather than only the console: a 401 here
+        // means the blacklist shown below is not the saved one, and silently
+        // rendering an empty list invites the operator to re-add every entry.
+        setError(describeApiError(err, 'Failed to load configuration'));
       }
     }
     fetchConfig();
@@ -71,20 +61,12 @@ export default function SetupPage() {
     setError('');
     setSuccess('');
     try {
-      const res = await fetch(`${API_BASE}/v1/config`, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ blacklist: updatedList })
-      });
-      if (!res.ok) throw new Error('Failed to save blacklist configuration');
+      await api.post('/v1/config', { blacklist: updatedList });
       setBlacklist(updatedList);
       setNewBlacklistMint('');
       setSuccess(`Added token ${mint.substring(0, 8)}... to blacklist.`);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to save blacklist configuration'));
     } finally {
       setLoading(false);
     }
@@ -96,19 +78,11 @@ export default function SetupPage() {
     setError('');
     setSuccess('');
     try {
-      const res = await fetch(`${API_BASE}/v1/config`, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ blacklist: updatedList })
-      });
-      if (!res.ok) throw new Error('Failed to save blacklist configuration');
+      await api.post('/v1/config', { blacklist: updatedList });
       setBlacklist(updatedList);
       setSuccess(`Removed token ${mint.substring(0, 8)}... from blacklist.`);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to save blacklist configuration'));
     } finally {
       setLoading(false);
     }
@@ -120,23 +94,11 @@ export default function SetupPage() {
     setSuccess('');
 
     try {
-      const res = await fetch(`${API_BASE}/v1/scorer/run`, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({})
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || data.message || 'Failed to trigger scorer');
-      }
+      await api.post('/v1/scorer/run', {});
 
       setSuccess('Scorer batch run successfully triggered in the background. Calculating wallet metrics, tiers, and generating clusters now.');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to trigger scorer'));
     } finally {
       setScorerLoading(false);
     }
@@ -151,28 +113,17 @@ export default function SetupPage() {
     setSuccess('');
 
     try {
-      const res = await fetch(`${API_BASE}/v1/discovery/from-token`, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ tokenMint: tokenMint.trim() })
+      const data = await api.post<{ tokenMint?: string }>('/v1/discovery/from-token', {
+        tokenMint: tokenMint.trim()
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || data.message || 'Failed to trigger discovery');
-      }
-
-      const data = await res.json();
       setSuccess(
-        `Token discovery queued for ${data.tokenMint}. ` +
+        `Token discovery queued for ${data?.tokenMint}. ` +
         `Early and biggest buyers will be backfilled, scored, and clustered automatically.`
       );
       setTokenMint('');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to trigger discovery'));
     } finally {
       setLoading(false);
     }

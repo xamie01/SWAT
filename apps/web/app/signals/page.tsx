@@ -1,29 +1,44 @@
 import Link from 'next/link';
+import { serverApiGet } from '../../lib/api-server.js';
+import { describeApiError } from '../../lib/api-error-message.js';
 
 export const dynamic = 'force-dynamic';
 
-// Server component: runs on the host, so reads the server-side API_KEY and the
-// configured base URL (not a hardcoded localhost, which breaks non-local
-// deployments and would 401 once auth is enforced).
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+/**
+ * Still a server component (checklist S6-3).
+ *
+ * The credential it used to send was the browser-exposed operator API key that
+ * S6-3 deleted (see `lib/api.ts` for what that was and why it was fatal). What
+ * replaces it is the operator's session cookie, which arrives on the *incoming
+ * request* -- so the fetch stays on the server and `lib/api-server.ts` forwards
+ * that cookie explicitly. `lib/api.ts` cannot be used here: it reads
+ * `document.cookie` and `window.location`, neither of which exists during a
+ * server render.
+ *
+ * `dynamic = 'force-dynamic'` matters more now, not less: the response is
+ * per-user, so it must never be cached or statically prerendered.
+ */
 
-async function getSignals() {
+/** Distinct from a data failure -- there is an action the reader can take. */
+const SIGNED_OUT_MESSAGE = 'Sign in to view the signal stream.';
+
+async function loadSignals(): Promise<{ signals: any[]; error: string | null }> {
   try {
-    const response = await fetch(`${API_BASE}/v1/signals`, {
-      cache: 'no-store',
-      headers: { 'x-api-key': API_KEY }
-    });
-    if (!response.ok) return [];
-    const data = await response.json();
-    return data.items || [];
-  } catch {
-    return [];
+    const data = await serverApiGet<{ items?: any[] }>('/v1/signals');
+    // `null` means no session cookie on the request, or the API rejected it with
+    // a 401. Either way it is "not signed in", not "no signals".
+    if (data === null) return { signals: [], error: SIGNED_OUT_MESSAGE };
+    return { signals: data.items ?? [], error: null };
+  } catch (caught: unknown) {
+    // The old version swallowed every failure and returned `[]`, so a broken API
+    // rendered as a clean 'engine is monitoring'. Keep the page rendering, but
+    // say which kind of failure it was.
+    return { signals: [], error: describeApiError(caught, 'Unable to load signals.') };
   }
 }
 
 export default async function SignalsPage() {
-  const signals = await getSignals();
+  const { signals, error } = await loadSignals();
 
   return (
     <main>
@@ -35,7 +50,11 @@ export default async function SignalsPage() {
       <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
         {signals.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-            <p style={{ color: 'var(--text-secondary)' }}>No active signals detected. The engine is monitoring.</p>
+            {/* Without this an unauthenticated load rendered as 'no signals', which
+                is a false all-clear on a monitoring surface. */}
+            <p style={{ color: error ? 'var(--danger)' : 'var(--text-secondary)' }}>
+              {error ?? 'No active signals detected. The engine is monitoring.'}
+            </p>
           </div>
         ) : (
           signals.map((signal: any) => (

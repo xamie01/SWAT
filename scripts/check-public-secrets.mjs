@@ -7,10 +7,10 @@
  * published, not configured — and unlike a leaked server secret it cannot be
  * contained by rotating access, only by rotating the secret itself.
  *
- * The audit already found this exact shape: `NEXT_PUBLIC_API_KEY` puts the
- * shared API key in the bundle. Existing occurrences are grandfathered in
- * `ALLOWED` below and removed by checklist S6-3; the point of this script is
- * that no *new* ones can appear while that work is pending.
+ * The audit already found this exact shape: `NEXT_PUBLIC_API_KEY` put the shared
+ * operator API key in the bundle. It was deleted by checklist S6-3 on
+ * 2026-08-25, so `ALLOWED` is now empty and this script is a plain gate rather
+ * than a ratchet: any match is a failure.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -24,10 +24,14 @@ const EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const SECRET_PATTERN = /NEXT_PUBLIC_[A-Z0-9_]*(KEY|SECRET|TOKEN|PASSWORD|PRIVATE|CREDENTIAL)[A-Z0-9_]*/g;
 
 /**
- * Known violations awaiting removal by S6-3 (Stage 6 frontend rebuild).
- * Do not add to this list — remove the usage instead.
+ * Grandfathered violations. **Empty, and it should stay that way.**
+ *
+ * `NEXT_PUBLIC_API_KEY` was removed on 2026-08-25 by S6-3, so the list this
+ * script was written to shrink is now shrunk. An entry here means a secret is
+ * currently shipping in the browser bundle; the fix is to remove the usage, not
+ * to add the name.
  */
-const ALLOWED = new Set(['NEXT_PUBLIC_API_KEY']);
+const ALLOWED = new Set([]);
 
 function walk(dir, out) {
   let entries;
@@ -49,9 +53,27 @@ function walk(dir, out) {
 const files = SCAN_DIRS.flatMap((dir) => walk(join(ROOT, dir), []));
 const violations = [];
 
+/**
+ * Explicit per-line escape hatch for *documentation* that names a removed
+ * variable.
+ *
+ * Needed because the fix for a browser-exposed secret should be allowed to
+ * explain itself. `apps/web/lib/api.ts` describes what it replaced and why, and
+ * that mention is not an exposure -- a variable name in a comment carries no
+ * value and is stripped from the bundle. Without this the incentive is to write
+ * a vaguer comment, which is the wrong trade.
+ *
+ * Deliberately a per-line opt-in rather than stripping comments wholesale:
+ * naively deleting everything after `//` also eats `https://...`, which could
+ * hide a genuine violation later on the same line. This form is visible in a
+ * diff and cannot silence anything the author did not point at.
+ */
+const MENTION_PRAGMA = 'check-public-secrets:allow-mention';
+
 for (const file of files) {
   const lines = readFileSync(file, 'utf8').split('\n');
   lines.forEach((line, index) => {
+    if (line.includes(MENTION_PRAGMA)) return;
     for (const match of line.matchAll(SECRET_PATTERN)) {
       const name = match[0];
       if (ALLOWED.has(name)) continue;

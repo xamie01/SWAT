@@ -1,6 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { api } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
+
+function logAndIgnore(what: string) {
+  return (err: unknown): null => {
+    console.error(describeApiError(err, `Command centre could not load ${what}`), err);
+    return null;
+  };
+}
 
 export default function CommandCenterView() {
   const [solanaMode, setSolanaMode] = useState('LIVE');
@@ -11,25 +20,25 @@ export default function CommandCenterView() {
   const [walletCount, setWalletCount] = useState(0);
   const [signals, setSignals] = useState<any[]>([]);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
-
+  /**
+   * Each tile keeps its own failure, as before: the old code guarded every
+   * response with `if (res.ok)`, so one endpoint being down left the other two
+   * populated. A shared try/catch would now abandon the rest of the panel the
+   * moment `apiFetch` threw.
+   *
+   * There is no error surface on this view, so a failure still shows as zeros --
+   * logged with its status, but not visible to the operator. Worth an error state
+   * eventually; adding one is outside this conversion.
+   */
   const fetchData = async () => {
-    try {
-      const statsRes = await fetch(`${apiUrl}/v1/signals/stats`, { headers: { 'X-Api-Key': apiKey } });
-      if (statsRes.ok) setStats(await statsRes.json());
-      
-      const walletsRes = await fetch(`${apiUrl}/v1/wallets`, { headers: { 'X-Api-Key': apiKey } });
-      if (walletsRes.ok) {
-        const w = await walletsRes.json();
-        setWalletCount(w.length || 0);
-      }
-      
-      const sigsRes = await fetch(`${apiUrl}/v1/signals?limit=10`, { headers: { 'X-Api-Key': apiKey } });
-      if (sigsRes.ok) setSignals((await sigsRes.json()).items || []);
-    } catch (err) {
-      console.error(err);
-    }
+    const [statsData, walletsData, sigsData] = await Promise.all([
+      api.get<any>('/v1/signals/stats').catch(logAndIgnore('signal stats')),
+      api.get<any>('/v1/wallets').catch(logAndIgnore('wallets')),
+      api.get<any>('/v1/signals?limit=10').catch(logAndIgnore('recent signals'))
+    ]);
+    if (statsData) setStats(statsData);
+    if (walletsData) setWalletCount(walletsData.length || 0);
+    if (sigsData) setSignals(sigsData.items || []);
   };
 
   useEffect(() => {

@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { api } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
 
 type Chain = 'solana' | 'polygon' | 'robinhood-chain';
 
@@ -59,21 +61,19 @@ export default function SignalsView() {
   const [acting, setActing] = useState(false);
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
-
   const fetchSignals = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (selectedPattern !== 'All Patterns') params.set('pattern', selectedPattern);
       const suffix = params.toString() ? `?${params.toString()}` : '';
 
-      const [signalsRes, statsRes] = await Promise.all([
-        fetch(`${apiUrl}/v1/signals${suffix}`, { cache: 'no-store', headers: { 'X-Api-Key': apiKey } }),
-        fetch(`${apiUrl}/v1/signals/stats`, { cache: 'no-store', headers: { 'X-Api-Key': apiKey } })
+      // Stats failure stays tolerated, as before: the old code only threw on the
+      // signals response and rendered `null` stats otherwise. Promise.all would
+      // now reject on either, so the stats call swallows its own error.
+      const [data, statsData] = await Promise.all([
+        api.get<any>(`/v1/signals${suffix}`),
+        api.get<any>('/v1/signals/stats').catch(() => null)
       ]);
-      if (!signalsRes.ok) throw new Error(`Signals endpoint returned ${signalsRes.status}`);
-      const data = await signalsRes.json();
 
       const mapped: Signal[] = (data.items || []).map((s: any) => {
         const tokenMint: string | null = s.token_mint ?? null;
@@ -110,15 +110,15 @@ export default function SignalsView() {
         };
       });
       setSignals(mapped);
-      setStats(statsRes.ok ? await statsRes.json() : null);
+      setStats(statsData);
       setLoadError(null);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('[web] signals request failed', err);
-      setLoadError('Unable to load signals. Displayed rows may be out of date.');
+      setLoadError(describeApiError(err, 'Unable to load signals. Displayed rows may be out of date.'));
     } finally {
       setLoading(false);
     }
-  }, [apiUrl, apiKey, selectedPattern]);
+  }, [selectedPattern]);
 
   useEffect(() => {
     void fetchSignals();
@@ -132,14 +132,7 @@ export default function SignalsView() {
     setActing(true);
     setBanner(null);
     try {
-      const res = await fetch(`${apiUrl}/v1/signals/${signal.id}/${action}`, {
-        method: 'POST',
-        headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' }
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(body?.error ?? `Request failed (${res.status})`);
-      }
+      await api.post(`/v1/signals/${signal.id}/${action}`);
       setBanner({
         kind: 'ok',
         text: action === 'execute'
@@ -148,9 +141,9 @@ export default function SignalsView() {
       });
       setSelectedSignal(null);
       void fetchSignals();
-    } catch (err) {
+    } catch (err: unknown) {
       // Keep the drawer open on failure so the operator sees which signal did not act.
-      setBanner({ kind: 'err', text: err instanceof Error ? err.message : 'Request failed' });
+      setBanner({ kind: 'err', text: describeApiError(err, 'Request failed') });
     } finally {
       setActing(false);
     }

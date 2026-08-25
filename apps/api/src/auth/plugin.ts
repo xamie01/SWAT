@@ -139,7 +139,13 @@ export async function registerAuth(app: FastifyInstance, options: AuthPluginOpti
         // Applies on public paths too: `POST /v1/auth/wallet/verify` links a
         // wallet to the *session's* account, which is state-changing.
         if (request.method !== 'GET' && request.method !== 'HEAD' && !csrfValid(request)) {
-          return reply.code(403).send({ error: 'Invalid CSRF token' });
+          // `code` is machine-readable on purpose. A CSRF failure and a role
+          // failure are both 403, and a client that tells them apart by matching
+          // the prose breaks the next time the prose is reworded. The distinction
+          // matters to the reader: a stale `swat_csrf` cookie is fixed by
+          // reloading, whereas a role failure never is -- and conflating them
+          // sends an operator hunting a permissions problem that does not exist.
+          return reply.code(403).send({ error: 'Invalid CSRF token', code: 'csrf_invalid' });
         }
         request.principal = { kind: 'user', user: resolved.user, sessionId: resolved.sessionId };
         return;

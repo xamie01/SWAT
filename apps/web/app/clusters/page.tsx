@@ -1,16 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-// Derive the API host from how the page is being viewed, so it works both on
-// the dev machine (localhost) and from another device on the LAN (the host's IP).
-// NEXT_PUBLIC_API_URL overrides this when set.
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+import { api } from '../../lib/api.js';
+import { describeApiError } from '../../lib/api-error-message.js';
 
 export default function ClustersPage() {
   const [clusters, setClusters] = useState<any[]>([]);
@@ -23,14 +15,10 @@ export default function ClustersPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/v1/clusters`, {
-        headers: { 'X-Api-Key': API_KEY }
-      });
-      if (!res.ok) throw new Error('Failed to fetch clusters');
-      const data = await res.json();
+      const data = await api.get<{ items?: any[] }>('/v1/clusters');
       setClusters(data.items || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to fetch clusters'));
     } finally {
       setLoading(false);
     }
@@ -44,15 +32,11 @@ export default function ClustersPage() {
 
     try {
       // The API exposes members under GET /v1/clusters/:id (returns { cluster, members }).
-      const res = await fetch(`${API_BASE}/v1/clusters/${clusterId}`, {
-        headers: { 'X-Api-Key': API_KEY }
-      });
-      if (!res.ok) throw new Error('Failed to fetch members');
-      const data = await res.json();
+      const data = await api.get<{ members?: any[] }>(`/v1/clusters/${clusterId}`);
       setClusterMembers(prev => ({ ...prev, [clusterId]: data.members || [] }));
       setExpandedCluster(clusterId);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to fetch cluster members'));
     }
   };
 

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { api, ApiError, resolveApiBase } from '../../lib/api.js';
+import { describeApiError } from '../../lib/api-error-message.js';
 
 type LogItem = {
   timestamp: string;
@@ -9,13 +11,21 @@ type LogItem = {
   message: string;
 };
 
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
+/**
+ * The SSE stream is the one call that cannot go through `lib/api.ts`.
+ *
+ * `EventSource` sets no request headers -- that is why the one-time ticket flow
+ * exists at all. So this page needs the API origin as a string, and takes it
+ * from the same `resolveApiBase` the client uses rather than re-deriving it, so
+ * the history request and the stream can never end up pointed at different hosts.
+ */
+function apiBase(): string {
+  return resolveApiBase(
+    typeof window === 'undefined'
+      ? null
+      : { protocol: window.location.protocol, hostname: window.location.hostname }
+  );
+}
 
 const SERVICE_COLORS: Record<string, string> = {
   api: '#60a5fa',            // blue
@@ -35,22 +45,28 @@ export default function LogsPage() {
   const [levelFilter, setLevelFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  // Two separate failures, because they have different consequences: history can
+  // fail while the stream works (you see new lines but no backlog) and the stream
+  // can fail while history works (you see a frozen snapshot). Collapsing them
+  // into one message would misdescribe whichever half is actually broken.
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch initial history
   useEffect(() => {
     async function fetchLogs() {
       try {
-        const res = await fetch(`${API_BASE}/v1/logs`, {
-          headers: { 'x-api-key': API_KEY }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          // Redis logs are pushed to list head (LIFO), reverse to chronological (oldest to newest)
-          setLogs(data.items ? data.items.reverse() : []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch logs history', err);
+        const data = await api.get<{ items?: LogItem[] }>('/v1/logs');
+        // Redis logs are pushed to list head (LIFO), reverse to chronological (oldest to newest)
+        setLogs(data?.items ? data.items.reverse() : []);
+        setHistoryError(null);
+      } catch (err: unknown) {
+        // Was console-only, which rendered an auth failure as 'No logs match
+        // filter rules.' -- an empty terminal that looks like a quiet system.
+        const message = describeApiError(err, 'Failed to fetch log history');
+        console.error(message, err);
+        setHistoryError(message);
       } finally {
         setLoading(false);
       }
@@ -67,26 +83,38 @@ export default function LogsPage() {
       setStatus('connecting');
       let ticket = '';
       try {
-        // Fetch a one-time ticket for SSE authentication
-        const res = await fetch(`${API_BASE}/v1/auth/ticket`, {
-          method: 'POST',
-          headers: { 'x-api-key': API_KEY }
-        });
-        if (!res.ok) throw new Error('Failed to get SSE ticket');
-        const data = await res.json();
+        // A one-time ticket, because EventSource cannot carry a header. The POST
+        // itself goes through the client so it picks up the CSRF token.
+        const data = await api.post<{ ticket?: string }>('/v1/auth/ticket');
+        if (!data?.ticket) throw new Error('Ticket response carried no ticket');
         ticket = data.ticket;
-      } catch (err) {
-        console.error('SSE Ticket Error:', err);
+      } catch (err: unknown) {
+        // `POST /v1/auth/ticket` requires role=admin, so a signed-in non-admin
+        // gets a 403 here. The generic 'not permitted' wording does not explain
+        // why the terminal below stopped updating, so say it in terms of the
+        // stream: everything else on this page still works for them.
+        const message = err instanceof ApiError && err.isForbidden
+          ? 'Live streaming requires an admin account. The history below is still current as of page load.'
+          : describeApiError(err, 'Could not start the live log stream');
+        console.error(message, err);
+        setStreamError(message);
         setStatus('disconnected');
+        // Do not reconnect on 401/403. The old code retried every three seconds
+        // forever, so an expired session became an indefinite loop of failing
+        // POSTs; middleware will move the operator to /login on their next
+        // navigation, and hammering the API until then achieves nothing. A 403
+        // will never resolve on its own at all -- the role does not change mid-session.
+        if (err instanceof ApiError && (err.isUnauthenticated || err.isForbidden)) return;
         clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(connectStream, 3000);
         return;
       }
-      
-      eventSource = new EventSource(`${API_BASE}/v1/logs/stream?ticket=${ticket}`);
+
+      eventSource = new EventSource(`${apiBase()}/v1/logs/stream?ticket=${encodeURIComponent(ticket)}`);
 
       eventSource.onopen = () => {
         setStatus('connected');
+        setStreamError(null);
       };
 
       eventSource.onmessage = (event) => {
@@ -184,6 +212,22 @@ export default function LogsPage() {
           </button>
         </div>
       </div>
+
+      {/* A badge reading 'Connection Offline' does not say whether the operator
+          should sign in again, ask for admin, or wait for the API to come back. */}
+      {streamError && (
+        <div
+          className="card"
+          style={{
+            marginTop: '1rem',
+            padding: '0.75rem 1rem',
+            background: 'rgba(239, 68, 68, 0.1)',
+            borderColor: 'var(--danger)'
+          }}
+        >
+          <p style={{ color: 'var(--danger)', margin: 0, fontSize: '0.9rem' }}>{streamError}</p>
+        </div>
+      )}
 
       {/* Control bar */}
       <div className="card" style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(15, 20, 35, 0.5)' }}>
@@ -289,7 +333,9 @@ export default function LogsPage() {
           </div>
         ) : filteredLogs.length === 0 ? (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-            <p style={{ color: 'var(--text-secondary)' }}>No logs match filter rules.</p>
+            <p style={{ color: historyError ? '#f87171' : 'var(--text-secondary)' }}>
+              {historyError ?? 'No logs match filter rules.'}
+            </p>
           </div>
         ) : (
           filteredLogs.map((log, index) => {
