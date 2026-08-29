@@ -184,3 +184,49 @@ detectable.
 - `CLAUDE.md` — "`packages/shared` … Built output (`dist/`) is what services import,
   so run `pnpm --filter @swat/shared build` if a service can't resolve a new export."
   That instruction is correct and is item 1.
+
+---
+
+## Recurrence log — the fourth instance, 2026-08-25
+
+Recording occurrences here because the *pattern* is now better evidence than any
+single item: this hazard has cost real debugging time four times, and each time it
+presented as something else.
+
+**What happened.** Two subagents added modules to `packages/db/src`
+(`quote-valuation.ts` for `S4-M35`, `polymarket-exit-queries.ts` for `S4-M19`) and
+the master agent added their barrel exports. `pnpm --filter @swat/db exec tsc
+--noEmit` was **clean**, and all 594 `@swat/db` tests **passed** — because both read
+`src/`. But `apps/trade-executor` reported six errors of the form:
+
+```
+src/index.ts(41,3): error TS2305: Module '"@swat/db"' has no exported member 'valuateChainNativeQuoteLeg'.
+```
+
+**The confusing part, and the reason this wasted time.** `packages/db/dist/` already
+contained `quote-valuation.js` **and** `quote-valuation.d.ts` — the files were there.
+What lagged was only `dist/index.d.ts`, the barrel. So the modules existed, compiled,
+and were individually importable by path, while the package's public surface did not
+admit they existed. `ls dist/` looked correct; `grep -c quote-valuation dist/index.d.ts`
+returned **0**. That is the check worth remembering.
+
+**Resolved by** `pnpm --filter @swat/db build` — a single filtered package build,
+which is not the full `pnpm build` the operator's constraint forbids and takes a
+couple of seconds. `grep -c` on the emitted barrel went 0 → 2, and all six errors
+cleared at once.
+
+**The diagnostic, in order, when a consumer cannot see a new export:**
+
+1. `grep -c '<new-module>' packages/<pkg>/dist/index.d.ts` — **0 means stale barrel**,
+   regardless of what `ls dist/` shows.
+2. `find packages/<pkg>/src -name '*.ts' -not -name '*.test.ts' -newer packages/<pkg>/dist/index.js | wc -l`
+   — a non-zero count is the same finding, stated as mtimes.
+3. Only then look for a genuine missing export.
+
+**Why this keeps happening to subagents specifically.** An agent told "do not edit the
+barrel, report the exports needed" cannot see the consequence of its own work: its
+package's tests pass, its typecheck is clean, and the breakage appears in a *different
+package* that it was told not to touch. The failure is structurally invisible from
+where the work is done. **So the master agent must rebuild the changed package's
+`dist/` before typechecking any consumer** — and that step belongs in the handoff
+doc, not in an agent's memory.

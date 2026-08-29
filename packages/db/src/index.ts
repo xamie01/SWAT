@@ -37,3 +37,22 @@ export * from './auth-wallets.js';
 export * from './audit-log.js';
 export * from './seed-admin.js';
 export * from './subscriptions.js';
+
+/**
+ * Quote-leg valuation (S4-M35).
+ *
+ * `copy_execution_evidence.quote_quantity` was a mixed-unit column -- USD on
+ * Polymarket and paper, SOL on Solana live, ETH on robinhood live -- and
+ * `cost_basis_usd` accumulated all four. One conversion rule lives here so the
+ * executor and the lifecycle rebuild cannot disagree about what a number means.
+ */
+export * from './quote-valuation.js';
+
+/**
+ * Polymarket position-exit race (S4-M19).
+ *
+ * A master's sell and a market resolution are independent exit triggers that can
+ * fire moments apart; these claim one winner per position rather than one per
+ * trigger.
+ */
+export * from './polymarket-exit-queries.js';
