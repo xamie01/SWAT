@@ -77,6 +77,39 @@ vi.mock('@swat/db', () => ({
   // no case reaches a live EVM submission — but an absent barrel export is how a
   // mock drifts from the module it stands in for.
   withEvmNonceLock: vi.fn(),
+  // The S4-M35 valuation helpers, declared for the same reason as
+  // `withEvmNonceLock`. No case here currently reaches them (`persistTrade` only
+  // valuates a CONFIRMED fill whose `amountUsd` the caller did not supply, and
+  // every confirmed path in this suite either stays `pending_confirmation` or
+  // passes `amountUsd` explicitly) — but a missing export does not read as
+  // `undefined` here, it makes vitest THROW at the call site inside production
+  // code, which is how the same gap broke shadow.test.ts's isolation assertion.
+  //
+  // Stubbed rather than `importActual`: the `@swat/db` barrel throws
+  // `DATABASE_URL is required` at import (packages/db/src/client.ts:13), and
+  // `importActual` on a `packages/db/src/*` path adds a TS6059 to
+  // `tsc --noEmit` by pulling a file outside this package's `rootDir` into the
+  // program. `usdAmount: null` is a value the real function genuinely returns
+  // when no native price is available, and `persistTrade` handles it.
+  deriveFillPriceUsd: vi.fn().mockReturnValue(null),
+  nativeQuoteCurrencyForChain: vi.fn((chain: string) =>
+    chain === 'solana' ? 'SOL' : chain === 'robinhood-chain' ? 'ETH' : 'USD'),
+  valuateChainNativeQuoteLeg: vi.fn().mockReturnValue({
+    code: 'native-price-unknown',
+    currency: 'SOL',
+    nativeAmount: '0',
+    nativeUsdPrice: null,
+    usdAmount: null,
+    reason: 'stubbed in execution-lifecycle.test.ts'
+  }),
+  valuateQuoteLeg: vi.fn().mockReturnValue({
+    code: 'no-quote-leg',
+    currency: null,
+    nativeAmount: null,
+    nativeUsdPrice: null,
+    usdAmount: null,
+    reason: 'stubbed in execution-lifecycle.test.ts'
+  }),
   // Supplies the master's fill price for the S4-M16 mirror bound at the Polymarket
   // call site. Driven by the `Polymarket mirror bound at the handleJob call site`
   // suite at the bottom of this file, which is the only place here that reaches
@@ -255,6 +288,18 @@ function canonicalExecution(
     requestedQuoteQuantity: null,
     confirmedBaseQuantity: '0',
     confirmedQuoteQuantity: '0',
+    // S4-M35. `0` here is a *genuine* zero, not a stand-in for unknown: this row
+    // has no confirmed fills at all (`confirmedBaseQuantity: '0'`), so the quote
+    // total omits nothing — `summarizeConfirmedQuoteTotal` calls that case
+    // `no-fills`, and pairs a known `'0'` total with a `0` count.
+    //
+    // The unknown case is the OTHER shape: `confirmedQuoteQuantity: null` with a
+    // positive count, meaning fills exist whose USD value could not be
+    // established. Writing a positive count here instead would assert the
+    // opposite of what these fixtures are — pre-submission executions in
+    // `requested` / `simulated` / `reconciliation_required` that have never been
+    // filled.
+    quoteUnassessedFillCount: 0,
     reservedBaseQuantity: '2',
     submissionAttempts: 0,
     maxSubmissionAttempts: 3,
@@ -739,6 +784,9 @@ function polygonCanonicalExecution(direction: 'buy' | 'sell' = 'buy') {
     requestedQuoteQuantity: direction === 'buy' ? '50' : null,
     confirmedBaseQuantity: '0',
     confirmedQuoteQuantity: '0',
+    // Same reasoning as the Solana fixture: no confirmed fills, so nothing is
+    // omitted from the quote total and `0` is a known zero (S4-M35).
+    quoteUnassessedFillCount: 0,
     reservedBaseQuantity: direction === 'sell' ? '25' : '0',
     submissionAttempts: 0,
     maxSubmissionAttempts: 3,
@@ -759,7 +807,20 @@ function polygonSourceTrade(priceUsd: string | null) {
   return {
     id: 'polygon-source-trade',
     chain: 'polygon' as const,
-    sourceEventType: 'evm_log' as const,
+    // `'venue_trade'`, because that is what a real Polygon `source_trades` row
+    // carries: `buildPolymarketSourceTradeInput` in the indexer
+    // (apps/indexer/src/source-trade-lifecycle.ts:150) is the only producer of
+    // polygon rows and writes `venue_trade` for a Polymarket Data API fill.
+    //
+    // `'evm_log'` was not a missing union member — it is not a source type at
+    // all. Migration 028 constrains the column to exactly
+    // `('transaction', 'order', 'venue_trade')`, so widening `SourceEventType`
+    // to admit it would make the type accept a value Postgres rejects. And an
+    // EVM log genuinely is a `'transaction'` in this codebase: the viem-log
+    // ingestion path (`buildRobinhoodSourceTradeInput`, same file:190, asserted
+    // in apps/indexer/src/evm-source-lifecycle.test.ts:174) writes
+    // `'transaction'` for exactly that shape.
+    sourceEventType: 'venue_trade' as const,
     sourceEventId: '0xmastertx',
     sourceEventIndex: '0',
     transactionHash: '0xmastertx',

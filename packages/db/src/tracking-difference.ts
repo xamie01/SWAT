@@ -35,23 +35,35 @@ import type { Chain, CopyExecutionMode, CopyExecutionState, SourceTradeSide } fr
  *
  * ## Why `confirmed_quote_quantity / confirmed_base_quantity` is refused
  *
- * It looks like a free VWAP and it is not a USD price. The executor writes
- * `quoteQuantity` in whatever unit that venue settles in:
+ * It looks like a free VWAP and it is still not used here.
  *
- *   * `apps/trade-executor/src/polymarket.ts:1461` and `index.ts:1930` write
- *     `result.spendAmountUsd` — USD.
- *   * `index.ts:2189` (paper simulation) writes `simAmountUsd` — USD.
- *   * `index.ts:1628,1650` (Solana live) writes
- *     `nativeLamportsDelta / 1_000_000_000` — **SOL**.
- *   * `index.ts:1764` (robinhood-chain live) writes `result.amountEth` — **ETH**.
+ * Until S4-M35 the reason was that the column was a mixed-unit lie: the executor
+ * wrote `quoteQuantity` in whatever unit that venue settled in — USD from
+ * Polymarket and from paper simulation, **SOL** from Solana live, **ETH** from
+ * robinhood-chain live — and nothing in the schema recorded which. Dividing those
+ * sums would have produced a SOL-per-token figure published as a USD tracking
+ * difference.
  *
- * The unit is a property of the executor path, not of the chain, so no per-chain
- * table can recover it and nothing in the schema records it. Dividing those sums
- * would yield a SOL-per-token or ETH-per-token figure that this module would then
- * publish as a USD tracking difference. `price_usd` is the only field whose USD
- * denomination is asserted by the schema, so it is the only field used. The cost of
- * that choice is stated honestly in `TrackingDifferenceCode`: on the two live paths
- * that pass no `priceUsd`, our price is unknown and the difference is not computed.
+ * Migration `054` fixed that at the source: `quote_quantity` is now USD on every
+ * row written from that point, with the native amount, its currency and the
+ * conversion rate preserved beside it (`packages/db/src/quote-valuation.ts`). Two
+ * reasons the ratio is still refused:
+ *
+ *   1. **Rows written before `054`.** The migration recovers each legacy row's unit
+ *      from (`evidence_type`, `chain`) and moves the amount into
+ *      `quote_native_quantity`, but it cannot recover the *historical* SOL or ETH
+ *      price, so those rows carry a NULL USD value. A sum across the boundary would
+ *      silently omit them.
+ *   2. **A ratio of sums is a VWAP, not a fill price.** This module compares the
+ *      master's fill against ours fill-by-fill; collapsing several partials into one
+ *      average is a different measurement, not a cheaper route to the same one.
+ *
+ * `price_usd` is per-fill and USD-denominated by the schema, so it remains the only
+ * field used. The cost of that choice is stated honestly in
+ * `TrackingDifferenceCode`. Note that S4-M35 also threaded a `priceUsd` through the
+ * Solana-live and robinhood-live fill recorders, so `user-price-unknown` on those
+ * paths now means the price feed was actually unavailable rather than that the
+ * executor never passed one.
  *
  * ## Fees are NOT included, and cannot be
  *

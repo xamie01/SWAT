@@ -37,6 +37,13 @@ import {
 } from '@swat/db';
 import { capPositionToAvailableBalance } from './policy.js';
 import {
+  classifyPolymarketOrderLiveness,
+  interpretPolymarketCancellation,
+  planPolymarketRungRetirement,
+  polymarketCancellationError,
+  type PolymarketCancellationReading
+} from './polymarket-cancellation.js';
+import {
   assertPolymarketMarketOpenForSubmission,
   fetchPolymarketMarketState,
   type PolymarketMarketState
@@ -963,6 +970,25 @@ export async function triggerPolymarket(params: {
 }
 
 /**
+ * How many times a rung's cancellation is attempted before the ladder stops.
+ *
+ * Three, because the two states worth retrying are both short-lived: the venue's
+ * matching-delay window, and a read of the order that briefly trails the cancel
+ * we just sent. Anything still resting after three attempts is a fact about the
+ * book rather than a race, and the answer to that is a human.
+ */
+export const POLYMARKET_RUNG_CANCEL_ATTEMPTS = 3;
+
+/**
+ * Pause between cancellation attempts.
+ *
+ * Two seconds is chosen against the documented 250 ms taker delay with headroom,
+ * not against the configurable sports `secondsDelay` — a long game delay is not
+ * something to spin on, and the `blocked` branch is the correct answer there.
+ */
+export const POLYMARKET_RUNG_CANCEL_RETRY_MS = 2_000;
+
+/**
  * Submit one exit-escalation rung as a GTD limit order (`S4-M17`).
  *
  * Separate from `triggerPolymarket` because the two order shapes answer different
@@ -1034,53 +1060,136 @@ export async function submitPolymarketExitRung(params: {
  * whether to occupy a worker for the rung's lifetime or hand it to a delayed job
  * by supplying its own `sleep`.
  *
- * Cancellation after the wait is belt-and-braces: the GTD expiration already
- * kills the remainder, but a rung whose cancellation the venue confirms is one we
- * can be sure is not about to fill behind the next rung, and double-selling the
- * same shares across two rungs is the failure that matters here.
+ * **Retiring the rung before the next one is placed (`S4-M36`).** This used to
+ * `await client.cancelOrder(...)` inside a try/catch on the assumption that a
+ * failed cancellation throws. It does not: the venue answers **200** with a
+ * `canceled` / `not_canceled` split, so a stale order landed in `not_canceled`
+ * and the catch never ran. The belt-and-braces cancellation was therefore a
+ * no-op on exactly the path it was written for, and the consequence was not
+ * cosmetic — a rung still resting on the book plus a non-zero `sizeMatched` read
+ * as a partial fill, so the ladder placed the next rung for the remainder and
+ * left **two live sell orders whose combined size can exceed the position**.
+ *
+ * Three things changed, in the order the item ranks them:
+ *
+ *   1. the fetched order must be **terminal**, not merely partially matched. The
+ *      data was always in hand — `fetchOrder` was already called and its status
+ *      thrown away while only `sizeMatched` was read.
+ *   2. the cancellation response is read through
+ *      `interpretPolymarketCancellation`, the one helper both call sites now
+ *      share, rather than inferred from the absence of an exception.
+ *   3. if the rung is not provably dead the cancel is retried and then the ladder
+ *      **stops** with an alert. Failing closed is deliberate and is the opposite
+ *      of `S4-M31`: there the worst case was one odd trade, here it is selling a
+ *      user's position twice, and the cost of stopping is a slower exit.
+ *
+ * A cancel refused inside the venue's matching-delay window counts as *wait*, not
+ * as failure: `/concepts/order-lifecycle` documents cancels as blocked there, so
+ * the refusal is the venue behaving as specified.
+ *
+ * Every venue call is an injectable port so the retirement logic can be exercised
+ * without a signer or a live client.
  */
 export function createPolymarketExitRungSubmitter(params: {
   tokenID: string;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   log?: (message: string) => void;
+  submit?: (rung: PolymarketExitLimitRung) => Promise<{ orderId: string }>;
+  cancelOrder?: (input: { orderId: string }) => Promise<unknown>;
+  fetchOrder?: (input: { orderId: string }) => Promise<OpenOrder>;
+  /** Raised when a rung cannot be shown to be dead, before the ladder stops. */
+  emitAlert?: (alert: { orderId: string; reason: string }) => Promise<void>;
+  maxCancelAttempts?: number;
+  cancelRetryDelayMs?: number;
 }): (rung: PolymarketExitLimitRung) => Promise<{ filledShares: number }> {
   const sleep = params.sleep
     ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
   const now = params.now ?? Date.now;
   const log = params.log ?? (() => {});
+  const maxCancelAttempts = params.maxCancelAttempts ?? POLYMARKET_RUNG_CANCEL_ATTEMPTS;
+  const cancelRetryDelayMs = params.cancelRetryDelayMs ?? POLYMARKET_RUNG_CANCEL_RETRY_MS;
 
   return async (rung: PolymarketExitLimitRung) => {
-    const submission = await submitPolymarketExitRung({
-      tokenID: params.tokenID,
-      rung,
-      now: now()
-    });
-    const client = requireSecureClobClient();
+    const submission = params.submit
+      ? await params.submit(rung)
+      : await submitPolymarketExitRung({
+        tokenID: params.tokenID,
+        rung,
+        now: now()
+      });
+    const cancelOrder = params.cancelOrder
+      ?? ((input: { orderId: string }) => requireSecureClobClient().cancelOrder(input));
+    const fetchOrder = params.fetchOrder
+      ?? ((input: { orderId: string }) => requireSecureClobClient().fetchOrder(input));
 
     // The venue kills the remainder one minute before the stated expiration, so
-    // waiting the effective lifetime is exactly long enough.
+    // waiting the effective lifetime is exactly long enough — when the assumption
+    // holds. The loop below is what covers the case where it does not.
     await sleep(rung.effectiveLifetimeMs);
 
-    try {
-      await client.cancelOrder({ orderId: submission.orderId });
-    } catch (error: unknown) {
-      // A cancellation failure is not a fill failure: the expiration still
-      // applies. Logged rather than thrown so the ladder keeps its shape.
-      const message = error instanceof Error ? error.message : String(error);
-      log(`[polymarket-exit] cancelling rung ${submission.orderId} failed: ${message}`);
+    let filledShares = 0;
+    let retired = false;
+    let blockedReason: string | null = null;
+
+    for (let attempt = 1; attempt <= maxCancelAttempts; attempt += 1) {
+      let cancellation: PolymarketCancellationReading;
+      try {
+        cancellation = interpretPolymarketCancellation(
+          await cancelOrder({ orderId: submission.orderId }),
+          submission.orderId
+        );
+      } catch (error: unknown) {
+        // A throw is a transport failure, not a statement about the order. It is
+        // recorded as such and the fetched order decides.
+        cancellation = polymarketCancellationError(error);
+      }
+
+      const order = await fetchOrder({ orderId: submission.orderId });
+      if (order.id !== submission.orderId) {
+        throw new UnrecoverableError(
+          `Polymarket returned order ${order.id} for exit rung ${submission.orderId}`
+        );
+      }
+      // Read before the terminal decision so a rung that filled and then went
+      // terminal still reports its fill.
+      filledShares = nonNegativeDecimal(String(order.sizeMatched), 'exit rung matched size');
+
+      const retirement = planPolymarketRungRetirement({
+        orderId: submission.orderId,
+        cancellation,
+        liveness: classifyPolymarketOrderLiveness(order.status),
+        attempt,
+        maxAttempts: maxCancelAttempts
+      });
+      log(`[polymarket-exit] rung ${submission.orderId}: ${retirement.reason}`);
+
+      if (retirement.kind === 'retired') {
+        retired = true;
+        break;
+      }
+      if (retirement.kind === 'blocked') {
+        blockedReason = retirement.reason;
+        break;
+      }
+      await sleep(cancelRetryDelayMs);
     }
 
-    const order = await client.fetchOrder({ orderId: submission.orderId });
-    if (order.id !== submission.orderId) {
+    if (!retired) {
+      const reason = blockedReason
+        ?? `rung ${submission.orderId} could not be shown to be dead within `
+        + `${maxCancelAttempts} cancel attempts`;
+      if (params.emitAlert) {
+        await params.emitAlert({ orderId: submission.orderId, reason });
+      }
+      // Fail closed. The escalation sweep catches this per candidate and records
+      // it, so one blocked ladder does not stop the others — what it must not do
+      // is place the next rung on top of a live one.
       throw new UnrecoverableError(
-        `Polymarket returned order ${order.id} for exit rung ${submission.orderId}`
+        `Polymarket exit rung was not provably retired, so the next rung is not placed: ${reason}`
       );
     }
-    // A rung that cannot be read is treated as unfilled rather than as filled:
-    // over-reporting a fill would strand shares while telling the ledger they are
-    // gone, and the next rung re-offers what is genuinely still held.
-    const filledShares = nonNegativeDecimal(String(order.sizeMatched), 'exit rung matched size');
+
     log(
       `[polymarket-exit] rung ${submission.orderId} at ${rung.price} filled `
       + `${filledShares} of ${rung.shares}`
@@ -1483,7 +1592,7 @@ async function finishConfirmedFill(
       evidenceType: 'venue_fill',
       evidenceId: `order:${order.id}`,
       baseQuantity: summary.shares.toString(),
-      quoteQuantity: summary.amountUsd.toString(),
+      quoteLeg: { amount: summary.amountUsd.toString(), currency: 'USD' },
       priceUsd: summary.averagePrice.toString(),
       confirmationState: 'confirmed',
       completesExecution: true,
@@ -1632,8 +1741,15 @@ async function reconcilePendingPolymarketTrade(
     }
     if (!summary && now - createdAt > POLYMARKET_ORDER_TIMEOUT_MS) {
       try {
-        const cancellation = await client.cancelOrder({ orderId: order.id });
-        if (cancellation.canceled.some((orderId) => String(orderId) === order.id)) {
+        const cancellation = interpretPolymarketCancellation(
+          await client.cancelOrder({ orderId: order.id }),
+          order.id
+        );
+        // One reading of the contract, shared with the exit-rung submitter
+        // (`S4-M36`). Only an explicit listing in `canceled` retires the order;
+        // a `not_canceled` entry — including "order already matched" — is not a
+        // cancellation and must not be recorded as one.
+        if (cancellation.kind === 'confirmed') {
           console.log(`[trade-executor] Cancelled timed out Polymarket order: ${order.id}`);
           return finishWithoutFill(
             row,
@@ -1642,7 +1758,12 @@ async function reconcilePendingPolymarketTrade(
             'Polymarket order timed out without a confirmed fill'
           );
         }
-        return markAmbiguous(row, `Polymarket did not confirm cancellation of timed out order ${order.id}`);
+        const detail = 'reason' in cancellation ? `: ${cancellation.reason}` : '';
+        return markAmbiguous(
+          row,
+          `Polymarket did not confirm cancellation of timed out order ${order.id} `
+          + `(${cancellation.kind})${detail}`
+        );
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         return markAmbiguous(row, `Polymarket cancellation is unresolved: ${message}`);

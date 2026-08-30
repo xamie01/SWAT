@@ -5,6 +5,42 @@ process.env.TROJAN_WALLET_ADDRESS = '11111111111111111111111111111111';
 process.env.HELIUS_API_KEY = 'test-helius-key';
 
 vi.mock('@swat/db', () => ({
+  // `persistTrade` runs the S4-M35 valuation on every confirmed fill whose USD
+  // amount the caller did not supply, which is exactly this test's Solana live
+  // fill. All four helpers are declared, not just the one on today's path: an
+  // export missing from this factory does not read as `undefined`, it makes
+  // vitest THROW at the call site, and that throw replaces the error under test
+  // — which is how a shadow-isolation test came to fail inside `persistTrade`
+  // with a stack that pointed at production code.
+  //
+  // Stubbed rather than `importActual`: `@swat/db`'s barrel throws
+  // `DATABASE_URL is required` at import (packages/db/src/client.ts:13), and
+  // `importActual` on a `packages/db/src/*` path drags a file outside this
+  // package's `rootDir` into the program and adds TS6059 to `tsc --noEmit` (see
+  // the same note in execution-authority-wiring.test.ts). The valuation math has
+  // its own suite in `packages/db`; nothing here asserts a USD figure.
+  //
+  // `usdAmount: null` is a value the real function genuinely returns when no
+  // native price is available, and `persistTrade` already handles it.
+  deriveFillPriceUsd: vi.fn().mockReturnValue(null),
+  nativeQuoteCurrencyForChain: vi.fn((chain: string) =>
+    chain === 'solana' ? 'SOL' : chain === 'robinhood-chain' ? 'ETH' : 'USD'),
+  valuateChainNativeQuoteLeg: vi.fn().mockReturnValue({
+    code: 'native-price-unknown',
+    currency: 'SOL',
+    nativeAmount: '0.19',
+    nativeUsdPrice: null,
+    usdAmount: null,
+    reason: 'stubbed in shadow.test.ts'
+  }),
+  valuateQuoteLeg: vi.fn().mockReturnValue({
+    code: 'no-quote-leg',
+    currency: null,
+    nativeAmount: null,
+    nativeUsdPrice: null,
+    usdAmount: null,
+    reason: 'stubbed in shadow.test.ts'
+  }),
   claimCircuitBreakerProbe: vi.fn(),
   resolveChainMode: vi.fn(),
   hasRecentBuy: vi.fn().mockResolvedValue(false),

@@ -795,7 +795,9 @@ describe('Polymarket live executor', () => {
         evidenceType: 'venue_fill',
         evidenceId: 'order:delayed-partial',
         baseQuantity: '10',
-        quoteQuantity: '4.5',
+        // S4-M35: the amount now carries its unit. Polymarket settles in USDC, so
+        // the currency is asserted here rather than left for a chain lookup.
+        quoteLeg: { amount: '4.5', currency: 'USD' },
         priceUsd: '0.45',
         confirmationState: 'confirmed',
         completesExecution: true

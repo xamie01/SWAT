@@ -530,8 +530,9 @@ describe('loadTrackingDifferences', () => {
       // our price by the unpriced share.
       expect(sql).toContain('FILTER (WHERE evidence.price_usd IS NOT NULL)');
       expect(sql).toContain('JOIN source_trades st ON st.id = ce.source_trade_id');
-      // `quote_quantity` is deliberately absent: it is SOL on Solana and ETH on
-      // robinhood-chain, so it is not a USD price.
+      // `quote_quantity` is deliberately absent. Since migration 054 it is USD on
+      // every newly written row, but pre-054 rows carry a NULL USD value and a
+      // ratio of sums is a VWAP rather than a per-fill price either way.
       expect(sql).not.toContain('quote_quantity');
       expect(records).toHaveLength(1);
       expect((records[0] as { difference: TrackingDifference }).difference.adverseBps)
