@@ -21,6 +21,102 @@ const values = {
   ROBINHOOD_BASE_ASSET_MODE: 'native-weth'
 };
 
+/**
+ * Builds a client stub whose `getBytecode` returns empty for the named contracts.
+ *
+ * The default is a non-empty result for everything, so a test names only the
+ * address it wants to be missing -- otherwise every one of these tests would
+ * have to enumerate five contracts to say something about one.
+ */
+function clientWithEmptyCodeAt(missing: readonly string[]) {
+  const empty = new Set(missing.map((address) => address.toLowerCase()));
+  return {
+    getChainId: vi.fn().mockResolvedValue(4663),
+    getBytecode: vi.fn(async ({ address }: { address: string }) =>
+      empty.has(address.toLowerCase()) ? '0x' : '0x60806040'),
+    simulateContract: vi.fn().mockResolvedValue({ result: [1n] })
+  } as never;
+}
+
+const liveMode = () => vi.fn().mockResolvedValue({
+  requestedMode: 'live' as const,
+  effectiveMode: 'live' as const,
+  certified: true
+});
+
+/**
+ * The configured-address bytecode gate (S4-M39).
+ *
+ * This gate already existed and had **no test**, which is how a documented
+ * Ethereum-mainnet quoter address survived in `.env.example` for chain 4663: the
+ * check that would have caught it was never proven to run. An untested guard on
+ * a funds path is indistinguishable from an absent one, so each configured
+ * contract gets its own case -- a loop that silently skipped an entry would
+ * otherwise pass.
+ */
+describe('Robinhood configured-address bytecode gate (S4-M39)', () => {
+  it.each([
+    ['router', values.ROBINHOOD_SWAP_ROUTER],
+    ['quoter', values.ROBINHOOD_QUOTER],
+    ['WETH9', values.ROBINHOOD_WETH9],
+    ['sanity token', values.ROBINHOOD_SANITY_TOKEN]
+  ])('refuses live when the configured %s has no deployed bytecode', async (label, address) => {
+    const result = await verifyRobinhoodEnvironment({
+      values,
+      resolveMode: liveMode(),
+      client: clientWithEmptyCodeAt([address]),
+      emitOpsAlert: vi.fn().mockResolvedValue(undefined)
+    });
+
+    expect(result.ready).toBe(false);
+    // The label is in the message on purpose: "no deployed bytecode" alone sends
+    // an operator to check five addresses instead of one.
+    expect(result.reason).toContain(label);
+    expect(result.reason).toContain('no deployed bytecode');
+  });
+
+  it('alerts rather than failing quietly, because a refused boot is an ops event', async () => {
+    const emitOpsAlert = vi.fn().mockResolvedValue(undefined);
+    await verifyRobinhoodEnvironment({
+      values,
+      resolveMode: liveMode(),
+      client: clientWithEmptyCodeAt([values.ROBINHOOD_QUOTER]),
+      emitOpsAlert
+    });
+    expect(emitOpsAlert).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ROBINHOOD_LIVE_NOT_READY',
+      severity: 'critical'
+    }));
+  });
+
+  it('refuses live when the RPC chain id does not match the configured one', async () => {
+    // A wrong-chain RPC is the other half of the same defect class: the addresses
+    // may all have code, just not on the chain we think we are trading on.
+    const client = clientWithEmptyCodeAt([]) as unknown as { getChainId: ReturnType<typeof vi.fn> };
+    client.getChainId = vi.fn().mockResolvedValue(1);
+    const result = await verifyRobinhoodEnvironment({
+      values,
+      resolveMode: liveMode(),
+      client: client as never,
+      emitOpsAlert: vi.fn().mockResolvedValue(undefined)
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reason).toContain('does not match RPC chain ID');
+  });
+
+  it('passes the gate when every configured address has code', async () => {
+    // The complement, so the four refusals above are not passing for an
+    // unrelated reason.
+    const result = await verifyRobinhoodEnvironment({
+      values,
+      resolveMode: liveMode(),
+      client: clientWithEmptyCodeAt([]),
+      emitOpsAlert: vi.fn().mockResolvedValue(undefined)
+    });
+    expect(result).toMatchObject({ ready: true, reason: 'onchain_environment_verified_for_process' });
+  });
+});
+
 describe('Robinhood startup runtime readiness', () => {
   it('clamps live readiness and emits the ops alert when durable runtime setup fails', async () => {
     const emitOpsAlert = vi.fn().mockResolvedValue(undefined);

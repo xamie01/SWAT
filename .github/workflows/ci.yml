@@ -76,6 +76,13 @@ jobs:
       - name: Check for browser-exposed secrets
         run: pnpm check:secrets
 
+      # Before typecheck, like check:secrets, and for the same reason: a config
+      # gap is cheap to report and does not need a compile to find. Catches the
+      # shape that let an Ethereum mainnet quoter address sit in .env.example for
+      # chain 4663 -- the code read one name, the file documented another.
+      - name: Check env var documentation coverage
+        run: pnpm check:env
+
       - name: Typecheck
         run: pnpm typecheck
 

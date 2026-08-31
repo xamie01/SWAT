@@ -23,6 +23,7 @@
     "dev:mcp": "pnpm --filter @swat/mcp-server dev",
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "check:secrets": "node scripts/check-public-secrets.mjs",
+    "check:env": "node scripts/check-env-coverage.mjs",
     "seed:admin": "pnpm --filter @swat/db seed:admin"
   },
   "devDependencies": {
