@@ -53,11 +53,18 @@ end of this block after any batch of ticks.
 | 4. Stage 1 — auth & tenancy | 22 | 0 | 0 | **closed** |
 | 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
-| 7. Stage 4 — custody & per-user execution | 20 | 46 | 4 | **the live front** |
+| 7. Stage 4 — custody & per-user execution | 24 | 52 | 4 | **the live front.** Open grew because verification kept finding real defects — `S4-M39`, `S4-M40`, `S4-M41` were all filed this session, not discovered late |
 | 8. Stage 5 — billing | 0 | 6 | 0 | not started; needs the Stripe MCP server first |
-| 9. Stage 6 — frontend | 0 | 46 | 0 | separate workstream; §9.1 is the only unblocked part |
+| 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **75** | **142** | **14** | |
+| **Total** | **75** | **126** | **15** | |
+
+**Regenerated 2026-08-31.** Counts are from the file, not maintained by hand. Two things worth reading in
+them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
+surfaced three genuine defects (`S4-M39` config drift, `S4-M40` an undecided fork, `S4-M41` a fabricated
+zero cost) — a checklist whose open count only ever falls is one that has stopped looking. And **`[=]`
+means the engineering is done but an external gate is not**: `S4-P10` (needs on-chain enforcement),
+`S4-M13` (needs the runtime router lookup), `S4-M39` (structural fix shipped; one address pending).
 
 **How to read the open column, because the raw number misleads.** Of 135 open:
 
