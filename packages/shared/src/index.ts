@@ -15,6 +15,7 @@ export * from './tiers.js';
 export * from './jito.js';
 export * from './jupiter-swap.js';
 export * from './polymarket-clob-auth.js';
+export * from './polymarket-clob-credentials.js';
 export * from './slippage.js';
 export * from './email.js';
 
