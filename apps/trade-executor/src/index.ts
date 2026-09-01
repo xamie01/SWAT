@@ -1949,23 +1949,44 @@ export async function handleJob(
                 submissionType: 'transaction',
                 submissionId: result.transactionHash
               });
+              // S4-M41: read `baseSpend`, never `amountEth`. In `erc20` mode
+              // `amountEth` is `0`, and writing that as an ETH cost recorded a
+              // fabricated zero on a trade that spent a stablecoin -- which makes
+              // the position look like an infinite-return winner that can never
+              // trip a stop-loss. `null` is the honest record for a spend the
+              // ledger cannot yet denominate; `054` gives us `quote_currency` and
+              // an unassessed count precisely so unknown is representable.
+              const robinhoodQuoteLeg = result.baseSpend.kind === 'native'
+                ? { amount: result.baseSpend.amount.toString(), currency: 'ETH' as const }
+                : null;
+              if (!robinhoodQuoteLeg) {
+                console.warn(
+                  '[trade-executor] robinhood fill recorded without a quote leg: '
+                  + `base asset spend is ${result.baseSpend.kind}, which the ledger cannot `
+                  + 'denominate yet (S4-M41). Cost basis for this fill is unassessed, not zero.'
+                );
+              }
               await persistCanonicalFill({
                 execution: canonicalExecution,
                 evidenceType: 'chain_receipt',
                 evidenceId: result.transactionHash,
                 baseQuantity: tokenQuantity,
-                quoteLeg: { amount: result.amountEth.toString(), currency: 'ETH' },
+                quoteLeg: robinhoodQuoteLeg,
                 // Same gap as the Solana path: no priceUsd was passed, so
                 // copy_execution_evidence.price_usd was NULL on every robinhood
-                // live fill. Derived from the USD value and the units received.
-                priceUsd: deriveFillPriceUsd(
-                  valuateChainNativeQuoteLeg({
-                    chain: 'robinhood-chain',
-                    amount: result.amountEth,
-                    nativeUsdPrice: await getCachedEthPrice()
-                  }).usdAmount,
-                  tokenQuantity
-                )
+                // live fill. Derived from the USD value and the units received --
+                // and left null when the spend is unassessed, because a price
+                // derived from a fabricated zero is itself fabricated.
+                priceUsd: robinhoodQuoteLeg
+                  ? deriveFillPriceUsd(
+                    valuateChainNativeQuoteLeg({
+                      chain: 'robinhood-chain',
+                      amount: Number(robinhoodQuoteLeg.amount),
+                      nativeUsdPrice: await getCachedEthPrice()
+                    }).usdAmount,
+                    tokenQuantity
+                  )
+                  : null
               });
             }
           }

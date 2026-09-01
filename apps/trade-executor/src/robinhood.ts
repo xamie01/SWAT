@@ -418,12 +418,66 @@ export function createMemoryRobinhoodPendingStore(): RobinhoodPendingStore {
   };
 }
 
+/**
+ * What the fill actually cost, in the base asset, with its unit.
+ *
+ * Exists because `amountEth` cannot express the `erc20` base-asset mode: it is a
+ * `number` whose name hardcodes a currency that only one of the two modes uses.
+ * In `erc20` mode it was set to `0`, and the ledger recorded that zero as a real
+ * ETH cost -- a fabricated value on a trade that spent a stablecoin (S4-M41).
+ *
+ * `kind: 'unassessed'` is the honest answer when the spend cannot be expressed in
+ * a currency the ledger accepts. It is deliberately NOT the number zero: a zero
+ * cost basis makes an ordinary position look like an infinite-return winner, and
+ * one that can never trip a stop-loss.
+ */
+export type RobinhoodBaseSpend =
+  | { readonly kind: 'native'; readonly currency: 'ETH'; readonly amount: number }
+  | { readonly kind: 'erc20'; readonly token: `0x${string}`; readonly baseUnits: bigint }
+  | { readonly kind: 'unassessed'; readonly reason: string };
+
+/**
+ * Describes what a fill cost in the base asset, carrying the unit.
+ *
+ * Pure so it is testable without a chain, and shared by both result-construction
+ * sites so they cannot disagree -- the `native-weth` and `erc20` branches
+ * previously diverged only at a `: 0`, which is exactly the kind of difference
+ * that hides.
+ */
+export function describeRobinhoodBaseSpend(input: {
+  baseAssetMode: 'native-weth' | 'erc20';
+  baseAsset: `0x${string}`;
+  direction: 'buy' | 'sell';
+  actualAmountIn: bigint;
+  actualAmountOut: bigint;
+}): RobinhoodBaseSpend {
+  // On a buy the base asset is what went IN; on a sell it is what came OUT.
+  const baseUnits = input.direction === 'buy' ? input.actualAmountIn : input.actualAmountOut;
+  if (input.baseAssetMode === 'native-weth') {
+    return { kind: 'native', currency: 'ETH', amount: Number(formatEther(baseUnits)) };
+  }
+  // Base units only -- deliberately NOT converted to a decimal here. The token's
+  // decimals are a property of the token (USDG is 6, not 18), so formatting with
+  // the ether helpers would understate the amount by 10^12 and present as "no
+  // funds" rather than as a scaling bug. The caller that knows the decimals
+  // converts; until then the integer is exact and the unit is explicit.
+  return { kind: 'erc20', token: input.baseAsset, baseUnits };
+}
+
 export type RobinhoodFilledResult = {
   status: 'filled';
   clientOrderId: string;
   signature: Hex;
   transactionHash: Hex;
+  /**
+   * Legacy ETH-denominated amount. Meaningful ONLY in `native-weth` mode, where
+   * it equals `baseSpend.amount`; `0` in `erc20` mode, which is why `baseSpend`
+   * exists. Retained because sizing and alerting still read it. **Never write
+   * this into the ledger directly** -- read `baseSpend`.
+   */
   amountEth: number;
+  /** The unit-carrying spend. Prefer this over `amountEth` (S4-M41). */
+  baseSpend: RobinhoodBaseSpend;
   actualAmountIn: bigint;
   actualAmountOut: bigint;
   quotedAmountOut: bigint;
@@ -874,6 +928,13 @@ async function runRobinhoodOrder(input: Parameters<typeof executeRobinhoodOrder>
       amountEth: input.config.baseAssetMode === 'native-weth'
         ? Number(formatEther(input.order.direction === 'buy' ? actual.actualAmountIn : actual.actualAmountOut))
         : 0,
+      baseSpend: describeRobinhoodBaseSpend({
+        baseAssetMode: input.config.baseAssetMode,
+        baseAsset: input.config.baseAsset,
+        direction: input.order.direction,
+        actualAmountIn: actual.actualAmountIn,
+        actualAmountOut: actual.actualAmountOut
+      }),
       actualAmountIn: actual.actualAmountIn,
       actualAmountOut: actual.actualAmountOut,
       quotedAmountOut: route.amountOut,
@@ -994,6 +1055,13 @@ export async function reconcileRobinhoodPending(input: {
       amountEth: input.config.baseAssetMode === 'native-weth'
         ? Number(formatEther(pending.direction === 'buy' ? actual.actualAmountIn : actual.actualAmountOut))
         : 0,
+      baseSpend: describeRobinhoodBaseSpend({
+        baseAssetMode: input.config.baseAssetMode,
+        baseAsset: input.config.baseAsset,
+        direction: pending.direction,
+        actualAmountIn: actual.actualAmountIn,
+        actualAmountOut: actual.actualAmountOut
+      }),
       actualAmountIn: actual.actualAmountIn,
       actualAmountOut: actual.actualAmountOut,
       quotedAmountOut: BigInt(pending.quotedAmountOut),
