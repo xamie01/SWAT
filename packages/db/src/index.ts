@@ -56,3 +56,9 @@ export * from './quote-valuation.js';
  * trigger.
  */
 export * from './polymarket-exit-queries.js';
+
+/**
+ * Fan-out eligibility (S4-13) — who copies a signal, and a stable code for
+ * everyone who does not. Pure; the caller fetches, this decides.
+ */
+export * from './fanout-eligibility.js';
