@@ -59,12 +59,25 @@ def sol_row(events: dict, **kwargs) -> pl.DataFrame:
                 "events_json": json.dumps(events),
                 "token_transfers_json": "[]",
                 "native_transfers_json": "[]",
+                "instructions_json": json.dumps(kwargs.get("instructions", [])),
                 "_kol_address": "KOL",
                 "_kol_handle": "kol",
                 "_raw_file": "raw.parquet",
             }
         ]
     )
+
+
+SWAP_USDC_INTO_MEME = {
+    "swap": {
+        "tokenInputs": [
+            {"mint": USDC, "rawTokenAmount": {"tokenAmount": "1000000", "decimals": 6}}
+        ],
+        "tokenOutputs": [
+            {"mint": MEME, "rawTokenAmount": {"tokenAmount": "1000000", "decimals": 6}}
+        ],
+    }
+}
 
 
 class TestPolymarket:
@@ -107,6 +120,63 @@ class TestPolymarket:
     def test_redeem_derives_price_from_cash_when_absent(self) -> None:
         frame = normalize_polymarket(
             pm_rows([{"type": "REDEEM", "price": None, "size": 200.0, "usdcSize": 200.0}])
+        )
+        assert frame.row(0, named=True)["price"] == pytest.approx(1.0)
+
+    def test_a_losing_redemption_settles_at_zero_not_one(self) -> None:
+        """The label-corrupting case, and the reason `/activity` was chosen.
+
+        Per the Data API spec, one REDEEM row is emitted per outcome and its
+        ``usdcSize`` is that outcome's payout — exactly ``0`` for a loser. A
+        truthiness check on the payout (`usdcSize and size`) treats 0 as absent
+        and falls through to the $1 winning-share default, pricing every
+        redeemed loser at a full payout.
+
+        The damage is silent and total: a position bought at 0.40 and lost
+        would book proceeds equal to its cost and label as a break-even instead
+        of a -100% loss. Every win rate in the project would be inflated, and
+        nothing would crash.
+        """
+        frame = normalize_polymarket(
+            pm_rows(
+                [
+                    {
+                        "type": "REDEEM",
+                        "side": None,
+                        "price": None,
+                        "size": 100.0,
+                        "usdcSize": 0.0,
+                    }
+                ]
+            )
+        )
+        row = frame.row(0, named=True)
+        assert row["side"] == "sell"
+        assert row["price"] == pytest.approx(0.0)
+        assert row["size_usd"] == pytest.approx(0.0)
+
+    def test_a_partial_redemption_uses_the_real_payout(self) -> None:
+        """Fractional resolutions exist — a voided market can pay 0.5/share."""
+        frame = normalize_polymarket(
+            pm_rows(
+                [
+                    {
+                        "type": "REDEEM",
+                        "price": None,
+                        "size": 100.0,
+                        "usdcSize": 50.0,
+                    }
+                ]
+            )
+        )
+        assert frame.row(0, named=True)["price"] == pytest.approx(0.5)
+
+    def test_redeem_falls_back_to_one_only_when_cash_is_truly_absent(self) -> None:
+        """The $1 default is a guess, so it must be the last resort, not the first."""
+        frame = normalize_polymarket(
+            pm_rows(
+                [{"type": "REDEEM", "price": None, "size": 100.0, "usdcSize": None}]
+            )
         )
         assert frame.row(0, named=True)["price"] == pytest.approx(1.0)
 
@@ -287,6 +357,42 @@ class TestSolana:
             )
         )
         assert frame.row(0, named=True)["venue"] == "raydium"
+
+    def test_program_ids_override_the_helius_label(self) -> None:
+        """Helius says "JUPITER" for every routed swap.
+
+        The pool is what the KOL actually entered, and it is what decides which
+        board gets reconstructed for that decision — so the program id has to
+        win over the label.
+        """
+        from pattern_ml.venues import BY_VENUE
+
+        frame = normalize_solana(
+            sol_row(
+                SWAP_USDC_INTO_MEME,
+                source="JUPITER",
+                instructions=[
+                    {
+                        "programId": BY_VENUE["jupiter-v6"].address,
+                        "innerInstructions": [
+                            {"programId": BY_VENUE["pump-bonding-curve"].address}
+                        ],
+                    }
+                ],
+            )
+        )
+        row = frame.row(0, named=True)
+        assert row["venue"] == "pump-bonding-curve"
+        assert row["router"] == "jupiter-v6"
+
+    def test_malformed_instructions_fall_back_to_the_label(self) -> None:
+        """A bad payload must degrade the venue, never drop the trade."""
+        frame = normalize_solana(sol_row(SWAP_USDC_INTO_MEME, source="RAYDIUM"))
+        frame_bad = normalize_solana(
+            sol_row(SWAP_USDC_INTO_MEME, source="RAYDIUM", instructions=[])
+        )
+        assert frame.row(0, named=True)["venue"] == "raydium"
+        assert frame_bad.row(0, named=True)["venue"] == "raydium"
 
     def test_empty_input(self) -> None:
         assert normalize_solana(pl.DataFrame()).is_empty()

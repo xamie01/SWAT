@@ -22,6 +22,7 @@ from ..schema import (
     conform,
     empty_frame,
 )
+from ..venues import resolve_venue
 
 # Stablecoin mints are USD 1:1 for sizing purposes.
 STABLE_MINTS: frozenset[str] = frozenset(
@@ -112,9 +113,22 @@ def normalize_polymarket(raw: pl.DataFrame) -> pl.DataFrame:
         else:
             # A redemption/merge removes shares and returns cash: an exit.
             side = SIDE_SELL
-            if price is None:
-                # Winning shares redeem at $1. If the API gave us cash, prefer it.
-                price = (usdc_size / size) if (usdc_size and size) else 1.0
+            # Per the Data API spec, on a REDEEM row ``usdcSize`` *is* the payout
+            # for that row's outcome, and it is exactly **0** for a losing
+            # outcome (one row is emitted per outcome). So the payout is
+            # authoritative and the price must be derived from it.
+            #
+            # Defaulting to 1.0 when the payout is zero — which a truthiness
+            # check does, since `0 and size` is falsy — would price every
+            # redeemed loser at a full $1 payout and turn losses into
+            # break-evens. That is exactly the label corruption `/activity` was
+            # chosen to avoid, so the check is explicitly `is not None`.
+            if usdc_size is not None and size:
+                price = usdc_size / size
+            elif price is None:
+                # The API gave us neither a payout nor a price. A winning share
+                # settles at $1; this is the only branch where that is a guess.
+                price = 1.0
             if usdc_size is None:
                 usdc_size = size * price
 
@@ -165,6 +179,22 @@ def normalize_polymarket(raw: pl.DataFrame) -> pl.DataFrame:
 # -----------------------------------------------------------------------------
 # Solana
 # -----------------------------------------------------------------------------
+
+
+def _instructions(payload: str | None) -> list[dict]:
+    """Decode the stored instruction list; an unusable payload yields nothing.
+
+    A missing or malformed payload must not raise: `resolve_venue` falls back to
+    the Helius source label, so the row survives with a coarser venue rather
+    than being dropped.
+    """
+    if not payload:
+        return []
+    try:
+        decoded = json.loads(payload)
+    except (TypeError, ValueError):
+        return []
+    return decoded if isinstance(decoded, list) else []
 
 
 def _swap_legs(events_json: str | None) -> tuple[list[dict], list[dict]] | None:
@@ -309,6 +339,14 @@ def normalize_solana(
         )
 
         signature = row.get("signature")
+        # Venue from program ids, not from Helius's `source` label: the label
+        # collapses every routed order to "JUPITER" and cannot tell a bonding
+        # curve from an AMM. The choice-set builder needs that distinction to
+        # know which board to reconstruct.
+        venue, router = resolve_venue(
+            _instructions(row.get("instructions_json")),
+            helius_source=row.get("source"),
+        )
         rows.append(
             {
                 "trade_id": _trade_id("solana", signature, base_mint, side),
@@ -316,7 +354,8 @@ def normalize_solana(
                 "kol_address": row.get("_kol_address"),
                 "kol_handle": row.get("_kol_handle"),
                 "ts": ts,
-                "venue": (row.get("source") or "unknown").lower(),
+                "venue": venue,
+                "router": router,
                 "market_id": base_mint,
                 "market_label": None,  # token symbol resolved later, if at all
                 "outcome": None,  # a token has no outcome

@@ -41,9 +41,10 @@ from .schema import (
     REL_CHOSEN,
     REL_IGNORED,
     REL_LATER,
+    PolymarketScreen,
+    PumpFunScreen,
     Screen,
     SolanaScreen,
-    PolymarketScreen,
     screen_coverage,
 )
 
@@ -53,8 +54,9 @@ __all__ = [
     "REL_CHOSEN",
     "REL_IGNORED",
     "REL_LATER",
+    "PolymarketScreen",
+    "PumpFunScreen",
     "Screen",
     "SolanaScreen",
-    "PolymarketScreen",
     "screen_coverage",
 ]

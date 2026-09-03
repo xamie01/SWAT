@@ -69,15 +69,25 @@ class MarketSnapshotProvider(Protocol):
     chain: str
     source: str
 
-    def candidates_at(self, at: datetime, *, limit: int = 200) -> list[dict]:
+    def candidates_at(
+        self, at: datetime, *, limit: int = 200, venue: str | None = None
+    ) -> list[dict]:
         """Every plausibly-visible asset at ``at``, pre-screen.
 
         Returns dicts keyed by the feature names in
         ``choice.schema.CANDIDATE_SCHEMA`` (``market_id`` required).
+
+        ``venue`` is the protocol the trade being reconstructed executed on. On
+        Solana it decides the whole question asked — a launchpad board and a
+        Raydium trending list are different universes at the same instant.
+        Providers for venues where it is meaningless (Polymarket has one order
+        book) accept and ignore it.
         """
         ...
 
-    def features_at(self, market_id: str, at: datetime) -> dict | None:
+    def features_at(
+        self, market_id: str, at: datetime, *, venue: str | None = None
+    ) -> dict | None:
         """Point-in-time features for one asset.
 
         Needed when the chosen asset failed the screen and must be re-inserted
@@ -87,12 +97,16 @@ class MarketSnapshotProvider(Protocol):
 
 
 class SnapshotCache:
-    """On-disk cache of snapshots, keyed by (chain, minute).
+    """On-disk cache of snapshots, keyed by (chain, venue, minute).
 
     Reconstruction is expensive and rate-limited, and several KOLs trading in
     the same minute must all see the *same* U_t — otherwise the model can learn
     which provider call produced a row. Caching to the minute enforces that and
     makes re-runs free.
+
+    Venue is part of the key, not a detail. Two KOLs trading at 14:02 — one on a
+    Pump.fun curve, one on Raydium — were looking at different boards, and
+    serving one the other's universe would fabricate alternatives neither faced.
 
     Minute granularity is a deliberate rounding: it is the resolution most
     OHLCV sources offer anyway, and sub-minute precision would multiply cost
@@ -104,16 +118,17 @@ class SnapshotCache:
         self._root = root or (settings.data_dir / "snapshots")
         self._root.mkdir(parents=True, exist_ok=True)
 
-    def _path(self, chain: str, at: datetime) -> Path:
+    def _path(self, chain: str, at: datetime, venue: str | None = None) -> Path:
         minute = at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M")
         # Shard by day so a directory never holds a million files.
         day = minute[:8]
-        directory = self._root / chain / day
+        scope = _safe_scope(venue) if venue else "_all"
+        directory = self._root / chain / scope / day
         directory.mkdir(parents=True, exist_ok=True)
         return directory / f"{minute}.json"
 
-    def get(self, chain: str, at: datetime) -> list[dict] | None:
-        path = self._path(chain, at)
+    def get(self, chain: str, at: datetime, venue: str | None = None) -> list[dict] | None:
+        path = self._path(chain, at, venue)
         if not path.exists():
             return None
         try:
@@ -123,8 +138,14 @@ class SnapshotCache:
             return None
         return payload if isinstance(payload, list) else None
 
-    def put(self, chain: str, at: datetime, candidates: list[dict]) -> None:
-        path = self._path(chain, at)
+    def put(
+        self,
+        chain: str,
+        at: datetime,
+        candidates: list[dict],
+        venue: str | None = None,
+    ) -> None:
+        path = self._path(chain, at, venue)
         # Write-then-rename so a crash mid-write cannot leave a truncated file
         # that a later run would read as authoritative.
         tmp = path.with_suffix(".tmp")
@@ -139,12 +160,17 @@ class SnapshotCache:
         return counts
 
 
+def _safe_scope(venue: str) -> str:
+    """Venue names come from an API field, so they cannot be trusted as paths."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in venue)[:48] or "_all"
+
+
 class CachingProvider:
     """Wraps a provider so repeated calls for the same minute hit disk.
 
     Also the enforcement point for same-minute consistency: two KOLs trading at
-    14:02:07 and 14:02:41 get an identical U_t, because they were looking at the
-    same board.
+    14:02:07 and 14:02:41 on the same venue get an identical U_t, because they
+    were looking at the same board.
     """
 
     def __init__(self, inner: MarketSnapshotProvider, cache: SnapshotCache | None = None):
@@ -153,16 +179,20 @@ class CachingProvider:
         self.chain = inner.chain
         self.source = inner.source
 
-    def candidates_at(self, at: datetime, *, limit: int = 200) -> list[dict]:
-        cached = self._cache.get(self.chain, at)
+    def candidates_at(
+        self, at: datetime, *, limit: int = 200, venue: str | None = None
+    ) -> list[dict]:
+        cached = self._cache.get(self.chain, at, venue)
         if cached is not None:
             return cached[:limit]
-        fetched = self._inner.candidates_at(at, limit=limit)
-        self._cache.put(self.chain, at, fetched)
+        fetched = self._inner.candidates_at(at, limit=limit, venue=venue)
+        self._cache.put(self.chain, at, fetched, venue)
         return fetched
 
-    def features_at(self, market_id: str, at: datetime) -> dict | None:
-        return self._inner.features_at(market_id, at)
+    def features_at(
+        self, market_id: str, at: datetime, *, venue: str | None = None
+    ) -> dict | None:
+        return self._inner.features_at(market_id, at, venue=venue)
 
 
 class ForwardCollector:
@@ -180,12 +210,14 @@ class ForwardCollector:
         self._provider = provider
         self._cache = cache or SnapshotCache()
 
-    def collect(self, *, limit: int = 200) -> tuple[datetime, int]:
+    def collect(
+        self, *, limit: int = 200, venue: str | None = None
+    ) -> tuple[datetime, int]:
         """Take one snapshot of the current universe. Returns (when, how many)."""
         now = datetime.now(timezone.utc)
-        candidates = self._provider.candidates_at(now, limit=limit)
+        candidates = self._provider.candidates_at(now, limit=limit, venue=venue)
         for candidate in candidates:
             candidate["snapshot_source"] = SOURCE_LIVE
             candidate["snapshot_at"] = now.isoformat()
-        self._cache.put(self._provider.chain, now, candidates)
+        self._cache.put(self._provider.chain, now, candidates, venue)
         return now, len(candidates)

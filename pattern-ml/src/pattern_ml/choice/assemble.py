@@ -22,6 +22,7 @@ trader likes.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 import polars as pl
@@ -42,6 +43,31 @@ from .snapshot import MarketSnapshotProvider
 # A group with too few alternatives teaches nothing — ranking one item against
 # zero others is not a ranking problem.
 MIN_CANDIDATES = 3
+
+# A screen per venue, or one screen for everything. The per-venue form exists
+# because a launchpad board and an AMM trending list are ranked by different
+# things, and forcing one screen across both would describe neither.
+ScreenSpec = Screen | Mapping[str, Screen]
+
+
+def _screen_for(spec: ScreenSpec, venue: str | None) -> Screen | None:
+    """Resolve the screen governing one decision.
+
+    A mapping without a match returns ``None``, which drops the decision. That
+    is intentional: assembling a launchpad buy against an AMM screen would
+    manufacture alternatives the trader never saw, and a silently mis-screened
+    group is worse than a missing one.
+    """
+    if not isinstance(spec, Mapping):
+        return spec
+    if venue and venue in spec:
+        return spec[venue]
+    from ..venues import venue_kind
+
+    kind = venue_kind(venue) if venue else None
+    if kind and kind in spec:
+        return spec[kind]
+    return spec.get("*")
 
 
 def _group_id(kol_address: str, market_id: str, at: datetime) -> str:
@@ -131,7 +157,7 @@ def _prior_kol_context(
 def build_choice_sets(
     trades: pl.DataFrame,
     provider: MarketSnapshotProvider,
-    screen: Screen,
+    screen: ScreenSpec,
     *,
     chain: str,
     later_window: timedelta = DEFAULT_LATER_WINDOW,
@@ -140,6 +166,9 @@ def build_choice_sets(
     max_decisions: int | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Turn KOL buys into ranked training groups.
+
+    ``screen`` is either one ``Screen`` or a mapping keyed by venue name or
+    venue kind (``"bonding-curve"``, ``"amm"``), with ``"*"`` as the fallback.
 
     Returns ``(candidates, choice_sets)`` — the per-candidate training matrix
     and one metadata row per decision.
@@ -161,22 +190,48 @@ def build_choice_sets(
         kol = entry["kol_address"]
         chosen_id = entry["market_id"]
         at = entry["ts"]
+        # The venue the KOL actually traded on decides which board gets
+        # reconstructed. On Solana this is the whole question; on Polymarket
+        # there is one order book and the provider ignores it.
+        venue = entry.get("venue")
 
-        universe = provider.candidates_at(at)
+        active_screen = _screen_for(screen, venue)
+        if active_screen is None:
+            continue
+
+        universe = provider.candidates_at(at, venue=venue)
         if not universe:
             continue
 
+        # Category gating, when the screen asks for it. A politics specialist
+        # was not choosing between an election and a football game, so markets
+        # from unrelated categories are phantom alternatives. Enforced here
+        # rather than in `Screen.passes`, which sees one candidate at a time and
+        # cannot know the chosen market's category.
+        if getattr(active_screen, "same_category_only", False):
+            chosen_row = next(
+                (c for c in universe if c.get("market_id") == chosen_id), None
+            )
+            chosen_category = chosen_row.get("category") if chosen_row else None
+            if chosen_category:
+                universe = [
+                    c
+                    for c in universe
+                    if c.get("category") == chosen_category
+                    or c.get("market_id") == chosen_id
+                ]
+
         # Screen, then take the top slice by attention order.
-        passing = [c for c in universe if screen.passes(c)]
-        passing.sort(key=screen.rank_key, reverse=True)
-        passing = passing[: screen.max_candidates]
+        passing = [c for c in universe if active_screen.passes(c)]
+        passing.sort(key=active_screen.rank_key, reverse=True)
+        passing = passing[: active_screen.max_candidates]
 
         chosen_passed = any(c.get("market_id") == chosen_id for c in passing)
         if not chosen_passed:
             # The chosen asset was invisible to our screen. Re-insert it so the
             # group has a positive, and flag it — a KOL with many such groups is
             # telling you the screen does not describe how they find trades.
-            features = provider.features_at(chosen_id, at)
+            features = provider.features_at(chosen_id, at, venue=venue)
             if features is None:
                 continue
             features["market_id"] = chosen_id
@@ -221,6 +276,8 @@ def build_choice_sets(
                 "market_id": market_id,
                 "market_label": candidate.get("market_label"),
                 "outcome": candidate.get("outcome"),
+                "venue": venue,
+                "category": candidate.get("category"),
                 "relevance": relevance,
                 "chosen": market_id == chosen_id,
                 "snapshot_source": candidate.get("snapshot_source", provider.source),
@@ -243,9 +300,10 @@ def build_choice_sets(
                 "kol_handle": entry.get("kol_handle"),
                 "decided_at": at,
                 "chosen_market_id": chosen_id,
+                "venue": venue,
                 "n_candidates": len(kept),
                 "n_positive": n_positive,
-                "screen_name": screen.name,
+                "screen_name": active_screen.name,
                 "snapshot_source": provider.source,
                 "chosen_passed_screen": chosen_passed,
             }

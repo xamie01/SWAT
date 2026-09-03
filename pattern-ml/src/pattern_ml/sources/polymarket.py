@@ -18,16 +18,20 @@ Two further defaults on the Data API that bite if left alone:
 
 Paging
 ------
-Offsets are capped server-side (the cap has been tightened over time — the
-changelog cut it to 1000, the reference documents higher). Rather than betting
-on one number we page in ``start``-anchored windows: walk ascending until the
-offset budget is spent, then re-anchor ``start`` on the newest row seen and
-reset the offset. Rows repeated at a window boundary cost nothing because the
-trade id is a content hash and the warehouse dedupes on it.
+Verified against the Data API OpenAPI spec: ``/activity`` clamps ``limit`` to
+500 and **rejects** ``offset`` above 5000 with a 400 rather than clamping it.
+The spec's own guidance for reading deeper is exactly the strategy used here —
+page in ``start``/``end`` windows, each of which gets a fresh offset budget.
 
-Ascending order is deliberate: with ``sortDirection=ASC`` and a positive
-``start`` the feed reads from the beginning of the account's history rather
-than the default ~3-year window, which is what full-history mining needs.
+So: walk ascending until the offset budget is spent, then re-anchor ``start``
+on the newest row seen and reset the offset. Rows repeated at a window boundary
+cost nothing because the trade id is a content hash and the warehouse dedupes
+on it.
+
+Ascending order is deliberate, and the spec confirms why: with
+``sortDirection=ASC`` the feed reads from the beginning of the account's history
+rather than the default ~3-year window. Both orders are documented as *stable*,
+so pages compose without gaps or repeats.
 """
 
 from __future__ import annotations
@@ -41,13 +45,13 @@ import polars as pl
 from ..config import Kol, get_settings
 from .base import HttpSource, PullStats, SourceError
 
-# The Data API clamps `limit`; 500 is the documented maximum.
+# Spec: `limit` on /activity is clamped to 500.
 ACTIVITY_PAGE_LIMIT = 500
 
-# Conservative offset budget. The documented cap has moved between 1000 and
-# 5000; staying at 1000 costs only a few extra window re-anchors and can never
-# trip the 400 that a too-deep offset returns.
-ACTIVITY_MAX_OFFSET = 1_000
+# Spec: `offset` on /activity is capped at 5000, and a request past the cap is
+# "rejected with a 400 (never silently clamped)". Budget one page short of the
+# cap so the final in-window request cannot cross it.
+ACTIVITY_MAX_OFFSET = 5_000
 
 # Everything that moves share quantity or cash for a position. Deposits and
 # withdrawals are excluded separately (they are bankroll, not position, flow).

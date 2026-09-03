@@ -22,7 +22,11 @@ def isolated_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterat
     monkeypatch.setenv("PATTERN_ML_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("PATTERN_ML_DB", str(tmp_path / "data" / "test.duckdb"))
     # Never let a real key leak into a test run and fire a live request.
+    # `config` reads the repo-root .env as a fallback, so a key present there
+    # would otherwise reach the provider tests.
     monkeypatch.delenv("HELIUS_API_KEY", raising=False)
+    monkeypatch.delenv("BITQUERY_TOKEN", raising=False)
+    monkeypatch.delenv("BITQUERY_API_KEY", raising=False)
 
     # The settings cache would otherwise hand back paths from a previous test.
     get_settings.cache_clear()

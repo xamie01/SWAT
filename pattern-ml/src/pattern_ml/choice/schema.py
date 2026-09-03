@@ -51,6 +51,11 @@ CANDIDATE_SCHEMA: dict[str, pl.DataType] = {
     "market_id": pl.Utf8,
     "market_label": pl.Utf8,
     "outcome": pl.Utf8,
+    # which board this decision was made on — the universe the alternatives
+    # were drawn from, kept so a model is never trained across mixed venues
+    # without that being visible
+    "venue": pl.Utf8,
+    "category": pl.Utf8,
     # label
     "relevance": pl.Int32,
     "chosen": pl.Boolean,
@@ -73,6 +78,9 @@ CANDIDATE_SCHEMA: dict[str, pl.DataType] = {
     "holder_count": pl.Float64,
     "top10_holder_pct": pl.Float64,
     "spread_pct": pl.Float64,
+    # Bonding-curve progress in [0, 1]: 0 is a fresh launch, 1 is migration to
+    # an AMM. Null off launchpads, which is correct — an AMM token has no curve.
+    "curve_completion": pl.Float64,
     # roster-relative: how many tracked KOLs were already in, before t
     "prior_kol_entries": pl.Float64,
     "seconds_since_first_kol_entry": pl.Float64,
@@ -86,6 +94,7 @@ CHOICE_SET_SCHEMA: dict[str, pl.DataType] = {
     "kol_handle": pl.Utf8,
     "decided_at": pl.Datetime(time_unit="us", time_zone="UTC"),
     "chosen_market_id": pl.Utf8,
+    "venue": pl.Utf8,
     "n_candidates": pl.Int32,
     "n_positive": pl.Int32,
     "screen_name": pl.Utf8,
@@ -113,6 +122,7 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "holder_count",
     "top10_holder_pct",
     "spread_pct",
+    "curve_completion",
     "prior_kol_entries",
     "seconds_since_first_kol_entry",
 )
@@ -152,36 +162,81 @@ class Screen(Protocol):
 
 @dataclass(frozen=True)
 class SolanaScreen:
-    """Approximates a memecoin trending board.
+    """Approximates a DEX trending board — Raydium, Meteora, Orca, PumpSwap.
 
-    Defaults follow the shape of a typical DexScreener/Pump.fun filter: young,
-    liquid enough to trade, and showing real recent volume. They are a starting
-    point to be tuned against ``screen_coverage``, not received wisdom.
+    Only ``min_volume_5m_usd`` is on by default, because it is the only field
+    the Bitquery reconstruction fills for every candidate.
+
+    ``max_age_seconds`` and ``min_liquidity_usd`` default to ``None`` — off —
+    and that is a correctness requirement, not laziness. Age is censored
+    whenever a token first traded before the discovery window, and liquidity
+    costs an extra query per program per decision (``fetch_liquidity=True`` on
+    the provider). Gating on a field the reconstruction usually cannot fill
+    would reject every candidate and produce zero choice sets. Worse, gating on
+    one that live scoring *can* fill while historical assembly cannot would
+    train and serve from two different universes.
+
+    Turn either on only once the provider demonstrably fills it — check the null
+    rate in ``artifacts/choice_candidates.parquet`` before doing so.
     """
 
     name: str = "solana-trending"
-    max_age_seconds: float = 12 * 3600
     min_volume_5m_usd: float = 10_000.0
-    min_liquidity_usd: float = 5_000.0
+    max_age_seconds: float | None = None
+    min_liquidity_usd: float | None = None
     max_candidates: int = 20
 
     def passes(self, candidate: dict) -> bool:
-        age = candidate.get("age_seconds")
         volume = candidate.get("volume_5m_usd")
-        liquidity = candidate.get("liquidity_usd")
         # A missing value is not a pass. Admitting unknowns would fill U_t with
         # candidates whose features are all null, and the model would learn to
         # rank on missingness — which does not exist at serve time.
-        if age is None or volume is None or liquidity is None:
+        if volume is None or volume < self.min_volume_5m_usd:
             return False
-        return (
-            age <= self.max_age_seconds
-            and volume >= self.min_volume_5m_usd
-            and liquidity >= self.min_liquidity_usd
-        )
+        if self.max_age_seconds is not None:
+            age = candidate.get("age_seconds")
+            if age is None or age > self.max_age_seconds:
+                return False
+        if self.min_liquidity_usd is not None:
+            liquidity = candidate.get("liquidity_usd")
+            if liquidity is None or liquidity < self.min_liquidity_usd:
+                return False
+        return True
 
     def rank_key(self, candidate: dict) -> float:
         return float(candidate.get("volume_5m_usd") or 0.0)
+
+
+@dataclass(frozen=True)
+class PumpFunScreen:
+    """Approximates a launchpad board — Pump.fun, Moonshot, LaunchLab.
+
+    A different question from the AMM screen, deliberately. Nobody watching a
+    bonding-curve board sorts by dollar volume; they sort by how close a curve
+    is to migrating, because migration is the event being front-run. So the gate
+    and the attention ordering are both curve completion.
+
+    Both fields come free with the curve-state query, so unlike ``SolanaScreen``
+    this screen gates on values the provider actually fills.
+    """
+
+    name: str = "pump-launchpad"
+    min_completion: float = 0.70
+    min_liquidity_usd: float = 0.0
+    max_candidates: int = 20
+
+    def passes(self, candidate: dict) -> bool:
+        completion = candidate.get("curve_completion")
+        if completion is None or completion < self.min_completion:
+            return False
+        if self.min_liquidity_usd > 0:
+            liquidity = candidate.get("liquidity_usd")
+            if liquidity is None or liquidity < self.min_liquidity_usd:
+                return False
+        return True
+
+    def rank_key(self, candidate: dict) -> float:
+        return float(candidate.get("curve_completion") or 0.0)
 
 
 @dataclass(frozen=True)
@@ -191,11 +246,18 @@ class PolymarketScreen:
     Far more tractable than Solana: the live universe is hundreds of markets,
     not a hundred thousand, so U_t is close to genuinely enumerable rather than
     approximated.
+
+    ``max_spread_pct`` defaults to ``None`` — off. Spread requires an order-book
+    snapshot, and there is no historical endpoint for one, so a spread-gated
+    screen can be applied live but never reconstructed. Enabling it would make
+    historical and live choice sets come from *different* universes, which is
+    worse than not filtering on it at all. Turn it on only if you have a
+    provider that fills the field historically.
     """
 
     name: str = "polymarket-active"
     min_volume_24h_usd: float = 50_000.0
-    max_spread_pct: float = 3.0
+    max_spread_pct: float | None = None
     max_candidates: int = 20
     # When set, only markets sharing the chosen market's category compete. A
     # politics specialist was not choosing between an election and a football
@@ -204,10 +266,13 @@ class PolymarketScreen:
 
     def passes(self, candidate: dict) -> bool:
         volume = candidate.get("volume_24h_usd")
-        spread = candidate.get("spread_pct")
-        if volume is None or spread is None:
+        if volume is None or volume < self.min_volume_24h_usd:
             return False
-        return volume >= self.min_volume_24h_usd and spread <= self.max_spread_pct
+        if self.max_spread_pct is not None:
+            spread = candidate.get("spread_pct")
+            if spread is None or spread > self.max_spread_pct:
+                return False
+        return True
 
     def rank_key(self, candidate: dict) -> float:
         return float(candidate.get("volume_24h_usd") or 0.0)

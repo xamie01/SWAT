@@ -53,7 +53,8 @@ CANONICAL_TRADE_SCHEMA: dict[str, pl.DataType] = {
     # when
     "ts": pl.Datetime(time_unit="us", time_zone="UTC"),
     # what
-    "venue": pl.Utf8,           # jupiter | raydium | pump | polymarket-clob | …
+    "venue": pl.Utf8,           # pump-bonding-curve | raydium-amm-v4 | polymarket-clob | …
+    "router": pl.Utf8,          # aggregator the order went through, if any
     "market_id": pl.Utf8,
     "market_label": pl.Utf8,
     "outcome": pl.Utf8,
