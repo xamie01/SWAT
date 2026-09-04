@@ -130,6 +130,27 @@ Test counts after that session: `@swat/db` **357**, `@swat/shared` **214**, `@sw
 | **First admin — read this before running the dashboard** | The operator console is admin-only now, and **signing up through the app creates a plain `user`, never an admin**, so there is otherwise no way in. Set `ADMIN_EMAIL` + `ADMIN_INITIAL_PASSWORD` (both newly documented in `.env.example`) and run `pnpm --filter @swat/db seed:admin` once. Idempotent; never rewrites an existing admin's password; refuses under 12 characters |
 | Frontend design system | **Reuse the existing tokens verbatim** — Geist / Geist Mono / Material Symbols, the Material 3 surface families, and the semantic chain accents `solana-teal #14F195`, `polymarket-violet #8B5CF6`, `robinhood-amber #FFB800`. Full table in checklist §9 |
 
+## 4b. Parallel work — the tracker and the ownership rule
+
+**`docs/agents/build-progress.md` is the work-in-flight view.** The checklist is the
+specification; that file says what is being built right now, by whom, and against which
+verification baselines. It tracks nothing finished — a row is deleted when the item lands and
+its evidence moves into the checklist entry.
+
+**Why file ownership is exclusive and written down.** Two agents editing one file produces a
+merge the master agent has to referee, and the losing edit is usually the one with the better
+reasoning attached to it. So every in-flight row names the files it owns, and nothing else may
+touch them.
+
+**Two files are master-agent-only, always:** `packages/db/src/index.ts` and
+`packages/shared/src/index.ts`. Both are re-emitted to `dist/`, so an agent editing one cannot
+see the consequence of its own change — its package stays green while a *different* package
+breaks. See `stale-dist-hazards.md`; this has cost real time four times.
+
+**Migration numbers are allocated in the dispatch, never chosen by the agent.** Two agents that
+both take "the next free number" collide, and the collision surfaces as a migration that
+silently never runs.
+
 ## 5. Open questions — these need the human, don't invent answers
 
 - **OQ-3 — CLOSED 2026-08-19: Robinhood Chain supports Permit2.** `S4-M13` is now "use Permit2", fallback dropped. Two consequences: a mirror becomes one transaction instead of approve-then-swap, and `S4-P10`'s argument-level check moves off `approve`'s spender onto the permit's token/spender/amount/deadline fields.
