@@ -25,8 +25,17 @@ stayed green, so the bar is: break it, watch a *named* test fail, restore it, re
 
 ## In flight
 
-*Nothing dispatched. The 2026-09-01 decision set (`S4-M42`/`43`/`44`/`45`) has landed;
-fan-out `S4-14`/`S4-15` is next and the cap it depends on now exists.*
+| Item | Owns | Migration | Status |
+|---|---|---|---|
+| `S4-14` per-user enqueue + the `S4-13` candidate query | `packages/db/src/fanout-candidates.ts` (new), `apps/signal-engine/src/fanout-enqueue.ts` (new), `apps/signal-engine/src/index.ts` | none | dispatched |
+| `S4-15`/`S4-16`/`S4-17` per-user sizing, risk keys, platform clamp | `apps/trade-executor/src/per-user-sizing.ts` (new), `policy.ts` | none | dispatched |
+
+**Neither may edit `apps/trade-executor/src/index.ts`** — both need wiring there, so each
+reports a diff and the master agent applies them together. Two agents editing the executor's
+entry point is the merge this ownership rule exists to prevent.
+
+**Neither allocates a migration.** If either concludes one is needed it stops and reports,
+rather than guessing a number — the collision surfaces as a migration that silently never runs.
 
 | Item | Owns | Migration | Status |
 |---|---|---|---|
