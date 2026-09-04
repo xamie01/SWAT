@@ -57,7 +57,7 @@ end of this block after any batch of ticks.
 | 8. Stage 5 — billing | 0 | 6 | 0 | not started; needs the Stripe MCP server first |
 | 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **76** | **146** | **15** | |
+| **Total** | **77** | **142** | **15** | |
 
 **Regenerated 2026-08-31.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
