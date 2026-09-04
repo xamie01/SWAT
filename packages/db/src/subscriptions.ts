@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { capabilitiesFor, quotaExceeded, type Chain, type UserTier } from '@swat/shared';
 import { query } from './client.js';
+import { claimMasterMembershipSlot, requireGrantedSlot } from './master-membership.js';
 import { withTransaction } from './transaction.js';
 import type { UserScope } from './tenancy.js';
 
@@ -177,6 +178,15 @@ export class IllegalSubscriptionTransitionError extends Error {
 
 export type SubscriptionSource = 'manual' | 'platform-signal' | 'discovered';
 
+/**
+ * One subscription as a user is allowed to see it.
+ *
+ * **There is deliberately no `membershipSlot` field** (`S4-M9`). The ordinal
+ * migration `056` stores is a rank, and a rank is a headcount signal: "you are
+ * member #37" tells a user roughly how many people are ahead of them in the
+ * queue behind one worker, and tells a master when farming their own followers
+ * pays. Adding it here would ship it straight to `GET /v1/me/wallets`.
+ */
 export interface WalletSubscription {
   readonly walletAddress: string;
   readonly label: string | null;
@@ -204,11 +214,31 @@ interface SubscriptionRow {
   wound_down_at: Date | null;
   ended_at: Date | null;
   close_all_requested_at: Date | null;
+  /**
+   * Present only on reads that use `SUBSCRIPTION_INTERNAL_COLUMNS`. Optional so
+   * the user-facing reads cannot accidentally be typed as if they had it.
+   */
+  membership_slot?: number | null;
+  membership_grandfathered?: boolean;
 }
 
 /** Every column `toSubscription` needs, in one place so the reads cannot drift. */
 const SUBSCRIPTION_COLUMNS = `wallet_address, label, source, created_at,
           state, active_since, wound_down_at, ended_at, close_all_requested_at`;
+
+/**
+ * The above plus the membership-slot columns (migration `056`).
+ *
+ * Kept separate rather than folded into `SUBSCRIPTION_COLUMNS` because a slot
+ * ordinal is a **rank**, and a rank discloses the follower count `S4-M9`
+ * forbids showing — "you are member #37" tells a user roughly how many people
+ * are ahead of them and tells a master when farming their own followers pays.
+ * `toSubscription` therefore has no field for it, and only the writers that
+ * must allocate or release an ordinal select it.
+ */
+const SUBSCRIPTION_INTERNAL_COLUMNS =
+  `${SUBSCRIPTION_COLUMNS},
+          membership_slot, membership_grandfathered`;
 
 function toSubscription(row: SubscriptionRow): WalletSubscription {
   return {
@@ -331,6 +361,15 @@ async function assertTrackedWalletQuota(
  * Also the **re-subscribe** path (S4-M3): a `winding_down` or `ended` row is
  * transitioned back to `active` here rather than in a separate helper, so the
  * tracked-wallet quota is resolved in exactly one place.
+ *
+ * **Two independent caps bind here and they are not interchangeable.** The
+ * tracked-wallet quota is the *user's* limit — how many masters this account may
+ * follow — and over it means 402, upgrade and you may. The membership cap
+ * (`S4-M43`, migration `056`) is the *master's* limit — how many users it may
+ * serve — and over it means a refusal no upgrade can lift. The quota is checked
+ * first because it is the more specific answer to the caller, and because
+ * telling a user "the master is not accepting copiers" when they could not have
+ * subscribed anyway discloses the master's state for nothing (`S4-M9`).
  */
 export async function subscribeToWallet(
   scope: UserScope,
@@ -349,14 +388,17 @@ export async function subscribeToWallet(
     await lockUserForQuota(client, scope.userId);
 
     const existing = await client.query<SubscriptionRow>(
-      `SELECT ${SUBSCRIPTION_COLUMNS}
+      `SELECT ${SUBSCRIPTION_INTERNAL_COLUMNS}
          FROM user_wallet_subscriptions
         WHERE user_id = $1 AND wallet_address = $2`,
       [scope.userId, input.walletAddress]
     );
     const current = existing.rows[0];
 
-    // Already active: idempotent success, and it must not consume quota.
+    // Already active: idempotent success, and it must not consume quota. Nor a
+    // membership slot — the row already holds one (or is grandfathered), and
+    // running the allocator here would refuse an existing member their own
+    // wallet the moment the master filled up.
     if (current && current.state === 'active') {
       return {
         subscription: toSubscription(current),
@@ -384,6 +426,25 @@ export async function subscribeToWallet(
       if (current.state === 'ended') {
         await assertTrackedWalletQuota(client, scope.userId, capabilities.trackedWallets);
       }
+
+      // S4-M43 / S4-M44. Neither a `winding_down` nor an `ended` row holds a
+      // membership ordinal — migration `056`'s CHECK makes that unrepresentable
+      // — so re-entering `active` is an ordinary allocation and is refused when
+      // the master is full. The slot the user used to hold is not reserved for
+      // them: a reservation is a queue, and a queue holding a slot for an absent
+      // user makes the cap dishonest.
+      //
+      // Note this also applies to `winding_down → active`, the "changed my mind"
+      // path. It has to: the row released its ordinal when it wound down, and
+      // exempting it would let a user hold a slot indefinitely by cycling.
+      const membership = await claimMasterMembershipSlot(client, {
+        masterWalletAddress: input.walletAddress,
+        requester: {
+          priorState: current.state,
+          heldSlot: current.membership_slot ?? null
+        }
+      });
+
       const revived = await client.query<SubscriptionRow>(
         `UPDATE user_wallet_subscriptions
             SET state = 'active',
@@ -391,11 +452,19 @@ export async function subscribeToWallet(
                 wound_down_at = NULL,
                 ended_at = NULL,
                 close_all_requested_at = NULL,
+                membership_slot = $5,
+                membership_grandfathered = FALSE,
                 label = COALESCE($3, label),
                 source = COALESCE($4, source)
           WHERE user_id = $1 AND wallet_address = $2
         RETURNING ${SUBSCRIPTION_COLUMNS}`,
-        [scope.userId, input.walletAddress, input.label ?? null, input.source ?? null]
+        [
+          scope.userId,
+          input.walletAddress,
+          input.label ?? null,
+          input.source ?? null,
+          requireGrantedSlot(membership)
+        ]
       );
       return {
         subscription: toSubscription(revived.rows[0]!),
@@ -417,11 +486,27 @@ export async function subscribeToWallet(
     );
     const walletCreated = inserted.rows.length > 0;
 
+    // S4-M43: a first-time join takes an ordinal or is refused. Placed after the
+    // `wallets` upsert so the global wallet row exists for the foreign key, and
+    // inside the same transaction as the INSERT below so the advisory lock the
+    // allocator takes is still held when the ordinal is consumed.
+    const membership = await claimMasterMembershipSlot(client, {
+      masterWalletAddress: input.walletAddress,
+      requester: { priorState: null, heldSlot: null }
+    });
+
     const subscription = await client.query<SubscriptionRow>(
-      `INSERT INTO user_wallet_subscriptions (user_id, wallet_address, label, source)
-       VALUES ($1, $2, $3, COALESCE($4, 'manual'))
+      `INSERT INTO user_wallet_subscriptions
+              (user_id, wallet_address, label, source, membership_slot)
+       VALUES ($1, $2, $3, COALESCE($4, 'manual'), $5)
        RETURNING ${SUBSCRIPTION_COLUMNS}`,
-      [scope.userId, input.walletAddress, input.label ?? null, input.source ?? null]
+      [
+        scope.userId,
+        input.walletAddress,
+        input.label ?? null,
+        input.source ?? null,
+        requireGrantedSlot(membership)
+      ]
     );
 
     return {
@@ -545,12 +630,25 @@ async function applyTransition(
     // "how long did this take to close" is the operational question, and
     // leaves it NULL on the direct `active → ended` path, which is why the
     // migration's CHECK does not require it for `ended`.
+    //
+    // Both branches release the membership ordinal (S4-M43/S4-M44, migration
+    // `056`). A leaver must not hold a slot: they are no longer receiving
+    // entries, so holding one would make the cap under-serve the master by
+    // exactly the number of people on their way out. They **do** keep receiving
+    // sell mirrors, because that is derived from `state` alone — nothing on the
+    // fan-out path reads `membership_slot`, so releasing the slot cannot strand
+    // their open positions. `membership_grandfathered` is cleared for the same
+    // reason: `056`'s CHECK forbids a non-active row carrying the exemption, and
+    // clearing it here is what makes re-subscribe take a real ordinal or be
+    // refused.
     const updated =
       to === 'winding_down'
         ? await client.query<SubscriptionRow>(
             `UPDATE user_wallet_subscriptions
                 SET state = 'winding_down',
-                    wound_down_at = COALESCE(wound_down_at, NOW())
+                    wound_down_at = COALESCE(wound_down_at, NOW()),
+                    membership_slot = NULL,
+                    membership_grandfathered = FALSE
               WHERE user_id = $1 AND wallet_address = $2
             RETURNING ${SUBSCRIPTION_COLUMNS}`,
             [scope.userId, walletAddress]
@@ -558,7 +656,9 @@ async function applyTransition(
         : await client.query<SubscriptionRow>(
             `UPDATE user_wallet_subscriptions
                 SET state = 'ended',
-                    ended_at = NOW()
+                    ended_at = NOW(),
+                    membership_slot = NULL,
+                    membership_grandfathered = FALSE
               WHERE user_id = $1 AND wallet_address = $2
             RETURNING ${SUBSCRIPTION_COLUMNS}`,
             [scope.userId, walletAddress]
@@ -648,7 +748,9 @@ export async function requestCloseAll(
       `UPDATE user_wallet_subscriptions
           SET state = 'winding_down',
               wound_down_at = COALESCE(wound_down_at, NOW()),
-              close_all_requested_at = COALESCE(close_all_requested_at, NOW())
+              close_all_requested_at = COALESCE(close_all_requested_at, NOW()),
+              membership_slot = NULL,
+              membership_grandfathered = FALSE
         WHERE user_id = $1 AND wallet_address = $2
       RETURNING ${SUBSCRIPTION_COLUMNS}`,
       [scope.userId, walletAddress]

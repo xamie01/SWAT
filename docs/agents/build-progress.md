@@ -25,10 +25,11 @@ stayed green, so the bar is: break it, watch a *named* test fail, restore it, re
 
 ## In flight
 
+*Nothing dispatched. The 2026-09-01 decision set (`S4-M42`/`43`/`44`/`45`) has landed;
+fan-out `S4-14`/`S4-15` is next and the cap it depends on now exists.*
+
 | Item | Owns | Migration | Status |
 |---|---|---|---|
-| `S4-M43`+`S4-M44` master copier cap | `packages/db/src/master-membership.ts` (new), `subscriptions.ts` | **056** | dispatched |
-| `S4-M45` three exit triggers | `apps/trade-executor/src/manual-exit.ts` (new), `polymarket-exit-race.ts` | none | dispatched |
 
 ## Verification baselines — do not regress these
 
@@ -36,9 +37,9 @@ Captured 2026-09-01. Every agent reports its package's numbers against these.
 
 | Package | Tests | Files |
 |---|---:|---:|
-| `@swat/db` | 622 | 35 |
+| `@swat/db` | 674 | 36 |
 | `@swat/shared` | 349 | 20 |
-| `@swat/trade-executor` | 664 | 47 |
+| `@swat/trade-executor` | 705 | 48 |
 | `@swat/api` | 58 | 4 |
 | `@swat/web` | 46 | 4 |
 | `@swat/signal-engine` | 32 | — |

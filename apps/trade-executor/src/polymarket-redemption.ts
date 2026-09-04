@@ -91,7 +91,22 @@ export interface PolymarketPositionExitPorts {
   readonly releaseStalePositionExits?: (olderThanMs: number) => Promise<number>;
 }
 
-export interface RedemptionSweepDependencies extends Partial<PolymarketPositionExitPorts> {
+/**
+ * **The exit ports are required, and that is a deliberate change from `Partial`.**
+ *
+ * They were optional, defaulting to `unwiredPositionExitPort` -- which throws, so
+ * the intent was fail-closed. It was not: the only production call site omitted
+ * them for months, every market that mapped to a position was counted `failed`,
+ * and `S4-M19`'s single-winner claim was **inert in production** while 705 tests
+ * stayed green. Found 2026-09-01 while wiring `S4-M45`.
+ *
+ * A runtime throw cannot catch a *missing wire*, because the code path that would
+ * throw is only reached in a deployment nobody tests. Requiring the fields moves
+ * the same guarantee to compile time, where omitting one is a type error rather
+ * than a silent degradation. `unwiredPositionExitPort` is kept for tests that
+ * deliberately exercise the unwired path.
+ */
+export interface RedemptionSweepDependencies extends PolymarketPositionExitPorts {
   readonly client: PolymarketRedemptionClient;
   /** Logical account label. Null for the single-operator Stage 3 posture. */
   readonly userId?: string | null;

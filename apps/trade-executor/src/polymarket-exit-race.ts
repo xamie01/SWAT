@@ -48,16 +48,37 @@ import {
  * exit is *due* may consult whether the master still holds. Reversing that is how
  * a redemption sweep ends up trying to redeem a market we never entered.
  *
+ * **Manual exit is the third entrant, not a third path** (`S4-M45`). A user
+ * tapping "exit" moments before the master sells is the ordinary case, not the
+ * edge, so manual exit joins *this* function and *this* claim rather than getting
+ * its own. Everything below that was written for two entrants — the single-shot
+ * guard, the failed-claim rule, one winner per position — covers three unchanged;
+ * the only additions are one member on `PolymarketExitTrigger`, one field on the
+ * race input, and one rung in the ordering. The chain-generic layer that decides
+ * whether a manual exit is even expressible on a given chain lives in
+ * `manual-exit.ts` and *delegates here* for Polymarket.
+ *
  * Pure: no clock, no client, no database. The driver that owns the claim lives in
  * `polymarket-redemption.ts`.
  */
 
-/** Which of the two racing triggers is acting. */
+/** Which of the three racing triggers is acting. */
 export type PolymarketExitTrigger =
   /** The master closed their position and we mirror the sell. */
   | 'mirrored-sell'
   /** The market resolved and the position redeems. */
-  | 'redemption';
+  | 'redemption'
+  /**
+   * The user asked to exit, and the position sells into the book.
+   *
+   * Mechanically identical to `mirrored-sell` — both are a FAK sell of the whole
+   * position — and deliberately kept a separate *trigger* anyway, because the two
+   * record different facts. "The position exited" and "the position exited
+   * because the user asked" are not the same thing, and attribution reads the
+   * second one. Also: a manual exit must be able to win in states where the
+   * mirrored sell is not even eligible, so it cannot be folded into it.
+   */
+  | 'manual';
 
 export type PolymarketExitClaimStatus = 'claimed' | 'confirmed' | 'failed';
 
@@ -77,29 +98,97 @@ export interface PolymarketExitRaceInput {
   readonly masterHoldsPosition: boolean | null;
   readonly marketResolved: boolean;
   readonly acceptingOrders: boolean;
+  /**
+   * Whether the user has asked to exit this position (`S4-M45`).
+   *
+   * **Required, not optional.** An omitted field defaulting to `false` can only
+   * ever under-exit, so it is safe on the double-exit axis — but it is silent on
+   * the other one: a caller that forgot to thread the user's request would leave
+   * the user tapping "exit" and nothing happening, with no error anywhere. Every
+   * caller states it.
+   */
+  readonly manualExitRequested: boolean;
   /** An exit already claimed for this position, if any. */
   readonly existingClaim: PolymarketExitClaimState | null;
 }
 
+/**
+ * Stable outcome codes, one per reachable branch.
+ *
+ * Freeform `reason` strings are for a human reading a log line; these are what an
+ * operator dashboard, an alert rule and `S4-M24`'s skip rendering key on. Split
+ * the way `solana-simulation.ts` splits `refuse` from `unavailable`: two holds
+ * that look alike in prose ("nothing happened") are different findings, and
+ * sending an operator to debug the wrong one is the cost of collapsing them.
+ */
+export type PolymarketExitCode =
+  /** We hold nothing provable, so no trigger can act. Not a fault. */
+  | 'polymarket-exit-hold-no-proven-shares'
+  /** Another entrant already owns this position's exit. The race resolving. */
+  | 'polymarket-exit-already-claimed'
+  /** The market stopped accepting orders; redemption is the only exit that exists. */
+  | 'polymarket-exit-by-redemption'
+  /** The user asked to exit and the book is open, so it sells into the book. */
+  | 'polymarket-exit-by-manual-request'
+  /** The master closed and the book is open, so the exit mirrors as a sell. */
+  | 'polymarket-exit-by-mirrored-sell'
+  /** The master cross-reference is unread. Ignorance is not a trigger. */
+  | 'polymarket-exit-hold-master-holdings-unread'
+  /** Market open, master still in, no manual request. Nothing is due. */
+  | 'polymarket-exit-hold-no-trigger-fired';
+
 export type PolymarketExitRaceDecision =
   /** This trigger wins the race and should claim the position. */
-  | { readonly kind: 'exit'; readonly trigger: PolymarketExitTrigger; readonly reason: string }
+  | {
+    readonly kind: 'exit';
+    readonly trigger: PolymarketExitTrigger;
+    readonly code: PolymarketExitCode;
+    readonly reason: string;
+  }
   /** Another trigger already won. The loser is a no-op, not an error. */
   | {
     readonly kind: 'already-exiting';
     readonly trigger: PolymarketExitTrigger;
+    readonly code: PolymarketExitCode;
     readonly reason: string;
   }
   /** No trigger has fired yet. */
-  | { readonly kind: 'hold'; readonly reason: string };
+  | { readonly kind: 'hold'; readonly code: PolymarketExitCode; readonly reason: string };
 
 /**
  * Decide which exit trigger, if any, acts on this position now.
  *
- * Resolution outranks the mirrored sell when both look true at the same
- * observation, and that ordering is a venue fact rather than a preference: a
- * resolved market stops accepting orders, so a mirrored sell into it cannot fill
- * at any price. Redemption is then the only exit that exists.
+ * **One function for all three entrants, and the ordering below is the whole
+ * design.** The rungs are checked in a fixed order and the first that fires
+ * returns, so exactly one trigger can win per call — and because the single-shot
+ * guard sits above every one of them, exactly one can win per position across
+ * calls. Adding a fourth entrant means adding a rung here, never a second
+ * function.
+ *
+ * The order, and why each step is where it is:
+ *
+ *   0. **Nothing held → hold.** Above everything, including a manual request: a
+ *      user asking to exit a position we cannot prove we hold must not send an
+ *      order. Sizing has no honest input.
+ *   1. **A live claim → stand down.** The single-shot guard. Covers all three
+ *      entrants because it reads the *claim*, never the trigger being offered.
+ *   2. **Resolution → redemption**, outranking both selling entrants — a venue
+ *      fact, not a preference. A resolved market stops accepting orders, so a sell
+ *      into it cannot fill at any price. This is the rung that makes "redemption
+ *      is just another sell" false: a manual exit on a resolved market is still
+ *      honoured, but it is honoured *by redeeming*, because selling is no longer
+ *      a thing the venue will do.
+ *   3. **Manual request → manual**, outranking the mirrored sell. Both are the
+ *      same FAK sell of the whole position, so the winner does not change what is
+ *      sent to the venue — it changes what is *recorded*. The user's own
+ *      instruction is the more specific fact, and attributing it to the master
+ *      would show the user an audit trail in which their tap did nothing. It also
+ *      has to sit above rung 5: a manual exit must work when the master
+ *      cross-reference is unread, and for a subscription that mirrors nothing at
+ *      all.
+ *   4. **Master closed → mirrored sell.**
+ *   5. **Master unread → hold.** Ignorance is not a trigger.
+ *   6. **Nothing due → hold.**
  */
 export function decidePolymarketExit(
   input: PolymarketExitRaceInput
@@ -109,16 +198,23 @@ export function decidePolymarketExit(
   if (!Number.isFinite(input.heldShares) || input.heldShares <= 0) {
     return {
       kind: 'hold',
+      code: 'polymarket-exit-hold-no-proven-shares',
       reason: `position ${key} holds no proven shares, so there is nothing to exit`
     };
   }
 
   // The single-shot guard. A 'failed' claim is deliberately not a winner: a
   // redemption that failed must be retryable, and redemption has no deadline.
+  //
+  // It reads the claim and not the trigger being offered, which is exactly why
+  // adding the manual entrant needed no change here: a manual exit arriving after
+  // either other trigger claimed the position stands down, and a mirrored sell or
+  // a redemption arriving after a manual claim does the same.
   if (input.existingClaim && input.existingClaim.status !== 'failed') {
     return {
       kind: 'already-exiting',
       trigger: input.existingClaim.trigger,
+      code: 'polymarket-exit-already-claimed',
       reason:
         `position ${key} is already exiting via ${input.existingClaim.trigger} `
         + `(${input.existingClaim.status}); the race has one winner per position`
@@ -129,10 +225,27 @@ export function decidePolymarketExit(
     return {
       kind: 'exit',
       trigger: 'redemption',
+      code: 'polymarket-exit-by-redemption',
       reason:
         `condition ${input.position.conditionId} no longer accepts orders `
         + `(resolved=${input.marketResolved}, acceptingOrders=${input.acceptingOrders}), `
         + `so the ${input.heldShares} shares of ${input.position.outcome} exit by redemption`
+        + (input.manualExitRequested
+          ? ' — the manual request is honoured by redeeming, because a sell into a '
+            + 'resolved book cannot fill at any price'
+          : '')
+    };
+  }
+
+  if (input.manualExitRequested) {
+    return {
+      kind: 'exit',
+      trigger: 'manual',
+      code: 'polymarket-exit-by-manual-request',
+      reason:
+        `the user asked to exit ${input.position.outcome} on `
+        + `${input.position.conditionId}, so the ${input.heldShares} shares sell into `
+        + 'the open book on the user\'s instruction rather than the master\'s'
     };
   }
 
@@ -140,6 +253,7 @@ export function decidePolymarketExit(
     return {
       kind: 'exit',
       trigger: 'mirrored-sell',
+      code: 'polymarket-exit-by-mirrored-sell',
       reason:
         `the master no longer holds ${input.position.outcome} on `
         + `${input.position.conditionId}, so the exit mirrors as a sell`
@@ -148,9 +262,12 @@ export function decidePolymarketExit(
 
   if (input.masterHoldsPosition === null) {
     // Ignorance is not a trigger. Treating an unread cross-reference as "the
-    // master has closed" would exit a position on missing data.
+    // master has closed" would exit a position on missing data. A *manual*
+    // request is unaffected — it was already answered at rung 3, because the
+    // user's instruction does not depend on the master being readable.
     return {
       kind: 'hold',
+      code: 'polymarket-exit-hold-master-holdings-unread',
       reason:
         `master holdings for ${key} are unread, and an unknown cross-reference is `
         + 'not evidence the master closed'
@@ -159,7 +276,8 @@ export function decidePolymarketExit(
 
   return {
     kind: 'hold',
-    reason: `master still holds ${key} and the market is open; neither trigger has fired`
+    code: 'polymarket-exit-hold-no-trigger-fired',
+    reason: `master still holds ${key} and the market is open; no trigger has fired`
   };
 }
 
@@ -270,26 +388,37 @@ export interface PolymarketMirroredSellClaimPorts {
 }
 
 export type PolymarketMirroredSellClaim =
-  /** The mirrored sell owns this position's exit. Proceed with the sell. */
+  /** This entrant owns the position's exit. Proceed with the sell. */
   | { readonly kind: 'won'; readonly claimId: string }
-  /** Redemption already owns it. Do not sell — the shares are being redeemed. */
-  | { readonly kind: 'lost'; readonly reason: string };
+  /** Another entrant already owns it. Do not sell — it is already exiting. */
+  | { readonly kind: 'lost'; readonly reason: string; readonly code: PolymarketExitCode };
 
 /**
- * Claim a position for the mirrored-sell trigger before submitting the sell.
+ * Take the position-scoped exit claim on behalf of one entrant.
  *
- * This is the other half of the race, and it has to be taken *before* the order
- * is signed rather than after it fills. A resolved market stops accepting orders,
- * so if redemption has already claimed the position the sell cannot fill anyway —
- * but on a market that resolves mid-flight the sell can partially fill while
- * redemption settles the remainder, and without this claim the ledger would
- * record two exits for one position.
+ * **This is the single door into the claim, and that is the point of `S4-M45`.**
+ * The mirrored sell and the manual exit are two callers of *this* function with a
+ * different `trigger`, not two code paths — a manual exit that took its own claim,
+ * or none, would reintroduce the double-exit the claim exists to prevent. The
+ * redemption sweep reaches the same row through the same port in
+ * `polymarket-redemption.ts`; it fans out per condition, so it owns its loop but
+ * not a second guard.
  *
- * Losing the race is not an error. It is the design: whichever trigger got there
- * first exits the position, and the other one stands down.
+ * The claim has to be taken *before* the order is signed rather than after it
+ * fills. A resolved market stops accepting orders, so if redemption has already
+ * claimed the position the sell cannot fill anyway — but on a market that resolves
+ * mid-flight the sell can partially fill while redemption settles the remainder,
+ * and without this claim the ledger would record two exits for one position.
+ *
+ * Losing the race is not an error. It is the design: whichever entrant got there
+ * first exits the position, and the others stand down.
  */
-export async function claimPolymarketMirroredSellExit(
-  input: { position: PolymarketOutcomePosition; userId: string | null },
+export async function claimPolymarketExit(
+  input: {
+    position: PolymarketOutcomePosition;
+    userId: string | null;
+    trigger: PolymarketExitTrigger;
+  },
   ports: PolymarketMirroredSellClaimPorts
 ): Promise<PolymarketMirroredSellClaim> {
   const positionKey = polymarketPositionKey(input.position);
@@ -298,17 +427,46 @@ export async function claimPolymarketMirroredSellExit(
     positionKey,
     conditionId: input.position.conditionId,
     outcomeTokenId: input.position.tokenId,
-    exitTrigger: 'mirrored-sell',
+    exitTrigger: input.trigger,
     userId: input.userId
   });
   if (!claim) {
+    // Deliberately does not name which entrant won: the insert returns no row, so
+    // this side genuinely does not know. Reading the winner back would be a second
+    // query whose answer can change before it is used, and `getPolymarketPositionExits`
+    // already exists for reporting.
     const reason =
-      `position ${positionKey} is already exiting via redemption, so the mirrored sell `
-      + 'stands down rather than exiting it a second time';
+      `position ${positionKey} is already exiting via another trigger, so the `
+      + `${input.trigger} exit stands down rather than exiting it a second time`;
     log(`[polymarket-exit-race] ${reason}`);
-    return { kind: 'lost', reason };
+    return { kind: 'lost', reason, code: 'polymarket-exit-already-claimed' };
   }
   return { kind: 'won', claimId: claim.id };
+}
+
+/**
+ * The mirrored-sell entrant. A named wrapper, not a path of its own — it exists so
+ * the call site reads as what it is and cannot pass the wrong trigger.
+ */
+export async function claimPolymarketMirroredSellExit(
+  input: { position: PolymarketOutcomePosition; userId: string | null },
+  ports: PolymarketMirroredSellClaimPorts
+): Promise<PolymarketMirroredSellClaim> {
+  return claimPolymarketExit({ ...input, trigger: 'mirrored-sell' }, ports);
+}
+
+/**
+ * The manual entrant, `S4-M45`'s third one.
+ *
+ * Identical body to the mirrored sell by construction — one `claimPolymarketExit`
+ * call with a different trigger. If this function ever grows a branch the mirrored
+ * sell does not have, the two have stopped being one race.
+ */
+export async function claimPolymarketManualExit(
+  input: { position: PolymarketOutcomePosition; userId: string | null },
+  ports: PolymarketMirroredSellClaimPorts
+): Promise<PolymarketMirroredSellClaim> {
+  return claimPolymarketExit({ ...input, trigger: 'manual' }, ports);
 }
 
 export interface PolymarketExposureLeg {

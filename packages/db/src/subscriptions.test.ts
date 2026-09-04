@@ -354,6 +354,10 @@ describe('subscribeToWallet re-subscribe path', () => {
       { match: /FOR UPDATE/, rows: [{ id: scope.userId }] },
       { match: /COUNT\(\*\)/, rows: [{ count: '1' }] },
       { match: /SELECT wallet_address/, rows: [row('ended')] },
+      // Migration 056: re-entering `active` allocates a membership ordinal
+      // under a per-master advisory lock. See master-membership.test.ts.
+      { match: /pg_advisory_xact_lock/, rows: [] },
+      { match: /SELECT membership_slot/, rows: [] },
       { match: /^\s*UPDATE/, rows: [row('active', { wound_down_at: null, ended_at: null })] }
     ]);
 
@@ -376,6 +380,8 @@ describe('subscribeToWallet re-subscribe path', () => {
       { match: /FOR UPDATE/, rows: [{ id: scope.userId }] },
       { match: /COUNT\(\*\)/, rows: [{ count: '0' }] },
       { match: /SELECT wallet_address/, rows: [row('ended')] },
+      { match: /pg_advisory_xact_lock/, rows: [] },
+      { match: /SELECT membership_slot/, rows: [] },
       { match: /^\s*UPDATE/, rows: [row('active', { wound_down_at: null, ended_at: null })] }
     ]);
 
@@ -403,6 +409,10 @@ describe('subscribeToWallet re-subscribe path', () => {
     routeClient([
       { match: /FOR UPDATE/, rows: [{ id: scope.userId }] },
       { match: /SELECT wallet_address/, rows: [row('winding_down')] },
+      { match: /pg_advisory_xact_lock/, rows: [] },
+      // No COUNT(*) stub, deliberately: the membership read is a plain SELECT of
+      // the ordinals, so an accidental quota re-check would still be caught.
+      { match: /SELECT membership_slot/, rows: [] },
       { match: /^\s*UPDATE/, rows: [row('active', { wound_down_at: null })] }
     ]);
 

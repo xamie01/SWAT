@@ -38,6 +38,10 @@ import {
   releaseCopyExecutionReconciliationClaim,
   resolveChainMode,
   transitionCopyExecution,
+  claimPolymarketPositionExit,
+  confirmPolymarketPositionExit,
+  releasePolymarketPositionExit,
+  releaseStalePolymarketPositionExits,
   valuateChainNativeQuoteLeg,
   valuateQuoteLeg,
   deriveFillPriceUsd,
@@ -2591,8 +2595,18 @@ export async function main() {
         tasks.push({
           chain: 'polygon',
           run: async () => {
+            // The claim ports are REQUIRED, not optional decoration. Without
+            // them `runPolymarketRedemptionSweep` falls back to
+            // `unwiredPositionExitPort`, which throws for every market that maps
+            // to a position -- so before this line, S4-M19's single-winner claim
+            // was inert in production and every market was counted `failed`.
+            // Found 2026-09-01 while wiring S4-M45.
             const sweep = await runPolymarketRedemptionSweep({
               client: polymarketClient as unknown as PolymarketRedemptionClient,
+              claimPositionExit: claimPolymarketPositionExit,
+              confirmPositionExit: confirmPolymarketPositionExit,
+              releasePositionExit: releasePolymarketPositionExit,
+              releaseStalePositionExits: releaseStalePolymarketPositionExits,
               log: (message) => console.log(message)
             });
             if (sweep.redeemed > 0 || sweep.failed > 0) {

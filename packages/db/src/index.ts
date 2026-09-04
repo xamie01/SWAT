@@ -62,3 +62,10 @@ export * from './polymarket-exit-queries.js';
  * everyone who does not. Pure; the caller fetches, this decides.
  */
 export * from './fanout-eligibility.js';
+
+/**
+ * Master membership cap (S4-M43/S4-M44). Separate from `master-capacity.js`: that
+ * one bounds a single signal's cohort by price impact, this one bounds how many
+ * members a master may have at all.
+ */
+export * from './master-membership.js';

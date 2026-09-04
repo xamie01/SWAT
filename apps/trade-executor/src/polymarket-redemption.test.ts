@@ -244,7 +244,14 @@ describe('polymarket redemption sweep', () => {
     mocks.listRedeemablePolymarketMarkets.mockResolvedValue([market()]);
     const sdk = client();
 
-    const result = await runPolymarketRedemptionSweep({ client: sdk });
+    // The cast is the point of this test, not a shortcut: since 2026-09-01 the
+    // ports are REQUIRED, so omitting them is a compile error and a caller can no
+    // longer arrive here by accident. This deliberately reaches past the type to
+    // prove the runtime fallback still fails closed for a caller that bypasses it
+    // -- a hand-rolled dependency object, or JS with no types at all.
+    const result = await runPolymarketRedemptionSweep(
+      { client: sdk } as unknown as Parameters<typeof runPolymarketRedemptionSweep>[0]
+    );
 
     expect(sdk.redeemPositions).not.toHaveBeenCalled();
     expect(mocks.claimPolymarketRedemption).not.toHaveBeenCalled();

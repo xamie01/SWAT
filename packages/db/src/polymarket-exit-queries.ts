@@ -23,7 +23,16 @@ import { query } from './client.js';
  * exit race is not redemption — redemption is one of its two outcomes.
  */
 
-export type PolymarketExitTriggerName = 'mirrored-sell' | 'redemption';
+/**
+ * Which entrant won a position's exit race.
+ *
+ * `manual` added by `S4-M45`: a user exiting their own position is a third
+ * entrant in the SAME race as the master's sell and the market's resolution, not
+ * a separate path -- a user tapping exit moments before the master sells is the
+ * ordinary case, and a second path would sell the position twice. Widened in
+ * migration `057` on the `exit_trigger` CHECK.
+ */
+export type PolymarketExitTriggerName = 'mirrored-sell' | 'redemption' | 'manual';
 
 export interface PolymarketPositionExitClaim {
   readonly id: string;
