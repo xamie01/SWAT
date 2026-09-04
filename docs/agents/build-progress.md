@@ -29,7 +29,6 @@ stayed green, so the bar is: break it, watch a *named* test fail, restore it, re
 |---|---|---|---|
 | `S4-M43`+`S4-M44` master copier cap | `packages/db/src/master-membership.ts` (new), `subscriptions.ts` | **056** | dispatched |
 | `S4-M45` three exit triggers | `apps/trade-executor/src/manual-exit.ts` (new), `polymarket-exit-race.ts` | none | dispatched |
-| `S4-M42` pUSD withdrawal monitors | `packages/shared/src/pusd-liquidity.ts` (new) | none | dispatched |
 
 ## Verification baselines — do not regress these
 
@@ -38,7 +37,7 @@ Captured 2026-09-01. Every agent reports its package's numbers against these.
 | Package | Tests | Files |
 |---|---:|---:|
 | `@swat/db` | 622 | 35 |
-| `@swat/shared` | 325 | 19 |
+| `@swat/shared` | 349 | 20 |
 | `@swat/trade-executor` | 664 | 47 |
 | `@swat/api` | 58 | 4 |
 | `@swat/web` | 46 | 4 |

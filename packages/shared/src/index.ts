@@ -28,3 +28,10 @@ export * from './email.js';
  * before its tests can run.
  */
 export * from './authority/index.js';
+
+/**
+ * pUSD withdrawal-liquidity monitoring (S4-M42). Not a peg monitor: pUSD is
+ * unlisted, so there is no price to poll -- what strands funds is depth in one
+ * named Uniswap pool.
+ */
+export * from './pusd-liquidity.js';
