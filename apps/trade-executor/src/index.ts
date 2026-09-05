@@ -1387,8 +1387,22 @@ export async function handleJob(
     return { status: 'skipped', reason: 'Position size calculated to 0' };
   }
 
-  // Enforce 24-hour exposure cap per chain
-  const dailyExposureUsd = direction === 'buy' ? await getRollingExposureUsd(chain) : 0;
+  // Enforce the 24-hour exposure cap per (account, chain), not per chain alone
+  // (S4-M47). Before the account argument existed this summed EVERY trade on the
+  // chain, so under fan-out one user's spending charged every other user's
+  // allowance and the first user to trade hard silently capped the cohort.
+  //
+  // Resolved inline rather than hoisting `principal` from line ~1441:
+  // `resolveExecutionPrincipal` is pure over the payload, so calling it twice
+  // cannot disagree with itself, whereas moving a declaration across 50 lines of
+  // branching could change what the later reader sees.
+  const exposureAccount = resolveExecutionPrincipal(payload);
+  const dailyExposureUsd = direction === 'buy'
+    ? await getRollingExposureUsd(
+      exposureAccount.kind === 'user' ? exposureAccount.userId : null,
+      chain
+    )
+    : 0;
   const dailyCapUsd = parseFloat(process.env.DAILY_EXPOSURE_CAP_USD ?? '50000');
 
   let thisTradeUsd = size;

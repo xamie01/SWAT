@@ -354,25 +354,81 @@ export async function hasRecentBuy(tokenMint: string, withinMinutes: number): Pr
 }
 
 /**
- * Calculates the total USD exposure traded on a given chain in the last 24 hours.
+ * The tenant whose rolling exposure is being summed.
  *
- * Deliberately NOT tenant-scoped, same reasoning as `hasRecentBuy`: this backs
- * an operator-wide risk cap. Left global on purpose so S4-10 cannot silently
- * loosen a live limit — as written, every tenant's volume counts against one
- * shared budget, which is conservative (it blocks too early) rather than unsafe
- * (it would never let a tenant exceed the cap). Splitting it into a per-tenant
- * cap plus a global one is a risk-policy decision and a separate change.
+ * `null` is a real, load-bearing value, not a missing one: migration 050 leaves every
+ * legacy row at `user_id NULL` and backfills nothing, so `null` IS the pre-tenancy
+ * operator account. That is why the predicate below is `IS NOT DISTINCT FROM` and not
+ * `=` -- `user_id = NULL` is never true, so an `=` comparison would report the
+ * operator's rolling exposure as 0 and uncap the operator path entirely.
+ *
+ * A non-null value must be a `users.id` UUID. `normalizeTenantId` rejects anything
+ * else, which is what stops a stray account label (`'operator'`, an email, a
+ * chain-prefixed address) from silently matching zero rows and reading as "this user
+ * has spent nothing today".
  */
-export async function getRollingExposureUsd(chain: string): Promise<number> {
+export type ExposureAccount = string | null;
+
+/**
+ * USD bought on one chain by ONE tenant in the last 24 hours.
+ *
+ * ## Why this gained a parameter (`S4-M47`)
+ *
+ * It used to be `getRollingExposureUsd(chain)` with `WHERE chain = $1` alone, and the
+ * comment above it argued the global sum was deliberately conservative. That argument
+ * held while there was exactly one tenant. Under fan-out it inverts: **one user's
+ * spending charges every other user's daily allowance**, so the first user to trade
+ * hard silently caps the entire cohort, and the users who lose their allowance did
+ * nothing and get no explanation. "Conservative" stops being a safety property when it
+ * is another tenant's money being refused.
+ *
+ * This is the third of the checklist's §1 exceptions: there was no `account` argument
+ * to substitute a user key into, so it is a signature change rather than a value
+ * substitution.
+ *
+ * ## `account` here is the TENANCY COLUMN, not the risk-policy account label
+ *
+ * The executor has two `'operator'`-valued constants that must not be collapsed:
+ * `RISK_POLICY_ACCOUNT` (a tenancy key that becomes the user id) and
+ * `RECONCILIATION_ACCOUNT` (an escalation label that stays `'operator'`). This
+ * parameter is a THIRD thing and belongs to neither: it is compared against
+ * `trades.user_id`, a `users(id)` foreign key. So the call site passes the raw
+ * `userId` -- **not** `riskPolicyAccountForUser(userId)`, which returns the literal
+ * `'operator'` for the operator path and would be rejected here by
+ * `normalizeTenantId` rather than quietly matching nothing.
+ *
+ * ## Scoped, not global-plus-scoped
+ *
+ * A per-tenant sum plus a separate platform-wide sum is a defensible design, but it is
+ * a **risk-policy decision** (two limits, two thresholds, two alerts) and not this
+ * change. `userDailyExposureCapUsd` in the executor pairs a per-user cap with this
+ * per-user figure; a platform-wide ceiling on top of it is a distinct cap that should
+ * be named and configured as one rather than smuggled in as a side effect of this sum.
+ */
+export async function getRollingExposureUsd(
+  account: ExposureAccount,
+  chain: string
+): Promise<number> {
+  // `normalizeTenantId('')` returns `null`, i.e. the operator. That coercion is right
+  // for a write path reading an optional column off a payload, and wrong here: an empty
+  // string reaching a risk query means the caller *thought* it had a user, and answering
+  // with the operator's rolling exposure would size a user's trade against somebody
+  // else's ledger. Same reasoning as `riskPolicyAccountForUser`, which throws on `''`
+  // rather than falling back to the operator key.
+  if (account !== null && account.trim() === '') {
+    throw new Error('getRollingExposureUsd requires a non-empty user id or null');
+  }
+  const userId = normalizeTenantId(account);
   const rows = await query<{ total_usd: string | null }>(
     `SELECT SUM(amount_usd) AS total_usd
      FROM trades
-     WHERE chain = $1
+     WHERE user_id IS NOT DISTINCT FROM $1
+       AND chain = $2
        AND direction = 'buy'
        AND status IN ('filled', 'partial')
        AND (execution_mode IS NULL OR execution_mode != 'shadow')
        AND executed_at > NOW() - INTERVAL '24 hours'`,
-    [chain]
+    [userId, chain]
   );
   return parseFloat(rows[0]?.total_usd || '0');
 }

@@ -14,6 +14,7 @@ import {
   type ChainModeResolution,
   type FanoutPlan,
   type FanoutPlatformInputs,
+  type FanoutSignal,
   type SourceTradeSignalCandidate
 } from '@swat/db';
 import {
@@ -26,8 +27,15 @@ import {
   stripChainPrefix,
   tradeQueueForChain
 } from '@swat/shared';
-import type { Chain } from '@swat/shared';
+import type { Chain, ExecutionMode } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
+import {
+  capacityAppliesToDirection,
+  planCapacityLedgerEntries,
+  projectCohortNotionalUsd,
+  recordFanoutCapacityLedger,
+  resolveFanoutCapacity
+} from './capacity-inputs.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
 import { mayPatternTrade } from './trade-eligibility.js';
 import {
@@ -118,31 +126,38 @@ for (const [name, value] of [
 // ─── Fan-out enumeration (S4-13 / S4-14) ──────────────────────────────────────
 
 /**
- * Master capacity for a fan-out, or `null` when it cannot be assessed.
+ * Master capacity is now assessed per fan-out (`S4-M6`), and this note records
+ * exactly how far that goes — because the difference between "wired" and "closed"
+ * is where the trap in this item lives.
  *
- * **Returns `null` today, and that makes per-user copying inert on purpose.**
- * `assessMasterCapacity` (`S4-M6`) is a built but unwired library: assessing a
- * window needs a cohort notional projection, a pre-fan-out liquidity read, an
- * active-follower count, and — the part that cannot be skipped — the ledger
- * *writer*. Until the writer runs, an empty `master_capacity_ledger` reads as
- * "no capacity used" and the cap permits everything, so wiring the read alone
- * would install a capacity check that always passes.
+ * **What now happens.** `resolveFanoutCapacity` in `capacity-inputs.ts` reads the
+ * window's accounted notional from `master_capacity_ledger` (`053`), the active
+ * follower count, and any per-master policy override; builds a usable-liquidity
+ * value from the DexScreener pool TVL `checkTokenSafety` already fetched; and
+ * feeds `assessMasterCapacity` a cohort-level projected notional. The verdict maps
+ * onto `planFanout`'s gate with the two kinds of "no" kept apart — a real breach
+ * excludes users as `capacity-exhausted`, an unevaluable cap as
+ * `capacity-unknown`. `unassessablePolicy` is `'skip'` and must stay `'skip'`.
  *
- * `null` is the honest value and the fail-closed one: every otherwise-eligible
- * user is excluded with `capacity-unknown`, which the fan-out summary logs by
- * name on every signal, so "nobody copied" is never silent. The alternative —
- * declaring `unassessablePolicy: 'admit'` — would move real money through an
- * uncapped cohort in exchange for a feature that looks finished.
+ * **Two things remain, and both are visible in a log rather than silent.**
  *
- * This is the one line to change when `S4-M6` lands.
+ *   1. **Polymarket cannot be assessed.** Its liquidity is CLOB depth, not a pool
+ *      reserve, and no pre-fan-out feed exists (`S4-M38`). Every polygon fan-out
+ *      therefore excludes everyone with `capacity-unknown`, and
+ *      `summariseFanout` flags it as a platform fault.
+ *   2. **The ledger numerator is unpriced.** The writer below records one row per
+ *      fan-out event per mode with `notional_usd NULL` / basis `unpriced`,
+ *      because what this call site holds is a projection and not a fill. That
+ *      makes a window report `partial-unpriced-legs` — a pass that is explicitly a
+ *      LOWER BOUND — instead of the confident zero an **empty** ledger produces.
+ *      A priced numerator has to come from where a fill is confirmed, in
+ *      `trade-executor`, and until it does `S4-M6` is not ticked.
  */
-function fanoutCapacity(): FanoutPlatformInputs['capacity'] {
-  return null;
-}
-
 console.warn(
-  '[signal-engine] fan-out enumeration is live but master capacity is UNWIRED (S4-M6): '
-    + 'every eligible user is excluded as capacity-unknown until its ledger writer lands'
+  '[signal-engine] master capacity is wired (S4-M6) with two known gaps: polygon has no '
+    + 'pre-fan-out depth feed (S4-M38) so every polygon fan-out excludes users as '
+    + 'capacity-unknown, and the ledger numerator is unpriced so a window impact figure is '
+    + 'a LOWER BOUND until trade-executor writes priced rows'
 );
 
 /**
@@ -164,6 +179,16 @@ async function resolveFanoutChainMode(chain: Chain): Promise<ChainModeResolution
   }
 }
 
+interface SignalFanout {
+  readonly plan: FanoutPlan;
+  /**
+   * The chain's clamped mode, carried so the capacity ledger records the mode the
+   * cohort actually runs in. Re-resolving it after the fact is how a `paper`
+   * verdict gets recorded as `live` flow.
+   */
+  readonly effectiveMode: ExecutionMode;
+}
+
 /**
  * Enumerates and decides one signal's fan-out, or `null` if enumeration failed.
  *
@@ -177,8 +202,9 @@ async function planSignalFanout(
   sourceTrade: SourceTradeSignalCandidate,
   chain: Chain,
   tokenMint: string,
-  score: number
-): Promise<FanoutPlan | null> {
+  score: number,
+  poolTvlUsd: number | null
+): Promise<SignalFanout | null> {
   try {
     const [candidates, chainMode] = await Promise.all([
       listFanoutCandidates(
@@ -188,21 +214,51 @@ async function planSignalFanout(
       resolveFanoutChainMode(chain)
     ]);
 
-    return planFanout(
-      candidates,
-      {
-        chain,
+    const signal: FanoutSignal = {
+      chain,
+      masterWalletAddress: sourceTrade.walletAddress,
+      tokenMint,
+      direction: sourceTrade.side,
+      score
+    };
+    const platformWithoutCapacity = {
+      chainMode,
+      minimumBalanceUsd: FANOUT_MIN_BALANCE_USD
+    };
+
+    // Capacity is decided before fan-out and sized after it, so the cohort figure
+    // is an upper bound over the users who would be admitted but for capacity.
+    // See `projectCohortNotionalUsd` for why erring high is the safe direction.
+    const projection = projectCohortNotionalUsd(candidates, signal, platformWithoutCapacity);
+
+    let capacity: FanoutPlatformInputs['capacity'];
+    if (!capacityAppliesToDirection(sourceTrade.side)) {
+      // A sell is admitted without assessment: refusing one strands an open
+      // position with no exit, and a sell's notional is bounded by holdings this
+      // path cannot see. Argued in full in `capacityAppliesToDirection`.
+      capacity = { outcome: 'admit' };
+      console.log(
+        `[signal-engine] capacity not assessed for a sell mirror on ${chain} `
+          + `(${sourceTrade.walletAddress}): the cap is buy-side, and the cohort's sells are `
+          + 'bounded by buys it already gated'
+      );
+    } else {
+      const resolved = await resolveFanoutCapacity({
         masterWalletAddress: sourceTrade.walletAddress,
+        chain,
         tokenMint,
-        direction: sourceTrade.side,
-        score
-      },
-      {
-        chainMode,
-        minimumBalanceUsd: FANOUT_MIN_BALANCE_USD,
-        capacity: fanoutCapacity()
-      }
-    );
+        poolTvlUsd,
+        projection,
+        now: new Date()
+      });
+      capacity = resolved.capacity;
+      console.log(`[signal-engine] ${resolved.logLine}`);
+    }
+
+    return {
+      plan: planFanout(candidates, signal, { ...platformWithoutCapacity, capacity }),
+      effectiveMode: chainMode?.effectiveMode ?? 'off'
+    };
   } catch (error) {
     console.error(
       `[signal-engine] fan-out enumeration failed for ${sourceTrade.walletAddress}; `
@@ -397,12 +453,22 @@ async function enqueueSignal(opts: {
     // exactly as before. `mayPatternTrade` already refuses every cluster pattern,
     // so this branch is unreachable for them today — the guard keeps the
     // dependency explicit rather than incidental.
+    // `safety.liquidity` is the DexScreener pool TVL `checkTokenSafety` already
+    // fetched above, reused rather than re-fetched: a second round trip would add
+    // latency to the money path for a number just read, and two reads could
+    // disagree. `usableLiquidityForFanout` discards it unread on polygon.
     const fanout = opts.sourceTrade
-      ? await planSignalFanout(opts.sourceTrade, chain, opts.tokenMint, opts.signalScore)
+      ? await planSignalFanout(
+        opts.sourceTrade,
+        chain,
+        opts.tokenMint,
+        opts.signalScore,
+        safety.liquidity ?? null
+      )
       : null;
 
     if (fanout) {
-      const summary = summariseFanout(fanout);
+      const summary = summariseFanout(fanout.plan);
       console.log(`[signal-engine] fan-out ${signal.id}: ${summary.line}`);
       if (summary.warning) {
         console.warn(`[signal-engine] fan-out ${signal.id}: ${summary.warning}`);
@@ -420,8 +486,31 @@ async function enqueueSignal(opts: {
           direction: opts.sourceTrade.side
         }
         : null,
-      plan: fanout
+      plan: fanout?.plan ?? null
     }));
+
+    // The capacity ledger writer (`S4-M6`), and it runs **after** the enqueue on
+    // purpose: the row asserts a cohort order was committed, and an enqueue
+    // failure means it was not. Idempotent on `(source_trade_id, execution_mode)`,
+    // which matters because `markSourceTradeSignalDispatched` runs only below —
+    // so a fan-out that dies mid-way really is re-run whole on the next tick.
+    //
+    // Without this write the ledger stays empty, an empty window sums to "no
+    // capacity used", and the cap above permits every cohort while looking like a
+    // control. The notional is recorded as `unpriced` rather than as the
+    // projection, so the window reports a LOWER BOUND instead of a fabricated
+    // numerator — see `planCapacityLedgerEntries`.
+    if (fanout && opts.sourceTrade) {
+      await recordFanoutCapacityLedger(planCapacityLedgerEntries({
+        masterWalletAddress: opts.sourceTrade.walletAddress,
+        chain,
+        tokenMint: opts.tokenMint,
+        sourceTradeId: opts.sourceTrade.sourceTradeId,
+        effectiveMode: fanout.effectiveMode,
+        cohortSize: fanout.plan.eligible.length,
+        committedAt: new Date()
+      }));
+    }
   } else if (!patternMayTrade) {
     console.log(`[signal-engine] ⏭️ ${opts.patternType} is discovery-only (ADR-0005) | token: ${opts.tokenMint}`);
   } else if (!safety.isSafe) {

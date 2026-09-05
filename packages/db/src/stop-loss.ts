@@ -15,9 +15,20 @@ import { query } from './client.js';
  *   the value is resolved (DB `config.risk.stop_loss_pct` → env → default).
  */
 
-/** A signal's open position as reconstructed from its filled trade ledger. */
+/** One tenant's open position on a signal, reconstructed from its filled trade ledger. */
 export interface OpenPositionSnapshot {
   signalId: string;
+  /**
+   * Whose position this is. `null` IS the pre-tenancy operator account -- migration
+   * 050 leaves every legacy `trades` row at `user_id NULL` and backfills nothing.
+   *
+   * Load-bearing rather than informational (`S4-M46`): it is what the sweep turns into
+   * the `signal_stop_losses.account` key. Before it existed, every user's trades on one
+   * signal collapsed into one position, and because that table is
+   * `PRIMARY KEY (account, signal_id)`, one user's claim blocked every other holder's
+   * -- while the sweep reported success.
+   */
+  userId: string | null;
   tokenMint: string;
   chain: Chain;
   openQuantity: number;

@@ -218,6 +218,16 @@ async function runMarkToMarket() {
         `queued ${sweep.queued}, already triggered ${sweep.alreadyTriggered}, failed ${sweep.failed}.`
       );
     }
+    // Logged outside the `breached` guard and on its own line: an unaccountable position
+    // never reaches the breach check, so it would otherwise be invisible in exactly the
+    // case where nothing breached. Worded as a ledger problem because that is the fix --
+    // a `trades.user_id` that is neither a uuid nor NULL, which no retry will clear.
+    if (sweep.unaccountable > 0) {
+      console.error(
+        `[scorer] Stop-loss: ${sweep.unaccountable} position(s) skipped with an unusable ` +
+        `owner -- check trades.user_id on those signals; this will not self-resolve.`
+      );
+    }
   } catch (e) {
     console.error('[scorer] Stop-loss sweep failed:', e);
   }

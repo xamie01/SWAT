@@ -26,6 +26,12 @@ export * from './position-cap.js';
 export * from './forward-only.js';
 export * from './independence.js';
 export * from './master-capacity.js';
+/**
+ * Active-follower counts per (master, chain) -- the `activeFollowerCount` input
+ * `master-capacity.js` needs. Separate from `master-membership.js`: that counts
+ * ordinals, this counts the orders a fan-out implies (S4-M6).
+ */
+export * from './master-followers.js';
 export * from './user-execution-settings.js';
 export * from './user-balances.js';
 export * from './execution-grants.js';
