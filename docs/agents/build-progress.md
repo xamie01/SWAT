@@ -25,26 +25,25 @@ stayed green, so the bar is: break it, watch a *named* test fail, restore it, re
 
 ## In flight
 
-*Nothing dispatched. Fan-out `S4-13`..`S4-17` has landed as code; it is **inert** until
-`S4-M6` (master capacity) is wired, which is the next item and the one thing standing between
-this and a working per-user fan-out.*
-
 | Item | Owns | Migration | Status |
 |---|---|---|---|
+| `S4-M6` wire master capacity — **unblocks all of fan-out** | `packages/db/src/master-followers.ts` (new), `apps/signal-engine/src/capacity-inputs.ts` (new), `apps/signal-engine/src/index.ts` | none (`053` exists) | dispatched |
+| `S4-M46`/`47`/`48` per-user risk keys | `packages/db/src/{pnl-queries,trades}.ts`, `apps/scorer/src/{stop-loss,index}.ts` | **058** if needed | dispatched |
 
-**Neither may edit `apps/trade-executor/src/index.ts`** — both need wiring there, so each
-reports a diff and the master agent applies them together. Two agents editing the executor's
-entry point is the merge this ownership rule exists to prevent.
+**Why these two together.** `S4-M6` is the only thing making fan-out inert — `index.ts` passes
+`capacity: null`, so every eligible user is excluded with `capacity-unknown`. The risk-key trio is
+the other half of the same gate: without it, fan-out would execute with a stop-loss that protects
+**one user per signal** and a daily allowance **one user can exhaust for everyone**. Neither is
+safe to ship without the other, which is why they are one round rather than two.
 
-**Neither allocates a migration.** If either concludes one is needed it stops and reports,
-rather than guessing a number — the collision surfaces as a migration that silently never runs.
+**Both are forbidden from `apps/trade-executor/src/index.ts`** — each reports a diff instead.
+Three `'operator'` literals there are the master agent's to apply once both land: the six circuit
+-breaker calls (`:888`–`:933`), the dead risk-policy read (`:495`), and the exposure-cap call
+(`:1391`).
 
-*Nothing dispatched. Fan-out `S4-13`..`S4-17` has landed as code; it is **inert** until
-`S4-M6` (master capacity) is wired, which is the next item and the one thing standing between
-this and a working per-user fan-out.*
+**Only the risk-key agent may allocate a migration, and only `058`.** `S4-M6` needs none —
+`053` already created `master_capacity_ledger`.
 
-| Item | Owns | Migration | Status |
-|---|---|---|---|
 
 ## Verification baselines — do not regress these
 
