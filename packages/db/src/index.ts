@@ -69,3 +69,9 @@ export * from './fanout-eligibility.js';
  * members a master may have at all.
  */
 export * from './master-membership.js';
+
+/**
+ * Fan-out candidate enumeration (S4-13's fetch half). Fetches only; every
+ * decision lives in `fanout-eligibility.js`.
+ */
+export * from './fanout-candidates.js';

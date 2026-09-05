@@ -1,12 +1,19 @@
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import {
+  crossTenantScope,
   getPolymarketOutcomeContext,
   insertSignalWithDedupe,
   insertSourceTradeSignal,
+  listFanoutCandidates,
   listSourceTradeSignalCandidates,
   markSourceTradeSignalDispatched,
+  planFanout,
   query,
+  resolveChainMode,
+  type ChainModeResolution,
+  type FanoutPlan,
+  type FanoutPlatformInputs,
   type SourceTradeSignalCandidate
 } from '@swat/db';
 import {
@@ -23,6 +30,11 @@ import type { Chain } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
 import { mayPatternTrade } from './trade-eligibility.js';
+import {
+  enqueueFanoutTradeJobs,
+  planFanoutTradeJobs,
+  summariseFanout
+} from './fanout-enqueue.js';
 import {
   evaluateMirrorableActivity,
   resolveMinimumMirrorableNotionalUsd
@@ -83,12 +95,122 @@ const SOURCE_COPY_MIN_NOTIONAL_USD = resolveMinimumMirrorableNotionalUsd(
   process.env.SOURCE_COPY_MIN_NOTIONAL_USD
 );
 
+/**
+ * Platform balance floor for fan-out, in USD (`S4-13`).
+ *
+ * `0` disables the floor and is the default, following
+ * `SOURCE_COPY_MIN_NOTIONAL_USD`. A non-zero default here would be this file
+ * inventing a platform policy nobody decided. Note that `0` is not "let anyone
+ * through": an *unknown* balance still fails closed with `balance-unknown`,
+ * which is a different rule and lives in `fanout-eligibility.ts`.
+ */
+const FANOUT_MIN_BALANCE_USD = Number(process.env.FANOUT_MIN_BALANCE_USD ?? 0);
+
 for (const [name, value] of [
   ['MIN_SIGNAL_SCORE', MIN_SIGNAL_SCORE],
   ['SOURCE_COPY_MAX_EVENT_AGE_MS', SOURCE_COPY_MAX_EVENT_AGE_MS],
-  ['SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS', SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS]
+  ['SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS', SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS],
+  ['FANOUT_MIN_BALANCE_USD', FANOUT_MIN_BALANCE_USD]
 ] as const) {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
+}
+
+// ─── Fan-out enumeration (S4-13 / S4-14) ──────────────────────────────────────
+
+/**
+ * Master capacity for a fan-out, or `null` when it cannot be assessed.
+ *
+ * **Returns `null` today, and that makes per-user copying inert on purpose.**
+ * `assessMasterCapacity` (`S4-M6`) is a built but unwired library: assessing a
+ * window needs a cohort notional projection, a pre-fan-out liquidity read, an
+ * active-follower count, and — the part that cannot be skipped — the ledger
+ * *writer*. Until the writer runs, an empty `master_capacity_ledger` reads as
+ * "no capacity used" and the cap permits everything, so wiring the read alone
+ * would install a capacity check that always passes.
+ *
+ * `null` is the honest value and the fail-closed one: every otherwise-eligible
+ * user is excluded with `capacity-unknown`, which the fan-out summary logs by
+ * name on every signal, so "nobody copied" is never silent. The alternative —
+ * declaring `unassessablePolicy: 'admit'` — would move real money through an
+ * uncapped cohort in exchange for a feature that looks finished.
+ *
+ * This is the one line to change when `S4-M6` lands.
+ */
+function fanoutCapacity(): FanoutPlatformInputs['capacity'] {
+  return null;
+}
+
+console.warn(
+  '[signal-engine] fan-out enumeration is live but master capacity is UNWIRED (S4-M6): '
+    + 'every eligible user is excluded as capacity-unknown until its ledger writer lands'
+);
+
+/**
+ * Resolves the chain mode, reporting a failure as `null` rather than as paper.
+ *
+ * `null` excludes everyone with `chain-mode-unknown`. Defaulting to paper would
+ * keep writing ledger rows through exactly the outage an operator set the global
+ * kill switch for.
+ */
+async function resolveFanoutChainMode(chain: Chain): Promise<ChainModeResolution | null> {
+  try {
+    return await resolveChainMode(chain);
+  } catch (error) {
+    console.error(
+      `[signal-engine] fan-out could not resolve the ${chain} execution mode:`,
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
+}
+
+/**
+ * Enumerates and decides one signal's fan-out, or `null` if enumeration failed.
+ *
+ * `null` means "no per-user jobs", not "no jobs": the operator job is emitted
+ * either way, so an enumeration fault degrades to exactly the pre-fan-out
+ * behaviour instead of stopping the trade path. It is logged as an error because
+ * silently copying for nobody is the failure mode this whole item is guarding
+ * against.
+ */
+async function planSignalFanout(
+  sourceTrade: SourceTradeSignalCandidate,
+  chain: Chain,
+  tokenMint: string,
+  score: number
+): Promise<FanoutPlan | null> {
+  try {
+    const [candidates, chainMode] = await Promise.all([
+      listFanoutCandidates(
+        crossTenantScope('fan-out enumeration for a source-trade signal'),
+        { masterWalletAddress: sourceTrade.walletAddress, chain }
+      ),
+      resolveFanoutChainMode(chain)
+    ]);
+
+    return planFanout(
+      candidates,
+      {
+        chain,
+        masterWalletAddress: sourceTrade.walletAddress,
+        tokenMint,
+        direction: sourceTrade.side,
+        score
+      },
+      {
+        chainMode,
+        minimumBalanceUsd: FANOUT_MIN_BALANCE_USD,
+        capacity: fanoutCapacity()
+      }
+    );
+  } catch (error) {
+    console.error(
+      `[signal-engine] fan-out enumeration failed for ${sourceTrade.walletAddress}; `
+        + 'no user jobs will be queued for this signal:',
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
 }
 
 // ─── Shared helper ─────────────────────────────────────────────────────────────
@@ -269,19 +391,37 @@ async function enqueueSignal(opts: {
       ? await getClusterTier(opts.clusterId)
       : scoreToTier(opts.signalScore);
     console.log(`[signal-engine] ✅ TRADE QUEUED: ${opts.tokenMint} | score: ${opts.signalScore} | tier: ${clusterTier} | chain: ${chain}`);
-    await tradeQueueFor(chain).add('signal-trade', {
-      signalId:    signal.id,
-      score:       opts.signalScore,
-      tokenMint:   opts.tokenMint,
+
+    // Fan-out (`S4-13`/`S4-14`). Only a source-trade signal has a master wallet
+    // to enumerate subscribers of; a pattern signal gets the operator job alone,
+    // exactly as before. `mayPatternTrade` already refuses every cluster pattern,
+    // so this branch is unreachable for them today — the guard keeps the
+    // dependency explicit rather than incidental.
+    const fanout = opts.sourceTrade
+      ? await planSignalFanout(opts.sourceTrade, chain, opts.tokenMint, opts.signalScore)
+      : null;
+
+    if (fanout) {
+      const summary = summariseFanout(fanout);
+      console.log(`[signal-engine] fan-out ${signal.id}: ${summary.line}`);
+      if (summary.warning) {
+        console.warn(`[signal-engine] fan-out ${signal.id}: ${summary.warning}`);
+      }
+    }
+
+    await enqueueFanoutTradeJobs(tradeQueueFor, planFanoutTradeJobs({
+      signalId: signal.id,
+      tokenMint: opts.tokenMint,
+      score: opts.signalScore,
       clusterTier,
-      sourceTradeId: opts.sourceTrade?.sourceTradeId,
-      direction: opts.sourceTrade?.side
-    }, {
-      ...(opts.sourceTrade ? { jobId: `source-trade-${signal.id}` } : {}),
-      removeOnComplete: true,
-      attempts: 4,
-      backoff: { type: 'exponential', delay: 5000 }
-    });
+      sourceTrade: opts.sourceTrade
+        ? {
+          sourceTradeId: opts.sourceTrade.sourceTradeId,
+          direction: opts.sourceTrade.side
+        }
+        : null,
+      plan: fanout
+    }));
   } else if (!patternMayTrade) {
     console.log(`[signal-engine] ⏭️ ${opts.patternType} is discovery-only (ADR-0005) | token: ${opts.tokenMint}`);
   } else if (!safety.isSafe) {

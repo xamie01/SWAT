@@ -64,7 +64,7 @@ export function capPositionToAvailableBalance(opts: {
   return floorToPrecision(Math.min(opts.requested, opts.available, opts.maximum), opts.precision);
 }
 
-export function calculateBalanceAwareSize(opts: {
+export interface BalanceAwareSizingInput {
   balance: number;
   base: number;
   maximum: number;
@@ -73,7 +73,23 @@ export function calculateBalanceAwareSize(opts: {
   scoreMultiplier: number;
   precision: number;
   dynamic: boolean;
-}): number {
+}
+
+/**
+ * The size this configuration *asks for*, before any cap is applied.
+ *
+ * Extracted from `calculateBalanceAwareSize` rather than reimplemented, and it is
+ * the only statement of the formula in this repo. `per-user-sizing.ts` needs the
+ * pre-clamp figure so it can report *which* bound reduced a user's size — an
+ * operator asking "why did I get 0.05 and not 0.2" cannot be answered from a
+ * single already-clamped number. Deriving the request a second time there would
+ * have put two copies of the sizing formula in the tree, and the copy that drifted
+ * would misattribute the clamp while still returning a plausible size.
+ *
+ * Validation lives here, so both this and `calculateBalanceAwareSize` refuse the
+ * same inputs.
+ */
+export function requestedBalanceAwareSize(opts: BalanceAwareSizingInput): number {
   const values = [
     opts.balance,
     opts.base,
@@ -89,12 +105,14 @@ export function calculateBalanceAwareSize(opts: {
     throw new Error('Risk percentage cannot exceed 100');
   }
 
-  const requested = opts.dynamic
+  return opts.dynamic
     ? opts.balance * (opts.riskPct / 100) * opts.tierMultiplier * opts.scoreMultiplier
     : opts.base * opts.tierMultiplier * opts.scoreMultiplier;
+}
 
+export function calculateBalanceAwareSize(opts: BalanceAwareSizingInput): number {
   return capPositionToAvailableBalance({
-    requested,
+    requested: requestedBalanceAwareSize(opts),
     available: opts.balance,
     maximum: opts.maximum,
     precision: opts.precision

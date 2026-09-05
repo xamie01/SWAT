@@ -25,10 +25,12 @@ stayed green, so the bar is: break it, watch a *named* test fail, restore it, re
 
 ## In flight
 
+*Nothing dispatched. Fan-out `S4-13`..`S4-17` has landed as code; it is **inert** until
+`S4-M6` (master capacity) is wired, which is the next item and the one thing standing between
+this and a working per-user fan-out.*
+
 | Item | Owns | Migration | Status |
 |---|---|---|---|
-| `S4-14` per-user enqueue + the `S4-13` candidate query | `packages/db/src/fanout-candidates.ts` (new), `apps/signal-engine/src/fanout-enqueue.ts` (new), `apps/signal-engine/src/index.ts` | none | dispatched |
-| `S4-15`/`S4-16`/`S4-17` per-user sizing, risk keys, platform clamp | `apps/trade-executor/src/per-user-sizing.ts` (new), `policy.ts` | none | dispatched |
 
 **Neither may edit `apps/trade-executor/src/index.ts`** — both need wiring there, so each
 reports a diff and the master agent applies them together. Two agents editing the executor's
@@ -36,6 +38,10 @@ entry point is the merge this ownership rule exists to prevent.
 
 **Neither allocates a migration.** If either concludes one is needed it stops and reports,
 rather than guessing a number — the collision surfaces as a migration that silently never runs.
+
+*Nothing dispatched. Fan-out `S4-13`..`S4-17` has landed as code; it is **inert** until
+`S4-M6` (master capacity) is wired, which is the next item and the one thing standing between
+this and a working per-user fan-out.*
 
 | Item | Owns | Migration | Status |
 |---|---|---|---|
@@ -46,12 +52,12 @@ Captured 2026-09-01. Every agent reports its package's numbers against these.
 
 | Package | Tests | Files |
 |---|---:|---:|
-| `@swat/db` | 674 | 36 |
+| `@swat/db` | 706 | 37 |
 | `@swat/shared` | 349 | 20 |
-| `@swat/trade-executor` | 705 | 48 |
+| `@swat/trade-executor` | 765 | 49 |
 | `@swat/api` | 58 | 4 |
 | `@swat/web` | 46 | 4 |
-| `@swat/signal-engine` | 32 | — |
+| `@swat/signal-engine` | 75 | 4 |
 | `@swat/indexer` | 101 | — |
 | `@swat/scorer` | 62 | — |
 | `@swat/alert-service` | 13 | — |
