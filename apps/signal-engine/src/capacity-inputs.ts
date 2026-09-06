@@ -492,6 +492,18 @@ export interface ResolveFanoutCapacityInput {
   readonly tokenMint: string;
   /** Already-fetched DexScreener pool TVL, e.g. `SafetyResult.liquidity`. */
   readonly poolTvlUsd: number | null;
+  /**
+   * A Polymarket order-book verdict from `assessPolymarketBookDepth` (`S4-M38`).
+   *
+   * Threaded here rather than fetched inside, for the same reason `poolTvlUsd` is:
+   * the book lives in the indexer's in-process cache, and this runs in
+   * signal-engine. A read from here would either import a second cache or open a
+   * socket on the money path.
+   *
+   * Omitted means no subscriber is wired for this token, which polygon treats as
+   * a deployment gap and every other chain ignores.
+   */
+  readonly polymarketBook?: UsableLiquidity | null;
   readonly projection: CohortNotionalProjection;
   /** End of the window. Injected so the decision stays reproducible in a log. */
   readonly now: Date;
@@ -571,7 +583,8 @@ export async function resolveFanoutCapacity(
     liquidity: usableLiquidityForFanout({
       chain: input.chain,
       tokenMint: input.tokenMint,
-      poolTvlUsd: input.poolTvlUsd
+      poolTvlUsd: input.poolTvlUsd,
+      polymarketBook: input.polymarketBook
     }),
     activeFollowerCount,
     policy: { ...policyOverrides, unassessablePolicy: 'skip' }

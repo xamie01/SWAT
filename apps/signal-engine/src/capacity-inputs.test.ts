@@ -218,6 +218,30 @@ describe('usableLiquidityForFanout', () => {
     expect(result.note).toContain('S4-M38');
   });
 
+  it('carries a book verdict through resolveFanoutCapacity, not just the pure helper', () => {
+    // The wiring test. `usableLiquidityForFanout` accepting a verdict is useless
+    // if `resolveFanoutCapacity` never passes one -- which is exactly the
+    // correct-but-inert shape this checklist has been burned by four times, and
+    // which a unit test on the helper alone cannot detect.
+    const forwarded = usableLiquidityForFanout({
+      chain: 'polygon',
+      tokenMint: 'polygon:token-1',
+      poolTvlUsd: 9_999_999,
+      polymarketBook: {
+        chain: 'polygon',
+        tokenMint: 'polygon:token-1',
+        usableLiquidityUsd: 250_000,
+        basis: 'order-book-depth',
+        approximate: true,
+        note: 'walked ladder'
+      }
+    });
+    expect(forwarded.basis).toBe('order-book-depth');
+    expect(forwarded.usableLiquidityUsd).toBe(250_000);
+    // And the pool figure is still ignored, even though it is much larger.
+    expect(forwarded.usableLiquidityUsd).not.toBe(9_999_999);
+  });
+
   it('still refuses polygon when no subscriber supplied a book', () => {
     // The pre-S4-M38 behaviour, retained for the case it was written for.
     const result = usableLiquidityForFanout({
@@ -327,6 +351,32 @@ describe('capacityGateFor', () => {
     });
     expect(resolved.decision?.reasonCode).toBe('capacity-not-assessable');
     expect(resolved.capacity).toBeNull();
+  });
+
+  it('admits a polygon cohort once a book verdict is threaded through (S4-M38)', async () => {
+    // The wiring assertion. The test directly above proves polygon is
+    // unassessable WITHOUT a book; this proves the verdict actually reaches
+    // `assessMasterCapacity` rather than being accepted by the pure helper and
+    // then dropped on the floor -- the correct-but-inert shape this checklist has
+    // been burned by four times, and which a helper-only test cannot detect.
+    const resolved = await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      polymarketBook: {
+        chain: 'polygon',
+        tokenMint: POLY_TOKEN,
+        usableLiquidityUsd: 5_000_000,
+        basis: 'order-book-depth',
+        approximate: true,
+        note: 'walked ladder within 100bps'
+      },
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+    expect(resolved.decision?.reasonCode).not.toBe('capacity-not-assessable');
+    expect(resolved.capacity).not.toBeNull();
   });
 
   it('maps a real impact breach to skip so users read capacity-exhausted', async () => {
