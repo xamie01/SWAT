@@ -324,13 +324,27 @@ export type PolymarketBookUnknownCode =
   | 'book-snapshot-stale'
   /** Post-reconnect: top-of-book survives, the depth ladder does not. */
   | 'book-awaiting-snapshot'
+  /**
+   * **Both** sides empty after deletions are dropped. Unknown rather than zero,
+   * because that is what a truncated or failed snapshot looks like and a live
+   * market with no resting orders on either side is the rarer explanation. A
+   * one-sided empty is a different thing entirely -- see
+   * `'no-depth-within-bound'`.
+   */
+  | 'book-empty'
   /** A venue timestamp ahead of our clock beyond the skew allowance. */
   | 'book-clock-implausible'
-  /** The side the cohort would consume has no levels. */
-  | 'book-side-empty'
   /** Best bid at or above best ask -- crossed, or the two sides were swapped. */
   | 'book-crossed'
-  /** A level's price or size is not a usable number, or the price is outside (0,1). */
+  /**
+   * A level's price is outside (0,1), or its size is negative or non-finite.
+   *
+   * A size of **zero is not invalid**: `price_change` publishes `size: "0"` to
+   * delete a level, so a zero-size entry is a deletion a filler has not yet
+   * garbage-collected. Those are dropped before the walk, and a ladder in which
+   * every level is deleted is known-zero depth rather than unknown -- which is
+   * what makes `no-depth-within-bound` reachable.
+   */
   | 'book-level-invalid';
 
 /** The outcome. Three states, because zero and unknown are different answers. */
@@ -481,13 +495,25 @@ function finite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-/** A usable outcome price is strictly inside (0, 1); a usable size is positive. */
-function levelIsUsable(level: PolymarketBookLevel): boolean {
-  return finite(level.price)
-    && level.price > 0
-    && level.price < 1
-    && finite(level.size)
-    && level.size > 0;
+/**
+ * A level is *malformed* when its price is not an outcome price or its size is
+ * not a non-negative finite number.
+ *
+ * Zero size is well-formed and means "deleted" -- `price_change` publishes
+ * `size: "0"` to remove a level. Malformed is refused (`book-level-invalid`);
+ * deleted is dropped.
+ */
+function levelIsMalformed(level: PolymarketBookLevel): boolean {
+  return !finite(level.price)
+    || level.price <= 0
+    || level.price >= 1
+    || !finite(level.size)
+    || level.size < 0;
+}
+
+/** A level that still holds size. */
+function levelIsLive(level: PolymarketBookLevel): boolean {
+  return !levelIsMalformed(level) && level.size > 0;
 }
 
 /**
@@ -545,8 +571,10 @@ export function polymarketBookAverageImpactBps(input: {
   readonly notionalUsd: number;
 }): number | null {
   if (!finite(input.notionalUsd) || input.notionalUsd <= 0) return null;
-  const levels = sortedForDirection(input.ladders, input.cohortDirection);
-  if (levels.length === 0 || !levels.every(levelIsUsable)) return null;
+  const side = sortedForDirection(input.ladders, input.cohortDirection);
+  if (side.some(levelIsMalformed)) return null;
+  const levels = side.filter(levelIsLive);
+  if (levels.length === 0) return null;
 
   const bestPrice = levels[0]!.price;
   let remaining = input.notionalUsd;
@@ -858,24 +886,32 @@ export function assessPolymarketBookDepth(
     );
   }
 
-  const bids = [...entry.ladders.bids].sort((left, right) => right.price - left.price);
-  const asks = [...entry.ladders.asks].sort((left, right) => left.price - right.price);
-  const consumed = cohortDirection === 'buy' ? asks : bids;
-
-  if (consumed.length === 0) {
-    return unknown(
-      'book-side-empty',
-      `Cached Polymarket book for token ${tokenId} has no ${cohortDirection === 'buy' ? 'asks' : 'bids'}, `
-      + `which is the side a cohort ${cohortDirection} consumes.`,
-      ageMs
-    );
-  }
-  if (!consumed.every(levelIsUsable)) {
+  // Malformed is refused for the whole entry, not silently filtered: a ladder we
+  // cannot fully parse is a ladder we cannot price, and dropping the level we
+  // failed to read is exactly how an understated book becomes an overstated one.
+  if ([...entry.ladders.bids, ...entry.ladders.asks].some(levelIsMalformed)) {
     return unknown(
       'book-level-invalid',
       `Cached Polymarket book for token ${tokenId} contains a level whose price is outside (0,1) `
-      + 'or whose size is not a positive finite number. Refused rather than filtered: a ladder we '
-      + 'cannot fully parse is a ladder we cannot price.',
+      + 'or whose size is negative or non-finite. Refused rather than filtered. (A size of zero is '
+      + 'a price_change deletion and is dropped, not refused.)',
+      ageMs
+    );
+  }
+
+  const bids = entry.ladders.bids
+    .filter(levelIsLive)
+    .sort((left, right) => right.price - left.price);
+  const asks = entry.ladders.asks
+    .filter(levelIsLive)
+    .sort((left, right) => left.price - right.price);
+
+  if (bids.length === 0 && asks.length === 0) {
+    return unknown(
+      'book-empty',
+      `Cached Polymarket book for token ${tokenId} has no live levels on either side. Treated as `
+      + 'unknown rather than zero: a truncated or failed snapshot looks exactly like this, and it '
+      + 'is the likelier explanation than a live market with nothing resting on either side.',
       ageMs
     );
   }
@@ -890,15 +926,26 @@ export function assessPolymarketBookDepth(
     );
   }
 
-  const walk = walkLadder(consumed, cohortDirection, boundBps, impactCapBps);
+  const consumed = cohortDirection === 'buy' ? asks : bids;
+  const sideName = cohortDirection === 'buy' ? 'ask' : 'bid';
 
-  if (walk.notionalUsd <= 0) {
+  // A one-sided empty against a populated other side is **known zero**, not
+  // unknown: the snapshot arrived, it is fresh, and nobody is offering the side
+  // this cohort needs. That is a real market state, unlike both sides empty.
+  const walk = consumed.length === 0
+    ? null
+    : walkLadder(consumed, cohortDirection, boundBps, impactCapBps);
+
+  if (walk === null || walk.notionalUsd <= 0) {
     // Known, and known to be zero: the ladder is fresh and parseable and nothing
     // rests inside the bound. Distinct from unknown on purpose.
-    const detail =
-      `Polymarket book for token ${tokenId} holds no size within ${boundBps}bps of best `
-      + `${walk.bestPrice} on the ${cohortDirection === 'buy' ? 'ask' : 'bid'} side. Depth is known `
-      + 'to be zero here, which is not the same as unobserved.';
+    const detail = walk === null
+      ? `Polymarket book for token ${tokenId} has no live ${sideName} levels, which is the side a `
+        + `cohort ${cohortDirection} consumes. The other side is populated, so this is an observed `
+        + 'zero rather than a missing snapshot.'
+      : `Polymarket book for token ${tokenId} holds no size within ${boundBps}bps of best `
+        + `${walk.bestPrice} on the ${sideName} side. Depth is known to be zero here, which is not `
+        + 'the same as unobserved.';
     return Object.freeze({
       outcome: 'no-depth-within-bound' as const,
       reasonCode: 'polymarket-book-depth-empty-within-bound' as const,

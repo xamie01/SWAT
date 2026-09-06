@@ -35,3 +35,11 @@ export * from './authority/index.js';
  * named Uniswap pool.
  */
 export * from './pusd-liquidity.js';
+
+/**
+ * Polymarket order-book depth cache (S4-M38). An outcome share trades on a CLOB,
+ * so its liquidity is resting depth within a price bound -- not a pool TVL, and
+ * not something `priceImpactBps`'s constant-product algebra can consume. This
+ * module walks the ladder and publishes a calibrated equivalent reserve.
+ */
+export * from './polymarket-book-depth.js';
