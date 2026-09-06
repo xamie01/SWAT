@@ -57,14 +57,20 @@ import {
 /**
  * Builds the `UsableLiquidity` input from a DexScreener pool TVL, per chain.
  *
- * **Polymarket (`polygon`) is hard-gated to `unknownLiquidity` and the TVL
- * argument is not even read.** This is the single most important line in the
- * file, so the reasoning is written out rather than implied:
+ * **Polymarket (`polygon`) never uses the TVL argument — it is not even read.**
+ * Since `S4-M38` it accepts an order-book verdict instead (`polymarketBook`);
+ * before that it was hard-gated to `unknownLiquidity`. The gate is gone, the
+ * reasoning behind it is not, and it is why the pool figure is still discarded
+ * unread on this chain rather than filtered:
  *
  *   * A Polymarket outcome share is a **conditional token that trades on
  *     Polymarket's own CLOB**. Its liquidity is resting order-book depth inside a
  *     price bound, which is a different quantity from a pool reserve — the
  *     constant-product algebra in `priceImpactBps` does not describe it.
+ *   * A comment claiming a gate that no longer exists is worse than no comment,
+ *     so: what changed is that a **calibrated** figure can now arrive from the
+ *     depth model. What did not change is that a **pool** figure is still wrong
+ *     for this chain, and an unmeasured book still reads as unknown.
  *   * `fetchDexScreenerLiquidity(mint, 'polygon')` therefore either returns
  *     `null`, or — worse — returns the TVL of **some unrelated Polygon DEX pair
  *     that happens to match the address**. Passing that number through would put
@@ -98,8 +104,47 @@ export function usableLiquidityForFanout(input: {
   readonly tokenMint: string;
   /** DexScreener `liquidity.usd` for the deepest pair, or `null`. */
   readonly poolTvlUsd: number | null;
+  /**
+   * A Polymarket order-book verdict from `assessPolymarketBookDepth` (`S4-M38`).
+   *
+   * Passed as an already-assessed `UsableLiquidity` rather than as raw depth,
+   * because the calibration is the whole point: the depth model publishes
+   * `capacity * 10_000 / capBps`, an equivalent reserve for which
+   * `priceImpactBps(N, reserve) <= capBps` holds **iff** `N` is within the true
+   * book capacity. Accepting a raw depth number here and converting it locally
+   * would put that algebra in two places, and the wrong one of the two would be
+   * the one that silently disagrees.
+   *
+   * `undefined` means no subscriber is wired for this token, which is a different
+   * fact from a subscriber reporting a stale or gapped book — the first is a
+   * deployment gap, the second is a venue condition. Both fail closed; only their
+   * notes differ, so an operator is not sent to the wrong place.
+   */
+  readonly polymarketBook?: UsableLiquidity | null;
 }): UsableLiquidity {
   if (input.chain === 'polygon') {
+    // S4-M38: a book verdict is now accepted where previously polygon was hard
+    // -gated. The gate was correct while no honest depth figure existed — it
+    // discarded the DexScreener value **unread** rather than filtering on it,
+    // because a fabricated liquidity number fails OPEN and an unknown one fails
+    // closed. That reasoning still holds for the pool figure, which is why
+    // `poolTvlUsd` is still never consulted on this chain.
+    if (input.polymarketBook) {
+      // Trusted only when the model itself says it measured something. A verdict
+      // of `unknown` — stale, gapped, or no snapshot — falls through to the note
+      // below rather than being published as a figure.
+      if (input.polymarketBook.basis === 'order-book-depth' && input.polymarketBook.usableLiquidityUsd !== null) {
+        return input.polymarketBook;
+      }
+      return unknownLiquidity(
+        input.chain,
+        input.tokenMint,
+        'Polymarket book depth was assessed and came back unusable: '
+          + `${input.polymarketBook.note ?? 'no note supplied'} (S4-M38). A stale, gapped or `
+          + 'unsnapshotted book reads as unknown rather than as its last value, so this '
+          + 'fails closed on a venue condition rather than on a missing feed.'
+      );
+    }
     return unknownLiquidity(
       input.chain,
       input.tokenMint,

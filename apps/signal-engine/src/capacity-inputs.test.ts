@@ -163,6 +163,72 @@ describe('usableLiquidityForFanout', () => {
   it('does not fetch DexScreener for polygon at all', async () => {
     await expect(fetchPoolTvlUsdForCapacity('polygon', POLY_TOKEN)).resolves.toBeNull();
   });
+  it('accepts a measured order-book verdict on polygon (S4-M38)', () => {
+    // The gate this replaces was correct while no honest depth figure existed.
+    // Now that one does, refusing it would keep Polymarket permanently
+    // uncopyable for a reason that no longer applies.
+    const book = {
+      chain: 'polygon' as const,
+      tokenMint: 'polygon:token-1',
+      usableLiquidityUsd: 250_000,
+      basis: 'order-book-depth' as const,
+      // Always true for a book: resting size is an option the maker holds, not a
+      // commitment, so the figure can evaporate before the order lands.
+      approximate: true,
+      note: 'walked ladder within 100bps'
+    };
+    const result = usableLiquidityForFanout({
+      chain: 'polygon',
+      tokenMint: 'polygon:token-1',
+      poolTvlUsd: 5_000_000,
+      polymarketBook: book
+    });
+    expect(result).toBe(book);
+    // The pool figure must still be ignored even now the gate is open.
+    expect(result.usableLiquidityUsd).toBe(250_000);
+  });
+
+  it('refuses a book verdict that came back unknown, rather than publishing it', () => {
+    // A stale, gapped or unsnapshotted book is a VENUE condition; no subscriber
+    // at all is a DEPLOYMENT gap. Both fail closed, and the notes differ so an
+    // operator is not sent to the wrong place.
+    const result = usableLiquidityForFanout({
+      chain: 'polygon',
+      tokenMint: 'polygon:token-1',
+      poolTvlUsd: null,
+      polymarketBook: {
+        chain: 'polygon',
+        tokenMint: 'polygon:token-1',
+        // Deliberately INCONSISTENT: a figure present while the basis says the
+        // book was not measured. A verdict like this should never arrive, and the
+        // point of the fixture is that trusting `basis` blindly -- or passing the
+        // verdict straight through -- publishes 999_999 as real liquidity.
+        // An earlier version of this test used a null figure, which the
+        // pass-through mutation satisfied trivially.
+        usableLiquidityUsd: 999_999,
+        basis: 'unknown',
+        approximate: false,
+        note: 'snapshot is 40s stale'
+      }
+    });
+    expect(result.basis).toBe('unknown');
+    // The load-bearing assertion: the inconsistent figure must NOT survive.
+    expect(result.usableLiquidityUsd).toBeNull();
+    expect(result.note).toContain('40s stale');
+    expect(result.note).toContain('S4-M38');
+  });
+
+  it('still refuses polygon when no subscriber supplied a book', () => {
+    // The pre-S4-M38 behaviour, retained for the case it was written for.
+    const result = usableLiquidityForFanout({
+      chain: 'polygon',
+      tokenMint: 'polygon:token-1',
+      poolTvlUsd: 5_000_000
+    });
+    expect(result.basis).toBe('unknown');
+    expect(result.usableLiquidityUsd).toBeNull();
+  });
+
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
