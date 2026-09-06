@@ -464,6 +464,35 @@ describe('executor trade-state routing', () => {
     expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('operator', 'polygon');
   });
 
+  it('keys the breaker per user, so one tenant cannot halt the chain for everyone', async () => {
+    // S4-M16. With the `'operator'` literal this call read and wrote
+    // `breaker:operator:polygon` for every job, so one user's three consecutive
+    // failures tripped the breaker for EVERY other user on that chain -- a denial
+    // of service one tenant could inflict on all of them by trading badly.
+    //
+    // The operator path is the case above: a job with no `userId` still keys on
+    // 'operator', which is why that test passes unchanged and why this one had to
+    // be added rather than edited.
+    vi.mocked(db.readCircuitBreakerState).mockResolvedValue({
+      failureCount: 0,
+      trippedAt: null,
+      probeInFlight: false
+    } as never);
+
+    const userJob = {
+      data: { tokenMint: 'polygon:token-1', userId: 'user-abc' },
+      token: 'lock-token',
+      moveToDelayed: vi.fn()
+    };
+    const success = vi.fn().mockResolvedValue({ status: 'live-executed' });
+    await executeJobWithCircuitBreaker(userJob, success);
+
+    expect(db.readCircuitBreakerState).toHaveBeenCalledWith('user-abc', 'polygon');
+    expect(db.recordCircuitBreakerSuccess).toHaveBeenCalledWith('user-abc', 'polygon');
+    // The literal must not appear for a job that carries a tenant.
+    expect(db.readCircuitBreakerState).not.toHaveBeenCalledWith('operator', 'polygon');
+  });
+
   it('counts returned execution failures and thrown transient failures', async () => {
     const job = {
       data: { tokenMint: 'robinhood-chain:0x0000000000000000000000000000000000000001' },

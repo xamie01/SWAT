@@ -194,4 +194,29 @@ describe('DB risk policy in sizing', () => {
 
     expect(secondTight).toBe(firstTight);
   });
+
+  it('refuses to size a paper trade when the native price is unknown', async () => {
+    // S4-M48. `?? 150` for SOL and `?? 3000` for ETH used to substitute a rate on
+    // any feed failure, and a fabricated rate silently mis-scales every size
+    // derived from it: at a real SOL price of 300 the fallback HALVES every paper
+    // size, which reads as a conservative setting rather than a broken feed.
+    //
+    // The honest answer is to refuse. This asserts a size of 0 for an unreadable
+    // price -- not the ~0.66 the old fallback produced.
+    const shared = await import('@swat/shared');
+    vi.mocked(shared.fetchTokenPriceUsd).mockResolvedValueOnce(null);
+
+    const size = await getBalanceAwarePositionSize(95, 'solana', 'elite', 'paper', 'buy', 'm');
+    expect(size).toBe(0);
+  });
+
+  it('still sizes normally once the price feed answers', async () => {
+    // The complement, so the test above cannot pass because paper sizing is
+    // broken for some unrelated reason.
+    const shared = await import('@swat/shared');
+    vi.mocked(shared.fetchTokenPriceUsd).mockResolvedValue(150);
+
+    const size = await getBalanceAwarePositionSize(95, 'solana', 'elite', 'paper', 'buy', 'm');
+    expect(size).toBeGreaterThan(0);
+  });
 });

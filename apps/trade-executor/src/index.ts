@@ -153,6 +153,7 @@ import {
   type GrantedExecutionAuthority
 } from './execution-authority.js';
 import { createExecutionAuthorityAdapters } from './execution-authority-adapters.js';
+import { riskPolicyAccountForUser } from './per-user-sizing.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
@@ -484,27 +485,46 @@ function getSizingConfig(
   };
 }
 
+/**
+ * Spendable balance for sizing, or `null` when it cannot be established.
+ *
+ * `null` rather than `0` (S4-M41/S4-M48): a zero balance means "you have nothing
+ * to trade with", while null means "we could not find out". Sizing must refuse on
+ * the second, and a caller that coalesces them turns a price-feed outage into a
+ * confident decision not to trade.
+ */
 async function getAvailablePositionBalance(opts: {
   chain: Chain;
   sizingMode: 'paper' | 'live';
   direction: 'buy' | 'sell';
   tokenMint: string;
-}): Promise<number> {
+}): Promise<number | null> {
   if (opts.sizingMode === 'paper') {
-    // Resolve DB-backed risk policy (30s TTL) so changing DB values affects sizing without restart
-    const policy = await resolveRiskPolicy('operator', opts.chain);
     const bankrollUsd = parsePositiveNumber(
       process.env.PAPER_BANKROLL_USD,
       10_000,
       'PAPER_BANKROLL_USD'
     );
     if (opts.chain === 'polygon') return bankrollUsd;
-    if (opts.chain === 'solana') {
-      const solPrice = await fetchTokenPriceUsd(SOL_MINT) ?? 150;
-      return bankrollUsd / solPrice;
+    // A fabricated rate silently mis-scales every size derived from it, and the
+    // symptom is a position that looks deliberate. `?? 150` for SOL and `?? 3000`
+    // for ETH were doing exactly that on any price-feed failure -- at a real SOL
+    // price of 300 the fallback halves every paper size, which reads as a
+    // conservative setting rather than a broken feed.
+    //
+    // Returning null propagates "unknown" to the caller, which refuses rather
+    // than sizing. Same rule as S4-M41 and `resolveKnownBalanceUsd`: unknown is
+    // never a number.
+    const nativeMint = opts.chain === 'solana' ? SOL_MINT : WETH_ROBINHOOD;
+    const nativePrice = await fetchTokenPriceUsd(nativeMint);
+    if (nativePrice === null || !Number.isFinite(nativePrice) || nativePrice <= 0) {
+      console.warn(
+        `[trade-executor] no usable ${opts.chain} native price; paper bankroll is `
+        + 'unassessable rather than sized against a fabricated rate'
+      );
+      return null;
     }
-    const ethPrice = await fetchTokenPriceUsd(WETH_ROBINHOOD) ?? 3_000;
-    return bankrollUsd / ethPrice;
+    return bankrollUsd / nativePrice;
   }
 
   if (opts.chain === 'solana') {
@@ -562,6 +582,15 @@ export async function getBalanceAwarePositionSize(
     direction,
     tokenMint
   });
+  // Unknown is not zero. Returning 0 here would read downstream as "sized to
+  // nothing", indistinguishable from a deliberate skip; sizing must refuse
+  // instead, so the caller sees a size of 0 only when the balance is genuinely 0.
+  if (balance === null) {
+    console.warn(
+      `[trade-executor] spendable balance unassessable for ${chain}; refusing to size`
+    );
+    return 0;
+  }
   return calculateBalanceAwareSize({
     balance,
     base: config.base,
@@ -885,12 +914,27 @@ export async function executeJobWithCircuitBreaker(
   execute: (job: { data: unknown }) => Promise<ExecutorJobResult> = handleJob
 ): Promise<ExecutorJobResult> {
   const chain = chainFromJob(job);
-  const state = await readCircuitBreakerState('operator', chain);
+  // S4-M16: the breaker is keyed per (account, chain), not per chain alone. With
+  // the `'operator'` literal, one user's three consecutive failures tripped
+  // `breaker:operator:<chain>` and halted EVERY other user's trades on that chain
+  // for CIRCUIT_BREAKER_RESET_MS -- a denial of service one tenant could inflict
+  // on all of them, by doing nothing but trading badly.
+  //
+  // `riskPolicyAccountForUser` rather than a bare userId, so the breaker and the
+  // risk policy cannot key differently for one user. It is deliberately NOT
+  // `reconciliationAccountForUser`, which must stay `'operator'` (see the note
+  // above RISK_POLICY_ACCOUNT and §1 of the checklist).
+  const breakerAccount = riskPolicyAccountForUser(
+    resolveExecutionPrincipal((job.data ?? {}) as { userId?: unknown }).kind === 'user'
+      ? (job.data as { userId: string }).userId
+      : null
+  );
+  const state = await readCircuitBreakerState(breakerAccount, chain);
 
   if (state.trippedAt !== null) {
-    const probeClaimed = await claimCircuitBreakerProbe('operator', chain, CIRCUIT_BREAKER_RESET_MS);
+    const probeClaimed = await claimCircuitBreakerProbe(breakerAccount, chain, CIRCUIT_BREAKER_RESET_MS);
     if (!probeClaimed) {
-      const current = await readCircuitBreakerState('operator', chain);
+      const current = await readCircuitBreakerState(breakerAccount, chain);
       if (current.trippedAt !== null) {
         console.log(`[trade-executor] circuit breaker active for ${chain}; delaying job`);
         return delayForCircuitBreaker(job, chain, current.trippedAt);
@@ -903,10 +947,10 @@ export async function executeJobWithCircuitBreaker(
   try {
     const result = await execute(job);
     if (successfulBreakerOutcomes.has(result.status)) {
-      await recordCircuitBreakerSuccess('operator', chain);
+      await recordCircuitBreakerSuccess(breakerAccount, chain);
     } else if (failedBreakerOutcomes.has(result.status)) {
       const failed = await recordCircuitBreakerFailure(
-        'operator',
+        breakerAccount,
         chain,
         DEFAULT_RISK_CONFIG.maxConsecutiveFailures
       );
@@ -930,7 +974,7 @@ export async function executeJobWithCircuitBreaker(
       throw error;
     }
     const failed = await recordCircuitBreakerFailure(
-      'operator',
+      breakerAccount,
       chain,
       DEFAULT_RISK_CONFIG.maxConsecutiveFailures
     );
@@ -1573,6 +1617,16 @@ export async function handleJob(
             direction,
             tokenMint: cleanMint
           });
+          // A live submit path: an unknown balance must not be capped against, and
+          // must not be treated as zero either. Throwing here is deliberate --
+          // UnrecoverableError does not retry, so this refuses the trade rather
+          // than resubmitting against a balance we still cannot read.
+          if (currentSpendableBalance === null) {
+            throw new UnrecoverableError(
+              'Solana spendable balance is unassessable, so the submission cannot be '
+              + 'capped against it; refusing rather than sizing on an unknown'
+            );
+          }
           submissionSize = capPositionToAvailableBalance({
             requested: size,
             available: currentSpendableBalance,
