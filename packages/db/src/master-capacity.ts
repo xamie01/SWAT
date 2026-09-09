@@ -1,6 +1,7 @@
 import type { Chain } from '@swat/shared';
 import { DEFAULT_SLIPPAGE_BPS } from '@swat/shared';
 import { query } from './client.js';
+import type { QuoteCurrency } from './quote-valuation.js';
 
 /**
  * Per-master capacity cap, denominated in **price impact** (`S4-M6`, migration
@@ -1085,5 +1086,608 @@ export async function fetchMasterCapacityPolicy(params: {
       followerSoftCap: row?.follower_soft_cap ?? undefined
     },
     dailyBudgetShareBps: row?.daily_budget_share_bps ?? null
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The priced numerator (S4-M6): accruing real fills onto the cohort row
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ── What was missing, precisely ───────────────────────────────────────────
+//
+// `recordMasterCapacityLedgerEntry` above is called by the FAN-OUT site
+// (`apps/signal-engine/src/capacity-inputs.ts`, `recordFanoutCapacityLedger`) at
+// ENQUEUE time, and it writes `notional_usd NULL` / basis `unpriced`. That is the
+// honest value there and not a shortcut: what the fan-out holds is a
+// PROJECTION — an upper bound over admissible balances — and none of `053`'s
+// three priced bases describes a projection. Recording it as priced would put a
+// number in the numerator that no order produced, and every later window would
+// cap real cohorts against imagined flow.
+//
+// The consequence was that the committed term stayed `$0` forever, so
+// `fetchMasterWindowNotional` summed nothing and the impact cap measured only its
+// own projection. The row said "a fan-out happened and its notional is unknown
+// here"; nothing ever came back to say what it turned out to be.
+//
+// This section is that second half. As each user's fill confirms, the real USD
+// notional is ACCUMULATED onto the same cohort row.
+//
+// ── Why an UPDATE and never a second INSERT ───────────────────────────────
+//
+// The unique key is `(source_trade_id, execution_mode)` — ONE row for the whole
+// cohort, with no `user_id` and never one (`S4-M9`, `S4-M7`). A per-user INSERT
+// would collide on that key, `ON CONFLICT DO NOTHING` would keep the first row,
+// and **the first confirmed user's fill would masquerade as the entire cohort's
+// notional**. Every later user's flow would be invisible to the cap. So the
+// write is an accumulating UPDATE keyed on the cohort, and `053` needs no
+// per-user shape at all.
+//
+// ── Why the basis flip and the first non-null write are one statement ─────
+//
+// Verified against `053` rather than assumed. `chk_master_capacity_ledger_basis`
+// is:
+//
+//     notional_basis IN ('quote-stablecoin','source-amount-usd',
+//                        'marked-to-price','unpriced')
+//     AND (notional_basis = 'unpriced') = (notional_usd IS NULL)
+//     AND (notional_usd IS NULL OR notional_usd >= 0)
+//
+// The middle clause is an equality between the two columns, so a statement that
+// set `notional_usd` while leaving `notional_basis = 'unpriced'` would be
+// rejected, and so would the reverse. A CHECK is evaluated per row per
+// statement, so both must move in the SAME statement. They do — see
+// `ACCRUE_LEDGER_NOTIONAL_SQL`, which is one UPDATE assigning both columns.
+//
+// The third clause is why a negative accrual is refused in the pure layer rather
+// than sent to Postgres: a reversal large enough to drive the row below zero
+// would surface as a constraint violation from a statement whose stack trace says
+// nothing about reversals.
+//
+// ── Pure / DB split ──────────────────────────────────────────────────────
+//
+// Every decision — accrue or not, how much, which basis, is this a replay — is in
+// `decideCapacityFillAccrual`, which is pure. The DB function is one parameterized
+// UPDATE and a row-count check. There is no database on this branch, so anything
+// decided in SQL would be untestable.
+
+/**
+ * The three priced bases `053` admits, as a type. `unpriced` is deliberately not
+ * in this union: it is the *absence* of a priced figure, and a function that could
+ * return it here could accidentally write a priced number under it.
+ */
+export type PricedNotionalBasis = 'quote-stablecoin' | 'source-amount-usd' | 'marked-to-price';
+
+/** The execution modes `chk_master_capacity_ledger_mode` admits. */
+export type CapacityLedgerExecutionMode = 'paper' | 'live' | 'shadow';
+
+/**
+ * What happened to one confirmed fill's contribution to the cohort numerator.
+ *
+ * Three refusals rather than one, on the same reasoning as the
+ * `refuse` / `unavailable` split in `apps/trade-executor/src/solana-simulation.ts`:
+ * each sends an operator somewhere different, and folding them together would
+ * make a broken price feed indistinguishable from a routine replay.
+ *
+ * These strings are contracts. Telemetry and the admin capacity surface (`S6-43`)
+ * key on them, so they are appended to rather than renamed.
+ */
+export type CapacityFillAccrualCode =
+  /** A positive USD delta with a known basis. The only code that writes. */
+  | 'accrue'
+  /**
+   * The execution's cumulative valued USD total did not move, so this call adds
+   * nothing. Two causes, both benign and both **correctly** a no-op: the fill was
+   * already accrued (a BullMQ retry, or a reconciliation pass re-confirming the
+   * same evidence row), or the new fill carried no valued quote leg while an
+   * earlier one did.
+   *
+   * This is the mechanism that makes the caller's idempotency contract
+   * self-correcting rather than a bare promise — see the note on
+   * {@link decideCapacityFillAccrual}.
+   */
+  | 'no-new-usd'
+  /**
+   * Nothing about this execution has a USD value yet: every confirmed fill so far
+   * is unvalued (no usable SOL/ETH rate, or a venue that reported no quote leg at
+   * all). The row therefore stays `unpriced` with `notional_usd NULL`.
+   *
+   * **Not an accrual of zero.** A zero would read as "this cohort spent nothing",
+   * which is the false confidence the NULL exists to avoid: the window would go
+   * from `partial-unpriced-legs` (a declared lower bound) to `accounted` (a
+   * complete sum) while being neither. Same discipline as
+   * `quote-valuation.ts`'s `native-price-unknown` and
+   * `summarizeConfirmedQuoteTotal`'s `unvalued`.
+   */
+  | 'fill-value-unknown'
+  /**
+   * The cumulative total went DOWN. Evidence was reversed
+   * (`confirmation_state = 'reversed'` drops the fill out of the confirmed sum),
+   * or the caller passed a stale "before" figure.
+   *
+   * **Refused rather than subtracted, and the direction is stated:** leaving the
+   * accrued figure high over-counts the numerator, which over-refuses future
+   * cohorts. That is wrong but it fails CLOSED. Subtracting could drive the row
+   * negative and trip `notional_usd >= 0` inside `053`'s basis CHECK, surfacing as
+   * a constraint violation with nothing in the message about reversals. Capacity
+   * is also arguably a record of impact already inflicted: a reversed fill still
+   * consumed depth at submission time.
+   */
+  | 'refuse-reversed-fill';
+
+export type CapacityFillAccrual =
+  | {
+      readonly code: 'accrue';
+      /** Exact decimal text, always strictly positive. Never a float. */
+      readonly deltaUsd: string;
+      readonly notionalBasis: PricedNotionalBasis;
+      readonly reason: string;
+    }
+  | {
+      readonly code: 'no-new-usd' | 'fill-value-unknown' | 'refuse-reversed-fill';
+      readonly deltaUsd: null;
+      readonly notionalBasis: null;
+      readonly reason: string;
+    };
+
+export interface CapacityFillAccrualInput {
+  /**
+   * The fan-out event this fill belongs to. Half of `053`'s unique key, and the
+   * only identity this write needs — which is the point: no user, no target
+   * account, nothing that could turn the ledger into a headcount.
+   */
+  readonly sourceTradeId: string;
+  readonly executionMode: CapacityLedgerExecutionMode;
+  /**
+   * The unit the venue settled this fill's quote leg in, from
+   * `QuoteLegValuation.currency` (`S4-M35`). `null` when the venue reported no
+   * quote leg — which is an unknown value, not a zero one.
+   */
+  readonly quoteCurrency: QuoteCurrency | null;
+  /**
+   * `copy_executions.confirmed_quote_quantity` as it stood immediately BEFORE
+   * this fill was recorded, and immediately after. Both are `SUM(quote_quantity)`
+   * over the execution's confirmed/finalized evidence rows, i.e. over VALUED
+   * fills only, so `null` means "nothing valued yet" rather than zero.
+   *
+   * A cumulative pair rather than a per-fill amount, deliberately — see
+   * {@link decideCapacityFillAccrual}.
+   */
+  readonly confirmedQuoteUsdBefore: string | null;
+  readonly confirmedQuoteUsdAfter: string | null;
+}
+
+/**
+ * The basis a fill's USD figure actually has, from the unit it settled in.
+ *
+ * **`053`'s three bases, and which one describes a confirmed copy fill.** Read
+ * from the migration rather than guessed:
+ *
+ *   * `source-amount-usd` — "from `source_trades.amount_usd`". That is the
+ *     MASTER's trade size, not the cohort's. Wrong quantity entirely, and it is
+ *     NULL on robinhood-chain and on non-stablecoin Solana routes anyway
+ *     (`S4-M23`).
+ *   * `quote-stablecoin` — "quote token is USD-pegged". True where the fill
+ *     really settled in a dollar-pegged unit, and no conversion was applied.
+ *   * `marked-to-price` — "quantity times a fetched price". True where the fill
+ *     settled in SOL or ETH and `valuateQuoteLeg` multiplied by a fetched rate.
+ *
+ * So the honest answer **differs per chain**, which is why this is a function of
+ * the settlement currency and not one constant:
+ *
+ *   * **Polymarket (`polygon`)** settles in USDC/pUSD, which this codebase treats
+ *     as USD 1:1 (`nativeQuoteCurrencyForChain` returns `'USD'`, and `persistTrade`
+ *     applies no conversion). The executor passes `currency: 'USD'`, so
+ *     `quote-stablecoin`. The 1:1 assumption is `S4-M42`'s, and what invalidates it
+ *     is pUSD **redeemability** rather than a price feed — so a broken peg would
+ *     make this figure wrong without making it unknown. That is a limit of the
+ *     assumption, recorded rather than hidden.
+ *   * **Solana live** settles in SOL and `valuateQuoteLeg` multiplies by a fetched
+ *     SOL price, so `marked-to-price`.
+ *   * **Robinhood Chain live** settles in ETH, same conversion, so
+ *     `marked-to-price`.
+ *   * **Paper on every chain** sizes its quote leg in USD before it gets here
+ *     (`persistCanonicalFill` passes `currency: 'USD'` for `paper_simulation`), so
+ *     `quote-stablecoin`. Paper rows live under `execution_mode = 'paper'` and the
+ *     capacity read filters to `['live']`, so they never enter the cap's numerator
+ *     — the basis is recorded for correctness, not because it is consulted.
+ *
+ * `null` is returned for an unknown currency, never a default. A default would
+ * label a converted figure as a stablecoin one, which overstates how much the
+ * number can be trusted.
+ */
+export function pricedBasisForQuoteCurrency(
+  currency: QuoteCurrency | null | undefined
+): PricedNotionalBasis | null {
+  if (currency === 'USD') return 'quote-stablecoin';
+  if (currency === 'SOL' || currency === 'ETH') return 'marked-to-price';
+  return null;
+}
+
+/**
+ * Which basis a cohort row carries once legs with different bases have landed on
+ * it.
+ *
+ * `053` has one `notional_basis` column per row and no `mixed` value, so a mixed
+ * cohort has to resolve to one of the three. **The weaker claim wins:**
+ * `marked-to-price` over `quote-stablecoin`, because a sum containing a
+ * rate-converted leg is itself only as trustworthy as that rate, and labelling it
+ * `quote-stablecoin` would claim a certainty the number does not have. Degrading
+ * a label is honest; upgrading one is not.
+ *
+ * In practice a cohort should never mix: one `source_trade_id` fixes the chain,
+ * and one `execution_mode` fixes the executor path, so every leg settles in the
+ * same unit. This exists so that if that reasoning is ever wrong, the row is
+ * pessimistic rather than misleading.
+ */
+export function mergePricedBasis(
+  existing: PricedNotionalBasis | 'unpriced' | null,
+  incoming: PricedNotionalBasis
+): PricedNotionalBasis {
+  if (existing === null || existing === 'unpriced' || existing === incoming) return incoming;
+  return 'marked-to-price';
+}
+
+// ── Exact decimal subtraction ─────────────────────────────────────────────
+//
+// The delta is a difference of two Postgres NUMERIC texts and it is money, so it
+// is not computed in binary floating point. `0.3 - 0.1` is `0.19999999999999998`
+// in JS, and a numerator assembled from hundreds of those drifts against the
+// column it is supposed to mirror. Same reason `quote-valuation.ts` does its
+// multiply and divide on BigInt.
+//
+// Kept local rather than added to `quote-valuation.ts` because that file is not
+// this task's to edit; it belongs beside `multiplyDecimalText` and
+// `divideDecimalText`, and moving it there is noted in the report.
+
+const CAPACITY_UNSIGNED_DECIMAL = /^(?:\d+\.?\d*|\d*\.\d+)$/;
+
+/** Canonical unsigned decimal text, or `null` when the input is not one. */
+function normalizeLedgerDecimal(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const text = typeof value === 'number'
+    ? (Number.isFinite(value) && value >= 0 ? value.toFixed(20) : '')
+    : value.trim();
+  if (text === '' || !CAPACITY_UNSIGNED_DECIMAL.test(text)) return null;
+  return text;
+}
+
+function ledgerDecimalParts(text: string): { digits: bigint; scale: number } {
+  const [integerPart = '0', fractionalPart = ''] = text.split('.');
+  const combined = `${integerPart}${fractionalPart}`;
+  return { digits: BigInt(combined === '' ? '0' : combined), scale: fractionalPart.length };
+}
+
+function trimLedgerDecimal(text: string): string {
+  if (!text.includes('.')) return text.replace(/^0+(?=\d)/, '');
+  const trimmed = text.replace(/0+$/, '').replace(/\.$/, '');
+  return (trimmed === '' ? '0' : trimmed).replace(/^0+(?=\d)/, '');
+}
+
+/**
+ * `left - right` on unsigned decimal text, exactly. Returns `null` when either
+ * input is not a usable non-negative decimal, and a `-`-prefixed result when the
+ * difference is negative — the caller refuses on the sign rather than clamping,
+ * because a negative delta is a reversal and must be visible as one.
+ */
+export function subtractDecimalText(
+  left: string | number | null | undefined,
+  right: string | number | null | undefined
+): string | null {
+  const a = normalizeLedgerDecimal(left);
+  const b = normalizeLedgerDecimal(right);
+  if (a === null || b === null) return null;
+  const partsA = ledgerDecimalParts(a);
+  const partsB = ledgerDecimalParts(b);
+  const scale = Math.max(partsA.scale, partsB.scale);
+  const scaled =
+    partsA.digits * 10n ** BigInt(scale - partsA.scale)
+    - partsB.digits * 10n ** BigInt(scale - partsB.scale);
+  const negative = scaled < 0n;
+  const magnitude = (negative ? -scaled : scaled).toString();
+  if (scale === 0) return `${negative ? '-' : ''}${trimLedgerDecimal(magnitude)}`;
+  const padded = magnitude.padStart(scale + 1, '0');
+  const pointIndex = padded.length - scale;
+  const body = trimLedgerDecimal(`${padded.slice(0, pointIndex)}.${padded.slice(pointIndex)}`);
+  return `${negative && body !== '0' ? '-' : ''}${body}`;
+}
+
+/**
+ * Decides what one confirmed fill contributes to its cohort's numerator.
+ *
+ * Pure: no clock, no database, no network.
+ *
+ * ── Why a cumulative pair, and where idempotency lives ────────────────────
+ *
+ * **Idempotency is the CALLER's contract, not this function's — and that is a
+ * decision, not an omission.** Stated plainly because getting it wrong is silent:
+ * double-counting inflates the numerator and over-refuses future cohorts, which
+ * is the safe direction but still wrong, and it decays without any symptom.
+ *
+ * In-function deduplication would need this module to remember which
+ * `copy_executions.id` values have already been accrued onto a ledger row. `053`
+ * has nowhere to put that: the ledger row is cohort-level with **no `user_id` and
+ * no execution id**, and it must stay that way — a per-execution column is a
+ * per-user column with a different name, and `S4-M9`/`S4-M7` forbid making a
+ * headcount derivable from capacity data. A side table keyed on execution id
+ * would be a new migration, which this task does not have.
+ *
+ * So the contract is: **call once per confirmed fill.** What makes that contract
+ * satisfiable rather than a bare promise is the shape of the input. The caller
+ * does not hand over "this fill's USD amount"; it hands over the execution's
+ * cumulative valued-USD total **before** and **after** the fill was recorded, and
+ * the delta between them is what accrues. So:
+ *
+ *   * A BullMQ retry re-runs `recordCopyExecutionEvidence`, whose evidence insert
+ *     is `ON CONFLICT (execution_id, evidence_type, evidence_id) DO NOTHING`. The
+ *     cumulative total is therefore unchanged, the delta is zero, and this
+ *     function returns `no-new-usd` and writes nothing. **A replay is a no-op by
+ *     arithmetic, not by a promise anyone has to keep.**
+ *   * A reconciliation pass re-confirming the same evidence row behaves
+ *     identically, for the same reason.
+ *   * A genuine second fill (a partial, then the remainder) moves the total, and
+ *     only the increment accrues. This is why the input is a pair rather than a
+ *     single amount: a per-fill amount would double-count the partial.
+ *
+ * The residual risk the contract still carries is a **stale** `before` figure. Its
+ * two directions are asymmetric and worth naming: too low over-counts and
+ * over-refuses (fails closed); too high produces a negative delta, which surfaces
+ * as `refuse-reversed-fill` rather than as a silent subtraction. Neither is
+ * silent, which is the property being bought.
+ *
+ * Fails **loud** (`MasterCapacityInputError`) on an input that is structurally
+ * wrong — an unparseable cumulative figure, or per-user data — and routes every
+ * *missing* value to a named code.
+ */
+export function decideCapacityFillAccrual(
+  input: CapacityFillAccrualInput
+): CapacityFillAccrual {
+  // The same structural guard the decision uses. The ledger row has no user
+  // dimension and this write must not be the thing that introduces one.
+  assertNoPerUserCapacityInput(input, 'accrualInput');
+
+  if (typeof input.sourceTradeId !== 'string' || input.sourceTradeId.trim() === '') {
+    throw new MasterCapacityInputError('sourceTradeId must be a non-empty string');
+  }
+  if (
+    input.executionMode !== 'paper'
+    && input.executionMode !== 'live'
+    && input.executionMode !== 'shadow'
+  ) {
+    throw new MasterCapacityInputError(
+      `executionMode must be paper, live or shadow (053's chk_master_capacity_ledger_mode), `
+        + `got ${String(input.executionMode)}`
+    );
+  }
+
+  const after = normalizeLedgerDecimal(input.confirmedQuoteUsdAfter);
+  if (input.confirmedQuoteUsdAfter !== null && input.confirmedQuoteUsdAfter !== undefined && after === null) {
+    throw new MasterCapacityInputError(
+      `confirmedQuoteUsdAfter must be a non-negative decimal or null, got `
+        + `${JSON.stringify(input.confirmedQuoteUsdAfter)}`
+    );
+  }
+  const before = normalizeLedgerDecimal(input.confirmedQuoteUsdBefore);
+  if (input.confirmedQuoteUsdBefore !== null && input.confirmedQuoteUsdBefore !== undefined && before === null) {
+    throw new MasterCapacityInputError(
+      `confirmedQuoteUsdBefore must be a non-negative decimal or null, got `
+        + `${JSON.stringify(input.confirmedQuoteUsdBefore)}`
+    );
+  }
+
+  if (after === null) {
+    // Nothing about this execution is valued in USD yet. If something WAS valued
+    // before, the total cannot have become unknown without a reversal.
+    if (before !== null) {
+      return {
+        code: 'refuse-reversed-fill',
+        deltaUsd: null,
+        notionalBasis: null,
+        reason:
+          `The execution's confirmed USD total went from ${before} to unknown, which means `
+          + 'evidence was reversed. The accrued cohort notional is left as it stands rather '
+          + 'than reduced: over-counting over-refuses future cohorts, which fails closed, '
+          + "whereas a subtraction could drive the row below zero and trip 053's "
+          + 'notional_usd >= 0 CHECK with a message about nothing.'
+      };
+    }
+    return {
+      code: 'fill-value-unknown',
+      deltaUsd: null,
+      notionalBasis: null,
+      reason:
+        'No confirmed fill on this execution carries a USD value, so the cohort row stays '
+        + 'unpriced with notional_usd NULL. Accruing a zero would turn the window from a '
+        + 'declared lower bound into a complete sum reading "this cohort spent nothing", '
+        + 'which is exactly the false confidence the NULL exists to avoid.'
+    };
+  }
+
+  const delta = subtractDecimalText(after, before ?? '0');
+  if (delta === null) {
+    throw new MasterCapacityInputError(
+      `could not compute a USD delta from ${JSON.stringify(input.confirmedQuoteUsdBefore)} -> `
+        + `${JSON.stringify(input.confirmedQuoteUsdAfter)}`
+    );
+  }
+
+  if (delta.startsWith('-')) {
+    return {
+      code: 'refuse-reversed-fill',
+      deltaUsd: null,
+      notionalBasis: null,
+      reason:
+        `The execution's confirmed USD total fell from ${before ?? '0'} to ${after} `
+        + `(delta ${delta}). Evidence was reversed, or the caller passed a stale "before" `
+        + 'figure. Refused rather than subtracted: the accrued figure stays high, which '
+        + 'over-refuses future cohorts and therefore fails closed.'
+    };
+  }
+
+  if (delta === '0') {
+    return {
+      code: 'no-new-usd',
+      deltaUsd: null,
+      notionalBasis: null,
+      reason:
+        `The execution's confirmed USD total is unchanged at ${after}, so this fill adds `
+        + 'nothing. Either it was already accrued — a retry re-presents the same evidence '
+        + 'row and the insert is ON CONFLICT DO NOTHING — or this fill carried no valued '
+        + 'quote leg while an earlier one did. Writing nothing is correct in both cases.'
+    };
+  }
+
+  const basis = pricedBasisForQuoteCurrency(input.quoteCurrency);
+  if (basis === null) {
+    // The total moved, so a USD figure exists, but nothing said what unit produced
+    // it. Refusing is the fail-closed direction for a LABEL: guessing a basis
+    // would put a number under a claim about its provenance that nobody made.
+    return {
+      code: 'fill-value-unknown',
+      deltaUsd: null,
+      notionalBasis: null,
+      reason:
+        `The execution's confirmed USD total moved by ${delta} but the fill reported no `
+        + `settlement currency (${JSON.stringify(input.quoteCurrency)}), so no basis from `
+        + "053's list describes it. Left unpriced rather than guessed: a basis is a claim "
+        + 'about where a number came from, and defaulting one would put a converted figure '
+        + 'under quote-stablecoin.'
+    };
+  }
+
+  return {
+    code: 'accrue',
+    deltaUsd: delta,
+    notionalBasis: basis,
+    reason:
+      `Accruing $${delta} of confirmed fill notional onto the cohort row for source trade `
+      + `${input.sourceTradeId} (${input.executionMode}), basis ${basis} from a `
+      + `${input.quoteCurrency} quote leg.`
+  };
+}
+
+/**
+ * The one statement that turns an `unpriced` cohort row into a priced one and
+ * every later fill into an increment.
+ *
+ * Held as a constant so the test asserting its shape and the code executing it
+ * cannot be different strings — the whole invariant here is structural, and a
+ * test against a copy of the SQL would pass while the real query inserted.
+ *
+ * Three properties it must have, each load-bearing:
+ *
+ *   1. **`UPDATE`, not `INSERT`.** `(source_trade_id, execution_mode)` is unique
+ *      and cohort-level; a per-fill INSERT would let the first confirmed user's
+ *      fill stand in for the whole cohort.
+ *   2. **Both columns in one statement.** `chk_master_capacity_ledger_basis`
+ *      equates `notional_basis = 'unpriced'` with `notional_usd IS NULL`, and a
+ *      CHECK is evaluated per statement, so splitting them fails whichever half
+ *      runs first.
+ *   3. **`COALESCE(notional_usd, 0) + delta`**, so the first accrual starts from
+ *      the `unpriced` NULL and later ones add. `NULL + x` is `NULL`, which would
+ *      silently keep every cohort at zero.
+ *
+ * `RETURNING` exists so a missed row is detectable: an `UPDATE` that matches
+ * nothing is not an error in Postgres, and silently matching nothing is the
+ * fail-OPEN direction.
+ */
+export const ACCRUE_LEDGER_NOTIONAL_SQL = `UPDATE master_capacity_ledger
+        SET notional_usd = COALESCE(notional_usd, 0) + $1::numeric,
+            notional_basis = CASE
+              WHEN notional_basis = 'unpriced' THEN $2
+              WHEN notional_basis = $2 THEN notional_basis
+              ELSE 'marked-to-price'
+            END
+      WHERE source_trade_id = $3::uuid
+        AND execution_mode = $4
+  RETURNING notional_usd::text AS notional_usd, notional_basis`;
+
+export interface AccrueLedgerNotionalRow {
+  notional_usd: string | null;
+  notional_basis: string;
+}
+
+export interface CapacityFillAccrualResult {
+  /** True only when a row was actually updated. */
+  readonly applied: boolean;
+  /**
+   * The pure decision's code, or `ledger-row-missing` when the decision said
+   * accrue and no cohort row existed to accrue onto.
+   */
+  readonly code: CapacityFillAccrualCode | 'ledger-row-missing';
+  /** The accrued running total after this write, as text. `null` unless applied. */
+  readonly notionalUsd: string | null;
+  readonly notionalBasis: string | null;
+  /** One ops line. Safe to log; it names no user because this path has none. */
+  readonly reason: string;
+}
+
+/**
+ * Accrues one confirmed fill's USD notional onto its cohort's ledger row.
+ *
+ * The decision is `decideCapacityFillAccrual`; this is the statement and a
+ * row-count check.
+ *
+ * ── `ledger-row-missing` is reported, not repaired ────────────────────────
+ *
+ * A confirmed fill can arrive for a fan-out that has no ledger row:
+ * `recordFanoutCapacityLedger` **swallows** its write failures by design (the
+ * orders are already queued, so throwing would re-run the dispatch for nothing).
+ * When that happened, this UPDATE matches zero rows and real flow is missing from
+ * the numerator — which fails OPEN.
+ *
+ * It is surfaced as a distinct code rather than fixed here, and the reason is the
+ * same one that makes this an UPDATE at all: an INSERT on this path would be a
+ * per-fill insert, and the first fill to arrive would define the cohort row. The
+ * repair belongs where the cohort identity is known — the fan-out site holds the
+ * master address, chain and token mint; this call site holds none of them, and
+ * inventing them from the execution row would put a second definition of a
+ * cohort's identity in the codebase. Filed in the report rather than guessed at.
+ *
+ * Never throws for a missing row. It does propagate a genuine query failure, and
+ * the caller decides — see the call-site note in the report.
+ */
+export async function accrueMasterCapacityFillNotional(
+  input: CapacityFillAccrualInput
+): Promise<CapacityFillAccrualResult> {
+  const decision = decideCapacityFillAccrual(input);
+  if (decision.code !== 'accrue') {
+    return {
+      applied: false,
+      code: decision.code,
+      notionalUsd: null,
+      notionalBasis: null,
+      reason: decision.reason
+    };
+  }
+
+  const rows = await query<AccrueLedgerNotionalRow>(ACCRUE_LEDGER_NOTIONAL_SQL, [
+    decision.deltaUsd,
+    decision.notionalBasis,
+    input.sourceTradeId,
+    input.executionMode
+  ]);
+
+  const row = rows[0];
+  if (!row) {
+    return {
+      applied: false,
+      code: 'ledger-row-missing',
+      notionalUsd: null,
+      notionalBasis: null,
+      reason:
+        `No master_capacity_ledger row for source trade ${input.sourceTradeId} `
+        + `(${input.executionMode}), so $${decision.deltaUsd} of confirmed fill notional is `
+        + 'MISSING from the capacity numerator. The fan-out writer swallows its failures, so '
+        + 'this is the expected symptom of one. Under-counting the numerator permits larger '
+        + 'cohorts than it should, which fails OPEN — worth an alert rather than a debug line.'
+    };
+  }
+
+  return {
+    applied: true,
+    code: 'accrue',
+    notionalUsd: row.notional_usd,
+    notionalBasis: row.notional_basis,
+    reason: decision.reason
   };
 }

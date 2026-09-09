@@ -557,7 +557,17 @@ export async function getBalanceAwarePositionSize(
   clusterTier: ClusterTier,
   sizingMode: 'paper' | 'live',
   direction: 'buy' | 'sell',
-  tokenMint: string
+  tokenMint: string,
+  /**
+   * Whose money is being sized (`S4-15`/`S4-16`). `null` is the pre-tenancy
+   * operator path, which ADR-0001 leaves at `user_id NULL` and never backfills.
+   *
+   * Optional so the six-argument callers keep compiling, and defaulted to `null`
+   * rather than to some ambient current user: a sizing call that forgot to pass a
+   * tenant must size the OPERATOR's account, which is loud and wrong, rather than
+   * silently size one user off another's risk percentage.
+   */
+  userId: string | null = null
 ): Promise<number> {
   const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
   const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
@@ -574,7 +584,11 @@ export async function getBalanceAwarePositionSize(
   // Resolution failure is fatal rather than a warn-and-default (`Principle 3`).
   // Defaulting substitutes a risk percentage the account never agreed to, which is
   // a wrong-sized real trade. Throwing costs one skipped signal.
-  const policy = await resolveRiskPolicy(RISK_POLICY_ACCOUNT, chain);
+  // The account is the tenancy seam. `riskPolicyAccountForUser` returns the user
+  // id for a tenant and `RISK_POLICY_ACCOUNT` for the operator path, and it throws
+  // on a blank string rather than quietly keying on the operator -- which is what
+  // makes "I forgot to thread the id" a failure rather than a cross-tenant read.
+  const policy = await resolveRiskPolicy(riskPolicyAccountForUser(userId), chain);
   const config = { ...envConfig, riskPct: policy.maxPositionPct };
   const balance = await getAvailablePositionBalance({
     chain,
@@ -1397,6 +1411,14 @@ export async function handleJob(
 
   const direction = payload.direction ?? 'buy';
 
+  // Whose money this job spends. Resolved ONCE here, above every consumer, rather
+  // than re-derived per call site: the function is pure over the payload so two
+  // calls could not disagree, but a single declaration is what makes it obvious to
+  // a reader that sizing, the exposure cap and the breaker all key on the same
+  // tenant. They previously did not -- each read the `'operator'` literal.
+  const exposureAccount = resolveExecutionPrincipal(payload);
+  const jobUserId = exposureAccount.kind === 'user' ? exposureAccount.userId : null;
+
   // A stop-loss closes the whole position, so the quantity is dictated by the
   // ledger rather than by balance-aware sizing.
   let stopLossSellQuantity: number | null = null;
@@ -1423,7 +1445,12 @@ export async function handleJob(
         payload.clusterTier ?? 'promising',
         sizingMode,
         direction,
-        cleanMint
+        cleanMint,
+        // S4-15: size against THIS user's agreed risk percentage. Before this the
+        // call resolved the operator's policy for every job, so a fan-out sized
+        // fifty users off one account's settings -- the opposite of "exposure
+        // proportional to what they deposited and agreed to".
+        jobUserId
       );
 
   if (!Number.isFinite(size) || (size <= 0 && !liveTokenSell && stopLossSellQuantity === null)) {
@@ -1440,12 +1467,8 @@ export async function handleJob(
   // `resolveExecutionPrincipal` is pure over the payload, so calling it twice
   // cannot disagree with itself, whereas moving a declaration across 50 lines of
   // branching could change what the later reader sees.
-  const exposureAccount = resolveExecutionPrincipal(payload);
   const dailyExposureUsd = direction === 'buy'
-    ? await getRollingExposureUsd(
-      exposureAccount.kind === 'user' ? exposureAccount.userId : null,
-      chain
-    )
+    ? await getRollingExposureUsd(jobUserId, chain)
     : 0;
   const dailyCapUsd = parseFloat(process.env.DAILY_EXPOSURE_CAP_USD ?? '50000');
 

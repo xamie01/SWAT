@@ -25,9 +25,18 @@ import {
   priceImpactBps,
   recordMasterCapacityLedgerEntry,
   unknownLiquidity,
-  usableLiquidityFromPoolTvlUsd
+  usableLiquidityFromPoolTvlUsd,
+  accrueMasterCapacityFillNotional,
+  decideCapacityFillAccrual,
+  mergePricedBasis,
+  pricedBasisForQuoteCurrency,
+  subtractDecimalText
 } from './master-capacity.js';
-import type { MasterCapacityInput, UsableLiquidity } from './master-capacity.js';
+import type {
+  CapacityFillAccrualInput,
+  MasterCapacityInput,
+  UsableLiquidity
+} from './master-capacity.js';
 
 const WINDOW_END = new Date('2026-08-22T12:00:00.000Z');
 
@@ -653,5 +662,275 @@ describe('DB seams (mocked client)', () => {
     });
     expect(result.policy).toEqual({ maxAggregateImpactBps: 75, followerSoftCap: 20 });
     expect(result.dailyBudgetShareBps).toBe(1_200);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The priced numerator (S4-M6)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('subtractDecimalText', () => {
+  it('subtracts exactly, without binary floating point drift', () => {
+    // 0.3 - 0.1 is 0.19999999999999998 in JS. A numerator assembled from
+    // hundreds of those drifts against the NUMERIC column it mirrors.
+    expect(subtractDecimalText('0.3', '0.1')).toBe('0.2');
+    expect(subtractDecimalText('1500.75', '1000.25')).toBe('500.5');
+    expect(subtractDecimalText('0.000000001', '0')).toBe('0.000000001');
+  });
+
+  it('returns a signed result rather than clamping a negative difference', () => {
+    expect(subtractDecimalText('10', '25')).toBe('-15');
+  });
+
+  it('is zero, not negative zero, when the two figures are equal', () => {
+    expect(subtractDecimalText('150.00', '150')).toBe('0');
+    expect(subtractDecimalText('0', '0')).toBe('0');
+  });
+
+  it('rejects an unparseable or negative input rather than guessing', () => {
+    expect(subtractDecimalText('abc', '1')).toBeNull();
+    expect(subtractDecimalText('', '1')).toBeNull();
+    expect(subtractDecimalText('-5', '1')).toBeNull();
+    expect(subtractDecimalText(null, '1')).toBeNull();
+  });
+});
+
+describe('pricedBasisForQuoteCurrency', () => {
+  it('calls a USD-settled fill quote-stablecoin', () => {
+    // Polymarket settles in USDC/pUSD, treated 1:1, and paper sizes in USD.
+    expect(pricedBasisForQuoteCurrency('USD')).toBe('quote-stablecoin');
+  });
+
+  it('calls a SOL or ETH settled fill marked-to-price, because a rate was applied', () => {
+    expect(pricedBasisForQuoteCurrency('SOL')).toBe('marked-to-price');
+    expect(pricedBasisForQuoteCurrency('ETH')).toBe('marked-to-price');
+  });
+
+  it('returns null for an unknown currency rather than defaulting a basis', () => {
+    expect(pricedBasisForQuoteCurrency(null)).toBeNull();
+    expect(pricedBasisForQuoteCurrency(undefined)).toBeNull();
+  });
+});
+
+describe('mergePricedBasis', () => {
+  it('takes the incoming basis over an unpriced row', () => {
+    expect(mergePricedBasis('unpriced', 'quote-stablecoin')).toBe('quote-stablecoin');
+    expect(mergePricedBasis(null, 'marked-to-price')).toBe('marked-to-price');
+  });
+
+  it('keeps the basis when it already matches', () => {
+    expect(mergePricedBasis('quote-stablecoin', 'quote-stablecoin')).toBe('quote-stablecoin');
+  });
+
+  it('degrades a mixed row to marked-to-price, never upgrades it to quote-stablecoin', () => {
+    // A sum containing a rate-converted leg is only as trustworthy as the rate.
+    expect(mergePricedBasis('quote-stablecoin', 'marked-to-price')).toBe('marked-to-price');
+    expect(mergePricedBasis('marked-to-price', 'quote-stablecoin')).toBe('marked-to-price');
+  });
+});
+
+function accrual(
+  overrides: Partial<CapacityFillAccrualInput> = {}
+): CapacityFillAccrualInput {
+  return {
+    sourceTradeId: '00000000-0000-0000-0000-000000000001',
+    executionMode: 'live',
+    quoteCurrency: 'USD',
+    confirmedQuoteUsdBefore: null,
+    confirmedQuoteUsdAfter: '150',
+    ...overrides
+  };
+}
+
+describe('decideCapacityFillAccrual', () => {
+  it('accrues the increment between the cumulative totals, with a basis', () => {
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: '100', confirmedQuoteUsdAfter: '250.5' })
+    );
+    expect(decision.code).toBe('accrue');
+    expect(decision.deltaUsd).toBe('150.5');
+    expect(decision.notionalBasis).toBe('quote-stablecoin');
+  });
+
+  it('accrues the whole total on the first priced fill, when nothing was valued before', () => {
+    const decision = decideCapacityFillAccrual(accrual({ confirmedQuoteUsdBefore: null }));
+    expect(decision.code).toBe('accrue');
+    expect(decision.deltaUsd).toBe('150');
+  });
+
+  it('accrues only the increment on a second partial fill, never the whole total again', () => {
+    // The reason the input is a cumulative pair rather than a per-fill amount:
+    // a per-fill amount would count the first partial twice.
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: '150', confirmedQuoteUsdAfter: '400' })
+    );
+    expect(decision.deltaUsd).toBe('250');
+  });
+
+  it('is a no-op when the cumulative total did not move, so a retry cannot double-count', () => {
+    // The self-correcting half of the caller's idempotency contract: a BullMQ
+    // retry re-presents the same evidence row, whose insert is ON CONFLICT DO
+    // NOTHING, so the total is unchanged and the delta is zero by arithmetic.
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: '150', confirmedQuoteUsdAfter: '150' })
+    );
+    expect(decision.code).toBe('no-new-usd');
+    expect(decision.deltaUsd).toBeNull();
+  });
+
+  it('never accrues a zero when nothing about the fill is valued in USD', () => {
+    // A zero would read as "this cohort spent nothing" and turn the window from a
+    // declared lower bound into a complete sum that is neither.
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: null, confirmedQuoteUsdAfter: null, quoteCurrency: null })
+    );
+    expect(decision.code).toBe('fill-value-unknown');
+    expect(decision.deltaUsd).toBeNull();
+    expect(decision.notionalBasis).toBeNull();
+  });
+
+  it('leaves the row unpriced when a USD figure moved but no settlement currency was reported', () => {
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: '10', confirmedQuoteUsdAfter: '60', quoteCurrency: null })
+    );
+    expect(decision.code).toBe('fill-value-unknown');
+    expect(decision.deltaUsd).toBeNull();
+  });
+
+  it('refuses a negative delta rather than subtracting it below zero', () => {
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: '400', confirmedQuoteUsdAfter: '150' })
+    );
+    expect(decision.code).toBe('refuse-reversed-fill');
+    expect(decision.deltaUsd).toBeNull();
+  });
+
+  it('refuses a total that became unknown after being valued', () => {
+    const decision = decideCapacityFillAccrual(
+      accrual({ confirmedQuoteUsdBefore: '400', confirmedQuoteUsdAfter: null })
+    );
+    expect(decision.code).toBe('refuse-reversed-fill');
+  });
+
+  it('marks a SOL-settled fill marked-to-price, so the per-chain basis is not one constant', () => {
+    const decision = decideCapacityFillAccrual(accrual({ quoteCurrency: 'SOL' }));
+    expect(decision.notionalBasis).toBe('marked-to-price');
+  });
+
+  it('refuses per-user data in the accrual input, so this write cannot introduce a user dimension', () => {
+    expect(() =>
+      decideCapacityFillAccrual({
+        ...accrual(),
+        // @ts-expect-error deliberately widening the type the way a future change might
+        targetAccount: 'solana:USERWALLET'
+      })
+    ).toThrow(MasterCapacityInputError);
+  });
+
+  it('rejects an unparseable cumulative figure loudly instead of treating it as unknown', () => {
+    expect(() =>
+      decideCapacityFillAccrual(accrual({ confirmedQuoteUsdAfter: 'not-a-number' }))
+    ).toThrow(MasterCapacityInputError);
+    expect(() =>
+      decideCapacityFillAccrual(accrual({ confirmedQuoteUsdBefore: '-5' }))
+    ).toThrow(MasterCapacityInputError);
+  });
+
+  it('rejects an execution mode 053 would not admit', () => {
+    expect(() =>
+      // @ts-expect-error `off` is an ExecutionMode but not a ledger mode
+      decideCapacityFillAccrual(accrual({ executionMode: 'off' }))
+    ).toThrow(MasterCapacityInputError);
+  });
+});
+
+describe('accrueMasterCapacityFillNotional (mocked client)', () => {
+  beforeEach(() => {
+    mocks.query.mockReset();
+  });
+
+  it('accumulates onto the existing cohort row instead of inserting a second one', async () => {
+    // The unique key is (source_trade_id, execution_mode) and the row is
+    // cohort-level. A per-fill INSERT would collide, DO NOTHING would keep the
+    // first row, and the first confirmed user's fill would masquerade as the
+    // whole cohort's notional.
+    mocks.query.mockResolvedValueOnce([
+      { notional_usd: '150', notional_basis: 'quote-stablecoin' }
+    ]);
+    const result = await accrueMasterCapacityFillNotional(accrual());
+    const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/^UPDATE master_capacity_ledger/);
+    expect(sql).not.toMatch(/INSERT/i);
+    expect(sql).toMatch(/COALESCE\(notional_usd, 0\) \+ \$1::numeric/);
+    expect(sql).toMatch(/WHERE source_trade_id = \$3::uuid\s+AND execution_mode = \$4/);
+    expect(params).toEqual([
+      '150',
+      'quote-stablecoin',
+      '00000000-0000-0000-0000-000000000001',
+      'live'
+    ]);
+    expect(result.applied).toBe(true);
+    expect(result.notionalUsd).toBe('150');
+  });
+
+  it('sets notional_usd and notional_basis in one statement, because 053 couples them', async () => {
+    // chk_master_capacity_ledger_basis is
+    //   (notional_basis = 'unpriced') = (notional_usd IS NULL)
+    // and a CHECK is evaluated per row per statement, so a two-statement version
+    // fails on whichever half runs first.
+    mocks.query.mockResolvedValueOnce([
+      { notional_usd: '150', notional_basis: 'quote-stablecoin' }
+    ]);
+    await accrueMasterCapacityFillNotional(accrual());
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+    const [sql] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/SET notional_usd =[\s\S]*notional_basis = CASE/);
+    expect(sql.match(/UPDATE master_capacity_ledger/g)).toHaveLength(1);
+  });
+
+  it('carries no user dimension into the ledger write', async () => {
+    mocks.query.mockResolvedValueOnce([
+      { notional_usd: '150', notional_basis: 'quote-stablecoin' }
+    ]);
+    await accrueMasterCapacityFillNotional(accrual());
+    const [sql] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).not.toMatch(/user_id|target_account/);
+  });
+
+  it('issues no statement at all when the fill USD value is unknown', async () => {
+    const result = await accrueMasterCapacityFillNotional(
+      accrual({ confirmedQuoteUsdAfter: null, quoteCurrency: null })
+    );
+    expect(result.applied).toBe(false);
+    expect(result.code).toBe('fill-value-unknown');
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('issues no statement when a retry re-presents an already-accrued fill', async () => {
+    const result = await accrueMasterCapacityFillNotional(
+      accrual({ confirmedQuoteUsdBefore: '150', confirmedQuoteUsdAfter: '150' })
+    );
+    expect(result.code).toBe('no-new-usd');
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing cohort row instead of silently dropping real flow', async () => {
+    // The fan-out writer swallows its failures, so a fill can arrive for a
+    // fan-out that has no row. Under-counting the numerator permits larger
+    // cohorts than it should, which fails OPEN.
+    mocks.query.mockResolvedValueOnce([]);
+    const result = await accrueMasterCapacityFillNotional(accrual());
+    expect(result.applied).toBe(false);
+    expect(result.code).toBe('ledger-row-missing');
+    expect(result.reason).toMatch(/MISSING from the capacity numerator/);
+  });
+
+  it('degrades a mixed cohort row to marked-to-price in the statement itself', async () => {
+    mocks.query.mockResolvedValueOnce([
+      { notional_usd: '150', notional_basis: 'marked-to-price' }
+    ]);
+    await accrueMasterCapacityFillNotional(accrual({ quoteCurrency: 'USD' }));
+    const [sql] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/ELSE 'marked-to-price'/);
   });
 });

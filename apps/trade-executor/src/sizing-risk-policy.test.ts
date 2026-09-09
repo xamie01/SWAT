@@ -195,6 +195,34 @@ describe('DB risk policy in sizing', () => {
     expect(secondTight).toBe(firstTight);
   });
 
+  it('resolves the risk policy for the JOB\'s user, not the operator (S4-15)', async () => {
+    // The tenancy assertion. Before this the call was
+    // resolveRiskPolicy(RISK_POLICY_ACCOUNT, chain) -- the operator's literal --
+    // for every job, so a fan-out sized fifty users off ONE account's agreed risk
+    // percentage. That is the opposite of "exposure proportional to what they
+    // deposited and agreed to", and it was invisible with a single operator whose
+    // env and DB agree.
+    dbMocks.resolveRiskPolicy.mockResolvedValue({
+      maxPositionPct: 5, maxDailyExposurePct: 25, stopLossPct: 20, maxConsecutiveFailures: 3
+    });
+    await getBalanceAwarePositionSize(95, 'solana', 'elite', 'live', 'buy', 'm', 'user-abc');
+    expect(dbMocks.resolveRiskPolicy).toHaveBeenCalledWith('user-abc', 'solana');
+    expect(dbMocks.resolveRiskPolicy).not.toHaveBeenCalledWith('operator', 'solana');
+  });
+
+  it('keeps the operator path on the operator key when no user is threaded', async () => {
+    // The complement. ADR-0001 leaves legacy rows at user_id NULL and never
+    // backfills them, so omitting the argument must key on 'operator' rather than
+    // throw -- and the default is `null` rather than an ambient current user, so a
+    // call that FORGOT to thread a tenant sizes the operator loudly instead of
+    // sizing one user off another's percentage.
+    dbMocks.resolveRiskPolicy.mockResolvedValue({
+      maxPositionPct: 5, maxDailyExposurePct: 25, stopLossPct: 20, maxConsecutiveFailures: 3
+    });
+    await getBalanceAwarePositionSize(95, 'solana', 'elite', 'live', 'buy', 'm');
+    expect(dbMocks.resolveRiskPolicy).toHaveBeenCalledWith('operator', 'solana');
+  });
+
   it('refuses to size a paper trade when the native price is unknown', async () => {
     // S4-M48. `?? 150` for SOL and `?? 3000` for ETH used to substitute a rate on
     // any feed failure, and a fabricated rate silently mis-scales every size
