@@ -38,6 +38,15 @@ const eligibilityFixtures = vi.hoisted(() => ({
 }));
 
 vi.mock('@swat/db', () => ({
+  // S4-M6: `persistCanonicalFill` accrues the priced capacity numerator after
+  // every confirmed fill. Declared here even though nothing in this file asserts
+  // it -- an export missing from a `vi.mock` factory does not read as `undefined`,
+  // it makes vitest THROW at the call site, and that throw replaces the error
+  // under test. That is how a shadow-isolation test once failed inside
+  // `persistTrade` with a stack pointing at production code.
+  accrueMasterCapacityFillNotional: vi.fn().mockResolvedValue({
+    applied: true, code: 'accrue', deltaUsd: '0'
+  }),
   claimCircuitBreakerProbe: vi.fn(),
   claimSourceSignalForCopyExecution: vi.fn(),
   claimSignalForExecution: vi.fn(),
@@ -69,7 +78,28 @@ vi.mock('@swat/db', () => ({
   readCircuitBreakerState: vi.fn(),
   recordCircuitBreakerFailure: vi.fn(),
   recordCircuitBreakerSuccess: vi.fn(),
-  recordCopyExecutionEvidence: vi.fn(),
+  // Returns a result rather than `undefined`, because `persistCanonicalFill` now
+  // reads `fillValuation.currency` and the execution's confirmed total off it to
+  // accrue the capacity numerator (S4-M6). A bare `vi.fn()` resolves to undefined
+  // and the read throws -- which surfaces as a mirror-bound assertion failing,
+  // several layers from the actual cause.
+  //
+  // `usdAmount: null` with a `no-quote-leg` code is a shape the real function
+  // genuinely returns, and it makes the accrual a no-op here: these tests are
+  // about the mirror bound, not about capacity.
+  recordCopyExecutionEvidence: vi.fn().mockResolvedValue({
+    execution: { confirmedQuoteQuantity: null },
+    position: {},
+    fillValuation: {
+      code: 'no-quote-leg',
+      currency: null,
+      nativeAmount: null,
+      nativeUsdPrice: null,
+      usdAmount: null,
+      reason: 'stubbed in execution-lifecycle.test.ts'
+    },
+    confirmedQuoteTotal: { code: 'no-confirmed-fills', usdAmount: null, unassessedFillCount: 0 }
+  }),
   releaseSignalClaim: vi.fn(),
   resolveChainMode: vi.fn(),
   transitionCopyExecution: vi.fn(),

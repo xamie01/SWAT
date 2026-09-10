@@ -43,3 +43,10 @@ export * from './pusd-liquidity.js';
  * module walks the ladder and publishes a calibrated equivalent reserve.
  */
 export * from './polymarket-book-depth.js';
+
+/**
+ * Cross-service transport for the Polymarket book cache (S4-M38). The subscriber
+ * fills an in-process cache in the indexer; the pre-fan-out read happens in
+ * signal-engine. This is the bridge, over an injected key-value port.
+ */
+export * from './polymarket-book-transport.js';

@@ -38,6 +38,7 @@ import {
   releaseCopyExecutionReconciliationClaim,
   resolveChainMode,
   transitionCopyExecution,
+  accrueMasterCapacityFillNotional,
   claimPolymarketPositionExit,
   confirmPolymarketPositionExit,
   releasePolymarketPositionExit,
@@ -1254,7 +1255,7 @@ async function persistCanonicalFill(input: {
   completesExecution?: boolean;
   occurredAt?: Date;
 }): Promise<void> {
-  await recordCopyExecutionEvidence({
+  const result = await recordCopyExecutionEvidence({
     executionId: input.execution.id,
     evidenceType: input.evidenceType,
     evidenceId: input.evidenceId,
@@ -1265,6 +1266,43 @@ async function persistCanonicalFill(input: {
     completesExecution: input.completesExecution ?? true,
     occurredAt: input.occurredAt ?? new Date()
   });
+
+  // S4-M6: the priced numerator.
+  //
+  // The fan-out site writes this cohort's ledger row at ENQUEUE time as
+  // `unpriced`, because what it holds there is a projection and none of 053's
+  // priced bases describes a projection. This is where the real figure arrives.
+  //
+  // Here rather than at submission, deliberately: `persistCanonicalSubmission` is
+  // the submission site, and an order that never fills consumed no depth. All four
+  // fill paths funnel through this function with `confirmationState: 'confirmed'`,
+  // which is what makes one call cover every chain.
+  //
+  // The before/after pair is what makes a retry safe. `recordCopyExecutionEvidence`
+  // inserts evidence `ON CONFLICT DO NOTHING`, so a replayed job leaves the
+  // cumulative total unmoved, the delta is zero and no statement is issued. A
+  // genuine partial-then-remainder moves the total and only the increment accrues.
+  const accrual = await accrueMasterCapacityFillNotional({
+    sourceTradeId: input.execution.sourceTradeId,
+    executionMode: input.execution.executionMode,
+    quoteCurrency: result.fillValuation.currency,
+    confirmedQuoteUsdBefore: input.execution.confirmedQuoteQuantity,
+    confirmedQuoteUsdAfter: result.execution.confirmedQuoteQuantity
+  }).catch((error: unknown) => ({
+    applied: false as const,
+    code: 'accrual-failed' as const,
+    reason: error instanceof Error ? error.message : String(error)
+  }));
+
+  if (!accrual.applied) {
+    // Never thrown: this runs AFTER a confirmed fill, and throwing here would make
+    // the executor treat a filled order as failed. Both `ledger-row-missing` and
+    // `accrual-failed` UNDER-count, which fails open on the cap -- so these deserve
+    // an alert rather than a log line once alerting exists (S4-M6's follow-up).
+    console.warn(
+      `[trade-executor] capacity numerator not accrued (${accrual.code}): ${accrual.reason}`
+    );
+  }
 }
 
 async function terminateCanonicalExecution(
