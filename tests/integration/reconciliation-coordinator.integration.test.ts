@@ -102,7 +102,7 @@ describe('canonical reconciliation coordinator', () => {
         }),
         release: (input) => releaseCopyExecutionReconciliationClaim(input),
         reconcilers: {
-          [fixture.chain]: async (execution) => {
+          [fixture.chain]: async (execution: CopyExecutionRecord) => {
             seen.push(execution.id);
             // The venue still has no answer, which is the realistic first pass.
             return { status: 'pending' };
@@ -144,7 +144,7 @@ describe('canonical reconciliation coordinator', () => {
         }),
         release: (input) => releaseCopyExecutionReconciliationClaim(input),
         reconcilers: {
-          [fixture.chain]: async (execution) => {
+          [fixture.chain]: async (execution: CopyExecutionRecord) => {
             await transitionCopyExecution({
               executionId: execution.id,
               nextState: 'failed',

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { api } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
 
 export default function WalletIntelView() {
   const [activeTab, setActiveTab] = useState('Activity Feed');
@@ -9,23 +11,18 @@ export default function WalletIntelView() {
   const [walletData, setWalletData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
-
   const fetchWallet = async (address: string, chain: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/v1/wallets/${address}?chain=${chain}`, {
-        headers: { 'X-Api-Key': apiKey }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setWalletData(data);
-      } else {
-        setWalletData(null);
-      }
-    } catch (err) {
-      console.error(err);
+      setWalletData(await api.get(
+        `/v1/wallets/${encodeURIComponent(address)}?chain=${encodeURIComponent(chain)}`
+      ));
+    } catch (err: unknown) {
+      // This view has no error surface, so a 401 and an unknown wallet both
+      // render as 'N/A'. Logged with the status so the console can tell them
+      // apart; giving the operator that distinction needs an error banner this
+      // component does not have (left for the S6-13/S6-14 admin-shell work).
+      console.error(describeApiError(err, 'Wallet intel request failed'), err);
       setWalletData(null);
     } finally {
       setIsLoading(false);

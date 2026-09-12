@@ -19,6 +19,7 @@ function gammaMarket(overrides: Record<string, unknown> = {}) {
     acceptingOrders: true,
     umaResolutionStatus: 'unresolved',
     endDate: FUTURE,
+    secondsDelay: 0,
     ...overrides
   };
 }
@@ -38,6 +39,7 @@ function state(overrides: Partial<PolymarketMarketState> = {}): PolymarketMarket
     acceptingOrders: true,
     resolutionStatus: 'unresolved',
     endDate: new Date(Date.now() + 86_400_000),
+    secondsDelay: 0,
     ...overrides
   };
 }
@@ -110,6 +112,42 @@ describe('Polymarket market-state gate', () => {
 
     expect(String(fetchImpl.mock.calls[0]![0])).toContain(`condition_id=${CONDITION_ID}`);
     expect(resolved.acceptingOrders).toBe(true);
+  });
+
+  it('falls back to endDateIso when endDate is absent', () => {
+    // Gamma types BOTH `endDate` and `endDateIso` as nullable
+    // (`/api-reference/markets/get-market-by-id`), so a market can populate one
+    // and not the other. Reading only `endDate` would report a market with a
+    // perfectly good `endDateIso` as untradable.
+    const parsed = parsePolymarketMarketState(
+      { conditionId: CONDITION_ID, active: true, closed: false, endDateIso: FUTURE },
+      CONDITION_ID
+    );
+
+    expect(parsed.endDate.toISOString()).toBe(new Date(FUTURE).toISOString());
+  });
+
+  it('reports secondsDelay as null when absent or nonsensical, never as zero', () => {
+    // Zero is a positive claim that orders match immediately. Null says we do not
+    // know, which is what the S4-M18 staleness rule needs in order to stay honest
+    // about how much latency it has actually accounted for.
+    const absent = parsePolymarketMarketState(
+      { conditionId: CONDITION_ID, active: true, closed: false, endDate: FUTURE },
+      CONDITION_ID
+    );
+    expect(absent.secondsDelay).toBeNull();
+
+    const negative = parsePolymarketMarketState(
+      gammaMarket({ secondsDelay: -5 }),
+      CONDITION_ID
+    );
+    expect(negative.secondsDelay).toBeNull();
+
+    const configured = parsePolymarketMarketState(
+      gammaMarket({ secondsDelay: 30 }),
+      CONDITION_ID
+    );
+    expect(configured.secondsDelay).toBe(30);
   });
 
   it('blocks a submission into a market that stopped accepting orders', async () => {

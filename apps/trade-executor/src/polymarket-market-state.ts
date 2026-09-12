@@ -24,7 +24,25 @@ export type PolymarketMarketState = {
   closed: boolean;
   acceptingOrders: boolean;
   resolutionStatus: string;
+  /**
+   * When the market becomes eligible for resolution — per `/concepts/resolution`
+   * that is what an end date *means*, which is why `polymarket-staleness.ts`
+   * (`S4-M18`) uses it as the denominator for time-to-resolution rather than as
+   * a display value.
+   */
   endDate: Date;
+  /**
+   * The market's configured matching delay in seconds, or null when it reports
+   * none. `/market-data/market-details` → *Market Timing* documents
+   * `secondsDelay` as the "delay, in seconds, before a newly placed marketable
+   * order can match", and `/trading/place-orders` returns an order status of
+   * `delayed` for exactly that case.
+   *
+   * Read here rather than inferred because it is latency *we* incur between
+   * submission and any fill, so `S4-M18` charges it against the staleness
+   * budget. Typed nullable to match the documented `integer | null`.
+   */
+  secondsDelay: number | null;
 };
 
 export class PolymarketMarketClosedError extends Error {}
@@ -73,7 +91,16 @@ export function parsePolymarketMarketState(
     ? raw.umaResolutionStatus.trim().toLowerCase()
     : closed ? 'unknown' : 'unresolved';
 
-  const endDateValue = raw.endDate ?? raw.end_date;
+  // Gamma's market schema carries BOTH `endDate` (`string<date-time> | null`) and
+  // `endDateIso` (`string | null`) — verified in
+  // `/api-reference/markets/get-market-by-id`. Both are nullable, so reading only
+  // one can miss a market that populated the other. All four spellings are tried
+  // and a market that carries none is still refused: the gate below and the
+  // `S4-M18` staleness rule both need this timestamp, and neither may guess it.
+  const endDateValue = raw.endDate
+    ?? raw.end_date
+    ?? raw.endDateIso
+    ?? raw.end_date_iso;
   if (typeof endDateValue !== 'string' || !endDateValue.trim()) {
     throw new PolymarketMarketClosedError(
       `Polymarket market ${conditionId} is missing its end date`
@@ -86,7 +113,28 @@ export function parsePolymarketMarketState(
     );
   }
 
-  return { conditionId, active, closed, acceptingOrders, resolutionStatus, endDate };
+  // A delay that is absent, negative, or not a number is reported as null rather
+  // than as zero. Zero is a positive claim that orders match immediately; null
+  // says we do not know, which is what `S4-M18` needs to see to stay honest.
+  const rawSecondsDelay = raw.secondsDelay ?? raw.seconds_delay;
+  const parsedSecondsDelay = typeof rawSecondsDelay === 'number'
+    ? rawSecondsDelay
+    : typeof rawSecondsDelay === 'string' && rawSecondsDelay.trim()
+      ? Number(rawSecondsDelay)
+      : Number.NaN;
+  const secondsDelay = Number.isFinite(parsedSecondsDelay) && parsedSecondsDelay >= 0
+    ? parsedSecondsDelay
+    : null;
+
+  return {
+    conditionId,
+    active,
+    closed,
+    acceptingOrders,
+    resolutionStatus,
+    endDate,
+    secondsDelay
+  };
 }
 
 /**

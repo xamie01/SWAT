@@ -16,6 +16,7 @@ import {
   encodeRuntimeValue,
   type RedisHashClient
 } from './runtime-codec.js';
+import type { SolanaSimulationGate } from './solana-simulation.js';
 
 /**
  * Solana execution over Jupiter + Jito bundles (DG-1, checklist S3-1…S3-5).
@@ -52,7 +53,19 @@ export interface JupiterJitoSubmitInput {
 export type JupiterJitoSubmission =
   | { readonly status: 'submitted'; readonly clientOrderId: string; readonly bundleId: string; readonly lastValidBlockHeight: number }
   | { readonly status: 'pending_confirmation'; readonly clientOrderId: string; readonly bundleId: string; readonly lastValidBlockHeight: number }
-  | { readonly status: 'rejected'; readonly clientOrderId: string; readonly reason: string }
+  | {
+      readonly status: 'rejected';
+      readonly clientOrderId: string;
+      readonly reason: string;
+      /**
+       * Stable machine-readable code, when the rejection has one.
+       *
+       * Optional and additive so existing consumers that only read `reason` keep
+       * working; `S4-M24` reads this to render an actionable skip reason instead
+       * of parsing prose.
+       */
+      readonly code?: string;
+    }
   | { readonly status: 'submission_unknown'; readonly clientOrderId: string; readonly reason: string }
   | { readonly status: 'already_resolved'; readonly clientOrderId: string; readonly resolution: JupiterJitoResolution };
 
@@ -182,6 +195,15 @@ export interface JupiterJitoRuntimeOptions {
   readonly tipPercentile?: 'p50' | 'p75' | 'p95';
   readonly pendingTtlMs: number;
   readonly jupiterApiKey?: string;
+  /**
+   * Pre-trade simulation gate (checklist S4-M15).
+   *
+   * A **parameter**, not a module-level `Connection` (Standing Rule 2), and
+   * optional: when absent the swap is submitted unsimulated, which is the
+   * behaviour every caller had before this existed. Supply it from
+   * `createSolanaSimulationGateFromEnvironment()`.
+   */
+  readonly simulation?: SolanaSimulationGate;
   readonly now?: () => Date;
 }
 
@@ -223,6 +245,38 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
     });
     if (!built) {
       return { status: 'rejected', clientOrderId: input.clientOrderId, reason: 'swap-build-failed' };
+    }
+
+    // Pre-trade simulation (checklist S4-M15).
+    //
+    // **Why the gate lives inside the runtime rather than in front of it.** The
+    // artifact that has to be simulated is the built transaction, and it only
+    // ever exists here: `solana-dispatch.ts` holds a quote, and
+    // `buildJupiterSwap` is called from this function, after the idempotency
+    // guards. Simulating from dispatch would mean either building the swap twice
+    // (two paid Jupiter `/swap` calls producing two different transactions, so
+    // the one simulated is not the one submitted) or hoisting the build above the
+    // resolved/pending checks, which is exactly the ordering that must not change
+    // — a redelivered job would then build and simulate a swap for an order that
+    // is already terminal.
+    //
+    // It runs *before* the tip floor is fetched and before anything is signed, so
+    // a refused route costs one RPC round trip and nothing else. A skip here is
+    // `rejected`, never `submission_unknown`: no bundle was transmitted, so there
+    // is no venue-side state to reconcile.
+    if (options.simulation) {
+      const decision = await options.simulation.evaluate({
+        transactionBase64: built.swapTransaction,
+        clientOrderId: input.clientOrderId
+      });
+      if (decision.kind === 'skip') {
+        return {
+          status: 'rejected',
+          clientOrderId: input.clientOrderId,
+          reason: `${decision.code}: ${decision.reason}`,
+          code: decision.code
+        };
+      }
     }
 
     const floor = await getJitoTipFloor(options.jito);

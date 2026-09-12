@@ -42,6 +42,43 @@ const balanceMocks = vi.hoisted(() => ({
 }));
 vi.mock('./balances.js', () => balanceMocks);
 
+/**
+ * `S4-M27`. Without these two mocks this file reached the real network.
+ *
+ * `index.ts`'s `getCachedSolPrice` asks Redis and then falls through to
+ * `fetchTokenPriceUsd`, which calls DexScreener. In isolation the request usually
+ * completed, so the file passed 6/6 on its own; under a full-suite run it
+ * contended for the network and timed out at vitest's 5 s default, logging
+ * `[prices] DexScreener error ... TypeError: fetch failed`. That reads exactly like
+ * a real regression, and a suite that flakes for environmental reasons trains
+ * everyone to re-run rather than read the failure.
+ *
+ * `evaluateCopyPolicy` and `resolveSlippageBps` come from `importActual` because
+ * both are pure decision math with their own suites in `packages/shared`; stubbing
+ * them would only test the stub. Same reasoning, and same shape, as
+ * `execution-lifecycle.test.ts`.
+ */
+vi.mock('@swat/shared', async () => {
+  const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
+  return {
+    ...actual,
+    fetchTokenPriceUsd: vi.fn().mockResolvedValue(150),
+    getJupiterSimulatedFill: vi.fn()
+  };
+});
+
+// `getRedis()` constructs a real client and would try to connect. Nothing here
+// asserts cache behaviour: the price above is what the assertions turn on.
+vi.mock('ioredis', () => ({
+  Redis: class Redis {
+    get = vi.fn().mockResolvedValue(null);
+    setex = vi.fn().mockResolvedValue('OK');
+    set = vi.fn().mockResolvedValue('OK');
+    publish = vi.fn().mockResolvedValue(1);
+    on = vi.fn();
+  }
+}));
+
 const { getBalanceAwarePositionSize } = await import('./index.js');
 
 /**
@@ -156,5 +193,58 @@ describe('DB risk policy in sizing', () => {
     const secondTight = await getBalanceAwarePositionSize(95, 'solana', 'elite', 'live', 'buy', 'm');
 
     expect(secondTight).toBe(firstTight);
+  });
+
+  it('resolves the risk policy for the JOB\'s user, not the operator (S4-15)', async () => {
+    // The tenancy assertion. Before this the call was
+    // resolveRiskPolicy(RISK_POLICY_ACCOUNT, chain) -- the operator's literal --
+    // for every job, so a fan-out sized fifty users off ONE account's agreed risk
+    // percentage. That is the opposite of "exposure proportional to what they
+    // deposited and agreed to", and it was invisible with a single operator whose
+    // env and DB agree.
+    dbMocks.resolveRiskPolicy.mockResolvedValue({
+      maxPositionPct: 5, maxDailyExposurePct: 25, stopLossPct: 20, maxConsecutiveFailures: 3
+    });
+    await getBalanceAwarePositionSize(95, 'solana', 'elite', 'live', 'buy', 'm', 'user-abc');
+    expect(dbMocks.resolveRiskPolicy).toHaveBeenCalledWith('user-abc', 'solana');
+    expect(dbMocks.resolveRiskPolicy).not.toHaveBeenCalledWith('operator', 'solana');
+  });
+
+  it('keeps the operator path on the operator key when no user is threaded', async () => {
+    // The complement. ADR-0001 leaves legacy rows at user_id NULL and never
+    // backfills them, so omitting the argument must key on 'operator' rather than
+    // throw -- and the default is `null` rather than an ambient current user, so a
+    // call that FORGOT to thread a tenant sizes the operator loudly instead of
+    // sizing one user off another's percentage.
+    dbMocks.resolveRiskPolicy.mockResolvedValue({
+      maxPositionPct: 5, maxDailyExposurePct: 25, stopLossPct: 20, maxConsecutiveFailures: 3
+    });
+    await getBalanceAwarePositionSize(95, 'solana', 'elite', 'live', 'buy', 'm');
+    expect(dbMocks.resolveRiskPolicy).toHaveBeenCalledWith('operator', 'solana');
+  });
+
+  it('refuses to size a paper trade when the native price is unknown', async () => {
+    // S4-M48. `?? 150` for SOL and `?? 3000` for ETH used to substitute a rate on
+    // any feed failure, and a fabricated rate silently mis-scales every size
+    // derived from it: at a real SOL price of 300 the fallback HALVES every paper
+    // size, which reads as a conservative setting rather than a broken feed.
+    //
+    // The honest answer is to refuse. This asserts a size of 0 for an unreadable
+    // price -- not the ~0.66 the old fallback produced.
+    const shared = await import('@swat/shared');
+    vi.mocked(shared.fetchTokenPriceUsd).mockResolvedValueOnce(null);
+
+    const size = await getBalanceAwarePositionSize(95, 'solana', 'elite', 'paper', 'buy', 'm');
+    expect(size).toBe(0);
+  });
+
+  it('still sizes normally once the price feed answers', async () => {
+    // The complement, so the test above cannot pass because paper sizing is
+    // broken for some unrelated reason.
+    const shared = await import('@swat/shared');
+    vi.mocked(shared.fetchTokenPriceUsd).mockResolvedValue(150);
+
+    const size = await getBalanceAwarePositionSize(95, 'solana', 'elite', 'paper', 'buy', 'm');
+    expect(size).toBeGreaterThan(0);
   });
 });

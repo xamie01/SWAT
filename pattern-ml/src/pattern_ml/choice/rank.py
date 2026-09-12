@@ -146,9 +146,21 @@ def _baseline_scores(frame: pl.DataFrame, kind: str, seed: int) -> np.ndarray:
     if kind == "random":
         return np.random.default_rng(seed).random(frame.height)
     if kind == "volume":
-        # Rank by whatever volume column exists; the coarsest sensible heuristic.
-        for column in ("volume_5m_usd", "volume_24h_usd", "volume_1h_usd"):
-            if column in frame.columns:
+        # Rank by the screen's own attention key — the coarsest sensible
+        # heuristic, and the thing a human scanning the board actually does.
+        #
+        # `curve_completion` is in the list because on a launchpad every volume
+        # column is null: the curve-state query returns progress, not dollars.
+        # Falling through to zeros there would make the baseline a constant,
+        # beatable by any ordering at all, and `beats_baselines` would read as
+        # a pass on a model that had learned nothing.
+        for column in (
+            "volume_5m_usd",
+            "volume_24h_usd",
+            "volume_1h_usd",
+            "curve_completion",
+        ):
+            if column in frame.columns and frame[column].null_count() < frame.height:
                 return np.nan_to_num(frame[column].to_numpy().astype(float), nan=-1.0)
         return np.zeros(frame.height)
     raise ValueError(f"Unknown baseline: {kind}")

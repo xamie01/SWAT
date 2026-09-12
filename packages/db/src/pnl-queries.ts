@@ -1,12 +1,21 @@
 import { fetchTokenPriceUsd, isChain } from '@swat/shared';
 import { query } from './client.js';
 import { calculateAverageCostPnl } from './pnl-math.js';
+import type { PositionLedgerTrade, PositionPnl } from './pnl-math.js';
 import type { OpenPositionSnapshot } from './stop-loss.js';
 
 export { calculateAverageCostPnl, markToMarketPnl } from './pnl-math.js';
+// The argument and result types, not just the functions (`S4-M28`). Re-exporting
+// only the functions left every consumer outside this package unable to name what
+// `calculateAverageCostPnl` takes -- `apps/scorer/src/master-metrics.test.ts` had to
+// carry a hand-rolled structural copy of `PositionLedgerTrade`, which is free to
+// drift from the real one with nothing to catch it. Not a stale-dist symptom: the
+// gap was in `src` too.
+export type { PositionLedgerTrade, PositionPnl } from './pnl-math.js';
 
 type PositionTrade = {
   signal_id: string;
+  user_id: string | null;
   token_mint: string;
   direction: 'buy' | 'sell';
   token_amount: number | string | null;
@@ -16,19 +25,117 @@ type PositionTrade = {
 };
 
 /**
+ * One tenant's slice of one signal's trade ledger -- the unit this pass values.
+ *
+ * ## Why the ledger gained a dimension (`S4-M46`)
+ *
+ * It used to be keyed by `signal_id` alone. `trades.user_id` has existed since
+ * migration 050 and this query never read it, so **every user's trades on one signal
+ * merged into a single position**. Two consequences, both silent:
+ *
+ *   1. The average cost basis was blended across tenants. User A buying at $1 and
+ *      user B buying at $2 produced one $1.50 basis, so B's drawdown was measured
+ *      against money A spent.
+ *   2. Downstream, `signal_stop_losses` is `PRIMARY KEY (account, signal_id)`. One
+ *      merged position yields one claim, so **the first user to breach claimed the
+ *      signal and every other holder was never sold** -- and the sweep reported
+ *      success, having protected one of them.
+ *
+ * `S4-M16` describes the per-user risk work as "substitute the user key for
+ * `'operator'`". That phrasing hides this: no substitution reaches a query that has
+ * no user dimension to substitute into. The dimension has to exist first.
+ */
+type LedgerKey = {
+  readonly signalId: string;
+  /** `null` IS the pre-tenancy operator account (migration 050 backfills nothing). */
+  readonly userId: string | null;
+};
+
+/**
+ * NUL, as `copy-trade-lifecycle.ts` uses it for `COPY_IDENTITY_SEPARATOR`: a UUID
+ * cannot contain one, so no pair of distinct `(signal, user)` keys can collide into a
+ * single string.
+ */
+const LEDGER_KEY_SEPARATOR = String.fromCharCode(0);
+
+/**
+ * Stands in for the operator's `null` in a map key.
+ *
+ * A reserved marker rather than the empty string, so an operator group can never
+ * collide with an empty user id. The leading space is what reserves it: it cannot be a
+ * UUID.
+ */
+const OPERATOR_LEDGER_MARKER = ' operator';
+
+/** Map key for a `(signal, user)` pair. */
+function ledgerKey(signalId: string, userId: string | null): string {
+  return `${signalId}${LEDGER_KEY_SEPARATOR}${userId ?? OPERATOR_LEDGER_MARKER}`;
+}
+
+/** What one `(signal, user)` ledger resolved to, before the signal-level rollup. */
+type ValuedLedger = {
+  readonly key: LedgerKey;
+  readonly tokenMint: string;
+  readonly pnl: PositionPnl;
+  readonly currentPriceUsd: number | null;
+};
+
+export type MarkToMarketResult = {
+  /** Signals whose `pnl_usd` / `realized_pnl_usd` / `unrealized_pnl_usd` were written. */
+  updated: number;
+  /**
+   * `(signal, user)` ledgers that could not be valued, counted per ledger rather than
+   * per signal. With one tenant -- every row at `user_id NULL` -- the two are the same
+   * number, which is why the pre-`S4-M46` counts are unchanged.
+   */
+  skipped: number;
+  /**
+   * Every still-open position this pass priced, one per `(signal, user)`.
+   *
+   * This is the stop-loss sweep's input, so it is also the reason the sweep needs no
+   * subscription lookup: a user appears here because they hold something, not because
+   * a subscription row says they should.
+   */
+  positions: OpenPositionSnapshot[];
+};
+
+/**
  * Recompute realized and unrealized average-cost P&L from ordered filled trades.
  * Token prices are fetched once per distinct mint and only for open positions.
  *
  * Also returns a snapshot of every still-open position it priced, so stop-loss
  * enforcement can reuse this pass instead of re-querying the ledger and
  * re-fetching prices on its own schedule.
+ *
+ * ## Two groupings, deliberately
+ *
+ * Valuation is per `(signal, user)` -- see `LedgerKey` for why. The `signals` table has
+ * no user dimension (`001_init.sql` / `025`), so its three P&L columns stay a
+ * platform-wide total, and this pass writes them by **summing the per-user results**.
+ *
+ * That sum is not an approximation of the old merged number, it is a correction of it.
+ * Realized P&L, unrealized P&L, open quantity and open cost basis are all additive over
+ * disjoint sub-ledgers; average unit *cost* is not. Valuing each tenant against their
+ * own basis and adding is right; blending the bases first and then valuing invents a
+ * cost neither tenant paid. With a single tenant the two agree exactly, which is what
+ * keeps the operator path byte-identical.
+ *
+ * ## A partly unvaluable cohort does not produce a signal-level number
+ *
+ * If any one tenant's slice of a signal is unusable (oversold ledger, mixed mints, no
+ * price), the signal's total is unknown and the UPDATE is skipped rather than written
+ * from the tenants that did resolve. A total that silently omits a holder is a
+ * fabricated input to the performance dashboard. The tenants that *did* resolve still
+ * get their `positions` entry, because an open position needs a stop-loss regardless of
+ * whether some other tenant's books balance.
  */
 export async function markToMarketOpenPositions(
   signalId?: string
-): Promise<{ updated: number; skipped: number; positions: OpenPositionSnapshot[] }> {
+): Promise<MarkToMarketResult> {
   const trades = await query<PositionTrade>(`
     SELECT
       t.signal_id,
+      t.user_id,
       t.token_mint,
       t.direction,
       t.token_amount,
@@ -41,33 +148,53 @@ export async function markToMarketOpenPositions(
       AND t.direction IN ('buy', 'sell')
       AND (t.execution_mode IS NULL OR t.execution_mode != 'shadow')
       AND ($1::uuid IS NULL OR t.signal_id = $1)
-    ORDER BY t.signal_id, t.executed_at, t.id
+    ORDER BY t.signal_id, t.user_id, t.executed_at, t.id
   `, [signalId ?? null]);
 
-  const grouped = new Map<string, PositionTrade[]>();
+  // `ORDER BY ... t.user_id ...` keeps each tenant's rows contiguous and in execution
+  // order, which is what average-cost accounting requires. Grouping in TypeScript
+  // rather than in SQL for the reason `listFanoutCandidates` gives: the rules below
+  // (what makes a ledger unusable, when an unknown must stay unknown) are decisions,
+  // and a decision buried in SQL is one no unit test in this repo can reach.
+  const grouped = new Map<string, { key: LedgerKey; trades: PositionTrade[] }>();
   for (const trade of trades) {
-    const group = grouped.get(trade.signal_id) ?? [];
-    group.push(trade);
-    grouped.set(trade.signal_id, group);
+    const mapKey = ledgerKey(trade.signal_id, trade.user_id);
+    const group = grouped.get(mapKey)
+      ?? { key: { signalId: trade.signal_id, userId: trade.user_id }, trades: [] };
+    group.trades.push(trade);
+    grouped.set(mapKey, group);
   }
 
   const priceCache = new Map<string, number | null>();
   const positions: OpenPositionSnapshot[] = [];
-  let updated = 0;
   let skipped = 0;
 
-  for (const [signalId, signalTrades] of grouped) {
-    const tokenMint = signalTrades[0]?.token_mint;
+  // Per signal: every ledger that resolved, and whether any failed to. Both are needed
+  // before a signal-level total can be written, so the rollup happens after the loop.
+  const bySignal = new Map<string, { valued: ValuedLedger[]; incomplete: boolean }>();
+  const signalEntry = (id: string) => {
+    const existing = bySignal.get(id);
+    if (existing) return existing;
+    const created = { valued: [] as ValuedLedger[], incomplete: false };
+    bySignal.set(id, created);
+    return created;
+  };
+
+  for (const group of grouped.values()) {
+    const entry = signalEntry(group.key.signalId);
+    const tokenMint = group.trades[0]?.token_mint;
     if (!tokenMint) {
       skipped++;
+      entry.incomplete = true;
       continue;
     }
-    if (signalTrades.some((trade) => trade.token_mint !== tokenMint)) {
+    if (group.trades.some((trade) => trade.token_mint !== tokenMint)) {
       skipped++;
+      entry.incomplete = true;
       continue;
     }
 
-    const ledgerTrades = signalTrades.map((trade) => {
+    const ledgerTrades: PositionLedgerTrade[] = group.trades.map((trade) => {
       const tokenAmount = Number(trade.token_amount);
       const explicitAmountUsd = trade.amount_usd == null ? null : Number(trade.amount_usd);
       const priceUsd = trade.price_usd == null ? null : Number(trade.price_usd);
@@ -93,6 +220,7 @@ export async function markToMarketOpenPositions(
     }
     if (!ledgerValid) {
       skipped++;
+      entry.incomplete = true;
       continue;
     }
 
@@ -122,25 +250,19 @@ export async function markToMarketOpenPositions(
     const pnl = calculateAverageCostPnl(ledgerTrades, currentPrice);
     if (pnl === null) {
       skipped++;
+      entry.incomplete = true;
       continue;
     }
 
-    await query(
-      `UPDATE signals
-          SET pnl_usd = $1,
-              realized_pnl_usd = $2,
-              unrealized_pnl_usd = $3
-        WHERE id = $4`,
-      [pnl.totalPnlUsd, pnl.realizedPnlUsd, pnl.unrealizedPnlUsd, signalId]
-    );
-    updated++;
+    entry.valued.push({ key: group.key, tokenMint, pnl, currentPriceUsd: currentPrice });
 
     if (pnl.openQuantity > 1e-12 && currentPrice !== null) {
       const separator = tokenMint.indexOf(':');
       const chain = separator >= 0 ? tokenMint.slice(0, separator) : 'solana';
       if (isChain(chain)) {
         positions.push({
-          signalId,
+          signalId: group.key.signalId,
+          userId: group.key.userId,
           tokenMint,
           chain,
           openQuantity: pnl.openQuantity,
@@ -150,6 +272,30 @@ export async function markToMarketOpenPositions(
         });
       }
     }
+  }
+
+  let updated = 0;
+  for (const [signal, entry] of bySignal) {
+    if (entry.incomplete || entry.valued.length === 0) continue;
+
+    let totalPnlUsd = 0;
+    let realizedPnlUsd = 0;
+    let unrealizedPnlUsd = 0;
+    for (const ledger of entry.valued) {
+      totalPnlUsd += ledger.pnl.totalPnlUsd;
+      realizedPnlUsd += ledger.pnl.realizedPnlUsd;
+      unrealizedPnlUsd += ledger.pnl.unrealizedPnlUsd;
+    }
+
+    await query(
+      `UPDATE signals
+          SET pnl_usd = $1,
+              realized_pnl_usd = $2,
+              unrealized_pnl_usd = $3
+        WHERE id = $4`,
+      [totalPnlUsd, realizedPnlUsd, unrealizedPnlUsd, signal]
+    );
+    updated++;
   }
 
   return { updated, skipped, positions };

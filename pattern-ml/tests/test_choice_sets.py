@@ -32,7 +32,8 @@ BASE = datetime(2026, 3, 1, 14, 0, tzinfo=timezone.utc)
 class RecordingProvider:
     """A provider that logs what it was asked for, and when.
 
-    ``requested`` is what the leakage tests assert against.
+    ``requested`` is what the leakage tests assert against; ``venues`` is what
+    the routing tests assert against.
     """
 
     chain = "solana"
@@ -40,10 +41,14 @@ class RecordingProvider:
 
     def __init__(self, universe: dict[str, dict] | None = None) -> None:
         self.requested: list[datetime] = []
+        self.venues: list[str | None] = []
         self.universe = universe or {}
 
-    def candidates_at(self, at: datetime, *, limit: int = 200) -> list[dict]:
+    def candidates_at(
+        self, at: datetime, *, limit: int = 200, venue: str | None = None
+    ) -> list[dict]:
         self.requested.append(at)
+        self.venues.append(venue)
         out = []
         for market_id, features in self.universe.items():
             row = dict(features)
@@ -51,7 +56,9 @@ class RecordingProvider:
             out.append(row)
         return out[:limit]
 
-    def features_at(self, market_id: str, at: datetime) -> dict | None:
+    def features_at(
+        self, market_id: str, at: datetime, *, venue: str | None = None
+    ) -> dict | None:
         self.requested.append(at)
         features = self.universe.get(market_id)
         return dict(features) if features else None
@@ -77,7 +84,8 @@ def trades(rows: list[dict]) -> pl.DataFrame:
                 "kol_address": row.get("kol", "KOL1"),
                 "kol_handle": "kol-one",
                 "ts": row["ts"],
-                "venue": "jupiter",
+                "venue": row.get("venue", "raydium-amm-v4"),
+                "router": row.get("router"),
                 "market_id": row["market_id"],
                 "market_label": None,
                 "outcome": None,
@@ -263,9 +271,26 @@ class TestScreenBehaviour:
     def test_missing_features_do_not_pass_the_screen(self) -> None:
         """Admitting unknowns lets the model rank on missingness."""
         screen = SolanaScreen()
-        assert not screen.passes({"volume_5m_usd": None, "liquidity_usd": 1e6,
-                                  "age_seconds": 60})
+        assert not screen.passes({"volume_5m_usd": None, "liquidity_usd": 1e6})
+        assert not screen.passes({"liquidity_usd": 1e6})
+
+    def test_optional_gates_are_off_until_the_provider_fills_them(self) -> None:
+        """Age and liquidity default off, and that is a correctness requirement.
+
+        Both are frequently null in the Bitquery reconstruction — age is
+        censored outside the discovery window, liquidity needs an opt-in query.
+        Gating on them by default would reject every candidate and produce zero
+        choice sets.
+        """
+        assert SolanaScreen().passes({"volume_5m_usd": 1e6})
+
+    def test_an_enabled_gate_still_rejects_nulls(self) -> None:
+        screen = SolanaScreen(max_age_seconds=3600, min_liquidity_usd=5_000)
         assert not screen.passes({"volume_5m_usd": 1e6, "liquidity_usd": 1e6})
+        assert not screen.passes({"volume_5m_usd": 1e6, "age_seconds": 60})
+        assert screen.passes(
+            {"volume_5m_usd": 1e6, "age_seconds": 60, "liquidity_usd": 1e6}
+        )
 
     def test_chosen_asset_is_reinserted_and_flagged_when_it_fails(self) -> None:
         """A group with no positive is untrainable, so the choice is re-added.
@@ -348,6 +373,75 @@ class TestEntrySelection:
             chain="solana",
         )
         assert frame.height == 2
+
+
+class TestVenueRouting:
+    """A screen per board. The wrong screen invents alternatives."""
+
+    def test_the_traded_venue_is_passed_to_the_provider(self) -> None:
+        provider = RecordingProvider({"A": token(), "B": token(), "C": token()})
+        build_choice_sets(
+            trades([{"ts": BASE, "market_id": "A", "venue": "raydium-amm-v4"}]),
+            provider,
+            SolanaScreen(),
+            chain="solana",
+        )
+        assert provider.venues == ["raydium-amm-v4"]
+
+    def test_a_screen_mapping_selects_by_venue_name(self) -> None:
+        provider = RecordingProvider({"A": token(), "B": token(), "C": token()})
+        _, groups = build_choice_sets(
+            trades([{"ts": BASE, "market_id": "A", "venue": "raydium-amm-v4"}]),
+            provider,
+            {"raydium-amm-v4": SolanaScreen(name="named"), "*": SolanaScreen()},
+            chain="solana",
+        )
+        assert groups.row(0, named=True)["screen_name"] == "named"
+
+    def test_a_screen_mapping_falls_back_to_venue_kind(self) -> None:
+        """One entry should cover every AMM without listing them all."""
+        provider = RecordingProvider({"A": token(), "B": token(), "C": token()})
+        _, groups = build_choice_sets(
+            trades([{"ts": BASE, "market_id": "A", "venue": "orca-whirlpool"}]),
+            provider,
+            {"clmm": SolanaScreen(name="by-kind"), "*": SolanaScreen(name="fallback")},
+            chain="solana",
+        )
+        assert groups.row(0, named=True)["screen_name"] == "by-kind"
+
+    def test_an_unmatched_venue_uses_the_wildcard(self) -> None:
+        provider = RecordingProvider({"A": token(), "B": token(), "C": token()})
+        _, groups = build_choice_sets(
+            trades([{"ts": BASE, "market_id": "A", "venue": "some-new-dex"}]),
+            provider,
+            {"amm": SolanaScreen(name="amm"), "*": SolanaScreen(name="wildcard")},
+            chain="solana",
+        )
+        assert groups.row(0, named=True)["screen_name"] == "wildcard"
+
+    def test_a_mapping_with_no_wildcard_drops_unmatched_decisions(self) -> None:
+        """Better a missing group than one screened against the wrong board."""
+        provider = RecordingProvider({"A": token(), "B": token(), "C": token()})
+        candidates, groups = build_choice_sets(
+            trades([{"ts": BASE, "market_id": "A", "venue": "some-new-dex"}]),
+            provider,
+            {"bonding-curve": SolanaScreen(name="curves-only")},
+            chain="solana",
+        )
+        assert groups.is_empty()
+        assert candidates.is_empty()
+
+    def test_the_venue_is_recorded_on_every_row(self) -> None:
+        """So a model is never trained across mixed boards invisibly."""
+        provider = RecordingProvider({"A": token(), "B": token(), "C": token()})
+        candidates, groups = build_choice_sets(
+            trades([{"ts": BASE, "market_id": "A", "venue": "raydium-amm-v4"}]),
+            provider,
+            SolanaScreen(),
+            chain="solana",
+        )
+        assert set(candidates["venue"].to_list()) == {"raydium-amm-v4"}
+        assert groups.row(0, named=True)["venue"] == "raydium-amm-v4"
 
 
 class TestScreenCoverage:

@@ -180,6 +180,12 @@ export async function pauseUnderperformingWallets() {
       AND NOT EXISTS (
         SELECT 1 FROM user_wallet_subscriptions uws
          WHERE uws.wallet_address = wallets.address
+           -- Migration 051 retains an ended subscription instead of deleting the
+           -- row, so a bare existence check reads a wallet nobody tracks any more
+           -- as still subscribed and pins it to active forever. That silently
+           -- breaks the D9 bound this sweep enforces: indexing cost stops being
+           -- sublinear in user count and grows with user churn instead.
+           AND uws.state <> 'ended'
       )
       AND (
         (total_trades >= 50 AND composite_score < 40)
@@ -206,6 +212,12 @@ export async function pauseUnsubscribedWallets() {
       AND NOT EXISTS (
         SELECT 1 FROM user_wallet_subscriptions uws
          WHERE uws.wallet_address = wallets.address
+           -- Same reason as pauseUnderperformingWallets: an ended row is a
+           -- retained record, not a subscriber. A winding_down row IS one, and is
+           -- deliberately still counted -- the user holds positions whose exits
+           -- arrive as this wallet's sell mirror, so pausing it would strand them
+           -- with no exit signal.
+           AND uws.state <> 'ended'
       )
       AND priority <> 'high'
       AND NOT EXISTS (

@@ -76,8 +76,23 @@ jobs:
       - name: Check for browser-exposed secrets
         run: pnpm check:secrets
 
+      # Before typecheck, like check:secrets, and for the same reason: a config
+      # gap is cheap to report and does not need a compile to find. Catches the
+      # shape that let an Ethereum mainnet quoter address sit in .env.example for
+      # chain 4663 -- the code read one name, the file documented another.
+      - name: Check env var documentation coverage
+        run: pnpm check:env
+
       - name: Typecheck
         run: pnpm typecheck
+
+      # Runs as its own step even though `pnpm typecheck` also chains it. That
+      # chain is `&&`-joined, so any unrelated package typecheck failure would
+      # short-circuit before the integration suites were ever checked — the exact
+      # invisibility S4-M25 exists to close.
+      - name: Typecheck integration tests
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsc --noEmit -p tsconfig.integration.json
 
       - name: Test
         run: pnpm test

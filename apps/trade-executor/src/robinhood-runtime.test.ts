@@ -55,6 +55,8 @@ describe('Redis Robinhood pending store', () => {
       signature: pending.hash!,
       transactionHash: pending.hash!,
       amountEth: 0.1,
+      // native-weth mode, so baseSpend mirrors amountEth (S4-M41).
+      baseSpend: { kind: 'native' as const, currency: 'ETH' as const, amount: 0.1 },
       actualAmountIn: 100000000000000000n,
       actualAmountOut: 4900n,
       quotedAmountOut: 5000n,

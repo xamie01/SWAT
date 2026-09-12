@@ -41,7 +41,18 @@ export type SolanaDispatchOutcome =
       readonly bundleId: string;
       readonly venueStatus: string;
     }
-  | { readonly kind: 'rejected'; readonly reason: string }
+  | {
+      readonly kind: 'rejected';
+      readonly reason: string;
+      /**
+       * Stable machine-readable code when the rejection carries one — today the
+       * pre-trade simulation codes from `solana-simulation.ts` (checklist
+       * S4-M15). Optional and additive: consumers that only read `reason` are
+       * unaffected, and `S4-M24` can render an actionable skip reason without
+       * parsing prose.
+       */
+      readonly code?: string;
+    }
   | { readonly kind: 'ambiguous'; readonly reason: string }
   | {
       readonly kind: 'filled';
@@ -130,7 +141,9 @@ export function mapSubmissionToOutcome(
         venueStatus: submission.status
       };
     case 'rejected':
-      return { kind: 'rejected', reason: submission.reason };
+      return submission.code
+        ? { kind: 'rejected', reason: submission.reason, code: submission.code }
+        : { kind: 'rejected', reason: submission.reason };
     case 'submission_unknown':
       // Ambiguous, never rejected: the bundle may have been received, so the
       // execution must go to reconciliation rather than being retried into a

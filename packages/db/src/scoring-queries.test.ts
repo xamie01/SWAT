@@ -3,6 +3,8 @@ import {
   findUnprofitableBigBuyers,
   getActiveWallets,
   getWalletMetrics,
+  pauseUnderperformingWallets,
+  pauseUnsubscribedWallets,
   pruneUnprofitableBigBuyers,
   updateWalletScore
 } from './scoring-queries.js';
@@ -107,5 +109,40 @@ describe('chain-aware scoring queries', () => {
 
     await expect(pruneUnprofitableBigBuyers()).resolves.toBe(1);
     expect(deleteWalletCascade).toHaveBeenCalledWith('polygon:0xabc', 'polygon');
+  });
+});
+
+describe('subscriber probes ignore ended subscriptions (051 / S4-M3)', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(client.query).mockResolvedValue([]);
+  });
+
+  // `051` retains an ended subscription rather than deleting the row. A bare
+  // existence check therefore reads a wallet nobody tracks as still subscribed and
+  // pins it to `active` forever — indexing cost stops being sublinear in user
+  // count and grows with user churn instead, which is the D9 bound both of these
+  // sweeps exist to enforce.
+  it.each([
+    ['pauseUnderperformingWallets', pauseUnderperformingWallets],
+    ['pauseUnsubscribedWallets', pauseUnsubscribedWallets]
+  ])('%s excludes ended rows from its subscriber check', async (_name, run) => {
+    await run();
+    const sql = vi.mocked(client.query).mock.calls[0]?.[0] as string;
+    expect(sql).toContain('user_wallet_subscriptions');
+    expect(sql).toMatch(/uws\.state\s*<>\s*'ended'/);
+  });
+
+  it.each([
+    ['pauseUnderperformingWallets', pauseUnderperformingWallets],
+    ['pauseUnsubscribedWallets', pauseUnsubscribedWallets]
+  ])('%s still counts a winding_down row as a subscriber', async (_name, run) => {
+    // A winding-down subscriber holds positions whose exits arrive as this
+    // wallet's sell mirror. Pausing it would strand them with no exit signal —
+    // strictly worse than keeping one wallet indexed.
+    await run();
+    const sql = vi.mocked(client.query).mock.calls[0]?.[0] as string;
+    expect(sql).not.toContain("'winding_down'");
+    expect(sql).not.toMatch(/uws\.state\s*=\s*'active'/);
   });
 });

@@ -15,5 +15,31 @@ export * from './tiers.js';
 export * from './jito.js';
 export * from './jupiter-swap.js';
 export * from './polymarket-clob-auth.js';
+export * from './polymarket-clob-credentials.js';
 export * from './slippage.js';
 export * from './email.js';
+
+/**
+ * Argument-scoped execution permission policy (S4-P10).
+ *
+ * Lives under `src/authority/` and moves to `packages/authority` when that
+ * package is created (checklist §7.1) -- it is here rather than in a new
+ * workspace package only because a new package needs `pnpm install` to link
+ * before its tests can run.
+ */
+export * from './authority/index.js';
+
+/**
+ * pUSD withdrawal-liquidity monitoring (S4-M42). Not a peg monitor: pUSD is
+ * unlisted, so there is no price to poll -- what strands funds is depth in one
+ * named Uniswap pool.
+ */
+export * from './pusd-liquidity.js';
+
+/**
+ * Polymarket order-book depth cache (S4-M38). An outcome share trades on a CLOB,
+ * so its liquidity is resting depth within a price bound -- not a pool TVL, and
+ * not something `priceImpactBps`'s constant-product algebra can consume. This
+ * module walks the ladder and publishes a calibrated equivalent reserve.
+ */
+export * from './polymarket-book-depth.js';

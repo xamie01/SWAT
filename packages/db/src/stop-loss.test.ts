@@ -19,6 +19,8 @@ import type { OpenPositionSnapshot } from './stop-loss.js';
 function position(overrides: Partial<OpenPositionSnapshot> = {}): OpenPositionSnapshot {
   return {
     signalId: 'signal-1',
+    // `null` IS the pre-tenancy operator account, not an absent value (`S4-M46`).
+    userId: null,
     tokenMint: 'solana:token-1',
     chain: 'solana',
     openQuantity: 100,
@@ -126,5 +128,44 @@ describe('claimStopLossTrigger', () => {
     const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('DELETE FROM signal_stop_losses');
     expect(params).toEqual(['operator', 'signal-1']);
+  });
+
+  it('carries a user id into the account column, on one signal, for two tenants (S4-M46)', async () => {
+    // The DB half was already account-parameterised, which is what made `S4-M46` a
+    // caller-side defect. This pins the column the sweep now varies: two tenants on ONE
+    // signal must reach `ON CONFLICT (account, signal_id)` with different first
+    // parameters, or the second insert is swallowed and that holder is never sold.
+    //
+    // `account` is `VARCHAR(64)` (034) and a UUID is 36 characters, so a `users.id`
+    // fits. It is a label rather than a `users(id)` foreign key, which is why the raw id
+    // is written without `normalizeTenantId`.
+    mocks.query.mockResolvedValue([{ signal_id: 'shared-signal' }]);
+
+    await claimStopLossTrigger({
+      ...claim,
+      account: '11111111-1111-4111-8111-111111111111',
+      signalId: 'shared-signal'
+    });
+    await claimStopLossTrigger({
+      ...claim,
+      account: '22222222-2222-4222-8222-222222222222',
+      signalId: 'shared-signal'
+    });
+
+    const accounts = mocks.query.mock.calls.map(([, params]) => (params as unknown[])[0]);
+    expect(accounts).toEqual([
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222'
+    ]);
+    expect(String(accounts[0]).length).toBeLessThanOrEqual(64);
+  });
+
+  it('releases only the account it was given, never a co-holder’s claim', async () => {
+    mocks.query.mockResolvedValueOnce([]);
+    await releaseStopLossTrigger('11111111-1111-4111-8111-111111111111', 'shared-signal');
+
+    const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE account = $1 AND signal_id = $2');
+    expect(params).toEqual(['11111111-1111-4111-8111-111111111111', 'shared-signal']);
   });
 });

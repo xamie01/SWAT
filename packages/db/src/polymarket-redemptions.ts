@@ -21,39 +21,128 @@ export interface RedemptionClaim {
   readonly userId: string | null;
 }
 
+/**
+ * One outcome position of ours that a resolved market would redeem.
+ *
+ * Quantities are returned as strings because `copy_positions` stores them as
+ * unconstrained NUMERIC: routing a share count through a JS double before the
+ * caller has decided what precision it needs is how a ledger acquires drift.
+ */
+export interface RedeemablePosition {
+  readonly positionId: string;
+  /** Carried per row so the fan-out can verify it against the market it came from. */
+  readonly conditionId: string;
+  readonly userId: string | null;
+  readonly targetAccount: string;
+  /** Chain-prefixed, as stored: `polygon:<outcomeTokenId>`. */
+  readonly tokenMint: string;
+  /** The bare ERC-1155 outcome token id. */
+  readonly tokenId: string;
+  readonly outcome: string;
+  readonly outcomeIndex: number;
+  readonly heldShares: string;
+  readonly reservedSellShares: string;
+}
+
 export interface RedeemableMarket {
   readonly conditionId: string;
   readonly winningTokenId: string | null;
   readonly resolvedOutcome: string | null;
+  readonly negRisk: boolean;
+  /**
+   * The positions *we* hold in this condition. A condition holds two outcomes, so
+   * this can carry two rows, and collapsing them is exactly what `S4-M20`'s
+   * `assertPolymarketPositionsDistinct` exists to refuse.
+   */
+  readonly positions: readonly RedeemablePosition[];
 }
 
 /**
- * Markets that have resolved and hold a confirmed position, minus any already
- * claimed or confirmed.
+ * Resolved markets in which **we hold a confirmed position**, minus any already
+ * claimed or confirmed for redemption (checklist `S4-M37`).
  *
- * Scoped to *confirmed* fills on purpose: a pending or reconciliation-required
- * execution has no proven token balance, and redeeming against a position we
- * cannot yet prove we hold would produce a redemption row with no basis.
+ * **What was wrong before.** This joined `polymarket_markets` to
+ * `polymarket_trades` — *observed master* trades — with no status filter and no
+ * join to `copy_executions` or `copy_positions`, while its own doc comment
+ * claimed it was "scoped to confirmed fills". It was not. A redemption sweep
+ * acting on it would try to redeem markets we never entered, and every wallet we
+ * merely watch would have produced a redemption attempt.
+ *
+ * **The decided inversion.** Redemption is driven by our own open positions —
+ * close only what we actually hold. The master's holdings remain a
+ * *cross-reference* for deciding whether an exit is due (`S4-M19`), never the
+ * source of what to redeem. So the driving join is `copy_positions` with
+ * `confirmed_quantity > 0`, and `polymarket_trades` does not appear at all.
+ *
+ * **Why `copy_positions` and also `copy_executions`.** `confirmed_quantity` is
+ * the net holding rebuilt from confirmed evidence, which is the "do we hold it"
+ * test. The `copy_executions` existence check is the "did we ever enter" test,
+ * and it is kept separate because a position row can in principle survive its
+ * evidence being reclassified. A pending or reconciliation-required execution has
+ * no proven token balance, so neither test passes on one.
+ *
+ * **Tenancy.** `IS NOT DISTINCT FROM` rather than `=` because `user_id` is NULL
+ * for the pre-multi-tenant operator account, and `= NULL` is never true. This
+ * matches the NULLS NOT DISTINCT semantics of the redemption claim index in
+ * `046`; without it the operator's own positions would be invisible to the sweep.
+ *
+ * The token join is on the chain-prefixed form on both sides:
+ * `polymarket_outcomes.token_id` and `copy_positions.token_mint` both store
+ * `polygon:<tokenId>`, per the repo's prefixed-address invariant.
  */
-export async function listRedeemablePolymarketMarkets(
-  limit = 50
-): Promise<RedeemableMarket[]> {
+export async function listRedeemablePolymarketMarkets(input: {
+  userId?: string | null;
+  limit?: number;
+} = {}): Promise<RedeemableMarket[]> {
   return query<RedeemableMarket>(
-    `SELECT DISTINCT
-       m.condition_id   AS "conditionId",
+    `SELECT
+       m.condition_id     AS "conditionId",
        m.winning_token_id AS "winningTokenId",
-       m.resolved_outcome AS "resolvedOutcome"
+       m.resolved_outcome AS "resolvedOutcome",
+       COALESCE(m.neg_risk, FALSE) AS "negRisk",
+       json_agg(
+         json_build_object(
+           'positionId', p.id,
+           'conditionId', o.condition_id,
+           'userId', p.user_id,
+           'targetAccount', p.target_account,
+           'tokenMint', p.token_mint,
+           'tokenId', o.token_id,
+           'outcome', o.outcome,
+           'outcomeIndex', o.outcome_index,
+           'heldShares', p.confirmed_quantity::text,
+           'reservedSellShares', p.reserved_sell_quantity::text
+         )
+         ORDER BY o.outcome_index
+       ) AS positions
      FROM polymarket_markets m
-     JOIN polymarket_trades t ON t.condition_id = m.condition_id
+     JOIN polymarket_outcomes o
+       ON o.condition_id = m.condition_id
+     JOIN copy_positions p
+       ON p.chain = 'polygon'
+      AND p.token_mint = o.token_id
      WHERE m.resolution_status = 'resolved'
+       AND p.confirmed_quantity > 0
+       AND p.user_id IS NOT DISTINCT FROM $1
+       AND EXISTS (
+         SELECT 1 FROM copy_executions e
+         WHERE e.chain = 'polygon'
+           AND e.token_mint = p.token_mint
+           AND e.target_account = p.target_account
+           AND e.user_id IS NOT DISTINCT FROM p.user_id
+           AND e.state = 'confirmed'
+           AND e.confirmed_base_quantity > 0
+       )
        AND NOT EXISTS (
          SELECT 1 FROM polymarket_redemptions r
          WHERE r.condition_id = m.condition_id
+           AND r.user_id IS NOT DISTINCT FROM $1
            AND r.status IN ('claimed', 'confirmed')
        )
+     GROUP BY m.condition_id, m.winning_token_id, m.resolved_outcome, m.neg_risk
      ORDER BY m.condition_id
-     LIMIT $1`,
-    [limit]
+     LIMIT $2`,
+    [input.userId ?? null, input.limit ?? 50]
   );
 }
 

@@ -17,6 +17,7 @@ import {
 } from '@swat/db';
 import {
   buildIngestionHealthSnapshots,
+  chainFromTokenMint,
   chainSchema,
   createWalletBackfillJob,
   initLogger,
@@ -24,9 +25,11 @@ import {
   prefixChainValue,
   QUEUES,
   REDIS_CHANNELS,
+  tradeQueueForChain,
   walletAddressSchema,
   walletInputSchema
 } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 import {
   emergencyOff,
   executionModeUpdateSchema,
@@ -40,7 +43,17 @@ initLogger('api');
 const app = Fastify({ logger: true });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const tradeQueue = new Queue('swat-trades', { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+const tradeQueueConnection = new Redis(redisUrl, { maxRetriesPerRequest: null });
+// One trade queue per chain (D6 / S3-25). Manual executions route by the
+// signal's own chain-prefixed mint, using the same derivation the executor
+// applies — a mismatch would enqueue onto a queue whose worker serves a
+// different venue.
+const tradeQueues = new Map<Chain, Queue>(
+  (['solana', 'polygon', 'robinhood-chain'] as const).map((chain) => [
+    chain,
+    new Queue(tradeQueueForChain(chain), { connection: tradeQueueConnection })
+  ])
+);
 const backfillQueue = new Queue(QUEUES.walletBackfill, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
 // On-chain token discovery: the indexer's tokenDiscovery worker consumes this.
 const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
@@ -67,7 +80,17 @@ const corsOrigin = process.env.CORS_ORIGIN;
 await app.register(cors, {
   origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'X-Api-Key']
+  // x-csrf-token is required, not optional: cookie auth means the browser
+  // attaches credentials to cross-site requests automatically, so the API
+  // rejects a cookie-authenticated mutation without the double-submit header.
+  // Omitting it here makes the preflight fail and every login-then-POST break
+  // with a CORS error that looks nothing like the auth problem it is.
+  allowedHeaders: ['Content-Type', 'X-Api-Key', 'x-csrf-token'],
+  // Without this the browser discards Set-Cookie on the login response and
+  // never sends the session back, so cookie auth cannot work cross-origin at
+  // all. Note `origin: true` reflects the caller's origin rather than sending
+  // `*`, which is what makes credentialed CORS legal here.
+  credentials: true
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -90,9 +113,10 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
 import { randomBytes } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import { registerAuth, registerAdminOnlyGlobals } from './auth/plugin.js';
+import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerMeRoutes } from './routes/me.js';
+import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 
 await app.register(cookie);
 
@@ -165,7 +189,25 @@ app.setErrorHandler((error, request, reply) => {
   reply.code(500).send({ error: 'Internal Server Error' });
 });
 
-app.post('/v1/auth/ticket', async () => {
+/**
+ * Issues a one-time ticket for `GET /v1/logs/stream`, which is an admin surface.
+ *
+ * The role check is not decoration. This route sits under the `/v1/auth/` prefix,
+ * which `isUserReachable` admits for **any** authenticated principal -- that
+ * allowlist exists so a user can log in and read their own account, not so they
+ * can mint credentials. And a consumed ticket is upgraded to a `service`
+ * principal by the auth hook, which `registerAdminOnlyGlobals` admits
+ * unconditionally. So without this line any ordinary signed-up user could POST
+ * here and read the operator log stream: a privilege escalation that goes live
+ * the moment a second, non-admin account exists.
+ *
+ * The narrower fix would be to have the ticket carry the issuing principal and
+ * restore it on consumption, rather than conferring `service` on a credential a
+ * user can obtain. That is the right shape and is worth doing when SSE gains a
+ * second consumer; gating issuance is what closes the hole today.
+ */
+app.post('/v1/auth/ticket', async (request, reply) => {
+  if (!requireRole(request, reply, 'admin')) return;
   const ticket = randomBytes(16).toString('hex');
   // Ticket expires in 60 seconds
   await redis.set(`swat:ticket:${ticket}`, '1', 'EX', 60);
@@ -173,6 +215,7 @@ app.post('/v1/auth/ticket', async () => {
 });
 
 await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
+await registerExecutionSettingsRoutes(app);
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
 // Query-string values are always strings. Coerce + bound them so a caller can't
@@ -539,7 +582,23 @@ app.post('/v1/signals/:id/execute', async (req, reply) => {
     return reply.code(409).send({ error: 'Signal has no executable token' });
   }
 
-  // Enqueue to trade executor via BullMQ (not redis pubsub)
+  // Enqueue to trade executor via BullMQ (not redis pubsub), on the queue for
+  // this signal's own chain (S3-25). An unsupported prefix is refused here
+  // rather than enqueued: before the split it reached the shared queue and died
+  // in the executor, which reported a failed job instead of a bad request.
+  let chain: Chain;
+  try {
+    chain = chainFromTokenMint(signal.token_mint);
+  } catch (error) {
+    return reply.code(409).send({
+      error: error instanceof Error ? error.message : 'Unsupported trade chain'
+    });
+  }
+  const tradeQueue = tradeQueues.get(chain);
+  if (!tradeQueue) {
+    return reply.code(409).send({ error: `No trade queue configured for chain ${chain}` });
+  }
+
   await tradeQueue.add('signal-trade', {
     signalId: id,
     score: signal.signal_score,

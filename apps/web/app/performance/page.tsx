@@ -1,36 +1,56 @@
 import Link from 'next/link';
+import { serverApiGet } from '../../lib/api-server.js';
+import { describeApiError } from '../../lib/api-error-message.js';
 
 export const dynamic = 'force-dynamic';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+/**
+ * Still a server component (checklist S6-3). Same reasoning as
+ * `app/signals/page.tsx`: the browser client in `lib/api.ts` needs
+ * `document.cookie` and `window.location`, so a server render has to forward the
+ * incoming session cookie instead -- which is what `serverApiGet` does.
+ */
 
-async function apiFetch(path: string) {
+/** Distinct from a data failure -- there is an action the reader can take. */
+const SIGNED_OUT_MESSAGE = 'Sign in to view trading performance.';
+
+/**
+ * One panel's worth of data, with the same "render the page anyway" contract the
+ * old local `apiFetch` had. It returned `null` on any failure so a dead
+ * `/trading/trades` still left the win-rate tiles visible; that is preserved,
+ * except the reason now travels alongside the `null` instead of only reaching
+ * `console.error` on the host.
+ */
+async function load<T>(path: string, what: string): Promise<{ data: T | null; error: string | null }> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      cache: 'no-store',
-      headers: { 'x-api-key': API_KEY }
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch (err) {
-    console.error(`API fetch error for ${path}:`, err);
-    return null;
+    const data = await serverApiGet<T>(path);
+    if (data === null) return { data: null, error: SIGNED_OUT_MESSAGE };
+    return { data, error: null };
+  } catch (caught: unknown) {
+    return { data: null, error: describeApiError(caught, `Failed to load ${what}`) };
   }
 }
 
 export default async function PerformancePage() {
-  const performance = await apiFetch('/v1/trading/performance') ?? {
+  // Parallel rather than the three sequential awaits this replaced: independent
+  // reads with no ordering between them, so serialising them only added latency.
+  const [performanceResult, portfolioResult, tradesResult] = await Promise.all([
+    load<any>('/v1/trading/performance', 'performance metrics'),
+    load<any>('/v1/trading/portfolio', 'open positions'),
+    load<any>('/v1/trading/trades', 'trade history')
+  ]);
+
+  const performance = performanceResult.data ?? {
     win_rate: 0,
     total_pnl_usd: 0,
     total_signals: 0
   };
+  const positions = portfolioResult.data?.positions || [];
+  const trades = tradesResult.data?.items || [];
 
-  const portfolioData = await apiFetch('/v1/trading/portfolio') ?? { positions: [] };
-  const positions = portfolioData.positions || [];
-
-  const tradesData = await apiFetch('/v1/trading/trades') ?? { items: [] };
-  const trades = tradesData.items || [];
+  // First failure only. A lapsed session fails all three identically, and three
+  // copies of the same banner reads as three separate problems.
+  const error = performanceResult.error ?? portfolioResult.error ?? tradesResult.error;
 
   const winRatePercent = (parseFloat(performance.win_rate) * 100).toFixed(1);
   const totalPnL = parseFloat(performance.total_pnl_usd || 0);
@@ -41,6 +61,14 @@ export default async function PerformancePage() {
       <p style={{ color: 'var(--text-secondary)' }}>
         Track paper and live execution outcomes, open positions, and transaction history.
       </p>
+
+      {/* Zeros below could mean "nothing traded yet" or "we could not ask".
+          Without this banner those are the same screen. */}
+      {error && (
+        <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', marginTop: '1rem' }}>
+          <p style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+        </div>
+      )}
 
       {/* Performance metrics */}
       <div className="grid" style={{ marginTop: '2rem' }}>

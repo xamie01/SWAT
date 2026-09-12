@@ -1,16 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
-// Derive the API host from how the page is being viewed, so it works both on
-// the dev machine (localhost) and from another device on the LAN (the host's IP).
-// NEXT_PUBLIC_API_URL overrides this when set.
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+import { api } from '../../lib/api.js';
+import { describeApiError } from '../../lib/api-error-message.js';
 
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<any[]>([]);
@@ -28,15 +20,11 @@ export default function WalletsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/v1/wallets`, {
-        headers: { 'X-Api-Key': API_KEY }
-      });
-      if (!res.ok) throw new Error('Failed to fetch wallets');
-      const data = await res.json();
+      const data = await api.get<any>('/v1/wallets');
       // The API returns a bare array; tolerate a wrapped { items } shape too.
-      setWallets(Array.isArray(data) ? data : data.items ?? []);
-    } catch (err: any) {
-      setError(err.message);
+      setWallets(Array.isArray(data) ? data : data?.items ?? []);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to fetch wallets'));
     } finally {
       setLoading(false);
     }
@@ -47,16 +35,11 @@ export default function WalletsPage() {
     setError('');
     setSuccess('');
     try {
-      const res = await fetch(`${API_BASE}/v1/wallets/reindex`, {
-        method: 'POST',
-        headers: { 'X-Api-Key': API_KEY }
-      });
-      if (!res.ok) throw new Error('Failed to start indexer');
-      const data = await res.json();
-      setSuccess(`Indexer started — backfilling ${data.queued ?? 0} wallet(s). This can take a few minutes.`);
+      const data = await api.post<{ queued?: number }>('/v1/wallets/reindex');
+      setSuccess(`Indexer started — backfilling ${data?.queued ?? 0} wallet(s). This can take a few minutes.`);
       setTimeout(() => fetchWallets(), 4000);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to start indexer'));
     } finally {
       setLoading(false);
     }
@@ -71,24 +54,15 @@ export default function WalletsPage() {
     setSuccess('');
 
     try {
-      const res = await fetch(`${API_BASE}/v1/wallets`, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          wallets: [{ address: singleAddress.trim(), chain: singleChain, source: 'manual' }]
-        })
+      await api.post('/v1/wallets', {
+        wallets: [{ address: singleAddress.trim(), chain: singleChain, source: 'manual' }]
       });
-
-      if (!res.ok) throw new Error('Failed to add wallet');
 
       setSuccess('Wallet added! Indexer is backfilling transaction history...');
       setSingleAddress('');
       setTimeout(() => fetchWallets(), 2000);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to add wallet'));
     } finally {
       setLoading(false);
     }
@@ -108,24 +82,15 @@ export default function WalletsPage() {
     setSuccess('');
 
     try {
-      const res = await fetch(`${API_BASE}/v1/wallets`, {
-        method: 'POST',
-        headers: {
-          'X-Api-Key': API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          wallets: addresses.map(address => ({ address, chain: bulkChain, source: 'manual' }))
-        })
+      await api.post('/v1/wallets', {
+        wallets: addresses.map(address => ({ address, chain: bulkChain, source: 'manual' }))
       });
-
-      if (!res.ok) throw new Error('Failed to add wallets');
 
       setSuccess(`Added ${addresses.length} wallets! Indexer is backfilling...`);
       setBulkAddresses('');
       setTimeout(() => fetchWallets(), 2000);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(describeApiError(err, 'Failed to add wallets'));
     } finally {
       setLoading(false);
     }

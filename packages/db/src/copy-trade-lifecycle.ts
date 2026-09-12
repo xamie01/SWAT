@@ -13,6 +13,14 @@ import {
   type SourceTradeSide
 } from '@swat/shared';
 import { query } from './client.js';
+import {
+  summarizeConfirmedQuoteTotal,
+  valuateQuoteLeg,
+  type ConfirmedQuoteTotal,
+  type QuoteCurrency,
+  type QuoteLegInput,
+  type QuoteLegValuation
+} from './quote-valuation.js';
 import { withTransaction } from './transaction.js';
 
 export type DecimalInput = string | number;
@@ -92,7 +100,17 @@ export interface CopyExecutionRecord {
   requestedBaseQuantity: string | null;
   requestedQuoteQuantity: string | null;
   confirmedBaseQuantity: string;
-  confirmedQuoteQuantity: string;
+  /**
+   * USD sum over confirmed fills whose USD value is known.
+   *
+   * `null` means *unknown*: at least one confirmed fill exists and none of them
+   * carries a USD value. `'0'` means a genuine zero. Read alongside
+   * {@link quoteUnassessedFillCount} before treating this as a settled total —
+   * see migration 054 and `quote-valuation.ts` (S4-M35).
+   */
+  confirmedQuoteQuantity: string | null;
+  /** Confirmed fills omitted from `confirmedQuoteQuantity` because their USD value is unknown. */
+  quoteUnassessedFillCount: number;
   reservedBaseQuantity: string;
   submissionAttempts: number;
   maxSubmissionAttempts: number;
@@ -134,6 +152,14 @@ export interface CopyPositionRecord {
   confirmedQuantity: string;
   reservedSellQuantity: string;
   costBasisUsd: string;
+  /**
+   * Applied buy fills that contributed nothing to `costBasisUsd` because neither a
+   * USD quote value nor a USD price was recorded for them.
+   *
+   * Non-zero means `costBasisUsd` is a lower bound, not the whole basis. Present so
+   * a caller cannot read the number without also seeing what it omits (S4-M35).
+   */
+  costBasisUnvaluedFillCount: number;
   totalAcquiredQuantity: string;
   totalReducedQuantity: string;
   unmatchedReductionQuantity: string;
@@ -174,7 +200,8 @@ type CopyExecutionDbRow = QueryResultRow & {
   requested_base_quantity: string | null;
   requested_quote_quantity: string | null;
   confirmed_base_quantity: string;
-  confirmed_quote_quantity: string;
+  confirmed_quote_quantity: string | null;
+  quote_unassessed_fill_count: number;
   reserved_base_quantity: string;
   submission_attempts: number;
   max_submission_attempts: number;
@@ -223,6 +250,7 @@ const COPY_EXECUTION_COLUMNS = `
   requested_quote_quantity::text AS requested_quote_quantity,
   confirmed_base_quantity::text AS confirmed_base_quantity,
   confirmed_quote_quantity::text AS confirmed_quote_quantity,
+  quote_unassessed_fill_count,
   reserved_base_quantity::text AS reserved_base_quantity,
   submission_attempts,
   max_submission_attempts,
@@ -346,6 +374,7 @@ function mapCopyExecution(row: CopyExecutionDbRow): CopyExecutionRecord {
     requestedQuoteQuantity: row.requested_quote_quantity,
     confirmedBaseQuantity: row.confirmed_base_quantity,
     confirmedQuoteQuantity: row.confirmed_quote_quantity,
+    quoteUnassessedFillCount: Number(row.quote_unassessed_fill_count ?? 0),
     reservedBaseQuantity: row.reserved_base_quantity,
     submissionAttempts: Number(row.submission_attempts),
     maxSubmissionAttempts: Number(row.max_submission_attempts),
@@ -694,6 +723,33 @@ export async function advanceSourceTradeConfirmation(input: {
     );
     return { event: mapSourceTrade(applied.source), position: applied.position };
   });
+}
+
+/**
+ * The canonical source trade by id — the master's own event.
+ *
+ * Exists for the mirroring price bound (`S4-M16`): a copied order has to be
+ * bounded against the price the *master* actually got, and `copy_executions.price_usd`
+ * is **our** fill, not theirs. `source_trades.price_usd` is the master's, and this
+ * is the only read that surfaces it to the executor.
+ *
+ * A plain read rather than one of the `FOR SHARE` lookups above, because the
+ * caller is sizing a bound before submitting and is not mutating the row — taking
+ * a row lock on the money path to read one price would serialise mirrors behind
+ * each other for nothing. `price_usd` is nullable, and a null is returned as null
+ * rather than defaulted: the mirror planner fails closed on an absent master
+ * price, which is the whole point of not inventing one.
+ */
+export async function getCanonicalSourceTradeById(
+  sourceTradeId: string
+): Promise<CanonicalSourceTrade | null> {
+  const rows = await query<SourceTradeDbRow>(
+    `SELECT ${SOURCE_TRADE_COLUMNS}
+       FROM source_trades
+      WHERE id = $1`,
+    [sourceTradeId]
+  );
+  return rows[0] ? mapSourceTrade(rows[0]) : null;
 }
 
 export async function getSourceTradeByIdentity(input: {
@@ -1180,6 +1236,7 @@ async function rebuildCopyPosition(
     total_acquired_quantity: string;
     total_reduced_quantity: string;
     unmatched_reduction_quantity: string;
+    cost_basis_unvalued_fill_count: number;
     last_evidence_at: Date | null;
   }>(
     `WITH RECURSIVE ordered_events AS (
@@ -1187,7 +1244,16 @@ async function rebuildCopyPosition(
          ROW_NUMBER() OVER (ORDER BY evidence.occurred_at, evidence.id)::bigint AS sequence,
          execution.direction,
          evidence.base_quantity,
-         evidence.quote_quantity,
+         -- The unit gate (S4-M35, migration 054). quote_quantity is USD only on a
+         -- row that declares its currency; a pre-054 row whose executor path was
+         -- unidentifiable declares nothing, so its amount is refused here and the
+         -- base_quantity * price_usd fallback below -- which is USD by
+         -- construction -- decides instead. This is the COALESCE preference that
+         -- used to add SOL and ETH into a column named _usd.
+         CASE
+           WHEN evidence.quote_currency IS NOT NULL THEN evidence.quote_quantity
+           ELSE NULL
+         END AS quote_usd,
          evidence.price_usd,
          evidence.occurred_at
        FROM copy_position_applications application
@@ -1205,7 +1271,8 @@ async function rebuildCopyPosition(
          position.opening_cost_basis_usd AS cost_basis,
          0::numeric AS acquired,
          0::numeric AS reduced,
-         0::numeric AS unmatched
+         0::numeric AS unmatched,
+         0::integer AS unvalued
        FROM copy_positions position
        WHERE position.target_account = $1
          AND position.chain = $2
@@ -1222,7 +1289,7 @@ async function rebuildCopyPosition(
          END,
          CASE
            WHEN event.direction = 'buy' THEN
-             ledger.cost_basis + COALESCE(event.quote_quantity, event.base_quantity * event.price_usd, 0)
+             ledger.cost_basis + COALESCE(event.quote_usd, event.base_quantity * event.price_usd, 0)
            WHEN ledger.quantity = 0 THEN 0
            ELSE GREATEST(
              0,
@@ -1233,6 +1300,16 @@ async function rebuildCopyPosition(
          ledger.reduced + CASE WHEN event.direction = 'sell' THEN event.base_quantity ELSE 0 END,
          ledger.unmatched + CASE
            WHEN event.direction = 'sell' THEN GREATEST(0, event.base_quantity - ledger.quantity)
+           ELSE 0
+         END,
+         -- The trailing 0 in that COALESCE is what makes an unknown acquisition
+         -- cost look like a free one. It stays, because a partial basis is more
+         -- useful than none, but every buy it swallows is counted here so the
+         -- number never claims to be complete.
+         ledger.unvalued + CASE
+           WHEN event.direction = 'buy'
+             AND COALESCE(event.quote_usd, event.base_quantity * event.price_usd) IS NULL
+             THEN 1
            ELSE 0
          END
        FROM ledger
@@ -1260,6 +1337,7 @@ async function rebuildCopyPosition(
             total_acquired_quantity = final.acquired,
             total_reduced_quantity = final.reduced,
             unmatched_reduction_quantity = final.unmatched,
+            cost_basis_unvalued_fill_count = final.unvalued,
             last_evidence_at = metadata.last_evidence_at,
             updated_at = NOW()
        FROM final, metadata
@@ -1279,6 +1357,7 @@ async function rebuildCopyPosition(
        position.total_acquired_quantity::text AS total_acquired_quantity,
        position.total_reduced_quantity::text AS total_reduced_quantity,
        position.unmatched_reduction_quantity::text AS unmatched_reduction_quantity,
+       position.cost_basis_unvalued_fill_count,
        position.last_evidence_at`,
     [execution.target_account, execution.chain, execution.token_mint, execution.user_id ?? null]
   );
@@ -1296,6 +1375,7 @@ async function rebuildCopyPosition(
     totalAcquiredQuantity: row.total_acquired_quantity,
     totalReducedQuantity: row.total_reduced_quantity,
     unmatchedReductionQuantity: row.unmatched_reduction_quantity,
+    costBasisUnvaluedFillCount: Number(row.cost_basis_unvalued_fill_count ?? 0),
     lastEvidenceAt: row.last_evidence_at
   };
 }
@@ -1944,12 +2024,28 @@ type ExecutionEvidenceDbRow = QueryResultRow & {
   evidence_id: string;
   base_quantity: string;
   quote_quantity: string | null;
+  quote_native_quantity: string | null;
+  quote_currency: QuoteCurrency | null;
+  quote_native_usd_price: string | null;
   price_usd: string | null;
   confirmation_state: SourceConfirmationState;
   completes_execution: boolean;
   occurred_at: Date;
   payload_matches?: boolean;
 };
+
+/**
+ * The columns that make up an evidence row's immutable quote payload.
+ *
+ * One constant so the INSERT, the identity-collision comparison and the two
+ * RETURNING clauses cannot drift: a column present in the write but missing from
+ * the comparison is a silent replay that overwrites a unit.
+ */
+const EVIDENCE_QUOTE_COLUMNS = `
+    quote_quantity::text AS quote_quantity,
+    quote_native_quantity::text AS quote_native_quantity,
+    quote_currency,
+    quote_native_usd_price::text AS quote_native_usd_price`;
 
 function isStaleEvidenceConfirmation(
   current: SourceConfirmationState,
@@ -1958,22 +2054,56 @@ function isStaleEvidenceConfirmation(
   return isStaleConfirmation(current, proposed);
 }
 
-export async function recordCopyExecutionEvidence(input: {
+export interface RecordCopyExecutionEvidenceInput {
   executionId: string;
   evidenceType: ExecutionEvidenceType;
   evidenceId: string;
   baseQuantity: DecimalInput;
-  quoteQuantity?: DecimalInput | null;
+  /**
+   * What was paid, in the unit the venue actually settled in.
+   *
+   * Structured rather than a bare `quoteQuantity` number on purpose (S4-M35): the
+   * old field took whatever the executor path had — USD from Polymarket and paper,
+   * SOL from Solana live, ETH from robinhood live — and nothing recorded which.
+   * There is deliberately no way to hand this function an amount without its
+   * currency. The USD conversion happens here, once, through `valuateQuoteLeg`.
+   *
+   * Omit or pass `null` when the venue reported no quote amount at all.
+   */
+  quoteLeg?: QuoteLegInput | null;
   priceUsd?: DecimalInput | null;
   confirmationState: SourceConfirmationState;
   completesExecution: boolean;
   occurredAt: Date;
   observedAt?: Date;
-}): Promise<{ execution: CopyExecutionRecord; position: CopyPositionRecord }> {
+}
+
+export interface RecordCopyExecutionEvidenceResult {
+  execution: CopyExecutionRecord;
+  position: CopyPositionRecord;
+  /** How this single fill's quote leg was valued, including why it was not. */
+  fillValuation: QuoteLegValuation;
+  /** Whether the execution's confirmed USD total now accounts for every fill. */
+  confirmedQuoteTotal: ConfirmedQuoteTotal;
+}
+
+export async function recordCopyExecutionEvidence(
+  input: RecordCopyExecutionEvidenceInput
+): Promise<RecordCopyExecutionEvidenceResult> {
   const executionId = assertIdentifier('executionId', input.executionId, 128);
   const evidenceId = assertIdentifier('evidenceId', input.evidenceId);
   const baseQuantity = decimal('baseQuantity', input.baseQuantity);
-  const quoteQuantity = optionalDecimal('quoteQuantity', input.quoteQuantity);
+  const fillValuation = valuateQuoteLeg(input.quoteLeg);
+  const quoteQuantity = optionalDecimal('quoteLeg.usdAmount', fillValuation.usdAmount);
+  const quoteNativeQuantity = optionalDecimal(
+    'quoteLeg.amount',
+    fillValuation.nativeAmount
+  );
+  const quoteCurrency = fillValuation.currency;
+  const quoteNativeUsdPrice = optionalDecimal(
+    'quoteLeg.nativeUsdPrice',
+    fillValuation.nativeUsdPrice
+  );
   const priceUsd = optionalDecimal('priceUsd', input.priceUsd);
   const occurredAt = assertDate('occurredAt', input.occurredAt);
   const observedAt = assertDate('observedAt', input.observedAt ?? new Date());
@@ -1995,9 +2125,14 @@ export async function recordCopyExecutionEvidence(input: {
     await client.query(
       `INSERT INTO copy_execution_evidence (
          execution_id, evidence_type, evidence_id, base_quantity, quote_quantity,
+         quote_native_quantity, quote_currency, quote_native_usd_price,
          price_usd, confirmation_state, completes_execution, occurred_at, observed_at,
          confirmation_updated_at
-       ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10, $10)
+       ) VALUES (
+         $1, $2, $3, $4::numeric, $5::numeric,
+         $6::numeric, $7, $8::numeric,
+         $9::numeric, $10, $11, $12, $13, $13
+       )
        ON CONFLICT (execution_id, evidence_type, evidence_id) DO NOTHING`,
       [
         executionId,
@@ -2005,6 +2140,9 @@ export async function recordCopyExecutionEvidence(input: {
         evidenceId,
         baseQuantity,
         quoteQuantity,
+        quoteNativeQuantity,
+        quoteCurrency,
+        quoteNativeUsdPrice,
         priceUsd,
         input.confirmationState,
         input.completesExecution,
@@ -2019,8 +2157,7 @@ export async function recordCopyExecutionEvidence(input: {
          execution_id,
          evidence_type,
          evidence_id,
-         base_quantity::text AS base_quantity,
-         quote_quantity::text AS quote_quantity,
+         base_quantity::text AS base_quantity,${EVIDENCE_QUOTE_COLUMNS},
          price_usd::text AS price_usd,
          confirmation_state,
          completes_execution,
@@ -2028,9 +2165,12 @@ export async function recordCopyExecutionEvidence(input: {
          (
            base_quantity = $4::numeric
            AND quote_quantity IS NOT DISTINCT FROM $5::numeric
-           AND price_usd IS NOT DISTINCT FROM $6::numeric
-           AND completes_execution = $7
-           AND occurred_at = $8
+           AND quote_native_quantity IS NOT DISTINCT FROM $6::numeric
+           AND quote_currency IS NOT DISTINCT FROM $7
+           AND quote_native_usd_price IS NOT DISTINCT FROM $8::numeric
+           AND price_usd IS NOT DISTINCT FROM $9::numeric
+           AND completes_execution = $10
+           AND occurred_at = $11
          ) AS payload_matches
        FROM copy_execution_evidence
        WHERE execution_id = $1 AND evidence_type = $2 AND evidence_id = $3
@@ -2041,6 +2181,9 @@ export async function recordCopyExecutionEvidence(input: {
         evidenceId,
         baseQuantity,
         quoteQuantity,
+        quoteNativeQuantity,
+        quoteCurrency,
+        quoteNativeUsdPrice,
         priceUsd,
         input.completesExecution,
         occurredAt
@@ -2063,8 +2206,7 @@ export async function recordCopyExecutionEvidence(input: {
             execution_id,
             evidence_type,
             evidence_id,
-            base_quantity::text AS base_quantity,
-            quote_quantity::text AS quote_quantity,
+            base_quantity::text AS base_quantity,${EVIDENCE_QUOTE_COLUMNS},
             price_usd::text AS price_usd,
             confirmation_state,
             completes_execution,
@@ -2116,14 +2258,23 @@ export async function recordCopyExecutionEvidence(input: {
       ]
     );
 
+    // `SUM` skips NULLs, so the old `COALESCE(SUM(quote_quantity), 0)` produced the
+    // same confident-looking number whether every confirmed fill was valued in USD,
+    // some were, or none were. The two counts alongside the sum are what let
+    // `summarizeConfirmedQuoteTotal` tell those three cases apart, so an unknown
+    // total can be stored as NULL instead of as a zero nobody can question.
     const totalsResult = await client.query<{
       confirmed_base_quantity: string;
-      confirmed_quote_quantity: string;
+      valued_quote_usd_sum: string | null;
+      valued_fill_count: string;
+      unvalued_fill_count: string;
       completes_execution: boolean;
     }>(
       `SELECT
          COALESCE(SUM(base_quantity), 0)::text AS confirmed_base_quantity,
-         COALESCE(SUM(quote_quantity), 0)::text AS confirmed_quote_quantity,
+         SUM(quote_quantity)::text AS valued_quote_usd_sum,
+         COUNT(*) FILTER (WHERE quote_quantity IS NOT NULL)::text AS valued_fill_count,
+         COUNT(*) FILTER (WHERE quote_quantity IS NULL)::text AS unvalued_fill_count,
          COALESCE(BOOL_OR(completes_execution), FALSE) AS completes_execution
        FROM copy_execution_evidence
        WHERE execution_id = $1
@@ -2132,9 +2283,16 @@ export async function recordCopyExecutionEvidence(input: {
     );
     const totals = totalsResult.rows[0] as {
       confirmed_base_quantity: string;
-      confirmed_quote_quantity: string;
+      valued_quote_usd_sum: string | null;
+      valued_fill_count: string;
+      unvalued_fill_count: string;
       completes_execution: boolean;
     };
+    const confirmedQuoteTotal = summarizeConfirmedQuoteTotal({
+      valuedFillCount: Number(totals.valued_fill_count),
+      unvaluedFillCount: Number(totals.unvalued_fill_count),
+      valuedUsdSum: totals.valued_quote_usd_sum
+    });
 
     const preStatePosition = await rebuildCopyPosition(client, execution);
     const hasConfirmedQuantity = Number(totals.confirmed_base_quantity) > 0;
@@ -2175,6 +2333,7 @@ export async function recordCopyExecutionEvidence(input: {
       `UPDATE copy_executions
           SET confirmed_base_quantity = $2::numeric,
               confirmed_quote_quantity = $3::numeric,
+              quote_unassessed_fill_count = $5::integer,
               reserved_base_quantity = CASE
                 WHEN direction <> 'sell' OR $4 = 'confirmed' THEN 0
                 ELSE GREATEST(0, requested_base_quantity - $2::numeric)
@@ -2189,7 +2348,13 @@ export async function recordCopyExecutionEvidence(input: {
               updated_at = NOW()
         WHERE id = $1
       RETURNING ${COPY_EXECUTION_COLUMNS}`,
-      [execution.id, totals.confirmed_base_quantity, totals.confirmed_quote_quantity, desiredState]
+      [
+        execution.id,
+        totals.confirmed_base_quantity,
+        confirmedQuoteTotal.usdAmount,
+        desiredState,
+        confirmedQuoteTotal.unvaluedFillCount
+      ]
     );
     execution = updatedExecution.rows[0] as CopyExecutionDbRow;
     const position = await rebuildCopyPosition(client, execution);
@@ -2205,7 +2370,12 @@ export async function recordCopyExecutionEvidence(input: {
         [execution.signal_id]
       );
     }
-    return { execution: mapCopyExecution(execution), position };
+    return {
+      execution: mapCopyExecution(execution),
+      position,
+      fillValuation,
+      confirmedQuoteTotal
+    };
   });
 }
 

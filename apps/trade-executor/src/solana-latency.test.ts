@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  calculateSolanaLifecycleLatencies,
-  summarizeSolanaSignalToAlertLatency
-} from './solana-latency.js';
+import * as solanaLatency from './solana-latency.js';
+import { calculateSolanaLifecycleLatencies } from './solana-latency.js';
 
 describe('Solana lifecycle latency primitives', () => {
   it('keeps observation, detection, alert, submission, and confirmation distinct', () => {
@@ -32,28 +30,14 @@ describe('Solana lifecycle latency primitives', () => {
     });
   });
 
-  it('reports the measured median against the strict sub-60-second target', () => {
-    const samples = [20_000, 40_000, 70_000].map((signalToAlertMs) => ({
-      eventToSignalMs: null,
-      signalToAlertMs,
-      signalToSubmissionMs: null,
-      signalToConfirmationMs: null
-    }));
-
-    expect(summarizeSolanaSignalToAlertLatency(samples)).toEqual({
-      sampleCount: 3,
-      medianMs: 40_000,
-      targetMs: 60_000,
-      targetMet: true
-    });
-  });
-
-  it('leaves target status unknown when there is no measured sample', () => {
-    expect(summarizeSolanaSignalToAlertLatency([])).toEqual({
-      sampleCount: 0,
-      medianMs: null,
-      targetMs: 60_000,
-      targetMet: null
-    });
+  // S4-M22. The module previously exported SOLANA_SIGNAL_TO_ALERT_TARGET_MS = 60_000
+  // and a summariser that reported a measured median as `targetMet` against it.
+  // ADR-0005 §8.1 retires that number: a minute from detection to alert is a defect
+  // under single-master mirroring, so `targetMet: true` at 40 s was a false pass.
+  // No replacement target exists until S4-M21 supplies observed percentiles. This
+  // test is the tripwire: it fails if anyone re-adds a guessed target or a helper
+  // that judges latency against one.
+  it('exports measurement only, with no latency target to compare against', () => {
+    expect(Object.keys(solanaLatency).sort()).toEqual(['calculateSolanaLifecycleLatencies']);
   });
 });

@@ -10,9 +10,8 @@ import {
   toFiniteNumber,
   type AttributionData
 } from './attribution-model';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
+import { api } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
 
 const CHAIN_LABELS: Record<string, string> = {
   solana: 'Solana',
@@ -36,14 +35,7 @@ export default function AttributionView() {
 
   const loadAttribution = useCallback(async (signal?: AbortSignal) => {
     try {
-      const response = await fetch(`${API_BASE}/v1/trading/attribution`, {
-        cache: 'no-store',
-        headers: { 'X-Api-Key': API_KEY },
-        signal
-      });
-      if (!response.ok) throw new Error(`Attribution request failed (${response.status})`);
-
-      const next = parseAttributionData(await response.json());
+      const next = parseAttributionData(await api.get('/v1/trading/attribution', { signal }));
       setData(next);
       setSelectedTradeId((current) =>
         current && next.ledger.some((row) => row.trade_id === current)
@@ -51,9 +43,9 @@ export default function AttributionView() {
           : next.ledger[0]?.trade_id ?? null
       );
       setError(null);
-    } catch (requestError) {
+    } catch (requestError: unknown) {
       if (requestError instanceof DOMException && requestError.name === 'AbortError') return;
-      setError(requestError instanceof Error ? requestError.message : 'Attribution data is unavailable');
+      setError(describeApiError(requestError, 'Attribution data is unavailable'));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }

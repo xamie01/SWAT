@@ -20,19 +20,33 @@ import {
   claimStopLossTrigger,
   releaseStopLossTrigger
 } from '@swat/db';
-import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger } from '@swat/shared';
+import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger, tradeQueueForChain } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 import { runAttributionReporting } from './expectancy.js';
 import { runStopLossSweep } from './stop-loss.js';
+import {
+  runMasterMetricsBatch,
+  listMasterCandidates,
+  fetchMasterTradeRows,
+  formatMasterMetricsLine
+} from './master-metrics.js';
 
 const redisUrlForPublish = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redisPublishClient = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
 
-// Stop-loss exits go through the same durable queue the signal engine uses, so
+// Stop-loss exits go through the same durable queues the signal engine uses, so
 // they inherit the executor's mode gating, circuit breaker and reconciliation.
-const tradeQueue = new Queue('swat-trades', {
-  connection: new Redis(redisUrlForPublish, { maxRetriesPerRequest: null })
-});
-tradeQueue.on('error', (error) => console.error('[scorer] trade queue error', error));
+// One queue per chain since S3-25, so a stalled venue cannot hold up another
+// chain's exits — which for a stop-loss is the difference between a bounded loss
+// and an unbounded one.
+const tradeQueueConnection = new Redis(redisUrlForPublish, { maxRetriesPerRequest: null });
+const tradeQueues = new Map<Chain, Queue>(
+  (['solana', 'polygon', 'robinhood-chain'] as const).map((chain) => {
+    const queue = new Queue(tradeQueueForChain(chain), { connection: tradeQueueConnection });
+    queue.on('error', (error) => console.error(`[scorer] ${chain} trade queue error`, error));
+    return [chain, queue];
+  })
+);
 
 initLogger('scorer');
 
@@ -124,8 +138,37 @@ async function runScoringBatch() {
     )
   }));
 
+  console.log('[scorer] Computing out-of-sample master metrics (24h / 7d / 30d)...');
+  await runStage('master metrics', runMasterMetrics);
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`[scorer] Batch complete in ${elapsed}s.`);
+}
+
+/**
+ * S4-M8 - out-of-sample master metrics over 24h / 7d / 30d. Runs on the nightly
+ * batch because a track record does not change intraday in a way any user acts
+ * on, and the round-trip reconstruction reads up to 180 days per master.
+ */
+async function runMasterMetrics() {
+  const asOf = new Date();
+  const result = await runMasterMetricsBatch({
+    listMasters: () => listMasterCandidates({ asOf }),
+    fetchTrades: fetchMasterTradeRows,
+    asOf
+  });
+
+  console.log(
+    `[scorer] Master metrics: ${result.masters} candidates, ${result.reports.length} reported, ` +
+    `${result.decaying} decaying, ${result.improving} improving, ` +
+    `${result.insufficientEverywhere} with insufficient history in every window, ` +
+    `${result.failed} failed.`
+  );
+  // Divergence is itself the finding (ADR-0005 section 5.3), so a decaying
+  // master is logged individually rather than only counted.
+  for (const report of result.reports) {
+    if (report.trend === 'decaying') console.log(`[scorer] decaying master - ${formatMasterMetricsLine(report)}`);
+  }
 }
 
 /**
@@ -152,12 +195,18 @@ async function runMarkToMarket() {
       resolvePolicy: resolveRiskPolicy,
       claim: claimStopLossTrigger,
       release: releaseStopLossTrigger,
-      enqueueSell: (job, jobId) => tradeQueue.add('stop-loss-sell', job, {
-        jobId,
-        removeOnComplete: true,
-        attempts: 4,
-        backoff: { type: 'exponential', delay: 5000 }
-      }),
+      enqueueSell: (job, jobId, chain) => {
+        const queue = tradeQueues.get(chain);
+        // Refuse rather than fall back to another chain's queue: the sweep
+        // releases the claim on a throw, so the next pass retries the exit.
+        if (!queue) throw new Error(`No trade queue configured for chain ${chain}`);
+        return queue.add('stop-loss-sell', job, {
+          jobId,
+          removeOnComplete: true,
+          attempts: 4,
+          backoff: { type: 'exponential', delay: 5000 }
+        });
+      },
       publishAlert: (alert) => redisPublishClient.publish(
         REDIS_CHANNELS.alertQueue,
         JSON.stringify(alert)
@@ -167,6 +216,16 @@ async function runMarkToMarket() {
       console.log(
         `[scorer] Stop-loss: scanned ${sweep.scanned}, breached ${sweep.breached}, ` +
         `queued ${sweep.queued}, already triggered ${sweep.alreadyTriggered}, failed ${sweep.failed}.`
+      );
+    }
+    // Logged outside the `breached` guard and on its own line: an unaccountable position
+    // never reaches the breach check, so it would otherwise be invisible in exactly the
+    // case where nothing breached. Worded as a ledger problem because that is the fix --
+    // a `trades.user_id` that is neither a uuid nor NULL, which no retry will clear.
+    if (sweep.unaccountable > 0) {
+      console.error(
+        `[scorer] Stop-loss: ${sweep.unaccountable} position(s) skipped with an unusable ` +
+        `owner -- check trades.user_id on those signals; this will not self-resolve.`
       );
     }
   } catch (e) {

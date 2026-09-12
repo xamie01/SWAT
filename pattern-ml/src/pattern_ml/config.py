@@ -77,11 +77,13 @@ class Kol:
 @dataclass(frozen=True)
 class Settings:
     helius_api_key: str | None
+    bitquery_token: str | None
     polymarket_data_api: str
     data_dir: Path
     db_path: Path
     solana_max_rps: float
     polymarket_max_rps: float
+    bitquery_max_rps: float
     source_concurrency: int
 
     @property
@@ -121,6 +123,11 @@ def get_settings() -> Settings:
     _load_env()
     return Settings(
         helius_api_key=os.getenv("HELIUS_API_KEY") or None,
+        # Bitquery reconstructs the Solana opportunity set. Accepts either name
+        # so an existing BITQUERY_API_KEY in the repo-root .env still works.
+        bitquery_token=(
+            os.getenv("BITQUERY_TOKEN") or os.getenv("BITQUERY_API_KEY") or None
+        ),
         polymarket_data_api=(
             os.getenv("POLYMARKET_DATA_API") or "https://data-api.polymarket.com"
         ).rstrip("/"),
@@ -128,6 +135,9 @@ def get_settings() -> Settings:
         db_path=_resolve(os.getenv("PATTERN_ML_DB") or "data/warehouse.duckdb"),
         solana_max_rps=_env_float("SOLANA_MAX_RPS", 8.0),
         polymarket_max_rps=_env_float("POLYMARKET_MAX_RPS", 15.0),
+        # Deliberately low: Bitquery bills points per minute, and a long
+        # reconstruction cut off halfway leaves a half-written training set.
+        bitquery_max_rps=_env_float("BITQUERY_MAX_RPS", 2.0),
         source_concurrency=_env_int("SOURCE_CONCURRENCY", 4),
     )
 

@@ -378,9 +378,13 @@ describe('Polymarket live executor', () => {
         direction: 'buy'
       })).rejects.toThrow('paused for orders');
 
-      expect(marketStateMocks.assertPolymarketMarketOpenForSubmission).toHaveBeenCalledWith({
-        conditionId: `0x${'1'.repeat(64)}`
-      });
+      // expect.objectContaining, because `triggerPolymarket` also passes an injected
+      // `now` so the tradability gate and the S4-M18 staleness budget read one
+      // clock. Pinning the exact argument object made this assertion fail on a
+      // change that added a field without altering what it claims to check.
+      expect(marketStateMocks.assertPolymarketMarketOpenForSubmission).toHaveBeenCalledWith(
+        expect.objectContaining({ conditionId: `0x${'1'.repeat(64)}` })
+      );
       // Nothing may reach the venue once the gate refuses.
       expect(client.createMarketOrder).not.toHaveBeenCalled();
       expect(client.postOrder).not.toHaveBeenCalled();
@@ -791,7 +795,9 @@ describe('Polymarket live executor', () => {
         evidenceType: 'venue_fill',
         evidenceId: 'order:delayed-partial',
         baseQuantity: '10',
-        quoteQuantity: '4.5',
+        // S4-M35: the amount now carries its unit. Polymarket settles in USDC, so
+        // the currency is asserted here rather than left for a chain lookup.
+        quoteLeg: { amount: '4.5', currency: 'USD' },
         priceUsd: '0.45',
         confirmationState: 'confirmed',
         completesExecution: true

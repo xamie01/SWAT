@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 const CHAINS = ['solana', 'polygon', 'robinhood-chain'] as const;
 const MODES = ['off', 'paper', 'live', 'live+shadow'] as const;
 
@@ -75,18 +75,19 @@ function parseTradingStatus(value: unknown): TradingStatus | null {
   };
 }
 
-async function readResponse(response: Response): Promise<TradingStatus> {
-  if (!response.ok) {
-    throw new Error(`Trading control request failed with HTTP ${response.status}`);
-  }
-
-  const payload: unknown = await response.json();
+/**
+ * The non-2xx branch moved into `apiFetch`, which throws `ApiError` with the
+ * status attached. What is left is the shape check, which still has to happen
+ * here: a 200 carrying a payload we cannot parse is not a success.
+ */
+function readStatus(payload: unknown): TradingStatus {
   const status = parseTradingStatus(payload);
   if (!status) throw new Error('Trading control returned an invalid status payload');
   return status;
 }
 
 function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) return describeApiError(error, 'Trading control request failed');
   if (error instanceof Error) return error.message;
   return 'Trading control request failed';
 }
@@ -100,12 +101,7 @@ export default function RiskExecutionView() {
 
   const fetchStatus = useCallback(async (signal?: AbortSignal): Promise<void> => {
     try {
-      const response = await fetch(`${API_BASE}/v1/trading/status`, {
-        cache: 'no-store',
-        headers: { 'X-Api-Key': API_KEY },
-        signal
-      });
-      const nextStatus = await readResponse(response);
+      const nextStatus = readStatus(await api.get('/v1/trading/status', { signal }));
       setStatus(nextStatus);
       setError(null);
     } catch (caught) {
@@ -133,15 +129,7 @@ export default function RiskExecutionView() {
     setPendingChain(chain);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/v1/trading/mode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Api-Key': API_KEY
-        },
-        body: JSON.stringify({ chain, mode })
-      });
-      setStatus(await readResponse(response));
+      setStatus(readStatus(await api.post('/v1/trading/mode', { chain, mode })));
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -153,11 +141,7 @@ export default function RiskExecutionView() {
     setEmergencyPending(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/v1/trading/emergency-off`, {
-        method: 'POST',
-        headers: { 'X-Api-Key': API_KEY }
-      });
-      setStatus(await readResponse(response));
+      setStatus(readStatus(await api.post('/v1/trading/emergency-off')));
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {

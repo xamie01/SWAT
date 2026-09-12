@@ -152,9 +152,14 @@ async def pull_kol(kol: Kol, source: HttpSource) -> tuple[pl.DataFrame, PullStat
 
     fetched_at = datetime.now(timezone.utc).isoformat()
     # Helius rows carry deeply nested structures (events, tokenTransfers,
-    # accountData) whose shapes vary enough between transactions that Polars
-    # struct inference fights us. Keep the nested parts as JSON strings in the
-    # raw file and decode them during normalization.
+    # accountData, instructions) whose shapes vary enough between transactions
+    # that Polars struct inference fights us. Keep the nested parts as JSON
+    # strings in the raw file and decode them during normalization.
+    #
+    # `instructions` is kept specifically so the execution venue can be resolved
+    # from program ids. Helius's own `source` label collapses every Jupiter
+    # route to "JUPITER" and cannot distinguish a Pump.fun bonding curve from
+    # PumpSwap — a distinction the candidate query depends on entirely.
     flattened = [
         {
             "signature": tx.get("signature"),
@@ -168,6 +173,7 @@ async def pull_kol(kol: Kol, source: HttpSource) -> tuple[pl.DataFrame, PullStat
             "events_json": json.dumps(tx.get("events") or {}),
             "token_transfers_json": json.dumps(tx.get("tokenTransfers") or []),
             "native_transfers_json": json.dumps(tx.get("nativeTransfers") or []),
+            "instructions_json": json.dumps(tx.get("instructions") or []),
             "_kol_address": kol.address,
             "_kol_handle": kol.handle,
             "_fetched_at": fetched_at,

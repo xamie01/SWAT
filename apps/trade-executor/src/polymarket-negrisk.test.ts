@@ -303,7 +303,7 @@ describe('polymarket binary and neg-risk entry-exit matrix', () => {
         builderCode: BUILDER_CODE
       });
       expect(marketStateMocks.assertPolymarketMarketOpenForSubmission)
-        .toHaveBeenCalledWith({ conditionId: CONDITION_ID });
+        .toHaveBeenCalledWith(expect.objectContaining({ conditionId: CONDITION_ID }));
       expect(result.executionStatus).toBe('filled');
       expect(result.shares).toBe(50);
       expect(result.spendAmountUsd).toBe(20);
@@ -341,7 +341,7 @@ describe('polymarket binary and neg-risk entry-exit matrix', () => {
         builderCode: BUILDER_CODE
       });
       expect(marketStateMocks.assertPolymarketMarketOpenForSubmission)
-        .toHaveBeenCalledWith({ conditionId: CONDITION_ID });
+        .toHaveBeenCalledWith(expect.objectContaining({ conditionId: CONDITION_ID }));
       expect(result.executionStatus).toBe('filled');
       expect(result.shares).toBe(50);
       expect(result.spendAmountUsd).toBe(30);

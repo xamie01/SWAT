@@ -3,6 +3,7 @@ import { DelayedError, UnrecoverableError, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
   DEFAULT_RISK_CONFIG,
+  chainFromTokenMint,
   fetchTokenPriceUsd,
   getJupiterSimulatedFill,
   initLogger,
@@ -17,6 +18,7 @@ import {
   claimSourceSignalForCopyExecution,
   claimSignalForExecution,
   getRollingExposureUsd,
+  getCanonicalSourceTradeById,
   getCopyExecutionByClientOrderIdentity,
   getCopyExecutionBySubmissionIdentity,
   getTokenDecimals,
@@ -36,8 +38,18 @@ import {
   releaseCopyExecutionReconciliationClaim,
   resolveChainMode,
   transitionCopyExecution,
+  claimPolymarketPositionExit,
+  confirmPolymarketPositionExit,
+  releasePolymarketPositionExit,
+  releaseStalePolymarketPositionExits,
+  valuateChainNativeQuoteLeg,
+  valuateQuoteLeg,
+  deriveFillPriceUsd,
+  nativeQuoteCurrencyForChain,
+  withEvmNonceLock,
   withTransaction,
-  type CopyExecutionRecord
+  type CopyExecutionRecord,
+  type QuoteLegInput
 } from '@swat/db';
 import {
   calculateBalanceAwareSize,
@@ -58,7 +70,9 @@ import {
   robinhoodPublicClient,
   triggerRobinhood,
   evmAccount,
+  NonceContentionError,
   WETH_ROBINHOOD,
+  type EvmNonceLock,
   type RobinhoodExecutionAdapter,
   type RobinhoodExecutionConfig,
   type RobinhoodPendingStore,
@@ -80,7 +94,9 @@ import {
   getPolymarketAvailableBalance,
   getPolymarketLiveReadiness,
   getPolymarketClientIfReady,
-  simulatePolymarketBookFill
+  simulatePolymarketBookFill,
+  runPolymarketExitEscalationSweep,
+  type PolymarketMirrorContext
 } from './polymarket.js';
 import { polymarketSigner, resolvePolymarketIdentity } from './polymarket.js';
 import { OrderSide } from '@polymarket/client';
@@ -129,6 +145,15 @@ import {
   createPolymarketReconciler,
   createSolanaConfirmationReconciler
 } from './reconciliation-venues.js';
+import { misroutedJobWarning, tradeWorkerSpecs } from './trade-workers.js';
+import {
+  createExecutionAuthorityRegistry,
+  type ExecutionAuthorityResolver,
+  type ExecutionPrincipal,
+  type GrantedExecutionAuthority
+} from './execution-authority.js';
+import { createExecutionAuthorityAdapters } from './execution-authority-adapters.js';
+import { riskPolicyAccountForUser } from './per-user-sizing.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
@@ -236,6 +261,24 @@ async function getCachedEthPrice(): Promise<number | null> {
   }
 }
 
+/**
+ * USD price of one unit of a chain's native quote currency.
+ *
+ * The `nativeQuoteCurrencyForChain` switch is what decides which feed to ask, so
+ * adding a chain cannot silently skip its conversion: the currency map and the
+ * price lookup are the same decision, made once (S4-M35).
+ */
+async function nativeUsdPriceForChain(chain: Chain): Promise<number | null> {
+  switch (nativeQuoteCurrencyForChain(chain)) {
+    case 'SOL':
+      return getCachedSolPrice();
+    case 'ETH':
+      return getCachedEthPrice();
+    case 'USD':
+      return 1;
+  }
+}
+
 // ─── Trade persistence ─────────────────────────────────────────────────────────
 
 export async function persistTrade(opts: {
@@ -273,14 +316,22 @@ export async function persistTrade(opts: {
     : null;
   let amountUsd = hasConfirmedFill ? opts.amountUsd ?? null : null;
 
-  if (hasConfirmedFill && amountUsd === null && opts.chain === 'solana') {
-    const solPrice = await getCachedSolPrice();
-    amountUsd = solPrice !== null ? opts.size * solPrice : 0;
-  } else if (hasConfirmedFill && amountUsd === null && opts.chain === 'polygon') {
-    amountUsd = opts.size;
-  } else if (hasConfirmedFill && amountUsd === null && opts.chain === 'robinhood-chain') {
-    const ethPrice = await getCachedEthPrice();
-    amountUsd = ethPrice !== null ? opts.size * ethPrice : 0;
+  if (hasConfirmedFill && amountUsd === null) {
+    // One conversion rule (S4-M35). `valuateChainNativeQuoteLeg` owns both the
+    // chain -> unit map (Solana x SOL price, robinhood x ETH price, polygon
+    // already USD) and the multiplication, and the copy-evidence write path in
+    // `packages/db` calls the same function, so the two cannot drift apart. This
+    // block used to be that map, inlined.
+    const valuation = valuateChainNativeQuoteLeg({
+      chain: opts.chain,
+      amount: opts.size,
+      nativeUsdPrice: await nativeUsdPriceForChain(opts.chain)
+    });
+    // Behaviour deliberately unchanged here: an unavailable native price has always
+    // written 0 into `trades.amount_usd`, and revisiting that is a separate call
+    // from S4-M35, whose subject is `copy_execution_evidence`. The unknown is not
+    // lost -- it is `valuation.code`, and the evidence path stores it as NULL.
+    amountUsd = valuation.usdAmount === null ? 0 : Number(valuation.usdAmount);
   }
 
   const jup = opts.jupiterFill;
@@ -434,27 +485,46 @@ function getSizingConfig(
   };
 }
 
+/**
+ * Spendable balance for sizing, or `null` when it cannot be established.
+ *
+ * `null` rather than `0` (S4-M41/S4-M48): a zero balance means "you have nothing
+ * to trade with", while null means "we could not find out". Sizing must refuse on
+ * the second, and a caller that coalesces them turns a price-feed outage into a
+ * confident decision not to trade.
+ */
 async function getAvailablePositionBalance(opts: {
   chain: Chain;
   sizingMode: 'paper' | 'live';
   direction: 'buy' | 'sell';
   tokenMint: string;
-}): Promise<number> {
+}): Promise<number | null> {
   if (opts.sizingMode === 'paper') {
-    // Resolve DB-backed risk policy (30s TTL) so changing DB values affects sizing without restart
-    const policy = await resolveRiskPolicy('operator', opts.chain);
     const bankrollUsd = parsePositiveNumber(
       process.env.PAPER_BANKROLL_USD,
       10_000,
       'PAPER_BANKROLL_USD'
     );
     if (opts.chain === 'polygon') return bankrollUsd;
-    if (opts.chain === 'solana') {
-      const solPrice = await fetchTokenPriceUsd(SOL_MINT) ?? 150;
-      return bankrollUsd / solPrice;
+    // A fabricated rate silently mis-scales every size derived from it, and the
+    // symptom is a position that looks deliberate. `?? 150` for SOL and `?? 3000`
+    // for ETH were doing exactly that on any price-feed failure -- at a real SOL
+    // price of 300 the fallback halves every paper size, which reads as a
+    // conservative setting rather than a broken feed.
+    //
+    // Returning null propagates "unknown" to the caller, which refuses rather
+    // than sizing. Same rule as S4-M41 and `resolveKnownBalanceUsd`: unknown is
+    // never a number.
+    const nativeMint = opts.chain === 'solana' ? SOL_MINT : WETH_ROBINHOOD;
+    const nativePrice = await fetchTokenPriceUsd(nativeMint);
+    if (nativePrice === null || !Number.isFinite(nativePrice) || nativePrice <= 0) {
+      console.warn(
+        `[trade-executor] no usable ${opts.chain} native price; paper bankroll is `
+        + 'unassessable rather than sized against a fabricated rate'
+      );
+      return null;
     }
-    const ethPrice = await fetchTokenPriceUsd(WETH_ROBINHOOD) ?? 3_000;
-    return bankrollUsd / ethPrice;
+    return bankrollUsd / nativePrice;
   }
 
   if (opts.chain === 'solana') {
@@ -487,7 +557,17 @@ export async function getBalanceAwarePositionSize(
   clusterTier: ClusterTier,
   sizingMode: 'paper' | 'live',
   direction: 'buy' | 'sell',
-  tokenMint: string
+  tokenMint: string,
+  /**
+   * Whose money is being sized (`S4-15`/`S4-16`). `null` is the pre-tenancy
+   * operator path, which ADR-0001 leaves at `user_id NULL` and never backfills.
+   *
+   * Optional so the six-argument callers keep compiling, and defaulted to `null`
+   * rather than to some ambient current user: a sizing call that forgot to pass a
+   * tenant must size the OPERATOR's account, which is loud and wrong, rather than
+   * silently size one user off another's risk percentage.
+   */
+  userId: string | null = null
 ): Promise<number> {
   const tierMult = TIER_MULTIPLIER[clusterTier] ?? 0.5;
   const scoreMult = score >= 90 ? 1.0 : score >= 80 ? 0.75 : 0.5;
@@ -504,7 +584,11 @@ export async function getBalanceAwarePositionSize(
   // Resolution failure is fatal rather than a warn-and-default (`Principle 3`).
   // Defaulting substitutes a risk percentage the account never agreed to, which is
   // a wrong-sized real trade. Throwing costs one skipped signal.
-  const policy = await resolveRiskPolicy(RISK_POLICY_ACCOUNT, chain);
+  // The account is the tenancy seam. `riskPolicyAccountForUser` returns the user
+  // id for a tenant and `RISK_POLICY_ACCOUNT` for the operator path, and it throws
+  // on a blank string rather than quietly keying on the operator -- which is what
+  // makes "I forgot to thread the id" a failure rather than a cross-tenant read.
+  const policy = await resolveRiskPolicy(riskPolicyAccountForUser(userId), chain);
   const config = { ...envConfig, riskPct: policy.maxPositionPct };
   const balance = await getAvailablePositionBalance({
     chain,
@@ -512,6 +596,15 @@ export async function getBalanceAwarePositionSize(
     direction,
     tokenMint
   });
+  // Unknown is not zero. Returning 0 here would read downstream as "sized to
+  // nothing", indistinguishable from a deliberate skip; sizing must refuse
+  // instead, so the caller sees a size of 0 only when the balance is genuinely 0.
+  if (balance === null) {
+    console.warn(
+      `[trade-executor] spendable balance unassessable for ${chain}; refusing to size`
+    );
+    return 0;
+  }
   return calculateBalanceAwareSize({
     balance,
     base: config.base,
@@ -529,7 +622,18 @@ type RobinhoodRuntime = {
   config: RobinhoodExecutionConfig;
   pendingStore: RobinhoodPendingStore;
   safetyAssessment: ReturnType<typeof createRobinhoodSafetyAssessment>;
+  nonceLock: EvmNonceLock;
 };
+
+/**
+ * Binds the chain to the Postgres advisory lock (`S4-M12`).
+ *
+ * The chain is bound here rather than inside `robinhood.ts` so that module stays
+ * free of `@swat/db` and chain constants — and so the identical port serves
+ * Polymarket's `polygon` signer later without a second implementation.
+ */
+const robinhoodNonceLock: EvmNonceLock = (account, run) =>
+  withEvmNonceLock({ chain: 'robinhood-chain', account, run });
 
 const ownerAbi = parseAbi(['function owner() view returns (address)']);
 
@@ -553,8 +657,8 @@ export function createRobinhoodRuntime(redisClient: Redis): RobinhoodRuntime {
     // that is needed to turn any of them into a hard gate — see G2-R5.
     maxTransferFeeBps: Number(process.env.ROBINHOOD_MAX_TRANSFER_FEE_BPS ?? '0')
   });
-  configureRobinhoodRuntime({ pendingStore, safetyAssessment });
-  return { adapter, config, pendingStore, safetyAssessment };
+  configureRobinhoodRuntime({ pendingStore, safetyAssessment, nonceLock: robinhoodNonceLock });
+  return { adapter, config, pendingStore, safetyAssessment, nonceLock: robinhoodNonceLock };
 }
 
 function configureRobinhoodOpsAlerts(redisClient: Redis): void {
@@ -628,7 +732,8 @@ export async function runRobinhoodReconciliation(runtime: RobinhoodRuntime): Pro
     adapter: runtime.adapter,
     pendingStore: runtime.pendingStore,
     config: runtime.config,
-    safetyAssessment: runtime.safetyAssessment
+    safetyAssessment: runtime.safetyAssessment,
+    nonceLock: runtime.nonceLock
   });
   for (const outcome of outcomes) {
     if (outcome.status === 'filled') {
@@ -791,12 +896,15 @@ const failedBreakerOutcomes = new Set(['failed', 'rejected']);
 function chainFromJob(job: { data: unknown }): Chain {
   const payload = job.data as { tokenMint?: unknown } | null;
   const tokenMint = typeof payload?.tokenMint === 'string' ? payload.tokenMint : '';
-  const separator = tokenMint.indexOf(':');
-  const chain = separator >= 0 ? tokenMint.slice(0, separator) : 'solana';
-  if (!isChain(chain)) {
-    throw new UnrecoverableError(`Unsupported trade chain: ${chain}`);
+  // Shared with the producers (`tradeQueueForTokenMint`) rather than
+  // reimplemented here: since S3-25 the producer picks the queue with this same
+  // derivation, and the two ends disagreeing would put a job on a queue whose
+  // worker serves a different venue.
+  try {
+    return chainFromTokenMint(tokenMint);
+  } catch (error) {
+    throw new UnrecoverableError(error instanceof Error ? error.message : String(error));
   }
-  return chain;
 }
 
 async function delayForCircuitBreaker(
@@ -820,12 +928,27 @@ export async function executeJobWithCircuitBreaker(
   execute: (job: { data: unknown }) => Promise<ExecutorJobResult> = handleJob
 ): Promise<ExecutorJobResult> {
   const chain = chainFromJob(job);
-  const state = await readCircuitBreakerState('operator', chain);
+  // S4-M16: the breaker is keyed per (account, chain), not per chain alone. With
+  // the `'operator'` literal, one user's three consecutive failures tripped
+  // `breaker:operator:<chain>` and halted EVERY other user's trades on that chain
+  // for CIRCUIT_BREAKER_RESET_MS -- a denial of service one tenant could inflict
+  // on all of them, by doing nothing but trading badly.
+  //
+  // `riskPolicyAccountForUser` rather than a bare userId, so the breaker and the
+  // risk policy cannot key differently for one user. It is deliberately NOT
+  // `reconciliationAccountForUser`, which must stay `'operator'` (see the note
+  // above RISK_POLICY_ACCOUNT and §1 of the checklist).
+  const breakerAccount = riskPolicyAccountForUser(
+    resolveExecutionPrincipal((job.data ?? {}) as { userId?: unknown }).kind === 'user'
+      ? (job.data as { userId: string }).userId
+      : null
+  );
+  const state = await readCircuitBreakerState(breakerAccount, chain);
 
   if (state.trippedAt !== null) {
-    const probeClaimed = await claimCircuitBreakerProbe('operator', chain, CIRCUIT_BREAKER_RESET_MS);
+    const probeClaimed = await claimCircuitBreakerProbe(breakerAccount, chain, CIRCUIT_BREAKER_RESET_MS);
     if (!probeClaimed) {
-      const current = await readCircuitBreakerState('operator', chain);
+      const current = await readCircuitBreakerState(breakerAccount, chain);
       if (current.trippedAt !== null) {
         console.log(`[trade-executor] circuit breaker active for ${chain}; delaying job`);
         return delayForCircuitBreaker(job, chain, current.trippedAt);
@@ -838,10 +961,10 @@ export async function executeJobWithCircuitBreaker(
   try {
     const result = await execute(job);
     if (successfulBreakerOutcomes.has(result.status)) {
-      await recordCircuitBreakerSuccess('operator', chain);
+      await recordCircuitBreakerSuccess(breakerAccount, chain);
     } else if (failedBreakerOutcomes.has(result.status)) {
       const failed = await recordCircuitBreakerFailure(
-        'operator',
+        breakerAccount,
         chain,
         DEFAULT_RISK_CONFIG.maxConsecutiveFailures
       );
@@ -854,8 +977,18 @@ export async function executeJobWithCircuitBreaker(
     return result;
   } catch (error) {
     if (error instanceof UnrecoverableError || error instanceof DelayedError) throw error;
+    // Nonce contention is not a venue failure (S4-M12). Another process holds the
+    // account's nonce lock, so this job simply has not run yet — counting it
+    // would let three unlucky collisions trip the breaker and halt every trade on
+    // the chain for CIRCUIT_BREAKER_RESET_MS, turning a retryable millisecond
+    // overlap into a five-minute outage. BullMQ retries the job with backoff, by
+    // which time the holder has submitted and the pending nonce has advanced.
+    if (error instanceof NonceContentionError) {
+      console.warn(`[trade-executor] ${error.message}`);
+      throw error;
+    }
     const failed = await recordCircuitBreakerFailure(
-      'operator',
+      breakerAccount,
       chain,
       DEFAULT_RISK_CONFIG.maxConsecutiveFailures
     );
@@ -910,23 +1043,103 @@ const COPY_ELIGIBILITY_THRESHOLDS: CopyEligibilityThresholds = {
 
 type CanonicalExecutionSet = Partial<Record<'paper' | 'live' | 'shadow', CopyExecutionRecord>>;
 
-function resolveLiveCopyTargetAccount(chain: Chain): string {
-  if (chain === 'solana') {
-    if (!TROJAN_WALLET_ADDRESS) {
-      throw new UnrecoverableError('TROJAN_WALLET_ADDRESS is required for canonical Solana execution');
-    }
-    return TROJAN_WALLET_ADDRESS;
-  }
-  if (chain === 'robinhood-chain') {
-    if (!evmAccount) {
-      throw new UnrecoverableError('EVM_PRIVATE_KEY is required for canonical Robinhood execution');
-    }
-    return evmAccount.address;
-  }
-  if (!polymarketSigner) {
-    throw new UnrecoverableError('EVM_PRIVATE_KEY is required for canonical Polymarket execution');
-  }
-  return resolvePolymarketIdentity(polymarketSigner.address).funderAddress;
+// ─── Execution authority (S4-P7) ───────────────────────────────────────────────
+
+/**
+ * Which principal a job executes for.
+ *
+ * Read from the payload rather than hard-coded, so that the first job carrying a
+ * `userId` is routed to a per-user adapter and **denied with a named code**
+ * instead of silently executing with the operator's keys. Nothing enqueues a
+ * `userId` today — fan-out is `S4-7` — so every job in this tree resolves to
+ * `{ kind: 'operator' }` and behaviour is unchanged. The value is in what
+ * happens the first time one does.
+ *
+ * Deliberately a separate read from `RISK_POLICY_ACCOUNT`, which becomes the user
+ * id under fan-out for *sizing*. Sizing a trade wrongly is a bad trade;
+ * authorizing one wrongly spends someone else's money, so the two must not share
+ * a single fallback.
+ */
+function resolveExecutionPrincipal(payload: { userId?: unknown }): ExecutionPrincipal {
+  const userId = typeof payload.userId === 'string' ? payload.userId.trim() : '';
+  return userId ? { kind: 'user', userId } : { kind: 'operator' };
+}
+
+/**
+ * Ports `handleJob` is handed. One entry today; the object is the seam.
+ *
+ * A parameter rather than a module import so a test can substitute a stub
+ * authority and assert the executor is unchanged — which is `S4-P7`'s own
+ * acceptance test, and the thing that proves the runtime never learns where
+ * authority comes from.
+ */
+export type ExecutorJobPorts = {
+  readonly authorize: ExecutionAuthorityResolver;
+};
+
+/**
+ * Binds the six authority adapters to this process's configuration.
+ *
+ * Every accessor reads at authorize time, never at construction: `evmAccount`
+ * and `polymarketSigner` are module-level in their own files, and
+ * `getJupiterJitoSigner()` is only populated part-way through `main()`, so a
+ * snapshot taken here would permanently report "nothing configured".
+ *
+ * This function is the only place in the executor that names a chain-specific
+ * authority type. That is the point of it: `handleJob` names none.
+ */
+export function createExecutorJobPorts(): ExecutorJobPorts {
+  return {
+    authorize: createExecutionAuthorityRegistry(createExecutionAuthorityAdapters({
+      solana: {
+        trojanWalletAddress: () => TROJAN_WALLET_ADDRESS ?? null,
+        signer: () => getJupiterJitoSigner()
+      },
+      robinhoodChain: {
+        accountAddress: () => evmAccount?.address ?? null,
+        typedDataSigner: () => {
+          const account = evmAccount;
+          if (!account || typeof account.signTypedData !== 'function') return null;
+          // Permit2 (`S4-M13`) is the first caller. The cast sits at the edge on
+          // purpose: `Eip712TypedData` is declared without viem's generics so a
+          // Solana adapter can satisfy the same port without importing viem.
+          return (typedData) => account.signTypedData(
+            typedData as Parameters<typeof account.signTypedData>[0]
+          );
+        }
+      },
+      polygon: {
+        identity: () => polymarketSigner
+          ? resolvePolymarketIdentity(polymarketSigner.address)
+          : null,
+        typedDataSigner: () => {
+          const signer = polymarketSigner;
+          if (!signer || typeof signer._signTypedData !== 'function') return null;
+          // ethers v5 takes the domain, the types without their EIP712Domain
+          // entry, and the message as three arguments.
+          return (typedData) => signer._signTypedData(
+            typedData.domain,
+            typedData.types as Record<string, { name: string; type: string }[]>,
+            typedData.message as Record<string, unknown>
+          );
+        }
+      }
+    }))
+  };
+}
+
+let defaultJobPorts: ExecutorJobPorts | null = null;
+
+/**
+ * The default `handleJob` uses when no ports are passed.
+ *
+ * `main()` constructs its own set explicitly and threads it in, so production
+ * does not reach for this. It exists for the direct callers — the test suites and
+ * the acceptance scripts — that invoke `handleJob(job)` with one argument.
+ */
+function getDefaultJobPorts(): ExecutorJobPorts {
+  if (!defaultJobPorts) defaultJobPorts = createExecutorJobPorts();
+  return defaultJobPorts;
 }
 
 async function prepareCanonicalExecutions(input: {
@@ -936,13 +1149,27 @@ async function prepareCanonicalExecutions(input: {
   direction: 'buy' | 'sell';
   mode: 'paper' | 'live' | 'live+shadow';
   buyQuoteQuantity: number;
+  /**
+   * Where a live copy settles, taken from the granted authority (`S4-P7`).
+   *
+   * The claim's `target_account` and the authority's settlement address are the
+   * same fact, so it is resolved once, above, rather than derived here from
+   * whichever key happens to be configured. A paper-only mode has no live
+   * execution mode in the list and legitimately passes `null`.
+   */
+  liveTargetAccount: string | null;
 }): Promise<{ executions: CanonicalExecutionSet; reason?: string; shadowReason?: string }> {
   const executions: CanonicalExecutionSet = {};
   let shadowReason: string | undefined;
   for (const executionMode of executionModesForChainMode(input.mode)) {
     const targetAccount = executionMode === 'live'
-      ? resolveLiveCopyTargetAccount(input.chain)
+      ? input.liveTargetAccount
       : resolvePaperCopyTargetAccount(input.chain);
+    if (!targetAccount) {
+      throw new UnrecoverableError(
+        `Canonical ${executionMode} execution has no target account on ${input.chain}`
+      );
+    }
     let result: Awaited<ReturnType<typeof claimSourceSignalForCopyExecution>>;
     try {
       result = await claimSourceSignalForCopyExecution({
@@ -1016,7 +1243,13 @@ async function persistCanonicalFill(input: {
   evidenceType: 'chain_receipt' | 'venue_fill' | 'paper_simulation';
   evidenceId: string;
   baseQuantity: string;
-  quoteQuantity?: string | null;
+  /**
+   * What was paid, with its unit. Structured because the unit is a property of the
+   * executor path, not of the chain (S4-M35): this same function is called with USD
+   * from Polymarket and paper, SOL from Solana live and ETH from robinhood live, and
+   * nothing used to record which. `recordCopyExecutionEvidence` converts to USD.
+   */
+  quoteLeg?: QuoteLegInput | null;
   priceUsd?: string | null;
   completesExecution?: boolean;
   occurredAt?: Date;
@@ -1026,7 +1259,7 @@ async function persistCanonicalFill(input: {
     evidenceType: input.evidenceType,
     evidenceId: input.evidenceId,
     baseQuantity: input.baseQuantity,
-    quoteQuantity: input.quoteQuantity,
+    quoteLeg: input.quoteLeg,
     priceUsd: input.priceUsd,
     confirmationState: 'confirmed',
     completesExecution: input.completesExecution ?? true,
@@ -1099,7 +1332,10 @@ export async function runTrojanReconciliation(
 
 // ─── Worker Job Handler ────────────────────────────────────────────────────────
 
-export async function handleJob(job: { data: unknown }) {
+export async function handleJob(
+  job: { data: unknown },
+  ports: ExecutorJobPorts = getDefaultJobPorts()
+) {
   const payload = job.data as {
     signalId: string;
     sourceTradeId?: string;
@@ -1110,6 +1346,12 @@ export async function handleJob(job: { data: unknown }) {
     direction?: 'buy' | 'sell';
     stopLoss?: boolean;
     sellTokenAmount?: number;
+    /**
+     * Whose trade this is. Absent on every job the current producers enqueue,
+     * which resolves to the operator principal. Present under fan-out (`S4-7`),
+     * where it selects a per-user authority adapter.
+     */
+    userId?: string;
   };
 
   if (!payload.signalId || typeof payload.signalId !== 'string') {
@@ -1169,6 +1411,14 @@ export async function handleJob(job: { data: unknown }) {
 
   const direction = payload.direction ?? 'buy';
 
+  // Whose money this job spends. Resolved ONCE here, above every consumer, rather
+  // than re-derived per call site: the function is pure over the payload so two
+  // calls could not disagree, but a single declaration is what makes it obvious to
+  // a reader that sizing, the exposure cap and the breaker all key on the same
+  // tenant. They previously did not -- each read the `'operator'` literal.
+  const exposureAccount = resolveExecutionPrincipal(payload);
+  const jobUserId = exposureAccount.kind === 'user' ? exposureAccount.userId : null;
+
   // A stop-loss closes the whole position, so the quantity is dictated by the
   // ledger rather than by balance-aware sizing.
   let stopLossSellQuantity: number | null = null;
@@ -1195,7 +1445,12 @@ export async function handleJob(job: { data: unknown }) {
         payload.clusterTier ?? 'promising',
         sizingMode,
         direction,
-        cleanMint
+        cleanMint,
+        // S4-15: size against THIS user's agreed risk percentage. Before this the
+        // call resolved the operator's policy for every job, so a fan-out sized
+        // fifty users off one account's settings -- the opposite of "exposure
+        // proportional to what they deposited and agreed to".
+        jobUserId
       );
 
   if (!Number.isFinite(size) || (size <= 0 && !liveTokenSell && stopLossSellQuantity === null)) {
@@ -1203,8 +1458,18 @@ export async function handleJob(job: { data: unknown }) {
     return { status: 'skipped', reason: 'Position size calculated to 0' };
   }
 
-  // Enforce 24-hour exposure cap per chain
-  const dailyExposureUsd = direction === 'buy' ? await getRollingExposureUsd(chain) : 0;
+  // Enforce the 24-hour exposure cap per (account, chain), not per chain alone
+  // (S4-M47). Before the account argument existed this summed EVERY trade on the
+  // chain, so under fan-out one user's spending charged every other user's
+  // allowance and the first user to trade hard silently capped the cohort.
+  //
+  // Resolved inline rather than hoisting `principal` from line ~1441:
+  // `resolveExecutionPrincipal` is pure over the payload, so calling it twice
+  // cannot disagree with itself, whereas moving a declaration across 50 lines of
+  // branching could change what the later reader sees.
+  const dailyExposureUsd = direction === 'buy'
+    ? await getRollingExposureUsd(jobUserId, chain)
+    : 0;
   const dailyCapUsd = parseFloat(process.env.DAILY_EXPOSURE_CAP_USD ?? '50000');
 
   let thisTradeUsd = size;
@@ -1245,6 +1510,33 @@ export async function handleJob(job: { data: unknown }) {
     return { status: 'skipped', reason: `Re-buy cooldown active for ${payload.tokenMint}` };
   }
 
+  // Execution authority (`S4-P7`). One port, six adapters behind it; the operator
+  // is one of them and not a branch. Resolved here, above the claim, because the
+  // granted settlement address *is* the claim's `target_account` — and only for a
+  // mode that will actually move funds, since paper has nothing to authorize.
+  //
+  // A denial returns a skip carrying the adapter's stable code and never falls
+  // through to another adapter. That is the whole point: a per-user request
+  // satisfied by the operator's grant would fill a real trade with the operator's
+  // key and be indistinguishable from success.
+  const principal = resolveExecutionPrincipal(payload);
+  let liveAuthority: GrantedExecutionAuthority | null = null;
+  if (execMode === 'live' || execMode === 'live+shadow') {
+    const verdict = await ports.authorize({
+      chain,
+      principal,
+      action: 'venue-trade',
+      direction,
+      instrument: cleanMint
+    });
+    if (verdict.kind === 'denied') {
+      const reason = `Execution authority denied [${verdict.code}]: ${verdict.reason}`;
+      console.error(`[trade-executor] SKIPPED: ${reason} | signalId: ${payload.signalId}`);
+      return { status: 'skipped', reason };
+    }
+    liveAuthority = verdict.authority;
+  }
+
   // Claim the signal atomically
   let canonicalExecutions: CanonicalExecutionSet = {};
   let canonicalLiveAlreadyConfirmed = false;
@@ -1280,7 +1572,8 @@ export async function handleJob(job: { data: unknown }) {
       chain,
       direction,
       mode: execMode,
-      buyQuoteQuantity: size
+      buyQuoteQuantity: size,
+      liveTargetAccount: liveAuthority?.settlementAddress ?? null
     });
     canonicalExecutions = prepared.executions;
     canonicalShadowReason = prepared.shadowReason;
@@ -1347,6 +1640,16 @@ export async function handleJob(job: { data: unknown }) {
             direction,
             tokenMint: cleanMint
           });
+          // A live submit path: an unknown balance must not be capped against, and
+          // must not be treated as zero either. Throwing here is deliberate --
+          // UnrecoverableError does not retry, so this refuses the trade rather
+          // than resubmitting against a balance we still cannot read.
+          if (currentSpendableBalance === null) {
+            throw new UnrecoverableError(
+              'Solana spendable balance is unassessable, so the submission cannot be '
+              + 'capped against it; refusing rather than sizing on an unknown'
+            );
+          }
           submissionSize = capPositionToAvailableBalance({
             requested: size,
             available: currentSpendableBalance,
@@ -1385,14 +1688,19 @@ export async function handleJob(job: { data: unknown }) {
         // block engine are actually configured. Neither control implies the
         // other. Default remains Trojan, the incumbent certified path.
         const jitoRuntime = getConfiguredJupiterJitoRuntime();
-        const jitoSigner = getJupiterJitoSigner();
+        // The signing identity comes from the granted authority, not from the
+        // signer module: `handleJob` must not name a chain-specific authority
+        // type (`S4-P7`). `null` means this authority submits through a
+        // venue-managed route — the Trojan webhook — which is the certified
+        // default and the branch below.
+        const signingAddress = liveAuthority?.signingAddress ?? null;
         const useJupiterJito = shouldUseJupiterJito({
           chain,
           configured: resolveSolanaExecutor(),
-          jitoReady: Boolean(jitoRuntime && jitoSigner)
+          jitoReady: Boolean(jitoRuntime && signingAddress)
         });
 
-        if (useJupiterJito && jitoRuntime && jitoSigner) {
+        if (useJupiterJito && jitoRuntime && signingAddress) {
           const outcome = await dispatchSolanaTrade(
             {
               clientOrderId: canonicalExecution?.clientOrderId ?? payload.signalId,
@@ -1404,7 +1712,7 @@ export async function handleJob(job: { data: unknown }) {
             },
             {
               runtime: jitoRuntime,
-              signerPublicKey: jitoSigner.publicKey,
+              signerPublicKey: signingAddress,
               jupiterApiKey: process.env.JUPITER_API_KEY
             }
           );
@@ -1615,7 +1923,19 @@ export async function handleJob(job: { data: unknown }) {
                   evidenceType: 'chain_receipt',
                   evidenceId: resolution.transactionIdentity,
                   baseQuantity: tokenQuantity,
-                  quoteQuantity: executedSize.toString(),
+                  quoteLeg: { amount: executedSize.toString(), currency: 'SOL' },
+                  // `price_usd` used to be left NULL on this path, which is why
+                  // S4-M23's tracking difference could not be computed for Solana.
+                  // Both numbers are already in hand, so the realised fill price is
+                  // derived rather than re-fetched as a spot quote (S4-M35).
+                  priceUsd: deriveFillPriceUsd(
+                    valuateChainNativeQuoteLeg({
+                      chain: 'solana',
+                      amount: executedSize,
+                      nativeUsdPrice: await getCachedSolPrice()
+                    }).usdAmount,
+                    tokenQuantity
+                  ),
                   occurredAt: resolution.confirmedAt
                 });
               }
@@ -1724,12 +2044,44 @@ export async function handleJob(job: { data: unknown }) {
                 submissionType: 'transaction',
                 submissionId: result.transactionHash
               });
+              // S4-M41: read `baseSpend`, never `amountEth`. In `erc20` mode
+              // `amountEth` is `0`, and writing that as an ETH cost recorded a
+              // fabricated zero on a trade that spent a stablecoin -- which makes
+              // the position look like an infinite-return winner that can never
+              // trip a stop-loss. `null` is the honest record for a spend the
+              // ledger cannot yet denominate; `054` gives us `quote_currency` and
+              // an unassessed count precisely so unknown is representable.
+              const robinhoodQuoteLeg = result.baseSpend.kind === 'native'
+                ? { amount: result.baseSpend.amount.toString(), currency: 'ETH' as const }
+                : null;
+              if (!robinhoodQuoteLeg) {
+                console.warn(
+                  '[trade-executor] robinhood fill recorded without a quote leg: '
+                  + `base asset spend is ${result.baseSpend.kind}, which the ledger cannot `
+                  + 'denominate yet (S4-M41). Cost basis for this fill is unassessed, not zero.'
+                );
+              }
               await persistCanonicalFill({
                 execution: canonicalExecution,
                 evidenceType: 'chain_receipt',
                 evidenceId: result.transactionHash,
                 baseQuantity: tokenQuantity,
-                quoteQuantity: result.amountEth.toString()
+                quoteLeg: robinhoodQuoteLeg,
+                // Same gap as the Solana path: no priceUsd was passed, so
+                // copy_execution_evidence.price_usd was NULL on every robinhood
+                // live fill. Derived from the USD value and the units received --
+                // and left null when the spend is unassessed, because a price
+                // derived from a fabricated zero is itself fabricated.
+                priceUsd: robinhoodQuoteLeg
+                  ? deriveFillPriceUsd(
+                    valuateChainNativeQuoteLeg({
+                      chain: 'robinhood-chain',
+                      amount: Number(robinhoodQuoteLeg.amount),
+                      nativeUsdPrice: await getCachedEthPrice()
+                    }).usdAmount,
+                    tokenQuantity
+                  )
+                  : null
               });
             }
           }
@@ -1839,6 +2191,32 @@ export async function handleJob(job: { data: unknown }) {
             throw new UnrecoverableError('Canonical Polymarket SELL is missing proportional position evidence');
           }
           const submittedAt = new Date();
+          // The master-fill reference for the mirror price bound (S4-M16). Only a
+          // copy has a master: a manual execute or a stop-loss exit carries no
+          // `sourceTradeId` and legitimately gets no mirror, keeping the
+          // book-derived bound. Fetched here rather than threaded through the
+          // claim because `COPY_EXECUTION_COLUMNS` feeds several money-path
+          // queries, and widening all of them to carry one price is a larger
+          // change than one read.
+          let mirror: PolymarketMirrorContext | undefined;
+          // S4-M18 needs the same row: the staleness budget is measured from when
+          // the master's event actually happened, against the market's remaining
+          // time to resolution. Read once and used for both, rather than a second
+          // query for a second field of the same row.
+          let sourceEventAt: Date | undefined;
+          if (payload.sourceTradeId) {
+            const sourceTrade = await getCanonicalSourceTradeById(payload.sourceTradeId);
+            sourceEventAt = sourceTrade?.eventAt;
+            // A null price is passed through as null, not omitted: the planner
+            // fails closed on an absent master price, and dropping `mirror`
+            // entirely would silently downgrade a copy to the book bound.
+            mirror = {
+              sourceTradeId: payload.sourceTradeId,
+              masterFillPriceUsd: sourceTrade?.priceUsd == null
+                ? null
+                : Number(sourceTrade.priceUsd)
+            };
+          }
           const result = await triggerPolymarket({
             signalId: canonicalExecution?.clientOrderId ?? payload.signalId,
             tokenID: cleanMint,
@@ -1846,7 +2224,9 @@ export async function handleJob(job: { data: unknown }) {
             direction,
             sellShares: canonicalExecution?.direction === 'sell'
               ? Number(canonicalExecution.requestedBaseQuantity)
-              : undefined
+              : undefined,
+            mirror,
+            sourceEventAt
           });
           const orderId = result.orderId;
           const settlementHash = result.settlementTransactionHashes[0] ?? null;
@@ -1867,7 +2247,7 @@ export async function handleJob(job: { data: unknown }) {
                 evidenceType: 'venue_fill',
                 evidenceId: `order:${orderId}`,
                 baseQuantity: result.shares.toString(),
-                quoteQuantity: result.spendAmountUsd.toString(),
+                quoteLeg: { amount: result.spendAmountUsd.toString(), currency: 'USD' },
                 priceUsd: result.averagePrice?.toString() ?? null,
                 completesExecution: true
               });
@@ -2126,7 +2506,13 @@ export async function handleJob(job: { data: unknown }) {
           evidenceType: 'paper_simulation',
           evidenceId: `${simExecutor}:${paperExecution.clientOrderId}`,
           baseQuantity: simBaseQuantity,
-          quoteQuantity: simAmountUsd?.toString() ?? null,
+          // Paper simulation sizes its quote leg in USD on every chain -- see the
+          // simAmountUsd assignments above, which already multiply a SOL or ETH size
+          // by its native price. So the currency is stated, not inferred from
+          // `chain`, which would mislabel a Solana paper fill as SOL.
+          quoteLeg: simAmountUsd == null
+            ? null
+            : { amount: simAmountUsd.toString(), currency: 'USD' },
           priceUsd: simPriceUsd?.toString() ?? null,
           occurredAt: confirmedAt
         });
@@ -2300,8 +2686,18 @@ export async function main() {
         tasks.push({
           chain: 'polygon',
           run: async () => {
+            // The claim ports are REQUIRED, not optional decoration. Without
+            // them `runPolymarketRedemptionSweep` falls back to
+            // `unwiredPositionExitPort`, which throws for every market that maps
+            // to a position -- so before this line, S4-M19's single-winner claim
+            // was inert in production and every market was counted `failed`.
+            // Found 2026-09-01 while wiring S4-M45.
             const sweep = await runPolymarketRedemptionSweep({
               client: polymarketClient as unknown as PolymarketRedemptionClient,
+              claimPositionExit: claimPolymarketPositionExit,
+              confirmPositionExit: confirmPolymarketPositionExit,
+              releasePositionExit: releasePolymarketPositionExit,
+              releaseStalePositionExits: releaseStalePolymarketPositionExits,
               log: (message) => console.log(message)
             });
             if (sweep.redeemed > 0 || sweep.failed > 0) {
@@ -2343,6 +2739,52 @@ export async function main() {
       } catch (error) {
         console.error('[trade-executor] canonical reconciliation failed', error);
       }
+
+      // Escalate Polymarket exits reconciliation has already declared unfilled
+      // (S4-M17). An unfilled sell leaves the user holding a position their
+      // master has left, which is worse than a missed entry, so the ladder in
+      // `polymarket-exit-escalation.ts` re-offers it at progressively deeper
+      // limits and then hands the decision to a human.
+      //
+      // Last in the pass, and inside this guard rather than on a timer of its
+      // own (C1): a rung rests for its full lifetime inside this call, so
+      // running it earlier would delay the fast per-venue sweeps above, and a
+      // second timer could overlap a ladder with the reconciliation that
+      // classifies its own rungs.
+      try {
+        const exits = await runPolymarketExitEscalationSweep({
+          emitAlert: async (alert, candidate) => {
+            console.error(
+              `[trade-executor] polymarket exit escalation ${alert.code} on trade `
+              + `${candidate.id}: ${alert.reason}`
+            );
+            await redisClient.publish(REDIS_CHANNELS.alertQueue, JSON.stringify({
+              type: 'POLYMARKET_EXIT_ESCALATION',
+              title: 'Polymarket exit could not be completed',
+              message:
+                `Trade ${candidate.id} (sell ${candidate.token_mint}) still holds `
+                + `${alert.remainingShares} shares after the exit escalation ladder.\n`
+                + `Venue order: ${candidate.venue_order_id}\n`
+                + `Code: ${alert.code}\n`
+                + `Reason: ${alert.reason}\n`
+                + 'It will not be escalated further automatically. Redeem, hold, or unwind by hand.',
+              severity: alert.severity === 'critical' ? 'high' : 'medium',
+              chain: 'polygon'
+            }));
+          },
+          log: (message) => console.log(message)
+        });
+        if (exits.escalated > 0 || exits.alerted > 0 || exits.failed > 0 || exits.skipped > 0) {
+          console.log(
+            `[trade-executor] polymarket exit escalation: scanned ${exits.scanned}, `
+            + `escalated ${exits.escalated}, completed ${exits.completed}, `
+            + `alerted ${exits.alerted}, redeemed ${exits.redeemed}, `
+            + `failed ${exits.failed}, skipped ${exits.skipped}`
+          );
+        }
+      } catch (error) {
+        console.error('[trade-executor] polymarket exit escalation failed', error);
+      }
     } finally {
       reconciliationRunning = false;
     }
@@ -2350,18 +2792,39 @@ export async function main() {
   await reconcilePending().catch((error) => {
     console.error('[trade-executor] startup reconciliation failed', error);
   });
-  const tradeWorker = new Worker(
-    'swat-trades',
-    (job) => executeJobWithCircuitBreaker(job),
-  { connection: redisClient, concurrency: 3, autorun: true }
-);
+  // One worker per chain at concurrency 1, plus a drain worker on the pre-split
+  // queue (D6 / S3-25). Before the split a single concurrency-3 worker served
+  // every chain, so a slow venue held a slot the other two needed; now a
+  // Polymarket settlement delay or a Robinhood RPC outage cannot stall Solana
+  // copies. Total concurrency is unchanged — the three slots are just no longer
+  // shared. See `trade-workers.ts` for why concurrency stays at 1.
+  // The authority port, constructed here at the process edge and threaded into
+  // every job (`S4-P7`). `handleJob`'s default parameter exists for the test
+  // suites and the acceptance scripts; the worker never relies on it.
+  const jobPorts = createExecutorJobPorts();
 
-tradeWorker.on('failed', (_job, err) => {
-  console.error('[trade-executor] job failed', err?.message);
-});
-tradeWorker.on('error', (err) => {
-  console.error('[trade-executor] worker error', err);
-});
+  for (const spec of tradeWorkerSpecs()) {
+    const tradeWorker = new Worker(
+      spec.queue,
+      (job) => {
+        const misroute = misroutedJobWarning(spec, chainFromJob(job));
+        if (misroute) console.error(misroute);
+        return executeJobWithCircuitBreaker(job, (queued) => handleJob(queued, jobPorts));
+      },
+      { connection: redisClient, concurrency: spec.concurrency, autorun: true }
+    );
+
+    tradeWorker.on('failed', (_job, err) => {
+      console.error(`[trade-executor] job failed on ${spec.queue}`, err?.message);
+    });
+    tradeWorker.on('error', (err) => {
+      console.error(`[trade-executor] worker error on ${spec.queue}`, err);
+    });
+    console.log(
+      `[trade-executor] worker listening on ${spec.queue}`
+      + ` (chain: ${spec.chain ?? 'any — drain only'}, concurrency: ${spec.concurrency})`
+    );
+  }
 
 setInterval(() => {
   reconcilePending().catch((error) => {

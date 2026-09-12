@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from '../../../lib/api.js';
+import { describeApiError } from '../../../lib/api-error-message.js';
 
 type Chain = 'solana' | 'polygon' | 'robinhood-chain';
 type HealthStatus = 'healthy' | 'stale' | 'empty';
@@ -25,13 +27,6 @@ type IngestionResponse = {
   generatedAt: string;
   items: IngestionItem[];
 };
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:3001`
-    : 'http://localhost:3001');
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? 'swat-dev-key';
 
 const CHAIN_META: Record<Chain, {
   label: string;
@@ -261,18 +256,13 @@ export default function HealthView() {
   const refreshHealth = useCallback(async () => {
     setRefreshing(true);
     try {
-      const response = await fetch(`${API_BASE}/v1/health/ingestion`, {
-        cache: 'no-store',
-        headers: { 'X-Api-Key': API_KEY }
-      });
-      if (!response.ok) throw new Error(`Health endpoint returned ${response.status}`);
-      const data = normalizeResponse(await response.json());
+      const data = normalizeResponse(await api.get('/v1/health/ingestion'));
       setItems(data.items);
       setGeneratedAt(data.generatedAt);
       setError(null);
-    } catch (requestError) {
+    } catch (requestError: unknown) {
       console.error('[web] ingestion health request failed', requestError);
-      setError('Unable to load current ingestion telemetry.');
+      setError(describeApiError(requestError, 'Unable to load current ingestion telemetry.'));
     } finally {
       setLoading(false);
       setRefreshing(false);

@@ -36,7 +36,51 @@ import {
   transitionCopyExecution
 } from '@swat/db';
 import { capPositionToAvailableBalance } from './policy.js';
-import { assertPolymarketMarketOpenForSubmission } from './polymarket-market-state.js';
+import {
+  classifyPolymarketOrderLiveness,
+  interpretPolymarketCancellation,
+  planPolymarketRungRetirement,
+  polymarketCancellationError,
+  type PolymarketCancellationReading
+} from './polymarket-cancellation.js';
+import {
+  assertPolymarketMarketOpenForSubmission,
+  fetchPolymarketMarketState,
+  type PolymarketMarketState
+} from './polymarket-market-state.js';
+import {
+  planPolymarketMirrorBound,
+  resolvePolymarketMirrorToleranceBps,
+  type PolymarketMirrorBoundDecision
+} from './polymarket-mirror-bound.js';
+import {
+  escalatePolymarketExit,
+  POLYMARKET_GTD_MINIMUM_HORIZON_MS,
+  type PolymarketExitAlert,
+  type PolymarketExitEscalationOutcome,
+  type PolymarketExitLimitRung,
+  type PolymarketExitRedeem
+} from './polymarket-exit-escalation.js';
+import {
+  evaluatePolymarketSignalStaleness,
+  resolvePolymarketStalenessPolicy,
+  type PolymarketStalenessPolicy
+} from './polymarket-staleness.js';
+
+/**
+ * The staleness policy, resolved once (`S4-M18`).
+ *
+ * Memoised rather than read per order: `resolvePolymarketStalenessPolicy` parses
+ * and validates environment, and doing that on the money path would repeat the
+ * work and let a mid-run environment change silently alter what is refused. Lazy
+ * rather than at import so a malformed value surfaces on the first Polymarket
+ * order with a clear error, instead of during module load of an unrelated test.
+ */
+let cachedStalenessPolicy: PolymarketStalenessPolicy | null = null;
+function defaultStalenessPolicy(): PolymarketStalenessPolicy {
+  if (!cachedStalenessPolicy) cachedStalenessPolicy = resolvePolymarketStalenessPolicy();
+  return cachedStalenessPolicy;
+}
 
 export const POLYMARKET_CLOB_HOST = 'https://clob.polymarket.com';
 export const POLYGON_CHAIN_ID = 137;
@@ -470,7 +514,9 @@ export function planPolymarketBookOrder(
     }
     const tickRatio = level.price / tickSize;
     if (Math.abs(tickRatio - Math.round(tickRatio)) > 1e-8) {
-      throw new UnrecoverableError('Polymarket order-book price is off the current tick-size grid');
+      throw new UnrecoverableError(
+        'Polymarket Protection: order-book price is off the current tick-size grid'
+      );
     }
   }
 
@@ -502,7 +548,7 @@ export function planPolymarketBookOrder(
   shares = floorDecimal(shares, POLYMARKET_SHARE_DECIMALS);
   if (shares < minimumShares) {
     throw new UnrecoverableError(
-      `Polymarket order is below the ${minimumShares}-share minimum after venue rounding`
+      `Polymarket Protection: order is below the ${minimumShares}-share minimum after venue rounding`
     );
   }
   const bestPrice = levels[0]!.price;
@@ -570,12 +616,45 @@ function collateralAvailableForPrincipal(available: number): number {
   return available * 10_000 / (10_000 + feeBufferBps);
 }
 
+/**
+ * The master-fill reference a mirrored order is bounded against (`S4-M16`).
+ *
+ * Supplied only on the mirroring path. A manual or stop-loss order has no master
+ * and legitimately carries none, which is why this is optional rather than
+ * defaulted — but when it *is* supplied and `masterFillPriceUsd` is absent, the
+ * mirror fails closed with a skip instead of falling back to a book-derived
+ * bound that nobody sanctioned.
+ */
+export interface PolymarketMirrorContext {
+  /** The canonical source event being mirrored. Present iff this is a copy. */
+  readonly sourceTradeId: string;
+  /** The tracked wallet's realized price for that event, in USD per share. */
+  readonly masterFillPriceUsd: number | null;
+  /** Per-user override; falls back to POLYMARKET_MIRROR_TOLERANCE_BPS. */
+  readonly toleranceBps?: number;
+}
+
 export async function triggerPolymarket(params: {
   signalId: string;
   tokenID: string;
   spendAmountUsd: number;
   direction: 'buy' | 'sell';
   sellShares?: number;
+  mirror?: PolymarketMirrorContext;
+  /**
+   * When the source event this order copies actually happened (`S4-M18`).
+   *
+   * Optional for the same reason `mirror` is: only a copy has a source event. A
+   * manual execute or a stop-loss exit has none, and gating those on a timestamp
+   * that does not exist would refuse every one of them. Present-but-unusable
+   * still fails closed — the staleness rule below refuses rather than falling
+   * back to the flat ceiling.
+   */
+  sourceEventAt?: Date;
+  /** Per-user override; falls back to the POLYMARKET_STALENESS_* environment. */
+  stalenessPolicy?: Partial<PolymarketStalenessPolicy>;
+  /** Injected clock, so the staleness boundary is testable without faking time. */
+  now?: () => number;
 }) {
   if (!liveReadiness.ready) {
     throw new UnrecoverableError(`Polymarket live execution is not ready: ${liveReadiness.reason}`);
@@ -651,6 +730,32 @@ export async function triggerPolymarket(params: {
       params.direction === 'buy' ? spendAmountUsd : requestedShares,
       maxSlippageBps
     );
+
+    // The protective bound we actually sign. On the mirroring path it comes from
+    // the master's fill (`S4-M16`); a manual or stop-loss order keeps the
+    // book-walk level, which is all the reference such an order has.
+    let mirrorDecision: PolymarketMirrorBoundDecision | null = null;
+    let boundPrice = plan.limitPrice;
+    if (params.mirror) {
+      mirrorDecision = planPolymarketMirrorBound({
+        direction: params.direction,
+        masterFillPrice: params.mirror.masterFillPriceUsd,
+        bookLimitPrice: plan.limitPrice,
+        tickSize: Number(book.tickSize),
+        shares: params.direction === 'buy' ? plan.estimatedShares : requestedShares,
+        minimumShares: Number(book.minOrderSize),
+        toleranceBps: params.mirror.toleranceBps ?? resolvePolymarketMirrorToleranceBps()
+      });
+      if (mirrorDecision.kind === 'skip') {
+        // "Polymarket Protection" is the marker the job handler matches to record
+        // a skipped trade with its reason rather than a failed one.
+        throw new UnrecoverableError(
+          `Polymarket Protection: ${mirrorDecision.reason} [${mirrorDecision.code}]`
+        );
+      }
+      boundPrice = mirrorDecision.boundPrice;
+    }
+
     const maximumEntryPrice = Number(process.env.POLYMARKET_MAX_ENTRY_PRICE ?? '0.97');
     const minimumExitPrice = Number(process.env.POLYMARKET_MIN_EXIT_PRICE ?? '0.01');
     if (
@@ -659,12 +764,14 @@ export async function triggerPolymarket(params: {
     ) {
       throw new UnrecoverableError('Polymarket entry/exit price bounds are invalid');
     }
+    // Applied to the bound we are about to sign, not to the book level, so a
+    // mirror tolerance can never widen the operator's configured safe range.
     if (
-      (params.direction === 'buy' && plan.limitPrice > maximumEntryPrice) ||
-      (params.direction === 'sell' && plan.limitPrice < minimumExitPrice)
+      (params.direction === 'buy' && boundPrice > maximumEntryPrice) ||
+      (params.direction === 'sell' && boundPrice < minimumExitPrice)
     ) {
       throw new UnrecoverableError(
-        `Polymarket Protection: Price ${plan.limitPrice} outside safe bounds configured for this executor`
+        `Polymarket Protection: Price ${boundPrice} outside safe bounds configured for this executor`
       );
     }
 
@@ -672,7 +779,55 @@ export async function triggerPolymarket(params: {
     // the market will still accept an order at all. Deliberately placed after
     // the depth walk and price bounds so the state read is as close to the
     // submission as the code allows.
-    await assertPolymarketMarketOpenForSubmission({ conditionId: String(book.conditionId) });
+    const nowMs = (params.now ?? Date.now)();
+    const marketState = await assertPolymarketMarketOpenForSubmission({
+      conditionId: String(book.conditionId),
+      now: nowMs
+    });
+
+    // `S4-M18`: a copy's signal age is measured against the market's remaining
+    // time-to-resolution, not against a flat ceiling. Evaluated here, after the
+    // live market-state read, because `endDate` and `secondsDelay` are what that
+    // read returns and both are inputs to the budget — a second Gamma call to get
+    // them would be a second, later view of the same market.
+    //
+    // Only a copy carries `sourceEventAt`. A manual execute or a stop-loss exit
+    // has no source event and keeps today's behaviour, exactly as it keeps the
+    // book-derived bound when `mirror` is absent.
+    //
+    // **A copy with no readable event time is refused, not waved through.** Both
+    // `mirror` and `sourceEventAt` come from the one `getCanonicalSourceTradeById`
+    // read in `index.ts`, so when that row is missing the price half fails closed
+    // (a null master price skips) while the timing half would fail *open* — the
+    // `if` below simply would not run, and the copy would be indistinguishable
+    // from a manual order that never had a source event. That asymmetry is the
+    // wrong way round for a safety control: a signal whose age we cannot even
+    // establish is exactly the one this budget exists to refuse. `mirror` is the
+    // discriminator because it is present iff `payload.sourceTradeId` was.
+    if (params.mirror && !params.sourceEventAt) {
+      throw new UnrecoverableError(
+        'Polymarket Protection: this copy has no readable source event time, so its '
+        + 'age against the market\'s remaining time-to-resolution cannot be checked '
+        + '[source-event-time-unavailable]'
+      );
+    }
+    if (params.sourceEventAt) {
+      const staleness = evaluatePolymarketSignalStaleness({
+        signalAt: params.sourceEventAt,
+        resolutionAt: marketState.endDate,
+        now: nowMs,
+        matchingDelaySeconds: marketState.secondsDelay,
+        policy: params.stalenessPolicy ?? defaultStalenessPolicy()
+      });
+      if (staleness.kind === 'stale') {
+        // Same marker as the mirror skip: the job handler matches
+        // "Polymarket Protection" to record a skipped trade carrying this reason
+        // rather than a failed job that would retry into an even older signal.
+        throw new UnrecoverableError(
+          `Polymarket Protection: ${staleness.reason} [${staleness.code}]`
+        );
+      }
+    }
 
     const tradeSide = params.direction === 'buy' ? OrderSide.BUY : OrderSide.SELL;
     const order = await client.createMarketOrder(params.direction === 'buy'
@@ -681,7 +836,7 @@ export async function triggerPolymarket(params: {
           side: OrderSide.BUY,
           amount: spendAmountUsd,
           maxSpend: spendAmountUsd,
-          maxPrice: plan.limitPrice,
+          maxPrice: boundPrice,
           orderType: OrderType.FAK,
           builderCode: identity.builderCode
         }
@@ -689,7 +844,7 @@ export async function triggerPolymarket(params: {
           tokenId: params.tokenID,
           side: OrderSide.SELL,
           shares: requestedShares,
-          minPrice: plan.limitPrice,
+          minPrice: boundPrice,
           orderType: OrderType.FAK,
           builderCode: identity.builderCode
         });
@@ -721,7 +876,9 @@ export async function triggerPolymarket(params: {
       feesUsd: null,
       requestedSpendAmountUsd: params.direction === 'buy' ? spendAmountUsd : plan.estimatedNotionalUsd,
       requestedShares: params.direction === 'buy' ? plan.estimatedShares : requestedShares,
-      slippageBps: plan.slippageBps
+      slippageBps: plan.slippageBps,
+      mirrorBoundPrice: boundPrice,
+      mirrorTrackingBps: mirrorDecision?.kind === 'submit' ? mirrorDecision.trackingBps : null
     });
     if (response.tradeIds.length === 0) {
       return pendingResult(`Polymarket order was accepted with venue status ${response.status}`);
@@ -801,13 +958,244 @@ export async function triggerPolymarket(params: {
       feesUsd,
       requestedSpendAmountUsd: params.direction === 'buy' ? spendAmountUsd : plan.estimatedNotionalUsd,
       requestedShares: requested,
-      slippageBps: plan.slippageBps
+      slippageBps: plan.slippageBps,
+      mirrorBoundPrice: boundPrice,
+      mirrorTrackingBps: mirrorDecision?.kind === 'submit' ? mirrorDecision.trackingBps : null
     };
   } catch (error: unknown) {
     if (error instanceof UnrecoverableError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new UnrecoverableError(`Polymarket execution failed: ${message}`);
   }
+}
+
+/**
+ * How many times a rung's cancellation is attempted before the ladder stops.
+ *
+ * Three, because the two states worth retrying are both short-lived: the venue's
+ * matching-delay window, and a read of the order that briefly trails the cancel
+ * we just sent. Anything still resting after three attempts is a fact about the
+ * book rather than a race, and the answer to that is a human.
+ */
+export const POLYMARKET_RUNG_CANCEL_ATTEMPTS = 3;
+
+/**
+ * Pause between cancellation attempts.
+ *
+ * Two seconds is chosen against the documented 250 ms taker delay with headroom,
+ * not against the configurable sports `secondsDelay` — a long game delay is not
+ * something to spin on, and the `blocked` branch is the correct answer there.
+ */
+export const POLYMARKET_RUNG_CANCEL_RETRY_MS = 2_000;
+
+/**
+ * Submit one exit-escalation rung as a GTD limit order (`S4-M17`).
+ *
+ * Separate from `triggerPolymarket` because the two order shapes answer different
+ * questions. `triggerPolymarket` mirrors a master's trade and must not rest;
+ * this recovers an exit that already failed to fill and is allowed to rest for a
+ * bounded window.
+ *
+ * The `expiration` arrives pre-computed by `planPolymarketExitEscalation`, which
+ * owns the documented `now + 60 + N` formula and the 3-minute venue floor. It is
+ * re-checked here only for the case where a rung was planned and then sat in a
+ * queue long enough to go stale — submitting an already-expired expiration is a
+ * guaranteed rejection that would consume a rung.
+ */
+export async function submitPolymarketExitRung(params: {
+  tokenID: string;
+  rung: PolymarketExitLimitRung;
+  now?: number;
+}): Promise<{ orderId: string; status: string; expiration: number }> {
+  if (!liveReadiness.ready) {
+    throw new UnrecoverableError(`Polymarket live execution is not ready: ${liveReadiness.reason}`);
+  }
+  if (!polymarketSigner) {
+    throw new UnrecoverableError('Polymarket signer is not initialized');
+  }
+  const now = params.now ?? Date.now();
+  const horizonMs = params.rung.expiration * 1000 - now;
+  if (horizonMs < POLYMARKET_GTD_MINIMUM_HORIZON_MS) {
+    throw new UnrecoverableError(
+      `Polymarket exit rung expiration is only ${horizonMs}ms ahead; the venue rejects anything under 3 minutes`
+    );
+  }
+
+  const identity = resolvePolymarketIdentity(polymarketSigner.address);
+  const client = requireSecureClobClient();
+  const order = await client.createLimitOrder({
+    tokenId: params.tokenID,
+    side: OrderSide.SELL,
+    price: params.rung.price,
+    size: params.rung.shares,
+    expiration: params.rung.expiration,
+    builderCode: identity.builderCode
+  });
+  if (
+    typeof order.builder !== 'string'
+    || order.builder.toLowerCase() !== identity.builderCode
+  ) {
+    throw new UnrecoverableError('Polymarket signed exit rung omitted the configured builder code');
+  }
+
+  const response = await client.postOrder(order);
+  if (!response.ok) {
+    throw new UnrecoverableError(
+      `Polymarket exit rung rejected: ${response.code}: ${response.message}`
+    );
+  }
+  return {
+    orderId: response.orderId,
+    status: response.status,
+    expiration: params.rung.expiration
+  };
+}
+
+/**
+ * Build the `submitRung` port the escalation driver needs.
+ *
+ * The port's contract is "submit this rung, let it live out its window, then
+ * report what it filled", so the waiting lives here rather than in the driver —
+ * the driver stays pure enough to test without a clock, and the caller decides
+ * whether to occupy a worker for the rung's lifetime or hand it to a delayed job
+ * by supplying its own `sleep`.
+ *
+ * **Retiring the rung before the next one is placed (`S4-M36`).** This used to
+ * `await client.cancelOrder(...)` inside a try/catch on the assumption that a
+ * failed cancellation throws. It does not: the venue answers **200** with a
+ * `canceled` / `not_canceled` split, so a stale order landed in `not_canceled`
+ * and the catch never ran. The belt-and-braces cancellation was therefore a
+ * no-op on exactly the path it was written for, and the consequence was not
+ * cosmetic — a rung still resting on the book plus a non-zero `sizeMatched` read
+ * as a partial fill, so the ladder placed the next rung for the remainder and
+ * left **two live sell orders whose combined size can exceed the position**.
+ *
+ * Three things changed, in the order the item ranks them:
+ *
+ *   1. the fetched order must be **terminal**, not merely partially matched. The
+ *      data was always in hand — `fetchOrder` was already called and its status
+ *      thrown away while only `sizeMatched` was read.
+ *   2. the cancellation response is read through
+ *      `interpretPolymarketCancellation`, the one helper both call sites now
+ *      share, rather than inferred from the absence of an exception.
+ *   3. if the rung is not provably dead the cancel is retried and then the ladder
+ *      **stops** with an alert. Failing closed is deliberate and is the opposite
+ *      of `S4-M31`: there the worst case was one odd trade, here it is selling a
+ *      user's position twice, and the cost of stopping is a slower exit.
+ *
+ * A cancel refused inside the venue's matching-delay window counts as *wait*, not
+ * as failure: `/concepts/order-lifecycle` documents cancels as blocked there, so
+ * the refusal is the venue behaving as specified.
+ *
+ * Every venue call is an injectable port so the retirement logic can be exercised
+ * without a signer or a live client.
+ */
+export function createPolymarketExitRungSubmitter(params: {
+  tokenID: string;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  log?: (message: string) => void;
+  submit?: (rung: PolymarketExitLimitRung) => Promise<{ orderId: string }>;
+  cancelOrder?: (input: { orderId: string }) => Promise<unknown>;
+  fetchOrder?: (input: { orderId: string }) => Promise<OpenOrder>;
+  /** Raised when a rung cannot be shown to be dead, before the ladder stops. */
+  emitAlert?: (alert: { orderId: string; reason: string }) => Promise<void>;
+  maxCancelAttempts?: number;
+  cancelRetryDelayMs?: number;
+}): (rung: PolymarketExitLimitRung) => Promise<{ filledShares: number }> {
+  const sleep = params.sleep
+    ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  const now = params.now ?? Date.now;
+  const log = params.log ?? (() => {});
+  const maxCancelAttempts = params.maxCancelAttempts ?? POLYMARKET_RUNG_CANCEL_ATTEMPTS;
+  const cancelRetryDelayMs = params.cancelRetryDelayMs ?? POLYMARKET_RUNG_CANCEL_RETRY_MS;
+
+  return async (rung: PolymarketExitLimitRung) => {
+    const submission = params.submit
+      ? await params.submit(rung)
+      : await submitPolymarketExitRung({
+        tokenID: params.tokenID,
+        rung,
+        now: now()
+      });
+    const cancelOrder = params.cancelOrder
+      ?? ((input: { orderId: string }) => requireSecureClobClient().cancelOrder(input));
+    const fetchOrder = params.fetchOrder
+      ?? ((input: { orderId: string }) => requireSecureClobClient().fetchOrder(input));
+
+    // The venue kills the remainder one minute before the stated expiration, so
+    // waiting the effective lifetime is exactly long enough — when the assumption
+    // holds. The loop below is what covers the case where it does not.
+    await sleep(rung.effectiveLifetimeMs);
+
+    let filledShares = 0;
+    let retired = false;
+    let blockedReason: string | null = null;
+
+    for (let attempt = 1; attempt <= maxCancelAttempts; attempt += 1) {
+      let cancellation: PolymarketCancellationReading;
+      try {
+        cancellation = interpretPolymarketCancellation(
+          await cancelOrder({ orderId: submission.orderId }),
+          submission.orderId
+        );
+      } catch (error: unknown) {
+        // A throw is a transport failure, not a statement about the order. It is
+        // recorded as such and the fetched order decides.
+        cancellation = polymarketCancellationError(error);
+      }
+
+      const order = await fetchOrder({ orderId: submission.orderId });
+      if (order.id !== submission.orderId) {
+        throw new UnrecoverableError(
+          `Polymarket returned order ${order.id} for exit rung ${submission.orderId}`
+        );
+      }
+      // Read before the terminal decision so a rung that filled and then went
+      // terminal still reports its fill.
+      filledShares = nonNegativeDecimal(String(order.sizeMatched), 'exit rung matched size');
+
+      const retirement = planPolymarketRungRetirement({
+        orderId: submission.orderId,
+        cancellation,
+        liveness: classifyPolymarketOrderLiveness(order.status),
+        attempt,
+        maxAttempts: maxCancelAttempts
+      });
+      log(`[polymarket-exit] rung ${submission.orderId}: ${retirement.reason}`);
+
+      if (retirement.kind === 'retired') {
+        retired = true;
+        break;
+      }
+      if (retirement.kind === 'blocked') {
+        blockedReason = retirement.reason;
+        break;
+      }
+      await sleep(cancelRetryDelayMs);
+    }
+
+    if (!retired) {
+      const reason = blockedReason
+        ?? `rung ${submission.orderId} could not be shown to be dead within `
+        + `${maxCancelAttempts} cancel attempts`;
+      if (params.emitAlert) {
+        await params.emitAlert({ orderId: submission.orderId, reason });
+      }
+      // Fail closed. The escalation sweep catches this per candidate and records
+      // it, so one blocked ladder does not stop the others — what it must not do
+      // is place the next rung on top of a live one.
+      throw new UnrecoverableError(
+        `Polymarket exit rung was not provably retired, so the next rung is not placed: ${reason}`
+      );
+    }
+
+    log(
+      `[polymarket-exit] rung ${submission.orderId} at ${rung.price} filled `
+      + `${filledShares} of ${rung.shares}`
+    );
+    return { filledShares };
+  };
 }
 
 type PendingPolymarketTrade = {
@@ -979,8 +1367,16 @@ function validateFetchedOrder(row: PendingPolymarketTrade, order: OpenOrder): {
   if (order.side.trim().toUpperCase() !== row.direction.toUpperCase()) {
     throw new Error(`Polymarket order ${order.id} side does not match its persisted trade`);
   }
-  if (order.orderType.trim().toUpperCase() !== OrderType.FAK) {
-    throw new Error(`Polymarket order ${order.id} is not the expected FAK order`);
+  // FAK is the entry/exit order type (`S4-M16`), and GTD is the exit-escalation
+  // rung (`S4-M17`) — a rung is deliberately allowed to rest for a bounded two
+  // minutes because an unfilled exit is worse than a late one. Any other type
+  // means an order this executor did not create is being reconciled against one
+  // of our trade rows, which is not something to paper over.
+  const reconcilableOrderTypes: string[] = [OrderType.FAK, OrderType.GTD];
+  if (!reconcilableOrderTypes.includes(order.orderType.trim().toUpperCase())) {
+    throw new Error(
+      `Polymarket order ${order.id} is not an order type this executor submits (${order.orderType})`
+    );
   }
 
   const originalSize = nonNegativeDecimal(String(order.originalSize), 'order original size');
@@ -1196,7 +1592,7 @@ async function finishConfirmedFill(
       evidenceType: 'venue_fill',
       evidenceId: `order:${order.id}`,
       baseQuantity: summary.shares.toString(),
-      quoteQuantity: summary.amountUsd.toString(),
+      quoteLeg: { amount: summary.amountUsd.toString(), currency: 'USD' },
       priceUsd: summary.averagePrice.toString(),
       confirmationState: 'confirmed',
       completesExecution: true,
@@ -1345,8 +1741,15 @@ async function reconcilePendingPolymarketTrade(
     }
     if (!summary && now - createdAt > POLYMARKET_ORDER_TIMEOUT_MS) {
       try {
-        const cancellation = await client.cancelOrder({ orderId: order.id });
-        if (cancellation.canceled.some((orderId) => String(orderId) === order.id)) {
+        const cancellation = interpretPolymarketCancellation(
+          await client.cancelOrder({ orderId: order.id }),
+          order.id
+        );
+        // One reading of the contract, shared with the exit-rung submitter
+        // (`S4-M36`). Only an explicit listing in `canceled` retires the order;
+        // a `not_canceled` entry — including "order already matched" — is not a
+        // cancellation and must not be recorded as one.
+        if (cancellation.kind === 'confirmed') {
           console.log(`[trade-executor] Cancelled timed out Polymarket order: ${order.id}`);
           return finishWithoutFill(
             row,
@@ -1355,7 +1758,12 @@ async function reconcilePendingPolymarketTrade(
             'Polymarket order timed out without a confirmed fill'
           );
         }
-        return markAmbiguous(row, `Polymarket did not confirm cancellation of timed out order ${order.id}`);
+        const detail = 'reason' in cancellation ? `: ${cancellation.reason}` : '';
+        return markAmbiguous(
+          row,
+          `Polymarket did not confirm cancellation of timed out order ${order.id} `
+          + `(${cancellation.kind})${detail}`
+        );
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         return markAmbiguous(row, `Polymarket cancellation is unresolved: ${message}`);
@@ -1463,4 +1871,377 @@ export async function pollPolymarketOrders(): Promise<PolymarketReconciliationOu
     console.error(`[trade-executor] Polymarket order polling failed: ${message}`);
   }
   return outcomes;
+}
+
+/**
+ * Drive the exit-escalation ladder for exits that reconciliation has already
+ * declared unfilled (`S4-M17`).
+ *
+ * `pollPolymarketOrders` is where an exit *becomes* known-unfilled: a sell whose
+ * FAK reconciled to `cancelled`, `failed`, or `partial` is a position the master
+ * has left and the user still holds. Until this sweep existed the ladder in
+ * `polymarket-exit-escalation.ts` had no caller, so that state was terminal —
+ * the trade row said "cancelled" and nobody sold the shares.
+ *
+ * **Where it runs.** Inside the single guarded `reconcilePending` pass in
+ * `index.ts`, at the tail, after the per-venue sweeps and the canonical
+ * coordinator. Not on its own timer (audit finding `C1`): a second timer could
+ * overlap this ladder with the reconciliation that classifies its own rungs. At
+ * the tail because a ladder occupies the pass for as long as its rungs rest, and
+ * the fast sweeps must not queue behind it.
+ *
+ * **What it deliberately does not do.** It does not resume a partly-walked
+ * ladder. `escalatePolymarketExit` holds the rung index in a local, so one call
+ * walks the whole ladder or terminates; there is no column to persist a rung in
+ * and this module does not invent one. The consequences are stated on
+ * `POLYMARKET_EXIT_ESCALATION_SWEEP_LIMIT` and
+ * `resolvePolymarketExitReferencePrice`.
+ */
+
+/**
+ * How many exits one pass will escalate.
+ *
+ * One by default, and low on purpose. A ladder rests each rung for its full
+ * effective lifetime inside this call, so N candidates occupy the guarded
+ * reconciliation pass for N ladders' worth of wall clock. Raising this trades
+ * reconciliation latency for exit throughput, and the honest fix is not a bigger
+ * number — it is persisted rung state so each pass can advance one rung and
+ * return.
+ */
+export const POLYMARKET_EXIT_ESCALATION_SWEEP_LIMIT = 1;
+
+/**
+ * How far back a failed exit stays escalatable.
+ *
+ * An exit that failed an hour ago is not the same trade any more: the market has
+ * moved, and re-offering a ladder measured from that reference is the staleness
+ * `S4-M18` refuses on the entry path. Bounded rather than unbounded so a backlog
+ * of historical failures cannot be replayed by a restart.
+ */
+export const POLYMARKET_EXIT_ESCALATION_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Reconciliation outcomes that mean "the exit did not complete".
+ *
+ * `partial` is the case this sweep can actually act on. `cancelled` and `failed`
+ * are listed because reconciliation does produce them, but per
+ * `/resources/error-codes` a FAK that matches nothing is *rejected* at post time
+ * ("no orders found to match with FAK order") rather than resting and being
+ * cancelled — so a zero-fill exit often has no `venue_order_id` and never enters
+ * this query at all, and when it does it has no persisted reference price. Both
+ * are the same missing column; see `resolvePolymarketExitReferencePrice`.
+ */
+const POLYMARKET_UNFILLED_EXIT_STATUSES: readonly string[] = ['partial', 'cancelled', 'failed'];
+
+export interface PolymarketExitEscalationCandidate {
+  readonly id: string;
+  readonly copy_execution_id: string | null;
+  readonly signal_id: string | null;
+  readonly token_mint: string;
+  readonly status: string;
+  readonly venue_order_id: string;
+  /** Average price of the confirmed portion, or null when nothing filled. */
+  readonly price_usd: string | number | null;
+  readonly token_amount: string | number | null;
+  readonly target_amount_usd: string | number | null;
+}
+
+export type PolymarketExitReferenceResolution =
+  | { readonly kind: 'reference'; readonly referencePrice: number }
+  | { readonly kind: 'unavailable'; readonly reason: string };
+
+/**
+ * Find the price the failed attempt was bounded at, or say why it cannot be found.
+ *
+ * The ladder measures rungs down from the price the attempt that just failed
+ * offered — see `polymarket-exit-escalation.ts` on why the master's raw fill is
+ * the wrong reference. `triggerPolymarket` computes exactly that number
+ * (`boundPrice`, returned as `mirrorBoundPrice`) and then drops it: `TradeInsert`
+ * has no column for a signed protective bound, so it is not persisted.
+ *
+ * What survives is `price_usd`, which `finishConfirmedFill` sets to the average
+ * price of the *confirmed* portion. For a sell that is a price the venue actually
+ * paid us, so it is at or above the bound we signed — a valid, slightly
+ * conservative reference. A sell that filled nothing has `price_usd = NULL`
+ * (`insertTrade` only writes a price when there is a confirmed fill), and there
+ * is nothing else on the row that means "the price we offered":
+ * `target_amount_usd` is a requested notional and `token_amount` is null too, so
+ * dividing them would invent a price rather than recover one.
+ *
+ * So this returns `unavailable` for the zero-fill case rather than guessing. That
+ * is the honest half of `S4-M17`: the ladder runs for exits that partially
+ * filled, and a zero-fill exit is reported as needing the missing column.
+ */
+export function resolvePolymarketExitReferencePrice(
+  row: Pick<PolymarketExitEscalationCandidate, 'id' | 'status' | 'price_usd'>
+): PolymarketExitReferenceResolution {
+  if (row.price_usd === null || row.price_usd === undefined || row.price_usd === '') {
+    return {
+      kind: 'unavailable',
+      reason:
+        `trade ${row.id} reconciled to ${row.status} with no confirmed fill, so no price it `
+        + 'offered was persisted; the escalation reference needs the signed mirror bound stored '
+        + 'on the trade row'
+    };
+  }
+  const referencePrice = Number(row.price_usd);
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0 || referencePrice >= 1) {
+    return {
+      kind: 'unavailable',
+      reason: `trade ${row.id} persisted price ${row.price_usd} is not a valid outcome price`
+    };
+  }
+  return { kind: 'reference', referencePrice };
+}
+
+/**
+ * Exits this process has already walked a ladder for.
+ *
+ * Process-local, and that is a stated gap rather than a design: the terminal
+ * alert exists so a human decides the next lever, and without a durable marker
+ * the next pass sixty seconds later would start the same ladder from rung zero
+ * and alert again. A restart forgets, and a second executor instance never knew.
+ * The durable form is a claim on the trade row, which does not exist yet.
+ */
+const escalatedExitTradeIds = new Set<string>();
+
+/** Test seam; also the reset an operator would want after fixing a market by hand. */
+export function resetPolymarketExitEscalationMemoryForTesting(): void {
+  escalatedExitTradeIds.clear();
+}
+
+export interface PolymarketExitEscalationSweepPorts {
+  /** Publish the ladder's terminal alert. */
+  readonly emitAlert: (
+    alert: PolymarketExitAlert,
+    candidate: PolymarketExitEscalationCandidate
+  ) => Promise<void>;
+  readonly loadCandidates?: () => Promise<PolymarketExitEscalationCandidate[]>;
+  readonly fetchBook?: (tokenID: string) => Promise<OrderBook>;
+  readonly fetchSellableShares?: (tokenID: string) => Promise<number>;
+  readonly fetchMarketState?: (conditionId: string) => Promise<PolymarketMarketState>;
+  readonly submitRungFor?: (
+    tokenID: string
+  ) => (rung: PolymarketExitLimitRung) => Promise<{ filledShares: number }>;
+  readonly requestRedemption?: (
+    redeem: PolymarketExitRedeem,
+    candidate: PolymarketExitEscalationCandidate
+  ) => Promise<void>;
+  readonly escalate?: typeof escalatePolymarketExit;
+  readonly limit?: number;
+  readonly now?: () => number;
+  readonly log?: (message: string) => void;
+}
+
+export interface PolymarketExitEscalationSweepResult {
+  readonly scanned: number;
+  readonly escalated: number;
+  readonly completed: number;
+  readonly alerted: number;
+  readonly redeemed: number;
+  readonly failed: number;
+  readonly skipped: number;
+  readonly skips: readonly { readonly tradeId: string; readonly reason: string }[];
+  readonly outcomes: readonly {
+    readonly tradeId: string;
+    readonly outcome: PolymarketExitEscalationOutcome;
+  }[];
+}
+
+/**
+ * Highest bid on the book, or null when there is no usable bid.
+ *
+ * Computed as a maximum rather than read from `bids[0]` on purpose. The docs
+ * contradict themselves on ordering: `/api-reference/market-data/get-order-book`
+ * says bids are "sorted by price descending" (best first) while
+ * `/market-data/prices-order-books` says "bids are ordered by ascending price...
+ * so the best bid and ask are the last entries". A maximum is correct under
+ * either, and indexing would silently price a rung against the *worst* bid under
+ * one of them. Do not simplify this.
+ */
+function bestBidFromBook(book: OrderBook): number | null {
+  const bids = book.bids ?? [];
+  let best: number | null = null;
+  for (const level of bids) {
+    const price = Number(level.price);
+    if (!Number.isFinite(price) || price <= 0 || price >= 1) continue;
+    const size = Number(level.size);
+    if (!Number.isFinite(size) || size <= 0) continue;
+    if (best === null || price > best) best = price;
+  }
+  return best;
+}
+
+function resolvePolymarketMinimumExitPrice(): number {
+  const value = Number(process.env.POLYMARKET_MIN_EXIT_PRICE ?? '0.01');
+  if (!Number.isFinite(value) || value <= 0 || value >= 1) {
+    throw new UnrecoverableError('POLYMARKET_MIN_EXIT_PRICE must be between 0 and 1 exclusive');
+  }
+  return value;
+}
+
+async function loadUnfilledPolymarketExits(
+  now: number,
+  limit: number
+): Promise<PolymarketExitEscalationCandidate[]> {
+  return query<PolymarketExitEscalationCandidate>(
+    `SELECT id, copy_execution_id, signal_id, token_mint, status,
+            venue_order_id, price_usd, token_amount, target_amount_usd
+       FROM trades
+      WHERE chain = 'polygon'
+        AND executor = 'polymarket-clob'
+        AND execution_mode = 'live'
+        AND direction = 'sell'
+        AND status = ANY($1::text[])
+        AND venue_order_id IS NOT NULL
+        AND COALESCE(confirmed_at, submitted_at, executed_at) > $2::timestamptz
+      ORDER BY COALESCE(confirmed_at, submitted_at, executed_at) DESC, id DESC
+      LIMIT $3`,
+    [
+      POLYMARKET_UNFILLED_EXIT_STATUSES,
+      new Date(now - POLYMARKET_EXIT_ESCALATION_MAX_AGE_MS).toISOString(),
+      Math.max(1, limit) * 10
+    ]
+  );
+}
+
+export async function runPolymarketExitEscalationSweep(
+  ports: PolymarketExitEscalationSweepPorts
+): Promise<PolymarketExitEscalationSweepResult> {
+  const log = ports.log ?? (() => {});
+  const now = ports.now ?? Date.now;
+  const limit = ports.limit ?? POLYMARKET_EXIT_ESCALATION_SWEEP_LIMIT;
+  const escalate = ports.escalate ?? escalatePolymarketExit;
+  const skips: { tradeId: string; reason: string }[] = [];
+  const outcomes: { tradeId: string; outcome: PolymarketExitEscalationOutcome }[] = [];
+  let escalated = 0;
+  let completed = 0;
+  let alerted = 0;
+  let redeemed = 0;
+  let failed = 0;
+
+  // Escalating means signing and posting a real sell. There is nothing to
+  // escalate in paper mode, and the live-readiness gate is the same one
+  // `runPolymarketRedemptionSweep` sits behind.
+  if (!liveReadiness.ready) {
+    return {
+      scanned: 0, escalated: 0, completed: 0, alerted: 0, redeemed: 0, failed: 0,
+      skipped: 0, skips: [], outcomes: []
+    };
+  }
+
+  const minimumExitPrice = resolvePolymarketMinimumExitPrice();
+  const loadCandidates = ports.loadCandidates
+    ?? (() => loadUnfilledPolymarketExits(now(), limit));
+  const candidates = await loadCandidates();
+
+  for (const candidate of candidates) {
+    if (escalated + alerted + redeemed + completed >= limit) break;
+    if (escalatedExitTradeIds.has(candidate.id)) {
+      skips.push({
+        tradeId: candidate.id,
+        reason: 'this process has already walked a ladder for this exit'
+      });
+      continue;
+    }
+    const reference = resolvePolymarketExitReferencePrice(candidate);
+    if (reference.kind === 'unavailable') {
+      skips.push({ tradeId: candidate.id, reason: reference.reason });
+      log(`[polymarket-exit] skipping ${candidate.id}: ${reference.reason}`);
+      continue;
+    }
+
+    const tokenID = unprefixedPolygonToken(candidate.token_mint);
+    const fetchBook = ports.fetchBook
+      ?? ((id: string) => requireSecureClobClient().fetchOrderBook({ tokenId: id }));
+    const fetchSellableShares = ports.fetchSellableShares
+      ?? ((id: string) => getPolymarketAvailableBalance(id, 'sell'));
+    const fetchMarketState = ports.fetchMarketState
+      ?? ((conditionId: string) => fetchPolymarketMarketState(conditionId));
+
+    // The ladder's own `observe` port. Every value it needs is readable from the
+    // venue, which is why no schema is required to know *what is left*: the
+    // conditional-token balance is the remaining position, and the book carries
+    // the tick grid and the venue minimum. Only the reference price is not.
+    const observe = async () => {
+      const book = await fetchBook(tokenID);
+      const [remainingShares, market] = await Promise.all([
+        fetchSellableShares(tokenID),
+        fetchMarketState(String(book.conditionId))
+      ]);
+      return {
+        remainingShares,
+        bestBid: bestBidFromBook(book),
+        // Passed through as a share count, matching `planPolymarketBookOrder`.
+        // The docs disagree with themselves about the unit —
+        // `/trading/place-orders` calls `min_order_size` "the minimum number of
+        // shares the CLOB accepts" while `/market-data/market-details` calls the
+        // same field a "minimum USDC notional" — so this deliberately keeps the
+        // interpretation the rest of this module already uses rather than
+        // introducing a second one.
+        minimumShares: Number(book.minOrderSize),
+        tickSize: Number(book.tickSize),
+        market
+      };
+    };
+
+    // Claimed before the first rung, not after the ladder: a throw partway
+    // through has already sold shares, and re-running from rung zero would sell
+    // them twice.
+    escalatedExitTradeIds.add(candidate.id);
+    try {
+      const observed = await observe();
+      const outcome = await escalate(
+        {
+          ...observed,
+          referencePrice: reference.referencePrice,
+          minimumExitPrice
+        },
+        {
+          submitRung: ports.submitRungFor
+            ? ports.submitRungFor(tokenID)
+            : createPolymarketExitRungSubmitter({ tokenID, log }),
+          observe,
+          emitAlert: (alert) => ports.emitAlert(alert, candidate),
+          requestRedemption: async (redeem) => {
+            // No queue and no table: `runPolymarketRedemptionSweep` scans for
+            // resolved positions on this same guarded pass, so the correct
+            // action is to stop escalating and let it find this one. Inventing a
+            // redemption request row would duplicate the sweep's own source of
+            // truth.
+            if (ports.requestRedemption) await ports.requestRedemption(redeem, candidate);
+            else log(`[polymarket-exit] ${candidate.id} defers to the redemption sweep: ${redeem.reason}`);
+          },
+          now,
+          log
+        }
+      );
+      outcomes.push({ tradeId: candidate.id, outcome });
+      escalated += outcome.rungsSubmitted > 0 ? 1 : 0;
+      if (outcome.terminal === 'alert') alerted += 1;
+      else if (outcome.terminal === 'redeem') redeemed += 1;
+      else completed += 1;
+      log(
+        `[polymarket-exit] trade ${candidate.id} ladder ended ${outcome.terminal} after `
+        + `${outcome.rungsSubmitted} rungs, filled ${outcome.filledShares}, `
+        + `remaining ${outcome.remainingShares}`
+      );
+    } catch (error: unknown) {
+      failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      log(`[polymarket-exit] trade ${candidate.id} escalation failed: ${message}`);
+    }
+  }
+
+  return {
+    scanned: candidates.length,
+    escalated,
+    completed,
+    alerted,
+    redeemed,
+    failed,
+    skipped: skips.length,
+    skips,
+    outcomes
+  };
 }

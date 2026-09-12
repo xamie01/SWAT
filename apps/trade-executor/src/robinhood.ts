@@ -418,12 +418,66 @@ export function createMemoryRobinhoodPendingStore(): RobinhoodPendingStore {
   };
 }
 
+/**
+ * What the fill actually cost, in the base asset, with its unit.
+ *
+ * Exists because `amountEth` cannot express the `erc20` base-asset mode: it is a
+ * `number` whose name hardcodes a currency that only one of the two modes uses.
+ * In `erc20` mode it was set to `0`, and the ledger recorded that zero as a real
+ * ETH cost -- a fabricated value on a trade that spent a stablecoin (S4-M41).
+ *
+ * `kind: 'unassessed'` is the honest answer when the spend cannot be expressed in
+ * a currency the ledger accepts. It is deliberately NOT the number zero: a zero
+ * cost basis makes an ordinary position look like an infinite-return winner, and
+ * one that can never trip a stop-loss.
+ */
+export type RobinhoodBaseSpend =
+  | { readonly kind: 'native'; readonly currency: 'ETH'; readonly amount: number }
+  | { readonly kind: 'erc20'; readonly token: `0x${string}`; readonly baseUnits: bigint }
+  | { readonly kind: 'unassessed'; readonly reason: string };
+
+/**
+ * Describes what a fill cost in the base asset, carrying the unit.
+ *
+ * Pure so it is testable without a chain, and shared by both result-construction
+ * sites so they cannot disagree -- the `native-weth` and `erc20` branches
+ * previously diverged only at a `: 0`, which is exactly the kind of difference
+ * that hides.
+ */
+export function describeRobinhoodBaseSpend(input: {
+  baseAssetMode: 'native-weth' | 'erc20';
+  baseAsset: `0x${string}`;
+  direction: 'buy' | 'sell';
+  actualAmountIn: bigint;
+  actualAmountOut: bigint;
+}): RobinhoodBaseSpend {
+  // On a buy the base asset is what went IN; on a sell it is what came OUT.
+  const baseUnits = input.direction === 'buy' ? input.actualAmountIn : input.actualAmountOut;
+  if (input.baseAssetMode === 'native-weth') {
+    return { kind: 'native', currency: 'ETH', amount: Number(formatEther(baseUnits)) };
+  }
+  // Base units only -- deliberately NOT converted to a decimal here. The token's
+  // decimals are a property of the token (USDG is 6, not 18), so formatting with
+  // the ether helpers would understate the amount by 10^12 and present as "no
+  // funds" rather than as a scaling bug. The caller that knows the decimals
+  // converts; until then the integer is exact and the unit is explicit.
+  return { kind: 'erc20', token: input.baseAsset, baseUnits };
+}
+
 export type RobinhoodFilledResult = {
   status: 'filled';
   clientOrderId: string;
   signature: Hex;
   transactionHash: Hex;
+  /**
+   * Legacy ETH-denominated amount. Meaningful ONLY in `native-weth` mode, where
+   * it equals `baseSpend.amount`; `0` in `erc20` mode, which is why `baseSpend`
+   * exists. Retained because sizing and alerting still read it. **Never write
+   * this into the ledger directly** -- read `baseSpend`.
+   */
   amountEth: number;
+  /** The unit-carrying spend. Prefer this over `amountEth` (S4-M41). */
+  baseSpend: RobinhoodBaseSpend;
   actualAmountIn: bigint;
   actualAmountOut: bigint;
   quotedAmountOut: bigint;
@@ -447,16 +501,69 @@ export type RobinhoodOrder = {
   slippageBps: number;
 };
 
-let submissionTail: Promise<void> = Promise.resolve();
-async function withSubmissionLock<T>(operation: () => Promise<T>): Promise<T> {
-  const previous = submissionTail;
+/**
+ * In-process submission serialisation, **keyed by account** (`S4-M12`).
+ *
+ * This was a single global chain, which was correct for one operator key and
+ * becomes wrong the moment fan-out gives each user their own: every user's
+ * mirror would queue behind every other user's, on a venue where being late is
+ * the whole risk. Keyed by account, two users proceed concurrently while one
+ * user's two overlapping signals still serialise — which is the only ordering
+ * that nonce allocation actually requires.
+ *
+ * This layer is **necessary but not sufficient.** It is process-local, so two
+ * executor replicas would each hold their own chain and both read the same
+ * pending nonce. `EvmNonceLock` below is the cross-process half.
+ */
+const submissionTails = new Map<string, Promise<void>>();
+async function withSubmissionLock<T>(account: string, operation: () => Promise<T>): Promise<T> {
+  const key = account.toLowerCase();
+  const previous = submissionTails.get(key) ?? Promise.resolve();
   let release!: () => void;
-  submissionTail = new Promise<void>((resolve) => { release = resolve; });
+  const mine = new Promise<void>((resolve) => { release = resolve; });
+  submissionTails.set(key, mine);
   await previous;
   try {
     return await operation();
   } finally {
     release();
+    // Drop the entry once nothing is queued behind us, or the map grows one
+    // permanently-resolved promise per account seen — a slow leak that only
+    // shows up at fan-out scale, which is exactly when it would matter.
+    if (submissionTails.get(key) === mine) submissionTails.delete(key);
+  }
+}
+
+/**
+ * Cross-process nonce lock, injected rather than imported (`S4-M12`).
+ *
+ * A port, not a database call, for the same reason the signer is a parameter
+ * (Standing Rule 2): this module stays free of `@swat/db` and therefore testable
+ * without one. The provider binds the chain and is wired in `index.ts`.
+ *
+ * Returns `{acquired: false}` rather than blocking. A blocking wait would sit
+ * past the BullMQ job's lock duration and get the job declared stalled, which is
+ * a worse outcome than a clean retry once the current holder has submitted and
+ * the node's pending nonce has advanced.
+ */
+export type EvmNonceLock = <T>(
+  account: string,
+  run: () => Promise<T>
+) => Promise<{ acquired: true; result: T } | { acquired: false; result?: undefined }>;
+
+/**
+ * Raised when the cross-process nonce lock is held elsewhere.
+ *
+ * A distinct class because the circuit breaker must **not** count this. Nothing
+ * is wrong with the venue — another process is mid-submission — and three
+ * unlucky collisions in a row would otherwise trip the breaker and halt all
+ * Robinhood trading for `CIRCUIT_BREAKER_RESET_MS`. Deliberately NOT an
+ * `UnrecoverableError`: the job should be retried, not buried.
+ */
+export class NonceContentionError extends Error {
+  constructor(public readonly account: string) {
+    super(`EVM nonce lock for ${account} is held by another process; retry`);
+    this.name = 'NonceContentionError';
   }
 }
 
@@ -583,8 +690,29 @@ export async function executeRobinhoodOrder(input: {
   }) => Promise<RobinhoodSafetyAssessment>;
   now?: () => number;
   requireReadiness?: boolean;
+  /**
+   * Cross-process nonce lock (`S4-M12`). **Required, not optional** — an absent
+   * lock is indistinguishable from a working one until two processes race, and
+   * the failure is a vanished fill with no error anywhere. Tests pass a
+   * pass-through; `index.ts` passes the Postgres-backed one.
+   */
+  nonceLock: EvmNonceLock;
 }): Promise<RobinhoodExecutionResult> {
-  return withSubmissionLock(async () => {
+  // Two layers, innermost last: the per-account in-process chain orders this
+  // process's work, then the cross-process lock excludes other replicas. The
+  // whole order is inside the lock rather than just the nonce read — the nonce is
+  // read, then incremented locally across an approval receipt wait, so releasing
+  // any earlier would let a second process claim the nonce this one is about to
+  // use for the swap. Over-locking costs latency; under-locking loses a fill.
+  return withSubmissionLock(input.account, async () => {
+    const lease = await input.nonceLock(input.account, async () => await runRobinhoodOrder(input));
+    if (!lease.acquired) throw new NonceContentionError(input.account);
+    return lease.result;
+  });
+}
+
+async function runRobinhoodOrder(input: Parameters<typeof executeRobinhoodOrder>[0]): Promise<RobinhoodExecutionResult> {
+  return (async () => {
     if (input.requireReadiness !== false && !getRobinhoodLiveReadiness().ready) {
       return { status: 'skipped', state: 'safety_rejected', reason: getRobinhoodLiveReadiness().reason };
     }
@@ -800,6 +928,13 @@ export async function executeRobinhoodOrder(input: {
       amountEth: input.config.baseAssetMode === 'native-weth'
         ? Number(formatEther(input.order.direction === 'buy' ? actual.actualAmountIn : actual.actualAmountOut))
         : 0,
+      baseSpend: describeRobinhoodBaseSpend({
+        baseAssetMode: input.config.baseAssetMode,
+        baseAsset: input.config.baseAsset,
+        direction: input.order.direction,
+        actualAmountIn: actual.actualAmountIn,
+        actualAmountOut: actual.actualAmountOut
+      }),
       actualAmountIn: actual.actualAmountIn,
       actualAmountOut: actual.actualAmountOut,
       quotedAmountOut: route.amountOut,
@@ -809,7 +944,7 @@ export async function executeRobinhoodOrder(input: {
     };
     await input.pendingStore.resolve(input.order.clientOrderId, result);
     return result;
-  });
+  })();
 }
 
 export type RobinhoodReconciliationResult =
@@ -824,6 +959,13 @@ export async function reconcileRobinhoodPending(input: {
   pendingStore: RobinhoodPendingStore;
   config: RobinhoodExecutionConfig;
   safetyAssessment?: Parameters<typeof executeRobinhoodOrder>[0]['safetyAssessment'];
+  /**
+   * Needed because a confirmed approval **resumes into a swap** below, and that
+   * swap allocates a nonce like any other. Optional only in the sense that
+   * `safetyAssessment` is: without both, the resume is skipped rather than run
+   * unserialised.
+   */
+  nonceLock?: EvmNonceLock;
   now?: Date;
 }): Promise<RobinhoodReconciliationOutcome[]> {
   const now = input.now ?? new Date();
@@ -862,8 +1004,9 @@ export async function reconcileRobinhoodPending(input: {
       const result = { status: 'approval_confirmed' as const, clientOrderId: pending.clientOrderId };
       await input.pendingStore.resolve(pending.clientOrderId, result);
       results.push(result);
-      if (input.safetyAssessment) {
+      if (input.safetyAssessment && input.nonceLock) {
         const resumed = await executeRobinhoodOrder({
+          nonceLock: input.nonceLock,
           order: {
             clientOrderId: pending.clientOrderId,
             token: pending.token,
@@ -912,6 +1055,13 @@ export async function reconcileRobinhoodPending(input: {
       amountEth: input.config.baseAssetMode === 'native-weth'
         ? Number(formatEther(pending.direction === 'buy' ? actual.actualAmountIn : actual.actualAmountOut))
         : 0,
+      baseSpend: describeRobinhoodBaseSpend({
+        baseAssetMode: input.config.baseAssetMode,
+        baseAsset: input.config.baseAsset,
+        direction: pending.direction,
+        actualAmountIn: actual.actualAmountIn,
+        actualAmountOut: actual.actualAmountOut
+      }),
       actualAmountIn: actual.actualAmountIn,
       actualAmountOut: actual.actualAmountOut,
       quotedAmountOut: BigInt(pending.quotedAmountOut),
@@ -983,12 +1133,20 @@ export function createViemRobinhoodAdapter(
 
 let configuredPendingStore: RobinhoodPendingStore | null = null;
 let configuredSafetyAssessment: Parameters<typeof executeRobinhoodOrder>[0]['safetyAssessment'] | null = null;
+let configuredNonceLock: EvmNonceLock | null = null;
 export function configureRobinhoodRuntime(input: {
   pendingStore: RobinhoodPendingStore;
   safetyAssessment: Parameters<typeof executeRobinhoodOrder>[0]['safetyAssessment'];
+  nonceLock: EvmNonceLock;
 }): void {
   configuredPendingStore = input.pendingStore;
   configuredSafetyAssessment = input.safetyAssessment;
+  configuredNonceLock = input.nonceLock;
+}
+
+/** The configured cross-process nonce lock, for the reconciliation resume path. */
+export function getConfiguredRobinhoodNonceLock(): EvmNonceLock | null {
+  return configuredNonceLock;
 }
 
 export async function getRobinhoodSpendableEth(): Promise<number> {
@@ -1014,8 +1172,11 @@ export async function triggerRobinhood(params: {
   proportionBps?: number;
 }): Promise<RobinhoodExecutionResult> {
   if (!evmAccount || !robinhoodWalletClient) throw new UnrecoverableError('EVM_PRIVATE_KEY is not configured for Robinhood Chain live execution');
-  if (!configuredPendingStore || !configuredSafetyAssessment) {
-    throw new UnrecoverableError('Robinhood restart-safe pending store and safety adapter are not configured');
+  if (!configuredPendingStore || !configuredSafetyAssessment || !configuredNonceLock) {
+    // Fails closed on a missing nonce lock for the same reason as the pending
+    // store: submitting without it is silently unserialised, and the symptom is
+    // a fill that never happens rather than an error anyone sees.
+    throw new UnrecoverableError('Robinhood restart-safe pending store, safety adapter and nonce lock are not configured');
   }
   const direction = params.direction ?? 'buy';
   if (direction === 'buy' && (!Number.isFinite(params.amountEth) || params.amountEth <= 0)) {
@@ -1034,7 +1195,8 @@ export async function triggerRobinhood(params: {
     account: evmAccount.address,
     adapter: createViemRobinhoodAdapter(),
     pendingStore: configuredPendingStore,
-    safetyAssessment: configuredSafetyAssessment
+    safetyAssessment: configuredSafetyAssessment,
+    nonceLock: configuredNonceLock
   });
   return result;
 }
