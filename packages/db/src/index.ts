@@ -81,3 +81,9 @@ export * from './master-membership.js';
  * decision lives in `fanout-eligibility.js`.
  */
 export * from './fanout-candidates.js';
+
+/**
+ * Which Polymarket markets the book feed subscribes to (S4-M38). Read plus a
+ * pure decider; the eviction rule lives in `selectPolymarketBookSubscriptions`.
+ */
+export * from './polymarket-book-subscriptions.js';

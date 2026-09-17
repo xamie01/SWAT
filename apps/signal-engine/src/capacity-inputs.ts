@@ -6,6 +6,7 @@ import {
   fetchMasterCapacityPolicy,
   fetchMasterWindowNotional,
   MASTER_CAPACITY_WINDOWS,
+  PLATFORM_MAX_AGGREGATE_IMPACT_BPS,
   planFanout,
   recordMasterCapacityLedgerEntry,
   unknownLiquidity,
@@ -504,6 +505,39 @@ export interface ResolveFanoutCapacityInput {
    * a deployment gap and every other chain ignores.
    */
   readonly polymarketBook?: UsableLiquidity | null;
+  /**
+   * A reader that prices the Polymarket book **at the cap actually in force**
+   * (`S4-M38`, `apps/signal-engine/src/polymarket-book-reader.ts`).
+   *
+   * Why a callback rather than a value: the depth model publishes a *calibrated
+   * equivalent reserve*, `capacityNotionalUsd * 10_000 / impactCapBps`, and that
+   * equality holds only at its own cap. The cap is per-master and per-chain
+   * (`master_capacity_policy.max_aggregate_impact_bps` overriding
+   * `PLATFORM_MAX_AGGREGATE_IMPACT_BPS`), and it is resolved *inside* this
+   * function. A caller that priced the book beforehand would have to re-read the
+   * same policy row and would silently disagree with this one whenever an
+   * operator set an override — the wrong direction of which fails open.
+   *
+   * So the read is deferred to here and handed the resolved cap.
+   * `assertPolymarketBookLiquidityCalibration` then makes a mismatch loud rather
+   * than arithmetic.
+   *
+   * Ignored on every chain but polygon. When both this and `polymarketBook` are
+   * supplied, the explicit value wins — that path exists for tests and for a
+   * caller that has already read the book at a known cap.
+   */
+  readonly readPolymarketBook?: (input: {
+    readonly tokenMint: string;
+    readonly cohortDirection: 'buy' | 'sell';
+    readonly impactCapBps: number;
+  }) => Promise<UsableLiquidity>;
+  /**
+   * The direction the cohort trades, which picks the side of the book consumed.
+   * Defaults to `'buy'`: the capacity cap is buy-side (a sell mirror skips
+   * assessment entirely, argued in `capacityAppliesToDirection`), so a caller
+   * that reaches here without saying is buying.
+   */
+  readonly cohortDirection?: 'buy' | 'sell';
   readonly projection: CohortNotionalProjection;
   /** End of the window. Injected so the decision stays reproducible in a log. */
   readonly now: Date;
@@ -573,6 +607,37 @@ export async function resolveFanoutCapacity(
     };
   }
 
+  // The cap in force, resolved before the book is read so the reserve is
+  // calibrated against the same figure the cap will judge it by. This mirrors
+  // `assessMasterCapacity`'s own resolution exactly; the two disagreeing is what
+  // `assertPolymarketBookLiquidityCalibration` exists to catch.
+  const impactCapBps =
+    policyOverrides.maxAggregateImpactBps ?? PLATFORM_MAX_AGGREGATE_IMPACT_BPS[input.chain];
+
+  let polymarketBook = input.polymarketBook;
+  let bookLogLine: string | null = null;
+  if (
+    polymarketBook === undefined
+    && input.readPolymarketBook !== undefined
+    && input.chain === 'polygon'
+  ) {
+    try {
+      polymarketBook = await input.readPolymarketBook({
+        tokenMint: input.tokenMint,
+        cohortDirection: input.cohortDirection ?? 'buy',
+        impactCapBps
+      });
+    } catch (error) {
+      // The reader's own contract is not to throw, so this is belt-and-braces.
+      // Left as `undefined` rather than as an unknown value, because the two
+      // notes differ: a reader that failed is a deployment problem, an unknown
+      // book is a venue condition, and `usableLiquidityForFanout` says so.
+      bookLogLine =
+        `polymarket book read threw (${error instanceof Error ? error.message : String(error)}); `
+        + 'treated as no feed wired';
+    }
+  }
+
   const decision = assessMasterCapacity({
     masterWalletAddress: input.masterWalletAddress,
     chain: input.chain,
@@ -584,7 +649,7 @@ export async function resolveFanoutCapacity(
       chain: input.chain,
       tokenMint: input.tokenMint,
       poolTvlUsd: input.poolTvlUsd,
-      polymarketBook: input.polymarketBook
+      polymarketBook
     }),
     activeFollowerCount,
     policy: { ...policyOverrides, unassessablePolicy: 'skip' }
@@ -597,7 +662,8 @@ export async function resolveFanoutCapacity(
     logLine:
       `capacity ${decision.outcome} (${decision.reasonCode}) | cohort ${input.projection.cohortSize} `
       + `projected $${input.projection.projectedNotionalUsd.toFixed(2)} `
-      + `[${input.projection.basis}] | unassessed: ${unassessed} | ${decision.internal.detail}`
+      + `[${input.projection.basis}] | unassessed: ${unassessed}`
+      + `${bookLogLine === null ? '' : ` | ${bookLogLine}`} | ${decision.internal.detail}`
   };
 }
 

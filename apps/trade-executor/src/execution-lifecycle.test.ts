@@ -151,17 +151,18 @@ vi.mock('@swat/shared', async () => {
   // evaluateCopyPolicy is pure decision math with its own suite in
   // packages/shared; stubbing it would only test the stub.
   const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
-  // Imported from source rather than from `actual`, because `@swat/shared`
-  // resolves to its built `dist` here and that artifact lags the source (see the
-  // handoff's stale-dist note). Re-implementing the derivation in this mock would
-  // let it drift from the one the producers route on, which is the whole point of
-  // S3-25 having a single definition.
-  const { chainFromTokenMint } = await vi.importActual<
-    typeof import('../../../packages/shared/src/constants.js')
-  >('../../../packages/shared/src/constants.js');
+  // Taken from `actual` rather than re-implemented: `chainFromTokenMint` is the
+  // single definition of a job's chain (S3-25), and a local copy in this mock
+  // would be free to drift from the one the producers actually route on.
+  //
+  // Reaching into `packages/shared/src` directly instead — as an earlier version
+  // of this mock did — pulls a file outside this package's `rootDir` into the
+  // program and breaks `tsc -p tsconfig.json` with TS6059, which is what `pnpm
+  // typecheck` and CI run. The export is present on the built `dist` barrel, so
+  // the package import is both correct and sufficient.
   return {
     DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3 },
-    chainFromTokenMint,
+    chainFromTokenMint: actual.chainFromTokenMint,
     evaluateCopyPolicy: actual.evaluateCopyPolicy,
     // Pure resolution math with its own suite; a stub would test the stub.
     resolveSlippageBps: actual.resolveSlippageBps,

@@ -9,7 +9,8 @@ import {
   updateTokenLaunchTimestamp,
   recordFundingEdge,
   recordIngestionBatch,
-  logDiscoveryRun
+  logDiscoveryRun,
+  loadPolymarketBookSubscriptionSet
 } from '@swat/db';
 import {
   createWalletBackfillJob,
@@ -31,6 +32,7 @@ import {
   type HeliusParsedTransaction
 } from './parse.js';
 import { backfillEvmWallet, WalletChain } from './evm.js';
+import { createPolymarketBookRuntimeOnRedis } from './polymarket-book-runtime.js';
 import { backfillPolymarketWallet, pollPolymarketResolutions } from './polymarket.js';
 import {
   IngestionBatchError,
@@ -664,5 +666,105 @@ setInterval(() => {
   pollPolymarketResolutions().catch(console.error);
 }, 15 * 60 * 1000);
 pollPolymarketResolutions().catch(console.error);
+
+// ─── Polymarket order-book feed (S4-M38) ──────────────────────────────────────
+
+/**
+ * Streams Polymarket order books into Redis so `signal-engine` can gate fan-out
+ * on real depth before admitting copiers.
+ *
+ * **Why this lives here.** The book is the only honest liquidity figure for a
+ * Polymarket outcome share — it trades on Polymarket's own CLOB, not a DEX pair,
+ * so DexScreener TVL is either absent or belongs to an unrelated Polygon pair.
+ * Without this feed every polygon cohort reads `capacity-unknown` and nobody
+ * copies a Polymarket signal.
+ *
+ * **Failure is bounded on purpose.** Everything below degrades rather than
+ * throws: a failed seed starts with no markets, a dropped socket invalidates
+ * books to `awaiting-snapshot`, a failed resync lets entries age into
+ * `book-snapshot-stale`. Every one of those reads as *unknown* downstream, which
+ * excludes copiers rather than admitting them against depth nobody measured. A
+ * throw here, by contrast, would take down the process that also ingests Solana
+ * and Robinhood Chain.
+ */
+/**
+ * How often the subscription set is recomputed.
+ *
+ * Five minutes, not the resync cadence: this is a *membership* refresh (which
+ * markets exist and matter), not a *freshness* refresh (what the book says).
+ * Freshness is the subscriber's own 15s resync. A market that becomes active
+ * between refreshes is simply unsubscribed until the next one, which reads as
+ * `book-not-cached` and excludes its cohort — fail-closed, and the cost of a
+ * tighter cadence is a repeated scan of two tables for a set that rarely moves.
+ */
+const POLYMARKET_BOOK_SUBSCRIPTION_REFRESH_MS = 5 * 60 * 1000;
+
+const polymarketBookRuntime = createPolymarketBookRuntimeOnRedis(redis, {
+  logger: {
+    info: (message: string) => console.log(`[indexer] ${message}`),
+    warn: (message: string, error?: unknown) =>
+      console.warn(`[indexer] ${message}`, error ?? '')
+  }
+});
+
+polymarketBookRuntime.start();
+
+/**
+ * Seed the subscription set, then refresh it periodically.
+ *
+ * The set is the union of markets a tracked master traded recently and markets
+ * somebody still holds — the first are fan-out candidates, the second have to
+ * stay exitable. Refreshed on a cadence because a market that becomes active
+ * after boot would otherwise never be subscribed until the next restart.
+ */
+async function refreshPolymarketBookSubscriptions(): Promise<void> {
+  const set = await loadPolymarketBookSubscriptionSet({
+    now: new Date(),
+    onFailure: (detail: string) => console.warn(`[indexer] ${detail}`)
+  });
+
+  polymarketBookRuntime.subscriber.subscribe(set.tokenIds);
+
+  console.log(
+    `[indexer] polymarket book subscriptions: ${set.tokenIds.length} market(s) `
+      + `(${set.counts.recentTrade} recently traded, ${set.counts.openPosition} held)`
+      + `${set.evicted === 0 ? '' : `, ${set.evicted} evicted by the cap`}`
+  );
+}
+
+void refreshPolymarketBookSubscriptions().catch((error: unknown) => {
+  console.warn('[indexer] polymarket book subscription seed failed', error);
+});
+
+setInterval(() => {
+  void refreshPolymarketBookSubscriptions().catch((error: unknown) => {
+    console.warn('[indexer] polymarket book subscription refresh failed', error);
+  });
+}, POLYMARKET_BOOK_SUBSCRIPTION_REFRESH_MS);
+
+// ─── Shutdown ─────────────────────────────────────────────────────────────────
+
+/**
+ * Stop the book feed on the way out.
+ *
+ * `stop()` invalidates every cached book before closing the socket, so a
+ * deliberate shutdown cannot leave entries in Redis that look fresh while
+ * nothing is updating them. Registered for both signals because a container stop
+ * sends SIGTERM and an interactive run sends SIGINT.
+ */
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[indexer] ${signal} received; stopping the polymarket book feed`);
+  try {
+    polymarketBookRuntime.stop();
+  } catch (error) {
+    console.warn('[indexer] book feed shutdown failed', error);
+  }
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 console.log('[indexer] service running');

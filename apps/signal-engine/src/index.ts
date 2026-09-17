@@ -36,6 +36,7 @@ import {
   recordFanoutCapacityLedger,
   resolveFanoutCapacity
 } from './capacity-inputs.js';
+import { createPolymarketBookLiquidityReader } from './polymarket-book-reader.js';
 import { requirePolymarketSignalContext } from './polymarket-context.js';
 import { mayPatternTrade } from './trade-eligibility.js';
 import {
@@ -68,6 +69,33 @@ async function getClusterTier(clusterId: string): Promise<'elite' | 'pro' | 'pro
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const alertQueue = new Queue(QUEUES.alerts, { connection: redis });
+
+/**
+ * The Polymarket order-book read for the capacity gate (`S4-M38`, closing the
+ * feed `S4-M6` was waiting on).
+ *
+ * Built on the connection above rather than a second one: this is a single `GET`
+ * per polygon fan-out, on a path that already awaits three DB reads, so it does
+ * not warrant its own socket.
+ *
+ * The books are written by `indexer` (`polymarket-book-runtime.ts`). If that
+ * feed is not running, every read here is `book-not-cached`, which the gate turns
+ * into `capacity-unknown` and admits nobody on polygon — the fail-closed
+ * direction, and the same behaviour as before this was wired.
+ */
+const polymarketBookReader = createPolymarketBookLiquidityReader({
+  transport: {
+    get: (key) => redis.get(key),
+    set: async (key, value, ttlMs) => {
+      await redis.set(key, value, 'PX', Math.max(1, Math.ceil(ttlMs)));
+    },
+    mget: (keys) => redis.mget(...keys)
+  },
+  now: () => Date.now(),
+  logger: {
+    warn: (message, error) => console.warn(`[signal-engine] ${message}`, error ?? '')
+  }
+});
 
 /**
  * One trade queue per chain (D6 / S3-25). Created eagerly so a chain's first
@@ -249,6 +277,11 @@ async function planSignalFanout(
         tokenMint,
         poolTvlUsd,
         projection,
+        // Read inside `resolveFanoutCapacity`, after it resolves the cap in
+        // force, because the published reserve is calibrated to that exact cap.
+        readPolymarketBook: async (request) =>
+          (await polymarketBookReader.read(request)).liquidity,
+        cohortDirection: 'buy',
         now: new Date()
       });
       capacity = resolved.capacity;

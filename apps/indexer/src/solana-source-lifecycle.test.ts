@@ -51,7 +51,16 @@ vi.mock('@swat/db', () => ({
   refreshWalletActivity: vi.fn(),
   updateTokenLaunchTimestamp: vi.fn(),
   upsertToken: vi.fn(),
-  upsertWallet: vi.fn()
+  upsertWallet: vi.fn(),
+  // Booting `index.ts` starts the Polymarket book feed, which seeds its
+  // subscription set from here. A missing export does not read as `undefined` --
+  // it THROWS, and the throw lands in the seed's own `.catch`, so the feed would
+  // silently run its failure branch while this suite still went green.
+  loadPolymarketBookSubscriptionSet: vi.fn(async () => ({
+    tokenIds: [],
+    evicted: 0,
+    counts: { recentTrade: 0, openPosition: 0 }
+  }))
 }));
 
 vi.mock('@swat/shared', async (importOriginal) => ({
