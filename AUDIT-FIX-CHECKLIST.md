@@ -143,6 +143,83 @@ unchanged; only their kind is now visible.
 
 ---
 
+## How to test what has been built — added 2026-09-13
+
+**Asked by the operator: "at what stage can we test our build so far in case we have issues?"** The
+honest answer has three stages, because this branch has been built with **no database and no Redis**,
+and that determines exactly which faults are already impossible and which are still completely
+unobserved.
+
+### Stage A — runs today, needs nothing (and already passes)
+
+No infrastructure, no keys, no network. This is what has been run after every change:
+
+```bash
+pnpm --filter @swat/<pkg> typecheck     # per package; all 11 clean
+pnpm --filter @swat/<pkg> exec vitest run
+pnpm check:secrets                      # no browser-exposed secrets
+pnpm check:env                           # every governed env var documented
+```
+
+**2,567 tests pass across nine packages.** Do NOT run `pnpm build`, `pnpm dev` or
+`docker-compose up` — the operator's machine crashes on them. Per-package commands only.
+
+**What Stage A can prove:** every *decision* — who is eligible, what the cap admits, whether a book
+is stale, whether a figure is unknown rather than zero. These are pure functions with injected
+ports, and they are mutation-tested rather than merely green.
+
+**What Stage A structurally CANNOT prove, and this is the important half:** that any SQL runs, that
+any migration applies, that Redis round-trips, that a venue's field names still match, or that two
+processes agree on a wire format. Every one of those is mocked. A unit test cannot fail when
+Polymarket renames a field.
+
+### Stage B — needs Redis + outbound network (~5 minutes to set up)
+
+The first stage that exercises real I/O. One command, and it is the highest-value test available
+right now because it closes the single largest unknown on the branch:
+
+```bash
+pnpm acceptance:polymarket-book
+```
+
+Needs **Redis only** — deliberately *not* Postgres, so it can run before any migration has ever been
+applied. It discovers live markets from Polymarket's public Gamma API (nothing hardcoded, so it
+cannot rot), then checks six things in order: Redis reachable → `POST /books` returns rows → the rows
+carry a ladder → the live WebSocket delivers a snapshot → **the entry written by `indexer` comes back
+out of Redis decodable by `signal-engine`'s reader** → the depth model produces a *priced* verdict
+rather than a plausible unknown. It writes only its own book keys and deletes them on the way out;
+there is no order path in the file, so it cannot trade.
+
+That fifth step is the one that matters: it is the only place the bytes leave the process, and it is
+what 115 unit tests structurally cannot cover.
+
+Also runnable at this stage, against a throwaway database:
+
+```bash
+pnpm db:migrate                    # needs Postgres; applies all 57 migrations
+pnpm test:integration              # refuses to run unless the DB name ends _integration/_test
+pnpm acceptance:g0-d11
+pnpm acceptance:polymarket-context
+```
+
+**Expect failures here, and that is the point.** Nothing in `packages/db/sql/` has ever executed.
+The migrations are idempotent *by inspection*, which is not the same as verified.
+
+### Stage C — needs funded wallets and a reviewed certification
+
+Live execution stays gated behind `LIVE_ENABLED_CHAINS` **and** an active `chain_certifications` row.
+`TRADING_MODE=paper` and `AUTO_EXECUTE=false` stay set until that review happens. Everything in §0
+that is marked `(ext)` blocks this stage, not the two above it.
+
+### The recommendation
+
+**Set up Redis and run `pnpm acceptance:polymarket-book` before building anything further on top of
+the book feed.** It is five minutes of setup against a whole subsystem that has never touched a real
+socket, and a venue-shape surprise found now is cheap — found after the per-user sizing and billing
+work stacks on top of it, it is not.
+
+---
+
 ## 1. Verified baseline — updated 2026-08-05
 
 Measurements from an actual run, not claims carried forward.
@@ -785,7 +862,8 @@ existed, and the Solana dispatch cutover is wired behind
   **The verdict is carried, never recomputed.** `executionMode` and `mirrors` come from `planFanout`, which already clamped the mode by the platform gates (`S4-17`); re-deriving invites re-widening. **Mutation-verified: recomputing the mode fails 3 tests** — and the agent reported that its *first* attempt at that mutation caught only 1 test, because the original fixtures used `downgraded: true` alongside `paper`, which the mutation reproduced. It strengthened the fixture to a combination no other field can produce. **That is the mutation check working on the test rather than the code, which is the point of doing it.**
   **The operator path is emitted unconditionally** — no subscribers, fifty, or a failed enumeration — with a byte-identical id and no `userId` key at all. A `null` plan degrades to exactly today's behaviour.
   **Exclusion counts are logged**, with distinct wording when a fail-closed *unknown* dominates: `balance-unknown` reads as "balance feed outage suspected — check the balance poller, not user accounts", which is the `D3` diagnosis problem answered.
-  **⛔ Inert today, deliberately, and this is the reason for `[=]`.** `index.ts` passes `capacity: null`, so **every otherwise-eligible user is excluded with `capacity-unknown`.** `assessMasterCapacity` (`S4-M6`) is built but unwired, and its wiring needs a cohort notional projection, a pre-fan-out liquidity read, a follower count **and the ledger writer** — without the writer an empty ledger reads as "no capacity used" and the cap permits everything. Declaring `unassessablePolicy: 'admit'` would move real money through an uncapped cohort in exchange for a feature that merely looks finished. **`S4-M6` is the blocker; it is one function to change, logged by name on every fan-out plus a startup warning.**
+  **~~⛔ Inert today~~ — WIRED as of 2026-09-13.** *(The claim below described `index.ts` passing a hardcoded `capacity: null`; that is no longer what the code does, and a stale note asserting a gate that is closed is worse than no note.)* `index.ts` now calls `resolveFanoutCapacity`, which performs all four reads — cohort notional projection, pre-fan-out liquidity, follower count, and the ledger writer accruing at the confirmation funnel. Polygon's liquidity comes from the `S4-M38` book feed (`d8192ca`); Solana and Robinhood from pool TVL.
+  **`unassessablePolicy: 'skip'` was kept and must stay kept.** Declaring `'admit'` would move real money through a cohort whose impact nobody measured, in exchange for a fan-out that merely looks finished. So a chain with no working liquidity feed still admits nobody — that is the fail-closed direction, and if it happens the missing feed is the finding, not the policy.
   **`S3-25` unblocked this on 2026-08-20.** The per-chain queues are live with one concurrency-1 worker each, so fan-out no longer serialises every chain's users behind the slowest venue and a Polymarket settlement delay no longer stalls Solana copies. Resolve the queue with `tradeQueueForTokenMint()`; do not add a second derivation of a job's chain. Concurrency 1 per chain serialises a chain's jobs **within one executor process**, so it incidentally masks the `S4-M12` nonce race in the single-process case — but it is not a fix, and two windows remain open: the chain-agnostic `swat-trades` drain worker can pick a same-chain job concurrently with that chain's own worker (transient, only while the pre-split queue still has jobs), and a second executor replica reopens it permanently. `S4-M12` still has to land with this item.
 - [=] **S4-15** / **S4-16** / **S4-17** *(One pure module, done 2026-09-01: `apps/trade-executor/src/per-user-sizing.ts`, 60 tests. **`[=]` because nothing calls it** — the `index.ts` wiring is listed in `S4-M47`/`S4-M48` and below.)*
   **`S4-15` — no second sizing formula was written.** `calculateBalanceAwareSize`'s pre-clamp expression was extracted to `requestedBalanceAwareSize` so a clamp can be *attributed* without duplicating the maths; `policy.test.ts` (13) and `sizing-risk-policy.test.ts` (6) pass **unchanged**, which is the proof the extraction is behaviour-preserving. Proportionality is asserted directly in both axes: 2 units → 0.2 and 20 units → 2.0 at fixed percentage; 1% → 0.1 and 20% → 2.0 at fixed balance.
@@ -876,7 +954,8 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **One frozen user message for every cause**, digit-free, with tests asserting it matches no `\d`, `/follower/i`, `/liquidity/i`, `/impact/i` or `/bps/i` — because differing wording would itself distinguish "impact cap" from "follower cap", and the latter is a headcount signal (`S4-M9`). The specific code and figures travel beside it in a nested `internal`, so rendering them to a user is visible in review.
   **Mutation-verified:** disabling the follower soft-cap fails 6 tests; fabricating a liquidity figure fails 1; appending the reason code to the user message fails 3; disabling the per-user input guard fails 2.
   **POLYGON DEPTH DECIDED 2026-08-23: fetch the depth before the trade — and via the ingestion engine, not a per-order call.** The operator's choice was to read depth ahead of execution rather than accept `unassessed` for polygon. `S4-M38` is the design that makes that affordable: a background service streams books into Redis so the pre-trade read is a local microsecond lookup instead of a 100–300 ms round trip on the hot path. So this item's liquidity input for polygon comes from that cache, with the per-market staleness rule `S4-M38` specifies — **a stale local book must read as `unassessed`, never as truth**, which is exactly the input contract this module already has.
-  **Why unticked, and the trap in wiring it:** four things must land, all in `apps/` — a pre-fan-out liquidity fetch (new work for Polymarket), a cohort-level projected notional, an active-follower count per `(master, chain)`, and **the ledger writer**. Until the writer is wired, an empty ledger returns "no capacity used" and **the cap permits everything**, so the writer is part of the wiring rather than an optional extra.
+  **~~Why unticked, and the trap in wiring it~~ — ALL FOUR NOW LANDED.** *(2026-09-13.)* The pre-fan-out liquidity fetch was the last one and was the hard one, because Polymarket needed a feed built from nothing: `S4-M38` (`d8192ca`). The cohort notional, the follower count and **the ledger writer** landed in `401eb02` — the writer accrues at the confirmation funnel with before/after cumulative totals, so a BullMQ replay yields a zero delta and issues no statement. **The trap this entry warned about is closed: an unwired writer would have left an empty ledger reading as "no capacity used", permitting everything.**
+  **Remaining before this can be ticked `[x]`:** the cap is wired and the feed exists, but **no database and no Redis have ever run on this branch**, so `053`'s migration has never been applied, no ledger row has ever been written, and no Redis round trip has happened. Every part is proven against injected fakes. This stays `[ ]` until one integration run exercises: migration `053` applying cleanly, one fan-out writing one ledger row, and one polygon cohort admitted against a real book.
 - `[→]` **S4-M7** **Uniform skip and generic capacity messaging** — **pointer, not separate work.** The decision is recorded in `S4-P15`; the mechanism landed with `S4-M6` (one frozen, digit-free user message, tested against `/follower/i` and friends). Closes when `S4-M6` is wired.
 - [=] **S4-M43** *(Decision + enforcement done 2026-09-01: `packages/db/src/master-membership.ts`, 52 tests, migration `056`. **`[=]` because the concurrent-subscribe test cannot run without a database** — see the closing note.)*
   **Enforcement is a slot ordinal plus a partial unique index — a pigeonhole, not a count.** `membership_slot SMALLINT` with `CHECK 1..50` and `UNIQUE (wallet_address, membership_slot) WHERE membership_slot IS NOT NULL`. Range times uniqueness means exactly 50 ordinals exist per master, so **a 51st slot-holder is unrepresentable** — under arbitrary concurrency, against a future service that never read the module, and against a hand-typed `psql` INSERT. No application code has to be trusted, which is the property a `COUNT(*)`-then-INSERT can never have.
@@ -1133,13 +1212,18 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **The migration is structural, not a rename.** V1 is `GET /quote` then `POST /swap`, returning an assembled base64 transaction. V2 is a single **`GET /swap/v2/build`** returning **raw instructions you assemble yourself**, plus `blockhashWithMetadata` (blockhash in the response) and `addressesByLookupTableAddress` (**removes a separate RPC lookup — a latency win**). Also: `userPublicKey` becomes **`taker`**; `swapMode` is dropped (`/build` is ExactIn only); `routePlan` moves from `percent` to **`bps`**; `feeAccount` becomes required when `platformFeeBps > 0`; and a new `mode: "fast"` reduces latency.
   **The trap in the migration: V2 instructions emit no fee events.** Anything parsing fee transfers must switch to result amount fields or token balance deltas — **and `S4-P18` Jito tip accounting is exactly the kind of code that may read fee events.** Check it before switching, or tip accounting goes quietly wrong.
   **Done when:** we are on `/swap/v2/build`, `wrapAndUnwrapSol` is spelled correctly, **`forJitoBundle: true` is set**, tip accounting is confirmed not to depend on fee events, and the API-key/host question is resolved by a real request. *(Found 2026-08-20, LOW CONFIDENCE — unverified.)* `packages/shared/src/jupiter-swap.ts` posts `wrapUnwrapSOL`; current Jupiter may expect `wrapAndUnwrapSol`. If the name is wrong the API would **silently ignore it and use its default** rather than erroring, which is a quiet failure mode for a SOL unwrap. Could not be checked without network access. Needs one lookup against the live `/swap` schema before anyone trusts either spelling.
-- [=] **S4-M38** **Polymarket market-data ingestion engine — take the depth read off the hot path.** *(Designed 2026-08-22 with the operator; docs facts verified via MCP, latency shape verified by reading the code.)*
+- [x] **S4-M38** **Polymarket market-data ingestion engine — take the depth read off the hot path.** *(Designed 2026-08-22 with the operator; docs facts verified via MCP, latency shape verified by reading the code. **Feed closed end to end 2026-09-13, commit `d8192ca`.**)*
+  **DONE 2026-09-13 — the loop is closed and Polymarket can now be capacity-assessed.** Writer: `apps/indexer/src/polymarket-book-runtime.ts` (54 tests) — WebSocket over Node 22's built-in global (**no `ws` dependency**; adding a package for a platform built-in is supply-chain surface for nothing), `POST /books` chunked at the documented 500-id ceiling with bounded jittered backoff, and a composition root owning the heartbeat (10 s) and resync (15 s) timers with an **overlap guard** so a slow endpoint cannot stack concurrent POSTs. Reader: `apps/signal-engine/src/polymarket-book-reader.ts` (34 tests) — one Redis `GET`, one pure assessment, one `UsableLiquidity`. Subscription set: `packages/db/src/polymarket-book-subscriptions.ts` (27 tests) — the union of recently-traded and still-held markets, capped, evicting the **least** recently active.
+  **Calibration is why the read is deferred into `resolveFanoutCapacity` rather than passed in.** The published reserve is `C * 10_000 / capBps`, and that equality holds only at *its own* cap. The cap is per-master (`master_capacity_policy` overriding the platform default) and is resolved **inside** that function, so a caller pricing the book beforehand would re-read the same policy row and silently disagree whenever an operator set an override — **the wrong direction of which fails open.** `assertPolymarketBookLiquidityCalibration` makes a mismatch loud rather than arithmetic.
+  **Every failure path reads unknown, never 0 and never a last-known value** — absent key, stale entry, undecodable value, version skew, empty or crossed ladder, transport throw. Zero is a *figure*: it would read to the cap as "no liquidity" and produce a confident refusal, where unknown produces `capacity-unknown` and sends an operator to the feed.
+  **A defect found by mutation testing, fixed and pinned:** a throwing logger inside a timer callback escaped as an **unhandled rejection**, which terminates Node — a broken log transport would have taken down all-chain ingestion at the exact moment it was reporting a fault. The logger is now non-throwing, and a test fails if the wrapper is removed. **21 mutations** were run across the three modules and the two wirings; every one turned the suite red.
+  **Not verified, and this is the whole residual risk:** no database and no Redis exist on this branch, so **no Redis round trip and no live socket has ever executed**. The feed is proven against injected fakes only. The first real run needs watching for: the empirical WebSocket subscription ceiling (trap (c) below, still unmeasured), and whether `POST /books` accepts 500 ids in practice.
   **Depth model done 2026-09-06: `packages/shared/src/polymarket-book-depth.ts`, 37 tests. `[=]` because nothing populates the cache yet — no WebSocket subscriber exists.**
   **The central question answered, and the answer is no.** `priceImpactBps`'s constant-product algebra **cannot** consume a book-depth figure. It is `notional / reserve * 10_000`, exact for `x*y=k` because average execution price over spot is exactly `1 + dx/x`. **An order book has no `x`.** Substituting depth-within-bound for the reserve yields "fraction of the bounded book consumed, printed in bps" — a different quantity, compared against a ceiling denominated in *price impact*. Consuming all the depth would report 10,000 bps when true average impact is at most the bound: **wrong by a factor of `10_000/b`.**
   **A linear interpolation does not rescue it, and the reason matters.** `N / D(b) * b` looks conservative but a book with a sliver at the best price and a wall one tick below the bound has true impact ≈ `b` for almost every `N`, while the interpolation is near zero — **the fail-open direction, which is the one that admits a market-moving cohort.** The shape of the ladder determines the impact and no scalar summary preserves the shape. So book depth gets its own impact function: one walks the ladder, another inverts it.
   **What is handed to `S4-M6` is a calibrated equivalent reserve, not a fake conversion.** The consumer's decision is a single threshold test, so the module computes the true book capacity `C` and publishes `usableLiquidityUsd = C * 10_000 / capBps` — the reserve for which `priceImpactBps(N, reserve) <= capBps` **iff** `N <= C`, and for which `capacityNotionalUsd` returns exactly `C`. The admit/skip boundary is the true book boundary. **The cost is stated rather than buried:** away from that boundary the bps figures the consumer prints are budget-consumption readings, not price impact.
   **A stale entry reads unknown, never its last value** — and the age budget is two resync periods, so exactly one missed resync is tolerated. An empty cache is its own code, distinguishable from an observed zero. **Mutation-verified by the master agent: disabling the staleness comparison fails 5 tests; treating an absent entry as assessed fails 4.**
-  **Still open:** nothing populates the cache. It needs a market-WebSocket subscriber writing snapshots with an `observedAt`, plus the `UsableLiquidityBasis` addition on the `S4-M6` side so `usableLiquidityForFanout` stops hard-gating polygon. Until then Polymarket fan-out still excludes everyone with `capacity-unknown`.
+  **~~Still open: nothing populates the cache.~~** *(Closed 2026-09-13. The subscriber, the Redis writer, the reader and both service wirings all landed in `d8192ca`; `usableLiquidityForFanout` stopped hard-gating polygon in `401eb02`.)*
   **The problem, counted rather than estimated.** `triggerPolymarket` makes **four sequential external round trips before it posts an order**, with **zero `Promise.all`** among them: `listOpenOrders` (CLOB), `fetchBalanceAllowance` (CLOB), `fetchOrderBook` (CLOB), and `assertPolymarketMarketOpenForSubmission` (**Gamma — a different host**). Then it signs locally and posts. Under ADR-0005 latency *is* the product, so the target is not "make the book fetch faster" but "stop paying four serial trips".
   **No measured figure exists and none is invented here.** `S4-M22` deleted the old 60 s target precisely because no observed distribution existed. What is asserted is the *shape*: pre-submit cost is the sum of four serial internet round trips, one cross-host.
   **The design.** A single background ingestion service holds a WebSocket to Polymarket, maintains books in Redis, and the executor does a local read in place of trip 3. Which trips that actually removes, verified against the docs rather than assumed:
