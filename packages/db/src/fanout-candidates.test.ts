@@ -37,6 +37,7 @@ const sweep = () => crossTenantScope('fan-out enumeration');
 function candidateRow(overrides: Record<string, unknown> = {}) {
   return {
     user_id: USER_A,
+    active_since: new Date('2026-09-01T00:00:00.000Z'),
     subscription_state: 'active',
     tier: 'ultra',
     tier_expires_at: null,
@@ -104,6 +105,24 @@ describe('listFanoutCandidates — enumeration scope', () => {
     expect(sql).toContain('subscription.wallet_address = $1');
     expect(sql).not.toMatch(/cluster/i);
     expect(values[0]).toBe(MASTER);
+  });
+
+  it('selects active_since for the forward-only join boundary', async () => {
+    respondWith([]);
+    await listFanoutCandidates(sweep(), { masterWalletAddress: MASTER, chain: 'solana' });
+    expect(candidateSql()).toContain('subscription.active_since');
+    expect(candidateSql()).not.toContain('subscription.created_at');
+  });
+
+  it('maps active_since onto the candidate', async () => {
+    const activeSince = new Date('2026-09-03T00:00:00.000Z');
+    respondWith([candidateRow({ active_since: activeSince })], [balanceRow()]);
+    const [candidate] = await listFanoutCandidates(sweep(), {
+      masterWalletAddress: MASTER,
+      chain: 'solana',
+      now: NOW
+    });
+    expect(candidate!.activeSince).toEqual(activeSince);
   });
 
   it('excludes ended subscriptions in the WHERE clause', async () => {
@@ -220,7 +239,8 @@ describe('listFanoutCandidates — missing settings row', () => {
       masterWalletAddress: MASTER,
       tokenMint: 'solana:Mint111',
       direction: 'buy',
-      score: 90
+      score: 90,
+      eventAt: new Date('2026-09-02T00:00:00.000Z')
     };
     const platform: FanoutPlatformInputs = {
       chainMode: { effectiveMode: 'paper' },

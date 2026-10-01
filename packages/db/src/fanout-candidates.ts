@@ -88,6 +88,7 @@ export interface ListFanoutCandidatesInput {
 
 interface CandidateRow {
   user_id: string;
+  active_since: Date | null;
   /**
    * Typed `unknown` on purpose, matching `FanoutCandidate.subscriptionState`.
    *
@@ -209,6 +210,7 @@ export async function listFanoutCandidates(
   const rows = await query<CandidateRow>(
     `SELECT
        subscription.user_id,
+       subscription.active_since,
        subscription.state AS subscription_state,
        account.tier,
        account.tier_expires_at,
@@ -258,6 +260,7 @@ export async function listFanoutCandidates(
 
   return rows.map((row) => ({
     userId: row.user_id,
+    activeSince: row.active_since,
     subscriptionState: row.subscription_state,
     tier: toTier(row.tier),
     tierExpiresAt: row.tier_expires_at,

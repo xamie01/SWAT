@@ -247,7 +247,8 @@ async function planSignalFanout(
       masterWalletAddress: sourceTrade.walletAddress,
       tokenMint,
       direction: sourceTrade.side,
-      score
+      score,
+      eventAt: sourceTrade.eventAt
     };
     const platformWithoutCapacity = {
       chainMode,

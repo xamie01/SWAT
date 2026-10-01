@@ -59,6 +59,7 @@ const NOW = new Date('2026-09-05T12:00:00.000Z');
 function candidate(overrides: Partial<FanoutCandidate> = {}): FanoutCandidate {
   return {
     userId: overrides.userId ?? 'user-1',
+    activeSince: new Date('2026-09-01T00:00:00.000Z'),
     subscriptionState: 'active',
     tier: 'ultra',
     tierExpiresAt: null,
@@ -77,7 +78,8 @@ const SIGNAL: FanoutSignal = {
   masterWalletAddress: MASTER,
   tokenMint: TOKEN,
   direction: 'buy',
-  score: 90
+  score: 90,
+  eventAt: new Date('2026-09-02T00:00:00.000Z')
 };
 
 const PLATFORM: Omit<FanoutPlatformInputs, 'capacity'> = {
