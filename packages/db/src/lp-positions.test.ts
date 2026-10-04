@@ -19,7 +19,7 @@ vi.mock('./client.js', () => ({
   pool: { connect: mocks.connect }
 }));
 
-import { createLpPosition, listPositionsForMonitor, transitionLpPosition } from './lp-positions.js';
+import { createLpPosition, listPositionsForMonitor, sumOpenLpDeposits, sumOpenLpPoolExposure, transitionLpPosition } from './lp-positions.js';
 import { crossTenantScope, forUser } from './tenancy.js';
 
 const scope = forUser('11111111-1111-1111-1111-111111111111');
@@ -197,5 +197,24 @@ describe('lp-positions state machine', () => {
     expect(String(sql)).toContain("state IN ('active', 'near_edge', 'out_of_range')");
     expect(params[0]).toBe('solana');
     expect(params[1]).toBe(100);
+  });
+
+  it('exposure sums read open positions only, scoped by user and pool', async () => {
+    mocks.query.mockImplementation(async () => [{ total: '2500' }]);
+
+    await expect(sumOpenLpDeposits(scope)).resolves.toBe(2500);
+    const [totalSql] = mocks.query.mock.calls[0];
+    expect(String(totalSql)).toContain("state <> 'closed'");
+    expect(String(totalSql)).toContain('user_id = $1');
+
+    await expect(sumOpenLpPoolExposure(scope, 'solana', 'solana:pool')).resolves.toBe(2500);
+    const [poolSql, poolParams] = mocks.query.mock.calls[1];
+    expect(String(poolSql)).toContain('pool_address = $3');
+    expect(poolParams).toEqual([scope.userId, 'solana', 'solana:pool']);
+  });
+
+  it('an empty exposure sum reads as 0, not null', async () => {
+    mocks.query.mockImplementation(async () => [{ total: null }]);
+    await expect(sumOpenLpDeposits(scope)).resolves.toBe(0);
   });
 });

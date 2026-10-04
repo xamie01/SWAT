@@ -346,3 +346,37 @@ export async function attachOnChainPositionAddress(
     [positionId, scope.userId, onChainPositionAddress]
   );
 }
+
+/**
+ * Total open LP capital for a user, summed over non-closed positions. The
+ * exposure cap (Track G1) measures a pool against this base, so a position
+ * closing must shrink the base immediately — hence the state filter here
+ * rather than a cached total.
+ */
+export async function sumOpenLpDeposits(scope: UserScope): Promise<number> {
+  const rows = await query<{ total: number | string | null }>(
+    `SELECT SUM(deposit_amount) AS total FROM lp_positions
+      WHERE user_id = $1 AND state <> 'closed'`,
+    [scope.userId]
+  );
+  const total = rows[0]?.total;
+  return total === null || total === undefined ? 0 : toSafeNumber(total);
+}
+
+/**
+ * The user's open capital currently committed to one pool. Chain rides along
+ * because pool addresses are chain-prefixed and unique per chain.
+ */
+export async function sumOpenLpPoolExposure(
+  scope: UserScope,
+  chain: LpChain,
+  poolAddress: string
+): Promise<number> {
+  const rows = await query<{ total: number | string | null }>(
+    `SELECT SUM(deposit_amount) AS total FROM lp_positions
+      WHERE user_id = $1 AND chain = $2 AND pool_address = $3 AND state <> 'closed'`,
+    [scope.userId, chain, poolAddress]
+  );
+  const total = rows[0]?.total;
+  return total === null || total === undefined ? 0 : toSafeNumber(total);
+}
