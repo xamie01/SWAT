@@ -39,6 +39,7 @@ const poolRow = (overrides: Record<string, unknown> = {}) => ({
   fee_bps: 20,
   bin_step: 10,
   tick_spacing: null,
+  current_price: 150.25,
   tvl: 1_000_000,
   active_tvl: 400_000,
   volume_24h: 900_000,

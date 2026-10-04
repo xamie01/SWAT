@@ -31,6 +31,8 @@ export interface LpPool {
   readonly feeBps: number;
   readonly binStep: number | null;
   readonly tickSpacing: number | null;
+  /** Quote-per-base at scan time; null when the chain read failed. */
+  readonly currentPrice: number | null;
   /** `null` reads as "stored NUMERIC does not fit a float64" — never coerce to 0. */
   readonly tvl: number | null;
   readonly activeTvl: number | null;
@@ -55,6 +57,7 @@ interface PoolRow {
   fee_bps: number | string;
   bin_step: number | null;
   tick_spacing: number | null;
+  current_price: number | string | null;
   tvl: number | string | null;
   active_tvl: number | string | null;
   volume_24h: number | string | null;
@@ -68,7 +71,7 @@ interface PoolRow {
 
 const POOL_COLUMNS =
   'id, chain, protocol, pool_address, pair_label, base_token_mint, quote_token_mint, ' +
-  'fee_bps, bin_step, tick_spacing, tvl, active_tvl, volume_24h, fee_apr_24h, fee_apr_7d, ' +
+  'fee_bps, bin_step, tick_spacing, current_price, tvl, active_tvl, volume_24h, fee_apr_24h, fee_apr_7d, ' +
   'risk_score, risk_flags, last_scanned_at, created_at';
 
 /** NUMERIC arrives as number (fits float64) or string (does not) — never round silently. */
@@ -90,6 +93,7 @@ function toPool(row: PoolRow): LpPool {
     feeBps: Number(row.fee_bps),
     binStep: row.bin_step,
     tickSpacing: row.tick_spacing,
+    currentPrice: toSafeNumber(row.current_price),
     tvl: toSafeNumber(row.tvl),
     activeTvl: toSafeNumber(row.active_tvl),
     volume24h: toSafeNumber(row.volume_24h),
@@ -115,6 +119,7 @@ export interface UpsertLpPoolInput {
   readonly feeBps: number;
   readonly binStep?: number | null;
   readonly tickSpacing?: number | null;
+  readonly currentPrice?: number | null;
   readonly tvl: number;
   readonly activeTvl: number;
   readonly volume24h: number;
@@ -148,9 +153,9 @@ export async function upsertLpPool(input: UpsertLpPoolInput): Promise<LpPool> {
   const rows = await query<PoolRow>(
     `INSERT INTO lp_pools
        (chain, protocol, pool_address, pair_label, base_token_mint, quote_token_mint,
-        fee_bps, bin_step, tick_spacing, tvl, active_tvl, volume_24h,
+        fee_bps, bin_step, tick_spacing, current_price, tvl, active_tvl, volume_24h,
         fee_apr_24h, fee_apr_7d, last_scanned_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
      ON CONFLICT (chain, protocol, pool_address) DO UPDATE
        SET pair_label        = EXCLUDED.pair_label,
            base_token_mint   = EXCLUDED.base_token_mint,
@@ -158,6 +163,7 @@ export async function upsertLpPool(input: UpsertLpPoolInput): Promise<LpPool> {
            fee_bps           = EXCLUDED.fee_bps,
            bin_step          = EXCLUDED.bin_step,
            tick_spacing      = EXCLUDED.tick_spacing,
+           current_price     = EXCLUDED.current_price,
            tvl               = EXCLUDED.tvl,
            active_tvl        = EXCLUDED.active_tvl,
            volume_24h        = EXCLUDED.volume_24h,
@@ -175,6 +181,7 @@ export async function upsertLpPool(input: UpsertLpPoolInput): Promise<LpPool> {
       input.feeBps,
       input.binStep ?? null,
       input.tickSpacing ?? null,
+      input.currentPrice ?? null,
       input.tvl,
       input.activeTvl,
       input.volume24h,

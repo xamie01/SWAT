@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS lp_pools (
   fee_bps           NUMERIC(12,4) NOT NULL DEFAULT 0 CHECK (fee_bps >= 0),
   bin_step          INTEGER,
   tick_spacing      INTEGER,
+  -- Quote-per-base at scan time; anchors ladder planning between scans.
+  current_price     NUMERIC,
   tvl               NUMERIC NOT NULL DEFAULT 0 CHECK (tvl >= 0),
   active_tvl        NUMERIC NOT NULL DEFAULT 0 CHECK (active_tvl >= 0),
   volume_24h        NUMERIC NOT NULL DEFAULT 0 CHECK (volume_24h >= 0),
