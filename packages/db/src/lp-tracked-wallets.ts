@@ -1,0 +1,312 @@
+import type { LpChain } from '@swat/shared';
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
+
+/**
+ * Tracked LP wallets and their observation tables (`059`, Track D).
+ *
+ * The pipeline: the wallet indexer records an observation pass into
+ * `lp_wallet_snapshots` (raw time series), the PnL calculator (apps/lp Track
+ * D3, using the shared net-LP-result function) closes the books per position
+ * into `lp_wallet_position_results`, and the leaderboard aggregates only the
+ * results table — the screen never re-derives PnL from raw series at request
+ * time.
+ *
+ * Tracked wallets are external addresses (not tenants), so nothing here takes a
+ * UserScope. They are all chain-prefixed, same shape as
+ * `source_trades.wallet_address`.
+ */
+
+export interface TrackedLpWallet {
+  readonly id: string;
+  readonly chain: LpChain;
+  /** Chain-prefixed. */
+  readonly walletAddress: string;
+  readonly label: string | null;
+  readonly pollingCadenceSeconds: number;
+  readonly lastIndexedAt: Date | null;
+  readonly createdAt: Date;
+}
+
+interface WalletRow {
+  id: string;
+  chain: LpChain;
+  wallet_address: string;
+  label: string | null;
+  polling_cadence_seconds: number;
+  last_indexed_at: Date | null;
+  created_at: Date;
+}
+
+const WALLET_COLUMNS =
+  'id, chain, wallet_address, label, polling_cadence_seconds, last_indexed_at, created_at';
+
+function toWallet(row: WalletRow): TrackedLpWallet {
+  return {
+    id: row.id,
+    chain: row.chain,
+    walletAddress: row.wallet_address,
+    label: row.label,
+    pollingCadenceSeconds: row.polling_cadence_seconds,
+    lastIndexedAt: row.last_indexed_at,
+    createdAt: row.created_at
+  };
+}
+
+export interface TrackLpWalletInput {
+  readonly chain: LpChain;
+  /** Chain-prefixed. */
+  readonly walletAddress: string;
+  readonly label?: string | null;
+  readonly pollingCadenceSeconds?: number;
+}
+
+export async function trackLpWallet(input: TrackLpWalletInput): Promise<TrackedLpWallet> {
+  if (input.walletAddress.indexOf(':') < 0) {
+    throw new Error('tracked wallet address must be chain-prefixed');
+  }
+  const cadence = input.pollingCadenceSeconds ?? 300;
+  if (!Number.isInteger(cadence) || cadence < 30 || cadence > 86_400) {
+    throw new Error(`polling cadence must be an integer in 30..86400 seconds, got ${cadence}`);
+  }
+  const rows = await query<WalletRow>(
+    `INSERT INTO lp_tracked_wallets (chain, wallet_address, label, polling_cadence_seconds)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (chain, wallet_address) DO UPDATE
+       SET label = COALESCE(EXCLUDED.label, lp_tracked_wallets.label),
+           polling_cadence_seconds = EXCLUDED.polling_cadence_seconds
+     RETURNING ${WALLET_COLUMNS}`,
+    [input.chain, input.walletAddress, input.label ?? null, cadence]
+  );
+  return toWallet(rows[0]!);
+}
+
+export async function untrackLpWallet(chain: LpChain, walletAddress: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `DELETE FROM lp_tracked_wallets WHERE chain = $1 AND wallet_address = $2 RETURNING id`,
+    [chain, walletAddress]
+  );
+  return rows.length > 0;
+}
+
+export async function listTrackedLpWallets(options: { chain?: LpChain; limit?: number } = {}): Promise<TrackedLpWallet[]> {
+  const limit = options.limit ?? 500;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 2000) {
+    throw new Error(`listTrackedLpWallets limit must be an integer in 1..2000, got ${limit}`);
+  }
+  const rows = options.chain
+    ? await query<WalletRow>(
+        `SELECT ${WALLET_COLUMNS} FROM lp_tracked_wallets WHERE chain = $1 ORDER BY created_at LIMIT $2`,
+        [options.chain, limit]
+      )
+    : await query<WalletRow>(
+        `SELECT ${WALLET_COLUMNS} FROM lp_tracked_wallets ORDER BY created_at LIMIT $1`,
+        [limit]
+      );
+  return rows.map(toWallet);
+}
+
+/** One observed position in an index pass. */
+export interface WalletPositionObservation {
+  /** Chain-prefixed. */
+  readonly positionAddress: string;
+  /** Chain-prefixed. */
+  readonly poolAddress: string;
+  readonly capturedAt: Date;
+  readonly positionValueUsd: number;
+  readonly uncollectedFeesUsd: number;
+  readonly inRange: boolean;
+}
+
+function assertObservationUsd(name: string, value: number): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`lp_wallet_snapshots.${name} must be a non-negative finite number, got ${value}`);
+  }
+}
+
+/**
+ * Records one index pass for a wallet: the snapshot rows and the freshness
+ * stamp land in one transaction, so a wallet is never marked indexed with
+ * observations that failed to write.
+ */
+export async function recordLpWalletIndexPass(
+  trackedWalletId: string,
+  observations: readonly WalletPositionObservation[]
+): Promise<void> {
+  for (const observation of observations) {
+    assertObservationUsd('position_value_usd', observation.positionValueUsd);
+    assertObservationUsd('uncollected_fees_usd', observation.uncollectedFeesUsd);
+    if (observation.positionAddress.indexOf(':') < 0) {
+      throw new Error('observation position address must be chain-prefixed');
+    }
+  }
+
+  await withTransaction(async (client) => {
+    for (const observation of observations) {
+      await client.query(
+        `INSERT INTO lp_wallet_snapshots
+           (tracked_wallet_id, position_address, pool_address, captured_at,
+            position_value_usd, uncollected_fees_usd, in_range)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (tracked_wallet_id, position_address, captured_at) DO NOTHING`,
+        [
+          trackedWalletId,
+          observation.positionAddress,
+          observation.poolAddress,
+          observation.capturedAt,
+          observation.positionValueUsd,
+          observation.uncollectedFeesUsd,
+          observation.inRange
+        ]
+      );
+    }
+    await client.query(
+      `UPDATE lp_tracked_wallets SET last_indexed_at = NOW() WHERE id = $1`,
+      [trackedWalletId]
+    );
+  });
+}
+
+export interface WalletPositionResultInput {
+  /** Chain-prefixed. */
+  readonly positionAddress: string;
+  /** Chain-prefixed. */
+  readonly poolAddress: string;
+  readonly chain: LpChain;
+  readonly strategyType: 'spot' | 'curve' | 'bidask';
+  readonly netResultUsd: number;
+  readonly firstObservedAt: Date;
+  readonly lastObservedAt: Date;
+  readonly closed: boolean;
+}
+
+/** Track D3 output: one closed book per position. Upsert, keyed by (wallet, position). */
+export async function upsertLpWalletPositionResult(
+  trackedWalletId: string,
+  input: WalletPositionResultInput
+): Promise<void> {
+  if (!Number.isFinite(input.netResultUsd)) {
+    throw new Error(`net_result_usd must be finite, got ${input.netResultUsd}`);
+  }
+  await query(
+    `INSERT INTO lp_wallet_position_results
+       (tracked_wallet_id, position_address, pool_address, chain, strategy_type,
+        net_result_usd, first_observed_at, last_observed_at, closed, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+     ON CONFLICT (tracked_wallet_id, position_address) DO UPDATE
+       SET net_result_usd    = EXCLUDED.net_result_usd,
+           last_observed_at  = EXCLUDED.last_observed_at,
+           closed            = EXCLUDED.closed,
+           updated_at        = EXCLUDED.updated_at`,
+    [
+      trackedWalletId,
+      input.positionAddress,
+      input.poolAddress,
+      input.chain,
+      input.strategyType,
+      input.netResultUsd,
+      input.firstObservedAt,
+      input.lastObservedAt,
+      input.closed
+    ]
+  );
+}
+
+export type LeaderboardSort = 'pnl' | 'winRate';
+
+export interface LpLeaderboardEntry {
+  readonly trackedWalletId: string;
+  readonly chain: LpChain;
+  /** Chain-prefixed. */
+  readonly walletAddress: string;
+  readonly label: string | null;
+  readonly realizedPnlUsd: number;
+  /** Closed positions only; `null` when the wallet has no closed positions yet. */
+  readonly winRate: number | null;
+  readonly closedPositionCount: number;
+  readonly dominantStrategyType: 'spot' | 'curve' | 'bidask' | null;
+}
+
+interface LeaderboardRow {
+  tracked_wallet_id: string;
+  chain: LpChain;
+  wallet_address: string;
+  label: string | null;
+  realized_pnl_usd: number | string;
+  win_rate: number | string | null;
+  closed_position_count: number | string;
+  dominant_strategy_type: 'spot' | 'curve' | 'bidask' | null;
+}
+
+/**
+ * The LP Wallets screen. Win rate counts closed positions only — an open
+ * position has no realized result to vote on — and `dominant_strategy_type` is
+ * the modal strategy across all observed positions.
+ */
+export async function queryLpWalletLeaderboard(options: {
+  chain?: LpChain;
+  sort?: LeaderboardSort;
+  limit?: number;
+} = {}): Promise<LpLeaderboardEntry[]> {
+  const limit = options.limit ?? 25;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error(`queryLpWalletLeaderboard limit must be an integer in 1..100, got ${limit}`);
+  }
+  const sortExpression = options.sort === 'winRate'
+    ? 'win_rate DESC NULLS LAST, realized_pnl_usd DESC'
+    : 'realized_pnl_usd DESC';
+
+  const rows = options.chain
+    ? await query<LeaderboardRow>(
+        `SELECT
+           w.id                                   AS tracked_wallet_id,
+           w.chain                                AS chain,
+           w.wallet_address                       AS wallet_address,
+           w.label                                AS label,
+           COALESCE(SUM(r.net_result_usd), 0)     AS realized_pnl_usd,
+           CASE WHEN COUNT(*) FILTER (WHERE r.closed) > 0
+                THEN COUNT(*) FILTER (WHERE r.closed AND r.net_result_usd > 0)::numeric
+                     / COUNT(*) FILTER (WHERE r.closed)
+                END                                AS win_rate,
+           COUNT(*) FILTER (WHERE r.closed)        AS closed_position_count,
+           MODE() WITHIN GROUP (ORDER BY r.strategy_type) AS dominant_strategy_type
+         FROM lp_tracked_wallets w
+         JOIN lp_wallet_position_results r ON r.tracked_wallet_id = w.id
+         WHERE w.chain = $1
+         GROUP BY w.id, w.chain, w.wallet_address, w.label
+         ORDER BY ${sortExpression}
+         LIMIT $2`,
+        [options.chain, limit]
+      )
+    : await query<LeaderboardRow>(
+        `SELECT
+           w.id                                   AS tracked_wallet_id,
+           w.chain                                AS chain,
+           w.wallet_address                       AS wallet_address,
+           w.label                                AS label,
+           COALESCE(SUM(r.net_result_usd), 0)     AS realized_pnl_usd,
+           CASE WHEN COUNT(*) FILTER (WHERE r.closed) > 0
+                THEN COUNT(*) FILTER (WHERE r.closed AND r.net_result_usd > 0)::numeric
+                     / COUNT(*) FILTER (WHERE r.closed)
+                END                                AS win_rate,
+           COUNT(*) FILTER (WHERE r.closed)        AS closed_position_count,
+           MODE() WITHIN GROUP (ORDER BY r.strategy_type) AS dominant_strategy_type
+         FROM lp_tracked_wallets w
+         JOIN lp_wallet_position_results r ON r.tracked_wallet_id = w.id
+         GROUP BY w.id, w.chain, w.wallet_address, w.label
+         ORDER BY ${sortExpression}
+         LIMIT $1`,
+        [limit]
+      );
+
+  return rows.map((row) => ({
+    trackedWalletId: row.tracked_wallet_id,
+    chain: row.chain,
+    walletAddress: row.wallet_address,
+    label: row.label,
+    realizedPnlUsd: Number(row.realized_pnl_usd),
+    winRate: row.win_rate === null ? null : Number(row.win_rate),
+    closedPositionCount: Number(row.closed_position_count),
+    dominantStrategyType: row.dominant_strategy_type
+  }));
+}
