@@ -10,7 +10,9 @@ const dbMocks = vi.hoisted(() => ({
   forUser: vi.fn((userId: string) => ({ userId })),
   getLpPosition: vi.fn(),
   setLpPositionAutoRebalance: vi.fn(),
-  transitionLpPosition: vi.fn()
+  transitionLpPosition: vi.fn(),
+  trackLpWallet: vi.fn(),
+  untrackLpWallet: vi.fn()
 }));
 vi.mock('@swat/db', () => dbMocks);
 
@@ -312,27 +314,28 @@ describe('LP routes (Track H)', () => {
     });
   });
 
-  describe('manual rebalance trigger (Track I)', () => {
-    const owned = {
-      id: 'pos-1',
-      userId: 'user-1',
-      chain: 'solana',
-      protocol: 'meteora-dlmm',
-      poolAddress: 'solana:pool',
-      strategyType: 'spot',
-      rangeLower: 0.29,
-      rangeUpper: 0.31,
-      rungAllocations: [],
-      depositAmount: 1000,
-      depositAsset: 'solana:usdc',
-      state: 'active',
-      onChainPositionAddress: null,
-      autoRebalance: false,
-      openedAt: new Date(),
-      closedAt: null,
-      updatedAt: new Date()
-    };
+  // A shape-complete owned position shared by the stateful-route tests below.
+  const owned = {
+    id: 'pos-1',
+    userId: 'user-1',
+    chain: 'solana',
+    protocol: 'meteora-dlmm',
+    poolAddress: 'solana:pool',
+    strategyType: 'spot',
+    rangeLower: 0.29,
+    rangeUpper: 0.31,
+    rungAllocations: [],
+    depositAmount: 1000,
+    depositAsset: 'solana:usdc',
+    state: 'active',
+    onChainPositionAddress: null,
+    autoRebalance: false,
+    openedAt: new Date(),
+    closedAt: null,
+    updatedAt: new Date()
+  };
 
+  describe('manual rebalance trigger (Track I)', () => {
     it('queues the job, transitions to rebalancing, and reports both', async () => {
       const queueManualRebalance = vi.fn(async () => undefined);
       const app = await buildApp({ queueManualRebalance });
@@ -422,6 +425,125 @@ describe('LP routes (Track H)', () => {
       expect(response.statusCode).toBe(403);
       expect(response.json().code).toBe('csrf_invalid');
       expect(dbMocks.setLpPositionAutoRebalance).not.toHaveBeenCalled();
+      await app.close();
+    });
+  });
+
+  describe('close endpoint', () => {
+    it('closes an open position through the state machine', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.getLpPosition.mockResolvedValue({ ...owned, state: 'active' });
+      dbMocks.transitionLpPosition.mockResolvedValue({ ...owned, state: 'closed' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/positions/pos-1/close',
+        headers: sessionHeaders()
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ positionId: 'pos-1', state: 'closed' });
+      expect(dbMocks.transitionLpPosition).toHaveBeenCalledWith(
+        expect.anything(),
+        'pos-1',
+        expect.objectContaining({ toState: 'closed' })
+      );
+      await app.close();
+    });
+
+    it('refuses unknown and already-closed positions', async () => {
+      const app = await buildApp();
+      await app.ready();
+
+      dbMocks.getLpPosition.mockResolvedValue(null);
+      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-9/close', headers: sessionHeaders() })).statusCode).toBe(404);
+
+      dbMocks.getLpPosition.mockResolvedValue({ ...owned, state: 'closed' });
+      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-1/close', headers: sessionHeaders() })).statusCode).toBe(409);
+      await app.close();
+    });
+  });
+
+  describe('tracked-wallet on-ramp (service key only)', () => {
+    it('tracks a chain-prefixed wallet with the service key', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.trackLpWallet.mockResolvedValue({
+        id: 'w-1',
+        chain: 'solana',
+        walletAddress: 'solana:9xQe',
+        label: null,
+        pollingCadenceSeconds: 300,
+        lastIndexedAt: null,
+        createdAt: new Date()
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/wallets',
+        headers: serviceHeaders,
+        payload: { chain: 'solana', walletAddress: 'solana:9xQe', label: 'whale' }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(dbMocks.trackLpWallet).toHaveBeenCalledWith(
+        expect.objectContaining({ chain: 'solana', walletAddress: 'solana:9xQe', label: 'whale' })
+      );
+      await app.close();
+    });
+
+    it('a user session cannot track wallets — they are platform data, not tenant data', async () => {
+      const app = await buildApp();
+      await app.ready();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/wallets',
+        headers: sessionHeaders(),
+        payload: { chain: 'solana', walletAddress: 'solana:9xQe' }
+      });
+      expect(response.statusCode).toBe(403);
+      expect(dbMocks.trackLpWallet).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it('validates chain and prefix before touching the store', async () => {
+      const app = await buildApp();
+      await app.ready();
+
+      const badChain = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/wallets',
+        headers: serviceHeaders,
+        payload: { chain: 'ethereum', walletAddress: '0xabc' }
+      });
+      expect(badChain.statusCode).toBe(400);
+
+      const bare = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/wallets',
+        headers: serviceHeaders,
+        payload: { chain: 'solana', walletAddress: '9xQe' }
+      });
+      expect(bare.statusCode).toBe(400);
+      expect(dbMocks.trackLpWallet).not.toHaveBeenCalled();
+      await app.close();
+    });
+
+    it('untracks through the query string and reports whether a row was removed', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.untrackLpWallet.mockResolvedValue(true);
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/v1/lp/wallets?chain=solana&walletAddress=solana:9xQe',
+        headers: serviceHeaders
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ removed: true });
+      expect(dbMocks.untrackLpWallet).toHaveBeenCalledWith('solana', 'solana:9xQe');
       await app.close();
     });
   });

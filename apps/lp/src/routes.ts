@@ -5,7 +5,9 @@ import {
   listLpPositions,
   queryLpWalletLeaderboard,
   setLpPositionAutoRebalance,
+  trackLpWallet,
   transitionLpPosition,
+  untrackLpWallet,
   type UserScope
 } from '@swat/db';
 import type { LpChain } from '@swat/shared';
@@ -18,14 +20,19 @@ import type { LpStrategyType } from '@swat/db';
 const STRATEGY_DISTRIBUTIONS: readonly LpStrategyType[] = ['spot', 'curve', 'bidask'];
 
 /**
- * API / dashboard wiring (Track H) — five routes over the finished tracks:
+ * API / dashboard wiring (Track H + Track I) — the LP service's routes:
  *
- *   1. `GET /v1/lp/discover`            — Track B+C output, paginated + sortable.
- *   2. `GET /v1/lp/wallets/leaderboard` — Track D output.
- *   3. `GET /v1/lp/positions`           — Track F output (open positions, live
- *                                         PnL inputs, rebalance flag).
- *   4. `GET /v1/lp/strategy-templates`  — Track E5 presets.
- *   5. `POST /v1/lp/positions/deploy`   — Track E6 behind Track G1.
+ *   1. `GET  /v1/lp/discover`            — Track B+C output, paginated + sortable.
+ *   2. `GET  /v1/lp/wallets/leaderboard` — Track D output.
+ *   3. `GET  /v1/lp/positions`           — Track F output (open positions, live
+ *                                          PnL inputs, rebalance flag).
+ *   4. `GET  /v1/lp/strategy-templates`  — Track E5 presets.
+ *   5. `POST /v1/lp/positions/deploy`    — Track E6 behind Track G1.
+ *   6. `GET  /v1/lp/ladder-preview`      — Track I2 read-only live preview.
+ *   7. `POST /v1/lp/positions/:id/rebalance`      — Track I manual trigger.
+ *   8. `PATCH /v1/lp/positions/:id/auto-rebalance` — Track I opt-in toggle.
+ *   9. `POST /v1/lp/positions/:id/close` — exit from every open state.
+ *   10. `POST/DELETE /v1/lp/wallets`     — tracked-wallet on-ramp (service key).
  *
  * Static routes register before any parameterized ones (Fastify's match order),
  * the auth plugin registers before routes so `request.principal` is populated,
@@ -289,7 +296,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       if (error instanceof Error && (
         error.message.includes('must be') || error.message.includes('required')
         || error.message.includes('not in the scan cache') || error.message.includes('is off')
-        || error.message.includes('not both')
+        || error.message.includes('not both') || error.message.includes('no current price')
+        || error.message.includes('chain-prefixed')
       )) {
         return reply.code(400).send({ error: error.message });
       }
@@ -352,6 +360,83 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     }
     await setLpPositionAutoRebalance(scope, positionId, body.enabled);
     return { positionId, autoRebalance: body.enabled };
+  });
+
+  // Close a position. The state machine allows every open state -> closed
+  // (including `building`, so a stuck or unwanted build has an exit). The
+  // profit-bank sweep (G2) is deliberately NOT invoked here: it needs a
+  // realized-gain valuation from live position reads, which paper mode does
+  // not have — wiring it to a client-supplied gain would trust the caller to
+  // price its own sweep.
+  app.post('/v1/lp/positions/:positionId/close', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { positionId } = request.params as { positionId: string };
+
+    const position = await getLpPosition(scope, positionId);
+    if (!position) {
+      return reply.code(404).send({ error: 'position not found' });
+    }
+    if (position.state === 'closed') {
+      return reply.code(409).send({ error: 'position is already closed' });
+    }
+
+    try {
+      await transitionLpPosition(scope, positionId, {
+        toState: 'closed',
+        reason: 'user close (dashboard)'
+      });
+    } catch (error) {
+      return reply.code(409).send({
+        error: error instanceof Error ? error.message : 'transition refused'
+      });
+    }
+    return { positionId, state: 'closed' };
+  });
+
+  // Tracked-wallet on-ramp (Track D). Tracked wallets are external addresses,
+  // not tenants — the leaderboard is platform data — so these are
+  // service-key-only routes and never accept a user session.
+  app.post('/v1/lp/wallets', async (request, reply) => {
+    if (request.principal?.kind !== 'service') {
+      return reply.code(403).send({ error: 'service key required' });
+    }
+    const body = request.body as {
+      chain?: string;
+      walletAddress?: string;
+      label?: string;
+      pollingCadenceSeconds?: number;
+    };
+    if (!body.chain || (body.chain !== 'solana' && body.chain !== 'robinhood-chain')) {
+      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    }
+    if (!body.walletAddress || !body.walletAddress.startsWith(`${body.chain}:`)) {
+      return reply.code(400).send({ error: 'walletAddress must be chain-prefixed' });
+    }
+    const wallet = await trackLpWallet({
+      chain: body.chain,
+      walletAddress: body.walletAddress,
+      label: body.label ?? null,
+      pollingCadenceSeconds: body.pollingCadenceSeconds
+    });
+    return wallet;
+  });
+
+  app.delete('/v1/lp/wallets', async (request, reply) => {
+    if (request.principal?.kind !== 'service') {
+      return reply.code(403).send({ error: 'service key required' });
+    }
+    const query = request.query as Record<string, unknown>;
+    const chain = typeof query.chain === 'string' ? query.chain : undefined;
+    const walletAddress = typeof query.walletAddress === 'string' ? query.walletAddress : undefined;
+    if (!chain || (chain !== 'solana' && chain !== 'robinhood-chain')) {
+      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    }
+    if (!walletAddress || !walletAddress.startsWith(`${chain}:`)) {
+      return reply.code(400).send({ error: 'walletAddress must be chain-prefixed' });
+    }
+    const removed = await untrackLpWallet(chain, walletAddress);
+    return { removed };
   });
 }
 
