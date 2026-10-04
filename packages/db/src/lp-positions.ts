@@ -52,6 +52,12 @@ export interface LpPosition {
   readonly state: LpPositionState;
   /** Chain-prefixed; null while building or paper-only. */
   readonly onChainPositionAddress: string | null;
+  /**
+   * Track I: the owner's opt-in to automatic rebalancing. The scheduled
+   * monitor only queues rebalances for opted-in positions; manual triggers
+   * bypass this flag (the user IS the consent).
+   */
+  readonly autoRebalance: boolean;
   readonly openedAt: Date;
   readonly closedAt: Date | null;
   readonly updatedAt: Date;
@@ -71,6 +77,7 @@ interface PositionRow {
   deposit_asset: string;
   state: LpPositionState;
   on_chain_position_address: string | null;
+  auto_rebalance: boolean;
   opened_at: Date;
   closed_at: Date | null;
   updated_at: Date;
@@ -79,7 +86,7 @@ interface PositionRow {
 const POSITION_COLUMNS =
   'id, user_id, chain, protocol, pool_address, strategy_type, range_lower, range_upper, ' +
   'rung_allocations, deposit_amount, deposit_asset, state, on_chain_position_address, ' +
-  'opened_at, closed_at, updated_at';
+  'auto_rebalance, opened_at, closed_at, updated_at';
 
 function toSafeNumber(value: number | string): number {
   if (typeof value === 'number') return value;
@@ -120,6 +127,7 @@ function toPosition(row: PositionRow): LpPosition {
     depositAsset: row.deposit_asset,
     state: row.state,
     onChainPositionAddress: row.on_chain_position_address,
+    autoRebalance: row.auto_rebalance,
     openedAt: row.opened_at,
     closedAt: row.closed_at,
     updatedAt: row.updated_at
@@ -157,6 +165,8 @@ export interface CreateLpPositionInput {
   readonly depositAmount: number;
   /** Chain-prefixed. */
   readonly depositAsset: string;
+  /** Track I: opt into automatic rebalancing at deploy time. Default false. */
+  readonly autoRebalance?: boolean;
 }
 
 export async function createLpPosition(
@@ -179,8 +189,8 @@ export async function createLpPosition(
     const rows = await client.query<PositionRow>(
       `INSERT INTO lp_positions
          (user_id, chain, protocol, pool_address, strategy_type, range_lower, range_upper,
-          rung_allocations, deposit_amount, deposit_asset, state)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, 'building')
+          rung_allocations, deposit_amount, deposit_asset, state, auto_rebalance)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, 'building', $11)
        RETURNING ${POSITION_COLUMNS}`,
       [
         scope.userId,
@@ -192,7 +202,8 @@ export async function createLpPosition(
         input.rangeUpper,
         JSON.stringify(input.rungAllocations),
         input.depositAmount,
-        input.depositAsset
+        input.depositAsset,
+        input.autoRebalance ?? false
       ]
     );
     const position = rows.rows[0]!;
@@ -263,6 +274,23 @@ export async function listPositionsForMonitor(
     [chain, limit]
   );
   return rows.map(toPosition);
+}
+
+/**
+ * Track I: flips the auto-rebalance opt-in. A preference write, not a state
+ * transition — it must not touch `state` or the journal.
+ */
+export async function setLpPositionAutoRebalance(
+  scope: UserScope,
+  positionId: string,
+  enabled: boolean
+): Promise<void> {
+  await query(
+    `UPDATE lp_positions
+       SET auto_rebalance = $3, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2`,
+    [positionId, scope.userId, enabled]
+  );
 }
 
 export interface LpPositionStateTransition {

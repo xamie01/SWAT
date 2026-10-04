@@ -19,7 +19,7 @@ vi.mock('./client.js', () => ({
   pool: { connect: mocks.connect }
 }));
 
-import { createLpPosition, listPositionsForMonitor, sumOpenLpDeposits, sumOpenLpPoolExposure, transitionLpPosition } from './lp-positions.js';
+import { createLpPosition, listPositionsForMonitor, setLpPositionAutoRebalance, sumOpenLpDeposits, sumOpenLpPoolExposure, transitionLpPosition } from './lp-positions.js';
 import { crossTenantScope, forUser } from './tenancy.js';
 
 const scope = forUser('11111111-1111-1111-1111-111111111111');
@@ -41,6 +41,7 @@ const positionRow = (overrides: Record<string, unknown> = {}) => ({
   deposit_asset: 'solana:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   state: 'active',
   on_chain_position_address: null,
+  auto_rebalance: false,
   opened_at: new Date('2026-10-04T00:00:00Z'),
   closed_at: null,
   updated_at: new Date('2026-10-04T00:00:00Z'),
@@ -197,6 +198,44 @@ describe('lp-positions state machine', () => {
     expect(String(sql)).toContain("state IN ('active', 'near_edge', 'out_of_range')");
     expect(params[0]).toBe('solana');
     expect(params[1]).toBe(100);
+  });
+
+  it('creates a position with auto_rebalance persisted (default false)', async () => {
+    clientRoutes.push(
+      ['INSERT INTO lp_positions', [positionRow({ state: 'building', auto_rebalance: true })]],
+      ['lp_position_state_history', []]
+    );
+
+    const created = await createLpPosition(scope, {
+      chain: 'solana',
+      protocol: 'meteora-dlmm',
+      poolAddress: 'solana:pool',
+      strategyType: 'spot',
+      rangeLower: 150,
+      rangeUpper: 190,
+      rungAllocations: [],
+      depositAmount: 1000,
+      depositAsset: 'solana:usdc',
+      autoRebalance: true
+    });
+
+    expect(created.autoRebalance).toBe(true);
+    const insertCall = mocks.clientQuery.mock.calls.find(
+      (call) => String(call[0]).includes('INSERT INTO lp_positions')
+    );
+    expect(insertCall?.[1]?.[10]).toBe(true);
+  });
+
+  it('flips the auto-rebalance opt-in without touching state or the journal', async () => {
+    mocks.query.mockImplementation(async () => []);
+
+    await setLpPositionAutoRebalance(scope, 'pos-1', true);
+
+    const [sql, params] = mocks.query.mock.calls[0];
+    expect(String(sql)).toContain('SET auto_rebalance = $3');
+    expect(String(sql)).not.toContain('state');
+    expect(params).toEqual(['pos-1', scope.userId, true]);
+    expect(mocks.clientQuery).not.toHaveBeenCalled(); // no transaction, no journal row
   });
 
   it('exposure sums read open positions only, scoped by user and pool', async () => {
