@@ -1,6 +1,13 @@
 export type WalletTier = 'elite' | 'pro' | 'promising' | 'speculative';
 export type Chain = 'solana' | 'polygon' | 'robinhood-chain';
 
+/**
+ * Chains the LP dashboard operates on (migration `059`, `apps/lp`). LP is
+ * Meteora DLMM on Solana and Uniswap v3/v4 on Robinhood Chain; copy trading
+ * additionally serves polygon, so this is a narrowing of `Chain`, not a peer.
+ */
+export type LpChain = Extract<Chain, 'solana' | 'robinhood-chain'>;
+
 export interface WalletScoreInput {
   chain: Chain;
   winRate: number;
