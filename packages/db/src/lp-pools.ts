@@ -276,6 +276,21 @@ export async function listStaleLpPools(olderThanSeconds: number, limit = 200): P
   return rows.map(toPool);
 }
 
+/** Risk-pass input (Track C6): scanned pools still waiting for their risk score. */
+export async function listUnassessedLpPools(limit = 200): Promise<LpPool[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+    throw new Error(`listUnassessedLpPools limit must be an integer in 1..1000, got ${limit}`);
+  }
+  const rows = await query<PoolRow>(
+    `SELECT ${POOL_COLUMNS} FROM lp_pools
+      WHERE risk_score IS NULL
+      ORDER BY last_scanned_at
+      LIMIT $1`,
+    [limit]
+  );
+  return rows.map(toPool);
+}
+
 /**
  * Removes rows the scanner has not seen again within the window. Needed for the
  * same reason `pruneUserBalances` exists: an upsert-only cache can never zero
