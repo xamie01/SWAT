@@ -36,12 +36,16 @@ export function isLpPositionState(value: string): value is LpPositionState {
  * back in range without any transaction. `rebalancing` re-enters the range
  * states so the monitor re-classifies after the new ladder lands rather than
  * asserting an outcome it has not observed.
+ *
+ * `active → rebalancing` exists for the manual rebalance trigger (Track I):
+ * a user may re-center an in-range position on purpose. The scheduled monitor
+ * never uses it — it only re-labels from price observations.
  */
 const LP_POSITION_TRANSITIONS: Readonly<
   Record<LpPositionState, readonly LpPositionState[]>
 > = {
   building: ['active', 'closed'],
-  active: ['near_edge', 'out_of_range', 'closed'],
+  active: ['near_edge', 'out_of_range', 'rebalancing', 'closed'],
   near_edge: ['active', 'out_of_range', 'rebalancing', 'closed'],
   out_of_range: ['active', 'rebalancing', 'closed'],
   rebalancing: ['active', 'near_edge', 'out_of_range', 'closed'],
