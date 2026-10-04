@@ -1,4 +1,4 @@
-import { createLpPosition, type UserScope } from '@swat/db';
+import { createLpPosition, transitionLpPosition, type UserScope } from '@swat/db';
 import type { LpStrategyType } from '@swat/db';
 import type { LpChain } from '@swat/shared';
 import { buildLadderPlan, type LadderRung } from './ladder-plan.js';
@@ -111,6 +111,7 @@ export interface BuildPositionDeps {
     }): Promise<readonly EvmRungStep[]>;
   };
   readonly createPosition?: typeof createLpPosition;
+  readonly transitionPosition?: typeof transitionLpPosition;
   readonly userAddress: string;
 }
 
@@ -221,6 +222,21 @@ export async function buildPosition(
       recipient: deps.userAddress,
       currentPrice,
       distribution: params.distribution
+    });
+  }
+
+  // Paper mode: the recorded plan IS the build, so the position can leave
+  // `building` and become monitorable (the monitor sweep only reads
+  // active/near_edge/out_of_range rows — nothing else ever moved it out of
+  // `building`, which stranded every paper deploy). Live mode leaves the
+  // transition to the executor's broadcast confirmation
+  // (attachOnChainPositionAddress), since `building` must not read as
+  // deployed before the bundle actually lands.
+  if (mode === 'paper') {
+    const transition = deps.transitionPosition ?? transitionLpPosition;
+    await transition(scope, position.id, {
+      toState: 'active',
+      reason: `ladder plan recorded in paper mode (${steps.length} rungs)`
     });
   }
 

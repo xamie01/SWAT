@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dbMocks = vi.hoisted(() => ({
-  createLpPosition: vi.fn()
+  createLpPosition: vi.fn(),
+  transitionLpPosition: vi.fn()
 }));
 vi.mock('@swat/db', () => dbMocks);
 
@@ -42,17 +43,16 @@ const meteoraBuilder = {
   )
 };
 
-function deps(overrides: Partial<BuildPositionDeps> = {}): BuildPositionDeps {
-  return {
+const deps = (overrides: Partial<BuildPositionDeps> = {}): BuildPositionDeps => ({
     executionMode: paperMode,
     deployGuard: allowGuard,
     poolView,
     meteoraBuilder,
     createPosition: dbMocks.createLpPosition,
+    transitionPosition: dbMocks.transitionLpPosition,
     userAddress: 'solana:user',
     ...overrides
-  };
-}
+  });
 
 const request = {
   chain: 'solana' as const,
@@ -64,11 +64,16 @@ const request = {
 
 beforeEach(() => {
   dbMocks.createLpPosition.mockReset();
+  dbMocks.transitionLpPosition.mockReset();
   meteoraBuilder.buildLadder.mockClear();
   dbMocks.createLpPosition.mockImplementation(async (_scope, input) => ({
     id: 'pos-1',
     state: 'building',
     ...input
+  }));
+  dbMocks.transitionLpPosition.mockImplementation(async (_scope, _id, transition) => ({
+    id: 'pos-1',
+    state: transition.toState
   }));
 });
 
@@ -91,6 +96,22 @@ describe('buildPosition', () => {
         depositAsset: 'solana:usdc'
       })
     );
+    // Paper: the recorded plan IS the build — the position must become
+    // monitorable, or it would sit in `building` forever.
+    expect(dbMocks.transitionLpPosition).toHaveBeenCalledWith(
+      scope,
+      'pos-1',
+      expect.objectContaining({ toState: 'active' })
+    );
+  });
+
+  it('a live-mode build stays building — the executor confirms the transition', async () => {
+    await buildPosition(
+      deps({ executionMode: { resolveMode: async () => 'live' } }),
+      scope,
+      request
+    );
+    expect(dbMocks.transitionLpPosition).not.toHaveBeenCalled();
   });
 
   it('an off chain refuses before the guard even runs', async () => {
