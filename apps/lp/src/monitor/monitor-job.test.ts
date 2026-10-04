@@ -12,6 +12,7 @@ function position(overrides: Partial<MonitorPosition> = {}): MonitorPosition {
     rangeUpper: 110,
     state: 'active',
     onChainPositionAddress: 'solana:pos1',
+    autoRebalance: false,
     ...overrides
   };
 }
@@ -48,7 +49,10 @@ describe('runMonitorPass (F1/F6)', () => {
   });
 
   it('a drift to near_edge transitions the state and queues a positive rebalance', async () => {
-    const ports_ = ports({ pricePoller: { currentPrice: vi.fn(async () => 91) } });
+    const ports_ = ports({
+      pricePoller: { currentPrice: vi.fn(async () => 91) },
+      listPositions: vi.fn(async () => [position({ autoRebalance: true })])
+    });
 
     const summary = await runMonitorPass(ports_, 'solana');
 
@@ -66,7 +70,7 @@ describe('runMonitorPass (F1/F6)', () => {
     // Position stored as out_of_range already: observation matches, no transition,
     // but the economic gate still runs for out_of_range positions.
     const summary = await runMonitorPass(
-      { ...ports_, listPositions: vi.fn(async () => [position({ state: 'out_of_range' })]) },
+      { ...ports_, listPositions: vi.fn(async () => [position({ state: 'out_of_range', autoRebalance: true })]) },
       'solana'
     );
 
@@ -74,9 +78,42 @@ describe('runMonitorPass (F1/F6)', () => {
     expect(summary.rebalancesQueued).toBe(1);
   });
 
+  it('a position without the auto-rebalance opt-in is flagged, never queued', async () => {
+    const ports_ = ports({ pricePoller: { currentPrice: vi.fn(async () => 91) } });
+
+    const summary = await runMonitorPass(ports_, 'solana');
+
+    // state still transitions (that IS the recommendation), economics untouched
+    expect(summary.transitions).toEqual([
+      { positionId: 'pos-1', from: 'active', to: 'near_edge' }
+    ]);
+    expect(summary.rebalancesQueued).toBe(0);
+    expect(summary.rebalancesDeclined).toEqual([
+      { positionId: 'pos-1', reason: 'auto-rebalance-not-opted-in' }
+    ]);
+    expect(ports_.economics.estimate).not.toHaveBeenCalled();
+    expect(ports_.queueRebalance).not.toHaveBeenCalled();
+  });
+
+  it('an opted-in position auto-fires exactly as before', async () => {
+    const ports_ = ports({
+      pricePoller: { currentPrice: vi.fn(async () => 91) },
+      listPositions: vi.fn(async () => [position({ autoRebalance: true })])
+    });
+
+    const summary = await runMonitorPass(ports_, 'solana');
+
+    expect(summary.rebalancesQueued).toBe(1);
+    expect(summary.rebalancesDeclined).toEqual([]);
+    expect(ports_.queueRebalance).toHaveBeenCalledWith(
+      expect.objectContaining({ positionId: 'pos-1', netBenefitUsd: 30 })
+    );
+  });
+
   it('a declining economic projection records the decline instead of queueing', async () => {
     const ports_ = ports({
       pricePoller: { currentPrice: vi.fn(async () => 91) },
+      listPositions: vi.fn(async () => [position({ autoRebalance: true })]),
       economics: {
         estimate: vi.fn(async () => ({
           expectedExtraFeesUsd: 5,

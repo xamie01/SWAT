@@ -7,7 +7,10 @@ const dbMocks = vi.hoisted(() => ({
   listLpPositions: vi.fn(),
   queryLpWalletLeaderboard: vi.fn(),
   resolveSession: vi.fn(),
-  forUser: vi.fn((userId: string) => ({ userId }))
+  forUser: vi.fn((userId: string) => ({ userId })),
+  getLpPosition: vi.fn(),
+  setLpPositionAutoRebalance: vi.fn(),
+  transitionLpPosition: vi.fn()
 }));
 vi.mock('@swat/db', () => dbMocks);
 
@@ -32,6 +35,16 @@ async function buildApp(deps: Partial<LpRoutesDeps> = {}) {
       getPool: async () => ({ protocol: 'meteora-dlmm', binStep: 50, tickSpacing: null, currentPrice: 100 })
     },
     userAddress: 'solana:user',
+    livePreview: async () => ({
+      chain: 'solana',
+      poolAddress: 'solana:pool',
+      params: { rangeLower: 0.296, rangeUpper: 0.302, rungCount: 5, distribution: 'spot' },
+      rungs: [],
+      depositAmount: null,
+      source: 'template',
+      contextWarning: null
+    }),
+    queueManualRebalance: async () => undefined,
     ...deps
   });
   return app;
@@ -173,6 +186,38 @@ describe('LP routes (Track H)', () => {
     await app.close();
   });
 
+  it('deploy carries the auto-rebalance opt-in into the built position', async () => {
+    const build = vi.fn(async (_deps, _scope, request) => {
+      expect(request.autoRebalance).toBe(true);
+      return {
+        positionId: 'pos-1',
+        mode: 'paper' as const,
+        rungs: [],
+        steps: [],
+        rejectionReasons: []
+      };
+    });
+    const app = await buildApp({ build: build as never });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/lp/positions/deploy',
+      headers: sessionHeaders(),
+      payload: {
+        chain: 'solana',
+        poolAddress: 'solana:pool',
+        template: 'tight-spot-scalp',
+        depositAmount: 100,
+        depositAsset: 'solana:usdc',
+        autoRebalance: true
+      }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(build).toHaveBeenCalled();
+    await app.close();
+  });
+
   it('a successful paper deploy returns the plan with rungs and steps', async () => {
     const app = await buildApp({
       build: (async () => ({
@@ -207,5 +252,177 @@ describe('LP routes (Track H)', () => {
 
   it('legacyKeyHash is a deterministic sha-256 of the key', () => {
     expect(legacyKeyHash('x').equals(createHash('sha256').update('x').digest())).toBe(true);
+  });
+
+  describe('ladder preview (Track I2)', () => {
+    it('passes template queries through to the live preview', async () => {
+      const app = await buildApp({
+        livePreview: vi.fn(async () => ({ source: 'template', rungs: [{ weight: 1 }] }))
+      });
+      await app.ready();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/lp/ladder-preview?chain=solana&poolAddress=solana:pool&template=tight-spot-scalp&depositAmount=1000',
+        headers: serviceHeaders
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().source).toBe('template');
+      await app.close();
+    });
+
+    it('requires chain, poolAddress, and some params source', async () => {
+      const app = await buildApp();
+      await app.ready();
+
+      expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview', headers: serviceHeaders })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview?chain=solana&poolAddress=solana:pool', headers: serviceHeaders })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview?chain=ethereum&poolAddress=x&template=t', headers: serviceHeaders })).statusCode).toBe(400);
+      await app.close();
+    });
+
+    it('surfaces preview validation errors as 400 and context failures as 500', async () => {
+      const app = await buildApp({
+        livePreview: vi.fn(async () => {
+          throw new Error('unknown strategy template: moonshot');
+        })
+      });
+      await app.ready();
+      const validation = await app.inject({
+        method: 'GET',
+        url: '/v1/lp/ladder-preview?chain=solana&poolAddress=solana:pool&template=moonshot',
+        headers: serviceHeaders
+      });
+      expect(validation.statusCode).toBe(400);
+
+      const failing = await buildApp({
+        livePreview: vi.fn(async () => {
+          throw new Error('RPC timeout');
+        })
+      });
+      await failing.ready();
+      const internal = await failing.inject({
+        method: 'GET',
+        url: '/v1/lp/ladder-preview?chain=solana&poolAddress=solana:pool&template=tight-spot-scalp',
+        headers: serviceHeaders
+      });
+      expect(internal.statusCode).toBe(500);
+      await app.close();
+      await failing.close();
+    });
+  });
+
+  describe('manual rebalance trigger (Track I)', () => {
+    const owned = {
+      id: 'pos-1',
+      userId: 'user-1',
+      chain: 'solana',
+      protocol: 'meteora-dlmm',
+      poolAddress: 'solana:pool',
+      strategyType: 'spot',
+      rangeLower: 0.29,
+      rangeUpper: 0.31,
+      rungAllocations: [],
+      depositAmount: 1000,
+      depositAsset: 'solana:usdc',
+      state: 'active',
+      onChainPositionAddress: null,
+      autoRebalance: false,
+      openedAt: new Date(),
+      closedAt: null,
+      updatedAt: new Date()
+    };
+
+    it('queues the job, transitions to rebalancing, and reports both', async () => {
+      const queueManualRebalance = vi.fn(async () => undefined);
+      const app = await buildApp({ queueManualRebalance });
+      await app.ready();
+      dbMocks.getLpPosition.mockResolvedValue(owned);
+      dbMocks.transitionLpPosition.mockResolvedValue({ ...owned, state: 'rebalancing' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/positions/pos-1/rebalance',
+        headers: sessionHeaders()
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ queued: true, positionId: 'pos-1', state: 'rebalancing' });
+      expect(queueManualRebalance).toHaveBeenCalledWith({
+        positionId: 'pos-1',
+        chain: 'solana',
+        poolAddress: 'solana:pool'
+      });
+      await app.close();
+    });
+
+    it('refuses for other users’ positions and for terminal states', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.getLpPosition.mockResolvedValue(null);
+      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-9/rebalance', headers: sessionHeaders() })).statusCode).toBe(404);
+
+      dbMocks.getLpPosition.mockResolvedValue({ ...owned, state: 'closed' });
+      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-1/rebalance', headers: sessionHeaders() })).statusCode).toBe(409);
+      await app.close();
+    });
+
+    it('a refused transition after queueing returns 409, leaving the job a no-op', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.getLpPosition.mockResolvedValue(owned);
+      dbMocks.transitionLpPosition.mockRejectedValue(new Error('invalid lp position transition: closed -> rebalancing'));
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/positions/pos-1/rebalance',
+        headers: sessionHeaders()
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toContain('transition');
+      await app.close();
+    });
+  });
+
+  describe('auto-rebalance toggle (Track I)', () => {
+    it('flips the flag for the owning user and rejects non-boolean input', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.getLpPosition.mockResolvedValue({ id: 'pos-1', state: 'active' });
+
+      const on = await app.inject({
+        method: 'PATCH',
+        url: '/v1/lp/positions/pos-1/auto-rebalance',
+        headers: sessionHeaders(),
+        payload: { enabled: true }
+      });
+      expect(on.statusCode).toBe(200);
+      expect(on.json()).toEqual({ positionId: 'pos-1', autoRebalance: true });
+      expect(dbMocks.setLpPositionAutoRebalance).toHaveBeenCalledWith(expect.anything(), 'pos-1', true);
+
+      const bad = await app.inject({
+        method: 'PATCH',
+        url: '/v1/lp/positions/pos-1/auto-rebalance',
+        headers: sessionHeaders(),
+        payload: { enabled: 'yes' }
+      });
+      expect(bad.statusCode).toBe(400);
+      await app.close();
+    });
+
+    it('cookie POST/PATCH without the CSRF token is rejected before anything runs', async () => {
+      const app = await buildApp();
+      await app.ready();
+      const response = await app.inject({
+        method: 'PATCH',
+        url: '/v1/lp/positions/pos-1/auto-rebalance',
+        headers: { cookie: 'swat_session=session-token' },
+        payload: { enabled: true }
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json().code).toBe('csrf_invalid');
+      expect(dbMocks.setLpPositionAutoRebalance).not.toHaveBeenCalled();
+      await app.close();
+    });
   });
 });

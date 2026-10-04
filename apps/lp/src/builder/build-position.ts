@@ -72,6 +72,8 @@ export interface BuildPositionRequest {
   readonly depositAmount: number;
   /** Chain-prefixed deposit asset. */
   readonly depositAsset: string;
+  /** Track I: opt this position into monitor-driven auto-rebalancing. Default false. */
+  readonly autoRebalance?: boolean;
 }
 
 export type LadderExecutionStep = RungTxStep | EvmRungStep;
@@ -193,7 +195,8 @@ export async function buildPosition(
     rangeUpper: params.rangeUpper,
     rungAllocations: plan.rungs,
     depositAmount: request.depositAmount,
-    depositAsset: request.depositAsset
+    depositAsset: request.depositAsset,
+    autoRebalance: request.autoRebalance === true
   });
 
   let steps: readonly LadderExecutionStep[];

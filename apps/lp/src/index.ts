@@ -29,6 +29,9 @@ import { runWalletIndexPass } from './wallets/wallet-indexer.js';
 import { createPlanOnlyMeteoraPort, createPlanOnlyEvmPort } from './builder/plan-ports.js';
 import { createMeteoraLadderBuilder } from './builder/meteora-ladder.js';
 import { createEvmLadderBuilder } from './builder/evm-ladder.js';
+import { buildLivePreview } from './builder/live-preview.js';
+import { createLiveContextSource } from './builder/live-context.js';
+import { createRpcSolanaBinSource } from './scanner/solana-bins.js';
 
 /**
  * The LP service entry (Track H + scheduled wiring for B6/C6/F6/D4).
@@ -65,9 +68,16 @@ const riskPassCron = process.env.LP_RISK_PASS_CRON ?? '*/10 * * * *';
 
 // --- Chain boundary wiring -------------------------------------------------
 
+const solanaRpcUrl = process.env.SOLANA_RPC_URL
+  ?? (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : undefined);
+
 const meteoraFetcher = createMeteoraPoolFetcher({
   apiBase: process.env.METEORA_API_URL ?? 'https://dlmm-api.meteora.ag',
-  maxPairs: Number(process.env.LP_SCAN_MAX_PAIRS ?? 200)
+  maxPairs: Number(process.env.LP_SCAN_MAX_PAIRS ?? 200),
+  // Live bins for active-TVL now that the RPC bin source exists (Track I1).
+  binSource: solanaRpcUrl
+    ? createRpcSolanaBinSource({ rpcUrl: solanaRpcUrl, binsEachSide: 10 })
+    : undefined
   // binSource (the live DLMM SDK bin feed) is intentionally not wired yet:
   // @meteora-ag/dlmm@1.9.14 cannot be imported in this environment at all —
   // its ESM build re-exports anchor paths that only CJS resolution accepts,
@@ -93,6 +103,21 @@ const scanStore = {
 };
 
 const deployGuard = createDeployGuard();
+
+// Track I: live context for the ladder preview. Solana bins come from the
+// mainnet-verified RPC decode; EVM context from the viem pool reader. The
+// scan cache is the fallback when a live fetch fails.
+const liveContextSource = createLiveContextSource({
+  solanaBinSource: createRpcSolanaBinSource({
+    rpcUrl: solanaRpcUrl ?? 'https://api.mainnet-beta.solana.com'
+  }),
+  evmReader: robinhoodPools.length > 0
+    ? createViemRobinhoodPoolReader({
+        rpcUrl: process.env.ROBINHOOD_RPC_URL ?? '',
+        configuredPools: robinhoodPools
+      })
+    : undefined
+});
 
 // Pool view for ladder anchoring: served from the scan cache (Track B output).
 const poolView = {
@@ -247,7 +272,38 @@ async function buildApp(): Promise<FastifyInstance> {
     poolView,
     meteoraBuilder,
     evmBuilder,
-    userAddress: process.env.LP_SERVICE_USER_ADDRESS ?? ''
+    userAddress: process.env.LP_SERVICE_USER_ADDRESS ?? '',
+    livePreview: async (input) => {
+      const context = await liveContextSource.fetchLiveContext(input.chain, input.poolAddress);
+      if (!context) {
+        throw new Error(`no live or cached context for ${input.poolAddress}; run a scan first`);
+      }
+      return buildLivePreview({
+        chain: input.chain,
+        protocol: context.chain === 'solana' ? 'meteora-dlmm' : 'uniswap-v3',
+        poolAddress: input.poolAddress,
+        template: input.template as never,
+        // buildLivePreview re-validates distribution at runtime (the preview
+        // route surfaces it as 400), so the HTTP-boundary string casts here.
+        custom: input.custom as Parameters<typeof buildLivePreview>[0]['custom'],
+        currentPrice: context.currentPrice,
+        depositAmount: input.depositAmount,
+        binStep: context.binStep,
+        tickSpacing: context.tickSpacing,
+        bins: context.bins,
+        bands: context.bands,
+        warnings: context.warnings
+      });
+    },
+    queueManualRebalance: async (input) => {
+      const queue = executionQueueRefs[input.chain];
+      if (!queue) throw new Error(`LP execution queue for ${input.chain} is not running`);
+      await queue.add('lp-rebalance-manual', input, {
+        jobId: `lp-rebalance-${input.positionId}-${Date.now()}`,
+        removeOnComplete: true,
+        removeOnFail: 100
+      });
+    }
   });
 
   app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {

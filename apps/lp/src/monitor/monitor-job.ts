@@ -26,6 +26,13 @@ export interface MonitorPosition {
   readonly rangeUpper: number;
   readonly state: LpPosition['state'];
   readonly onChainPositionAddress: string | null;
+  /**
+   * Track I / F6 change: the owner's opt-in. The monitor never auto-fires a
+   * rebalance for a position whose owner did not opt in — it re-labels the
+   * state (which IS the recommendation the position manager surfaces) and
+   * stops. Manual triggers bypass this flag by design.
+   */
+  readonly autoRebalance: boolean;
 }
 
 export interface PricePollerPort {
@@ -111,6 +118,17 @@ export async function runMonitorPass(ports: MonitorJobPorts, chain: LpChain): Pr
       }
     }
     if (observed !== 'near_edge' && observed !== 'out_of_range') continue;
+
+    // F6 change: no auto-fire by default. Without the owner's opt-in the
+    // re-labeled state is the deliverable — the position manager shows it as
+    // `rebalanceRecommended` and the user decides (manual trigger endpoint).
+    if (!position.autoRebalance) {
+      summary.rebalancesDeclined.push({
+        positionId: position.id,
+        reason: 'auto-rebalance-not-opted-in'
+      });
+      continue;
+    }
 
     // Economic gate: only a strictly positive projection earns a rebalance.
     const economicsInput = await ports.economics.estimate({ position, currentPrice, state: observed });

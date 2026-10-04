@@ -1,10 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  getLpPosition,
   listDiscoverPools,
   listLpPositions,
   queryLpWalletLeaderboard,
+  setLpPositionAutoRebalance,
+  transitionLpPosition,
   type UserScope
 } from '@swat/db';
+import type { LpChain } from '@swat/shared';
 import { rankPoolsByVolumeToActiveLiquidity } from './scanner/ranking.js';
 import { requireUser, registerLpAuth, type LpAuthOptions } from './auth.js';
 import { buildPosition, type BuildPositionDeps, type BuildPositionResult } from './builder/build-position.js';
@@ -45,6 +49,29 @@ function clampOffset(raw: unknown): number {
 export type LpRoutesDeps = BuildPositionDeps & {
   /** Test seam: override the entrypoint itself. */
   readonly build?: typeof buildPosition;
+  /**
+   * Track I: computes the read-only ladder preview with live context. Wired in
+   * the service entry (it owns the context sources and the cache fallback);
+   * tests stub it.
+   */
+  readonly livePreview: (input: {
+    readonly chain: 'solana' | 'robinhood-chain';
+    readonly poolAddress: string;
+    readonly template?: string;
+    readonly custom?: {
+      readonly rangeLower: number;
+      readonly rangeUpper: number;
+      readonly rungCount: number;
+      readonly distribution: string;
+    };
+    readonly depositAmount?: number;
+  }) => Promise<unknown>;
+  /** Track I: queues a manual rebalance job on the chain's execution queue. */
+  readonly queueManualRebalance: (input: {
+    readonly positionId: string;
+    readonly chain: LpChain;
+    readonly poolAddress: string;
+  }) => Promise<void>;
 };
 
 export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps): Promise<void> {
@@ -121,6 +148,59 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     return { templates: listStrategyTemplates() };
   });
 
+  // Track I2: read-only live preview. Static route — registered before the
+  // parameterized /positions/:id routes below.
+  app.get('/v1/lp/ladder-preview', async (request, reply) => {
+    if (!request.principal) return reply.code(401).send({ error: 'Unauthorized' });
+    const query = request.query as Record<string, unknown>;
+    const chain = typeof query.chain === 'string' ? query.chain : undefined;
+    const poolAddress = typeof query.poolAddress === 'string' ? query.poolAddress : undefined;
+    if (!chain || !poolAddress) {
+      return reply.code(400).send({ error: 'chain and poolAddress are required' });
+    }
+    if (chain !== 'solana' && chain !== 'robinhood-chain') {
+      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    }
+    if (!poolAddress.startsWith(`${chain}:`)) {
+      return reply.code(400).send({ error: 'poolAddress must be chain-prefixed' });
+    }
+
+    const template = typeof query.template === 'string' ? query.template : undefined;
+    const hasCustom = query.rangeLower !== undefined || query.distribution !== undefined;
+    if (!template && !hasCustom) {
+      return reply.code(400).send({ error: 'a strategy template or custom ladder params is required' });
+    }
+    let custom: Parameters<LpRoutesDeps['livePreview']>[0]['custom'];
+    if (hasCustom) {
+      custom = {
+        rangeLower: Number(query.rangeLower),
+        rangeUpper: Number(query.rangeUpper),
+        rungCount: Number(query.rungCount),
+        distribution: String(query.distribution ?? '')
+      };
+    }
+    const depositAmount = query.depositAmount === undefined ? undefined : Number(query.depositAmount);
+
+    try {
+      const preview = await deps.livePreview({
+        chain,
+        poolAddress,
+        template,
+        custom,
+        depositAmount
+      });
+      return preview;
+    } catch (error) {
+      // Validation errors (template unknown, params out of range) are client
+      // errors; live-context failures bubble to the global handler as 500.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/must be|required|unknown strategy template|not both|binStep|tickSpacing/.test(message)) {
+        return reply.code(400).send({ error: message });
+      }
+      throw error;
+    }
+  });
+
   // H5: Deploy-ladder action (E6 behind G1) — user-scoped, state-changing.
   app.post('/v1/lp/positions/deploy', async (request, reply) => {
     const scope = requireUser(request, reply);
@@ -138,6 +218,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       };
       depositAmount?: number;
       depositAsset?: string;
+      /** Track I: opt this position into monitor-driven auto-rebalancing. */
+      autoRebalance?: boolean;
     };
 
     if (!body.chain || !body.poolAddress || !body.depositAsset || !Number.isFinite(Number(body.depositAmount))) {
@@ -191,7 +273,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
               }
             : undefined,
         depositAmount: Number(body.depositAmount),
-        depositAsset: body.depositAsset
+        depositAsset: body.depositAsset,
+        autoRebalance: body.autoRebalance === true
       });
 
       if (result.rejectionReasons.length > 0) {
@@ -212,6 +295,63 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       }
       throw error;
     }
+  });
+
+  // Track I: manual rebalance trigger — the user IS the consent, so the
+  // auto-rebalance opt-in does not apply here.
+  app.post('/v1/lp/positions/:positionId/rebalance', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { positionId } = request.params as { positionId: string };
+
+    const position = await getLpPosition(scope, positionId);
+    if (!position) {
+      return reply.code(404).send({ error: 'position not found' });
+    }
+    if (position.state === 'building') {
+      return reply.code(409).send({ error: 'position is still building; nothing to rebalance yet' });
+    }
+    if (position.state === 'closed') {
+      return reply.code(409).send({ error: 'position is closed' });
+    }
+
+    await deps.queueManualRebalance({
+      positionId: position.id,
+      chain: position.chain,
+      poolAddress: position.poolAddress
+    });
+    // Transition after the job is queued: a refusal here (racing a close)
+    // leaves a queued job that no-ops on a closed position, never a position
+    // stuck in `rebalancing` with no work behind it.
+    try {
+      await transitionLpPosition(scope, positionId, {
+        toState: 'rebalancing',
+        reason: 'manual rebalance trigger (Track I)'
+      });
+    } catch (error) {
+      return reply.code(409).send({
+        error: error instanceof Error ? error.message : 'transition refused'
+      });
+    }
+    return { queued: true, positionId, state: 'rebalancing' };
+  });
+
+  // Track I: auto-rebalance opt-in toggle.
+  app.patch('/v1/lp/positions/:positionId/auto-rebalance', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { positionId } = request.params as { positionId: string };
+    const body = request.body as { enabled?: boolean };
+    if (typeof body.enabled !== 'boolean') {
+      return reply.code(400).send({ error: 'enabled (boolean) is required' });
+    }
+
+    const position = await getLpPosition(scope, positionId);
+    if (!position) {
+      return reply.code(404).send({ error: 'position not found' });
+    }
+    await setLpPositionAutoRebalance(scope, positionId, body.enabled);
+    return { positionId, autoRebalance: body.enabled };
   });
 }
 

@@ -41,8 +41,12 @@ export interface MeteoraTokenPrices {
 }
 
 export interface MeteoraBinSource {
-  /** Bins around the active bin, human-scale, from the DLMM SDK. */
-  fetchBins(poolAddress: string): Promise<{ bins: readonly MeteoraBin[]; activeBinId: number }>;
+  /**
+   * Bins around the active bin, human-scale. `binStep` rides along when the
+   * source knows it (the RPC source reads it from the LbPair) so callers can
+   * snap ladder plans without a second lookup.
+   */
+  fetchBins(poolAddress: string): Promise<{ bins: readonly MeteoraBin[]; activeBinId: number; binStep?: number }>;
 }
 
 export interface MeteoraPoolFetcherOptions {
