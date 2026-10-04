@@ -9,7 +9,9 @@ import {
   initLogger
 } from '@swat/shared';
 import {
+  getLpPositionAnyOwner,
   listTrackedLpWallets,
+  pruneStaleLpPools,
   recordLpWalletIndexPass,
   resolveChainMode,
   upsertLpPool,
@@ -160,7 +162,13 @@ async function runScanGuarded(): Promise<void> {
       fetchers: [meteoraFetcher, robinhoodFetcher],
       store: scanStore
     });
-    console.log('[lp] pool scan complete', JSON.stringify(summary));
+    // Pools the scanner has not seen for a week leave the cache: an upsert-only
+    // writer can never remove a pool that dropped off the source list, and a
+    // vanished pool on the Discover feed is a position waiting to happen.
+    // Generous window: a pool temporarily missing from one API page must not
+    // flap out of the feed.
+    const pruned = await pruneStaleLpPools(7 * 24 * 3600);
+    console.log('[lp] pool scan complete', JSON.stringify({ ...summary, prunedStalePools: pruned }));
   } catch (error) {
     console.error('[lp] pool scan failed:', error instanceof Error ? error.message : error);
   } finally {
@@ -219,7 +227,9 @@ async function runMonitorGuarded(): Promise<void> {
           transition: (positionId, toState, reason) => transitionLpPosition(crossTenantScope('lp position monitor sweep'), positionId, { toState, reason }),
           queueRebalance: async (input) => {
             await executionQueueRefs[input.chain]?.add('lp-rebalance', input, {
-              jobId: `lp-rebalance-${input.positionId}`,
+              // Unique per firing: a fixed jobId + removeOnFail would let one
+              // failed job silently swallow every later add for the position.
+              jobId: `lp-rebalance-${input.positionId}-${Date.now()}`,
               removeOnComplete: true,
               removeOnFail: 100
             });
@@ -261,7 +271,18 @@ async function runWalletIndexGuarded(): Promise<void> {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  await app.register(cors, { origin: true, credentials: true });
+  // CORS is opt-in per origin: reflecting `origin: true` with credentials
+  // would let any site read cookie-authenticated responses. The operator
+  // console (e.g. the Next.js app on its own port) names itself in
+  // LP_CORS_ORIGIN; with nothing configured, no cross-origin browser client
+  // is allowed (service-key callers are unaffected — they are not browsers).
+  const corsOrigins = (process.env.LP_CORS_ORIGIN ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (corsOrigins.length > 0) {
+    await app.register(cors, { origin: corsOrigins, credentials: true });
+  }
   await app.register(cookie);
   if (apiKey) {
     await registerLpAuth(app, { legacyKeyHash: legacyKeyHash(apiKey) });
@@ -336,8 +357,20 @@ async function startExecutionWorkers(
       async (job) => {
         const mode = await executionMode.resolveMode(chain as 'solana' | 'robinhood-chain');
         if (mode !== 'live') {
-          // Paper (or off): the job is a plan, not a submission. The monitor
-          // already journaled the economic case; record the intent and stop.
+          // The queue is durable: between enqueue and run the position may have
+          // closed (or never left `building`), so the recorded intent must
+          // check the row it was queued for before treating the job as work.
+          const payload = job.data as { positionId?: string };
+          const position = payload.positionId
+            ? await getLpPositionAnyOwner(crossTenantScope('lp execution worker'), payload.positionId)
+            : null;
+          if (!position || position.state === 'closed' || position.state === 'building') {
+            console.log(
+              `[lp] execution job ${job.id ?? ''} skipped: position ${payload.positionId ?? '?'} ` +
+              `is ${position?.state ?? 'gone'}`
+            );
+            return { mode, broadcast: false, skipped: true };
+          }
           console.log(
             `[lp] execution job ${job.id ?? ''} for ${chain} recorded in ${mode} mode (not broadcast):`,
             JSON.stringify(job.data)
@@ -370,12 +403,14 @@ if (apiKey) {
 }
 console.log(`[lp] scan every ${scanCron}, monitor ${monitorCron}, risk ${riskPassCron}, wallets ${walletIndexCron}`);
 
+// Execution workers start BEFORE the cron passes: a monitor pass firing in the
+// startup gap would find no queue refs and silently drop its rebalance adds.
+await startExecutionWorkers(connection, closers);
+
 cron.schedule(scanCron, () => void runScanGuarded(), { timezone: 'UTC' });
 cron.schedule(monitorCron, () => void runMonitorGuarded(), { timezone: 'UTC' });
 cron.schedule(riskPassCron, () => void runRiskGuarded(), { timezone: 'UTC' });
 cron.schedule(walletIndexCron, () => void runWalletIndexGuarded(), { timezone: 'UTC' });
-
-await startExecutionWorkers(connection, closers);
 
 if (process.env.RUN_ON_STARTUP === 'true') {
   void runScanGuarded();

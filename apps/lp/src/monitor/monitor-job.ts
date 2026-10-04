@@ -1,4 +1,4 @@
-import type { crossTenantScope, LpPosition } from '@swat/db';
+import type { LpPosition } from '@swat/db';
 import type { LpChain } from '@swat/shared';
 import { classifyRangeState, type RangeState } from './classifier.js';
 import { evaluateRebalanceEconomics, type RebalanceEconomicsInput } from './economic-check.js';
@@ -15,7 +15,6 @@ import { evaluateRebalanceEconomics, type RebalanceEconomicsInput } from './econ
  */
 
 export type { RangeState };
-export type { crossTenantScope };
 
 export interface MonitorPosition {
   readonly id: string;

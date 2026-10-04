@@ -42,10 +42,9 @@ export function createLiveContextSource(options: LiveContextSourceOptions): Live
     return {
       chain,
       currentPrice: pool.currentPrice,
-      anchor:
-        pool.protocol === 'meteora-dlmm'
-          ? { kind: 'bin', activeBinId: 0 }
-          : { kind: 'tick', currentTick: 0 },
+      // The scan cache carries no anchor observation; null is the honest
+      // "unknown" here — a fabricated bin id 0 would read as a real anchor.
+      anchor: null,
       binStep: pool.binStep,
       tickSpacing: pool.tickSpacing,
       bins: null,

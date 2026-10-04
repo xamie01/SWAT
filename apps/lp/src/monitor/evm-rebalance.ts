@@ -27,17 +27,17 @@ export function buildEvmRebalancePlan(port: EvmRebalancePort, input: {
     const closeSteps = await port.buildCloseSteps({ onChainPositionAddress: input.position.onChainPositionAddress! });
     const remintSteps = await port.buildRemintSteps(input.plan, input.recipient);
 
-    let sequence = 0;
-    const steps: RebalanceStep[] = [
-      ...closeSteps,
-      {
-        sequence: sequence++,
-        kind: 'swap' as const,
-        description: 're-center inventory for the new range (executor computes leg ratio)',
-        payload: { poolAddress: input.position.poolAddress }
-      },
-      ...remintSteps
-    ].map((step, index) => ({ ...step, sequence: index }));
+    const swapStep: RebalanceStep = {
+      sequence: 0,
+      kind: 'swap' as const,
+      description: 're-center inventory for the new range (executor computes leg ratio)',
+      payload: { poolAddress: input.position.poolAddress }
+    };
+    // Sequence is position-in-bundle, assigned here so port-returned steps
+    // cannot carry stale ordering.
+    const steps: RebalanceStep[] = [...closeSteps, swapStep, ...remintSteps].map(
+      (step, index) => ({ ...step, sequence: index })
+    );
 
     return { steps, signReady: input.signReady };
   })();

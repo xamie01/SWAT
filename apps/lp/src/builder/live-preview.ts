@@ -23,8 +23,12 @@ export interface LivePoolContext {
   readonly chain: LpChain;
   /** Quote-per-base, right now. */
   readonly currentPrice: number;
-  /** Meteora: active bin id. Uniswap: current tick. */
-  readonly anchor: { readonly kind: 'bin'; readonly activeBinId: number } | { readonly kind: 'tick'; readonly currentTick: number };
+  /**
+   * Meteora: active bin id. Uniswap: current tick. `null` on the scan-cache
+   * fallback — the cache carries no anchor observation, and a fabricated one
+   * (0) would read as a real bin id / tick to any consumer.
+   */
+  readonly anchor: { readonly kind: 'bin'; readonly activeBinId: number } | { readonly kind: 'tick'; readonly currentTick: number } | null;
   /** Granularity the ladder will snap to. */
   readonly binStep: number | null;
   readonly tickSpacing: number | null;
