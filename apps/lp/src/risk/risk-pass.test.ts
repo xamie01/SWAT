@@ -24,6 +24,7 @@ function pool(overrides: Partial<LpPool> = {}): LpPool {
     feeBps: 20,
     binStep: 10,
     tickSpacing: null,
+    currentPrice: 150,
     tvl: 1_000_000,
     activeTvl: 400_000,
     volume24h: 900_000,

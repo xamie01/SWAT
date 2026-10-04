@@ -26,6 +26,7 @@ export interface UpsertLpPoolPort {
     feeBps: number;
     binStep: number | null;
     tickSpacing: number | null;
+    currentPrice: number | null;
     tvl: number;
     activeTvl: number;
     volume24h: number;
@@ -59,6 +60,7 @@ export async function runPoolScan(deps: ScanJobDeps): Promise<ScanSummary> {
           feeBps: pool.feeBps,
           binStep: pool.binStep,
           tickSpacing: pool.tickSpacing,
+          currentPrice: pool.currentPrice,
           tvl: pool.tvl,
           activeTvl: pool.activeTvlUsd,
           volume24h: pool.volume24h,
