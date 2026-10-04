@@ -8,7 +8,10 @@ import {
 import { rankPoolsByVolumeToActiveLiquidity } from './scanner/ranking.js';
 import { requireUser, registerLpAuth, type LpAuthOptions } from './auth.js';
 import { buildPosition, type BuildPositionDeps, type BuildPositionResult } from './builder/build-position.js';
-import { listStrategyTemplates } from './builder/templates.js';
+import { listStrategyTemplates, STRATEGY_TEMPLATE_NAMES, type StrategyTemplateName } from './builder/templates.js';
+import type { LpStrategyType } from '@swat/db';
+
+const STRATEGY_DISTRIBUTIONS: readonly LpStrategyType[] = ['spot', 'curve', 'bidask'];
 
 /**
  * API / dashboard wiring (Track H) — five routes over the finished tracks:
@@ -153,18 +156,38 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       return reply.code(400).send({ error: 'a strategy template or custom ladder params is required' });
     }
 
+    if (body.template !== undefined && !(STRATEGY_TEMPLATE_NAMES as readonly string[]).includes(body.template)) {
+      return reply.code(400).send({
+        error: `unknown strategy template: ${body.template}`,
+        known: STRATEGY_TEMPLATE_NAMES
+      });
+    }
+    if (body.custom !== undefined) {
+      const custom = body.custom;
+      if (
+        !Number.isFinite(Number(custom.rangeLower)) || Number(custom.rangeLower) <= 0
+        || !Number.isFinite(Number(custom.rangeUpper)) || Number(custom.rangeUpper) <= Number(custom.rangeLower)
+        || !Number.isInteger(Number(custom.rungCount)) || Number(custom.rungCount) < 1 || Number(custom.rungCount) > 64
+        || !(STRATEGY_DISTRIBUTIONS as readonly string[]).includes(String(custom.distribution))
+      ) {
+        return reply.code(400).send({
+          error: 'custom ladder needs rangeLower > 0, rangeUpper > rangeLower, integer rungCount in 1..64, and distribution spot|curve|bidask'
+        });
+      }
+    }
+
     try {
       const result = await (deps.build ?? buildPosition)(deps, scope, {
         chain: body.chain,
         poolAddress: body.poolAddress,
-        template: body.template as never,
+        template: body.template as StrategyTemplateName | undefined,
         custom:
           body.custom
             ? {
                 rangeLower: Number(body.custom.rangeLower),
                 rangeUpper: Number(body.custom.rangeUpper),
                 rungCount: Number(body.custom.rungCount),
-                distribution: body.custom.distribution as never
+                distribution: String(body.custom.distribution) as LpStrategyType
               }
             : undefined,
         depositAmount: Number(body.depositAmount),

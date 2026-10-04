@@ -68,6 +68,12 @@ const riskPassCron = process.env.LP_RISK_PASS_CRON ?? '*/10 * * * *';
 const meteoraFetcher = createMeteoraPoolFetcher({
   apiBase: process.env.METEORA_API_URL ?? 'https://dlmm-api.meteora.ag',
   maxPairs: Number(process.env.LP_SCAN_MAX_PAIRS ?? 200)
+  // binSource (the live DLMM SDK bin feed) is intentionally not wired yet:
+  // @meteora-ag/dlmm@1.9.14 cannot be imported in this environment at all —
+  // its ESM build re-exports anchor paths that only CJS resolution accepts,
+  // and its CJS build does not export the DLMM class. The `binSource` port on
+  // createMeteoraPoolFetcher is the fixture-tested seam; adopt the SDK (or a
+  // patched build) behind it without touching the scanner.
 });
 
 const robinhoodPools = (process.env.ROBINHOOD_LP_POOL_ADDRESSES ?? '')
