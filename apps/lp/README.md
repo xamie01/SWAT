@@ -178,7 +178,12 @@ concentration 35, bundled launch 25, freeze 25, blacklist 20, pause 10;
 deduplicated by flag, capped at 100). The pass runs after the scan, scores
 every `risk_score IS NULL` pool, and attaches score + flags. A pool whose
 checks throw stays unassessed — and therefore unlisted — until the next pass;
-"we have not looked yet" is the honest state.
+"we have not looked yet" is the honest state. A chain with **no checks
+configured** (Robinhood Chain today) also stays unassessed: scoring it 0 would
+present "we have not looked" as "clean" and put those pools on the feed.
+
+The scan pass also prunes pools unseen for 7 days (`pruneStaleLpPools`) — an
+upsert-only cache can never remove a pool that dropped off the source list.
 
 ### Wallet indexer (Tracks D1–D5)
 Each scheduled pass reads every tracked wallet through its chain's reader,
@@ -196,16 +201,26 @@ rung exposure is comparable at both ends of a wide range), weights them by
 distribution, and snaps to chain granularity — bin ids on Meteora
 (`id = ln(price)/ln(1+binStep)`), spaced ticks on Uniswap
 (`tick = ln(price)/ln(1.0001)`, floored to spacing). Per-rung allocation =
-weight × deposit. On Meteora a rung is one position (`addLiquidityByStrategy`
-per rung — the SDK has no batched multi-position call); on Uniswap it is one
-NFT mint, preceded by a swap step when the rung needs base tokens.
+weight × deposit. Weight shapes: `spot` is equal; `curve` decays from the
+rung **nearest the current price** in log space, in both directions (so a
+down-tilted range loads its top rung — dump capture — and the shape follows
+the price rather than the index); `bidask` concentrates at **both** edges
+symmetrically, dipping in the middle (the accumulation shape). On Meteora a
+rung is one position (`addLiquidityByStrategy` per rung — the SDK has no
+batched multi-position call); on Uniswap it is one NFT mint, preceded by a
+swap step when the rung needs base tokens.
 
 `buildPosition` runs, in order: execution-mode gate (off refuses before
 anything else runs) → deploy guard (G1 exposure cap) → pool lookup in the scan
 cache (a pool without a scan or price cannot anchor a ladder) → template or
 custom params (both at once is an error) → plan → persist as `building` →
-execution steps. Guardrail refusals return `rejectionReasons` with an empty
-bundle (HTTP 403 with reasons, not a generic 500).
+execution steps. **In paper mode the build ends with a `building → active`
+transition** — the recorded plan IS the build, and without it the position
+would sit in `building` forever, invisible to the monitor and un-closable by
+rebalance. In live mode that transition belongs to the executor's broadcast
+confirmation (`attachOnChainPositionAddress`). Guardrail refusals return
+`rejectionReasons` with an empty bundle (HTTP 403 with reasons, not a generic
+500).
 
 ### Manual position builder (Track I)
 
@@ -295,6 +310,7 @@ Config (all optional unless noted — see `.env.example` "LP Dashboard" block):
 | `LP_SCAN_MAX_PAIRS` | `200` | pairs per scan |
 | `ROBINHOOD_LP_POOL_ADDRESSES` | *(empty)* | comma-separated v3/v4 pool list (operator-configured) |
 | `LP_SERVICE_USER_ADDRESS` | *(empty)* | recipient used in paper plans |
+| `LP_CORS_ORIGIN` | *(empty)* | comma-separated browser origins allowed to call the API with cookies; empty = no cross-origin browser client (service-key callers unaffected) |
 | `API_KEY` | — | enables service-key auth (required in production) |
 | `SOLANA_RPC_URL` / `HELIUS_API_KEY` | — | chain reads (existing WAKE vars) |
 | `ROBINHOOD_RPC_URL` | — | EVM reads (existing WAKE var) |
@@ -302,21 +318,24 @@ Config (all optional unless noted — see `.env.example` "LP Dashboard" block):
 ## API (Track H)
 
 All routes require a principal: a WAKE session cookie (browser, with CSRF
-double-submit on POST) or `X-Api-Key: $API_KEY` (service; no tenant, so
-`/positions` and `/deploy` reject it). Static routes register before
+double-submit on state-changing methods) or `X-Api-Key: $API_KEY` (service; no
+tenant, so `/positions` and `/deploy` reject it). Static routes register before
 parameterized ones; limits are clamped server-side.
 
 | Route | Auth | Notes |
 |---|---|---|
 | `GET /v1/health` | public | |
-| `GET /v1/lp/discover?chain=&sort=volume\|activeTvl\|feeApr24h\|ratio&limit=&offset=` | any | `sort=ratio` applies the volume-to-active-TVL ranking post-query; unassessed pools never appear (SQL-level) |
+| `GET /v1/lp/discover?chain=&sort=volume\|activeTvl\|feeApr24h\|ratio&limit=&offset=` | any | `sort=ratio` applies the volume-to-active-TVL ranking post-query; unassessed pools never appear (SQL-level); pools with volume but zero active TVL rank as unmeasurable, not infinite |
 | `GET /v1/lp/wallets/leaderboard?chain=&sort=pnl\|winRate&limit=` | any | aggregates closed-position results |
 | `GET /v1/lp/positions?includeClosed=` | **user only** | each open position carries `rebalanceRecommended` (true in `near_edge`/`out_of_range`) |
 | `GET /v1/lp/strategy-templates` | any | the four presets with widths/rung counts |
 | `GET /v1/lp/ladder-preview` (query: `chain`, `poolAddress`, `template` or `rangeLower`+`rangeUpper`+`rungCount`+`distribution`, `depositAmount`) | any | Track I2: read-only live preview — resolved params, per-rung allocation, live liquidity share per rung; `contextWarning` says when it fell back to the scan cache |
-| `POST /v1/lp/positions/deploy` | **user only** | body: `{ chain, poolAddress, template? , custom?, depositAmount, depositAsset, autoRebalance? }`; guardrail refusals → `403 { reasons }`; validation → `400`; success → `{ positionId, mode, rungs, steps }` |
+| `POST /v1/lp/positions/deploy` | **user only** | body: `{ chain, poolAddress, template? , custom?, depositAmount, depositAsset, autoRebalance? }`; guardrail refusals → `403 { reasons }`; validation → `400`; success → `{ positionId, mode, rungs, steps }` (paper deploys also transition the position to `active`) |
 | `POST /v1/lp/positions/:positionId/rebalance` | **user only** | Track I: manual trigger — queues the rebalance job and transitions to `rebalancing`; bypasses the `autoRebalance` flag; `409` on building/closed/raced positions |
 | `PATCH /v1/lp/positions/:positionId/auto-rebalance` | **user only** | Track I: flips the opt-in; body `{ enabled: boolean }` |
+| `POST /v1/lp/positions/:positionId/close` | **user only** | exits from every open state (including `building` — the stuck-build escape hatch); `409` on closed/raced; the G2 profit-bank sweep is deliberately not invoked here (see the note below) |
+| `POST /v1/lp/wallets` | **service only** | tracked-wallet on-ramp (Track D): body `{ chain, walletAddress (chain-prefixed), label?, pollingCadenceSeconds? }` |
+| `DELETE /v1/lp/wallets?chain=&walletAddress=` | **service only** | untracks; → `{ removed: boolean }` |
 
 Deploy example:
 
@@ -334,7 +353,7 @@ from `apps/api` login: `swat_session` + `swat_csrf` with `x-csrf-token`.)
 ## How to test
 
 ```bash
-pnpm --filter @swat/lp test          # 159 unit tests (vitest, colocated)
+pnpm --filter @swat/lp test          # 167 unit tests (vitest, colocated)
 pnpm --filter @swat/lp typecheck     # tsc --noEmit
 pnpm --filter @swat/lp build         # emit to dist/ (NodeNext ESM)
 pnpm --filter @swat/db test          # 844 tests (incl. 059+060 migration ledger contracts)
@@ -394,13 +413,32 @@ These are implemented and typed but cannot execute in the build environment
   uses it. The Uniswap tick-band walker remains a documented seam (in-range
   liquidity only for now), and the EVM live preview path (slot0 reads) is
   implemented but runtime-unproven (no Robinhood Chain RPC here).
-- **Live execution**: the workers record paper plans and throw a explicit
-  error on live jobs; the SDK-backed signing ports land behind the same
-  interfaces (`MeteoraLiquidityPort`, `EvmPositionPort`, rebalance ports) at
-  live certification.
+- **Live execution**: the workers record paper plans (after checking the
+  position is still actionable) and throw an explicit error on live jobs; the
+  SDK-backed signing ports land behind the same interfaces
+  (`MeteoraLiquidityPort`, `EvmPositionPort`, rebalance ports) at live
+  certification.
 - **Integration tests**: written against a migrated `INTEGRATION_DATABASE_URL`
   database; unrun here per the build handoff. `schema-guard.ts` already lists
   the lp_* tables.
+
+### Wired-but-inert (needs live position valuation)
+
+- **Profit banking (G2) and the reserve sub-vault (G3)** are implemented,
+  tested, and reachable only from a close-with-realized-gain flow — which
+  requires live position inventory reads that arrive with the SDK-backed
+  execution ports. The close endpoint deliberately does NOT invoke them with a
+  client-supplied gain: trusting the caller to price its own sweep is the
+  failure mode the guardrail exists to prevent.
+- **Robinhood Chain risk checks** are written (`risk/evm-checks.ts`) but not
+  wired into the risk pass's `checksByChain`, so EVM pools stay unassessed
+  (and off the feed) until an EVM holder/explorer port exists.
+- **Solana liquidity-lock check** is wired but its resolver defaults to null
+  (DLMM positions are NFTs, not LP tokens) — it activates when a classic-AMM
+  LP-mint resolver is configured.
+- **Rebalance executor steps** are plan-shaped; no queue consumer yet turns a
+  `lp-rebalance` job into `buildMeteora/EvmRebalancePlan` calls (the worker
+  records paper intent only).
 
 ## Open question: guardrail enforcement mode (Track G)
 
