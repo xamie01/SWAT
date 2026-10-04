@@ -33,10 +33,11 @@ describe('createSolanaLpPositionReader', () => {
 
     expect(observed?.positionAddress).toBe('solana:Pos1');
     expect(observed?.poolAddress).toBe('solana:Pair1');
-    // base: 2 * 150 * 200 = 60_000; quote: 100 * 1 = 100
-    expect(observed?.positionValueUsd).toBeCloseTo(60_100, 9);
-    // fees: 0.1 * 150 * 200 + 5 * 1 = 3005
-    expect(observed?.uncollectedFeesUsd).toBeCloseTo(3_005, 9);
+    // Each leg priced once in USD: base 2 * $200 = 400, quote 100 * $1 = 100.
+    // (currentPrice 150 is quote-per-base and must NOT multiply in again.)
+    expect(observed?.positionValueUsd).toBeCloseTo(500, 9);
+    // fees: 0.1 * $200 + 5 * $1 = 25
+    expect(observed?.uncollectedFeesUsd).toBeCloseTo(25, 9);
     expect(observed?.inRange).toBe(true);
   });
 

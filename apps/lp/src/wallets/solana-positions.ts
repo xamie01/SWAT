@@ -57,10 +57,13 @@ export function createSolanaLpPositionReader(options: {
         ]);
         if (basePriceUsd === null || quotePriceUsd === null) continue;
 
+        // Each leg is priced once, in USD per token. `currentPrice` is
+        // quote-per-base — multiplying it in as well would double-count the
+        // quote leg's unit and inflate the base leg by the pool price.
         const positionValueUsd =
-          pair.baseAmount * pair.currentPrice * basePriceUsd + pair.quoteAmount * quotePriceUsd;
+          pair.baseAmount * basePriceUsd + pair.quoteAmount * quotePriceUsd;
         const uncollectedFeesUsd =
-          pair.uncollectedBaseFees * pair.currentPrice * basePriceUsd
+          pair.uncollectedBaseFees * basePriceUsd
           + pair.uncollectedQuoteFees * quotePriceUsd;
 
         observed.push({
