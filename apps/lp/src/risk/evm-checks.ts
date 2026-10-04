@@ -89,7 +89,7 @@ export function evmLiquidityLockCheck(
     const movableShare = movable / totalSupply;
     if (movableShare < 0.1) return [];
     return [
-      { flag: LIQUIDITY_UNLOCKED_FLAG, detail: `${(movableShare * 100).toFixed(1)}% of LP tokens sit in the pool deployer's wallet` }
+      { flag: LIQUIDITY_UNLOCKED_FLAG, detail: `${(movableShare * 100).toFixed(1)}% of LP tokens sit in the queried holder balance rather than a locker or burn address` }
     ];
   };
 }

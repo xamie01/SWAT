@@ -48,9 +48,9 @@ describe('rankPoolsByVolumeToActiveLiquidity', () => {
     );
   });
 
-  it('volume with zero active TVL is infinite ratio — top, flagged', () => {
-    expect(volumeToActiveLiquidityRatio({ poolAddress: 'x', volume24h: 50, activeTvl: 0 })).toBe(
-      Number.POSITIVE_INFINITY
-    );
+  it('volume against zero active TVL is unmeasurable, not an infinite ratio', () => {
+    // Trades need liquidity — volume > 0 with activeTvl = 0 is a failed
+    // active-TVL observation, and Infinity would top the feed with it.
+    expect(volumeToActiveLiquidityRatio({ poolAddress: 'x', volume24h: 50, activeTvl: 0 })).toBeNull();
   });
 });

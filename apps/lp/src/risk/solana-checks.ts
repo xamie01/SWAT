@@ -161,11 +161,15 @@ export function liquidityLockCheck(
       ),
       port.call<{ value: { amount: string } }>('getTokenSupply', [lpMint])
     ]);
+    const lockedOrBurnedAmount = largest.value
+      .filter((account) => BURN_ADDRESSES.has(account.address))
+      .reduce((sum, account) => sum + Number(account.amount), 0);
+    // Movable is supply MINUS what was observed locked/burned. Reading the raw
+    // supply here (as the buckets were disjoint, this is not) would count every
+    // locked LP token as movable and flag even fully-locked pools.
     const snapshot: LiquidityLockSnapshot = {
-      lockedOrBurnedAmount: largest.value
-        .filter((account) => BURN_ADDRESSES.has(account.address))
-        .reduce((sum, account) => sum + Number(account.amount), 0),
-      movableAmount: Number(supply.value.amount)
+      lockedOrBurnedAmount,
+      movableAmount: Math.max(0, Number(supply.value.amount) - lockedOrBurnedAmount)
     };
     const finding = liquidityLockFinding(snapshot);
     return finding ? [finding] : [];

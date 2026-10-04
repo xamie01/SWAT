@@ -52,7 +52,7 @@ describe('runRiskPass', () => {
       attachRisk
     });
 
-    expect(summary).toEqual({ assessed: 1, failed: 0 });
+    expect(summary).toEqual({ assessed: 1, failed: 0, skippedNoChecks: 0 });
     const [chain, address, score, flags] = attachRisk.mock.calls[0];
     expect(chain).toBe('solana');
     expect(address).toBe('solana:pool-a');
@@ -79,12 +79,12 @@ describe('runRiskPass', () => {
       attachRisk
     });
 
-    expect(summary).toEqual({ assessed: 1, failed: 1 });
+    expect(summary).toEqual({ assessed: 1, failed: 1, skippedNoChecks: 0 });
     expect(attachRisk).toHaveBeenCalledTimes(1);
     expect(attachRisk.mock.calls[0][1]).toBe('solana:pool-a');
   });
 
-  it('a chain with no configured checks produces a clean score rather than an exception', async () => {
+  it('a chain with no configured checks stays unassessed instead of scoring 0', async () => {
     const listUnassessed = vi.fn<typeof listUnassessedLpPools>(async () => [pool({ chain: 'robinhood-chain' })]);
     const attachRisk = vi.fn<typeof attachLpPoolRisk>(async () => undefined);
 
@@ -94,7 +94,9 @@ describe('runRiskPass', () => {
       attachRisk
     });
 
-    expect(summary).toEqual({ assessed: 1, failed: 0 });
-    expect(attachRisk.mock.calls[0][2]).toBe(0);
+    // Score 0 would read as "clean" and put the pool on the Discover feed;
+    // leaving risk_score NULL keeps it off until the chain has real checks.
+    expect(summary).toEqual({ assessed: 0, failed: 0, skippedNoChecks: 1 });
+    expect(attachRisk).not.toHaveBeenCalled();
   });
 });

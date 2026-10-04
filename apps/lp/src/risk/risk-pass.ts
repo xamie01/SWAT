@@ -22,6 +22,8 @@ export interface RiskPassDeps {
 export interface RiskPassSummary {
   readonly assessed: number;
   readonly failed: number;
+  /** Pools on a chain with no checks configured — left unassessed, never scored 0. */
+  readonly skippedNoChecks: number;
 }
 
 function toContext(pool: LpPool): TokenRiskContext {
@@ -40,9 +42,18 @@ export async function runRiskPass(deps: RiskPassDeps): Promise<RiskPassSummary> 
   const unassessed = await listUnassessed(200);
   let assessed = 0;
   let failed = 0;
+  let skippedNoChecks = 0;
 
   for (const pool of unassessed) {
-    const checks = deps.checksByChain[pool.chain] ?? [];
+    const checks = deps.checksByChain[pool.chain];
+    if (!checks || checks.length === 0) {
+      // A chain with no configured checks has NOT been looked at. Attaching a
+      // score of 0 would present "we have not looked yet" as "clean" and put
+      // the pool on the feed — the exact failure the NULL-vs-0 split on
+      // lp_pools.risk_score exists to prevent.
+      skippedNoChecks += 1;
+      continue;
+    }
     try {
       const findings = (await Promise.all(checks.map((check) => check(toContext(pool))))).flat();
       const combined = combineTokenRisk(findings);
@@ -58,5 +69,5 @@ export async function runRiskPass(deps: RiskPassDeps): Promise<RiskPassSummary> 
     }
   }
 
-  return { assessed, failed };
+  return { assessed, failed, skippedNoChecks };
 }

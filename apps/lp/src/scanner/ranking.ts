@@ -11,7 +11,10 @@
  *
  * Unmeasurable inputs (null active TVL or volume) sort to the bottom, after
  * every pool that could be ranked — a pool that cannot be measured must never
- * beat one that measurably performed.
+ * beat one that measurably performed. A measured volume against a zero active
+ * TVL is unmeasurable too, not an infinite ratio: trades require liquidity,
+ * so volume > 0 with activeTvl = 0 means the active-TVL observation failed,
+ * and an `Infinity` would put the least-verified pool at the very top.
  */
 export interface RankablePool {
   readonly poolAddress: string;
@@ -27,7 +30,7 @@ export function volumeToActiveLiquidityRatio(pool: RankablePool): number | null 
     return null;
   }
   if (pool.activeTvl <= 0) {
-    return pool.volume24h > 0 ? Number.POSITIVE_INFINITY : null;
+    return null;
   }
   return pool.volume24h / pool.activeTvl;
 }
