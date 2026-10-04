@@ -139,6 +139,9 @@ export async function recordLpWalletIndexPass(
     if (observation.positionAddress.indexOf(':') < 0) {
       throw new Error('observation position address must be chain-prefixed');
     }
+    if (observation.poolAddress.indexOf(':') < 0) {
+      throw new Error('observation pool address must be chain-prefixed');
+    }
   }
 
   await withTransaction(async (client) => {
@@ -238,13 +241,22 @@ interface LeaderboardRow {
   dominant_strategy_type: 'spot' | 'curve' | 'bidask' | null;
 }
 
+/** NUMERIC arrives as number (fits float64) or string (does not) — never round silently. */
+function toSafeNumber(value: number | string): number {
+  if (typeof value === 'number') return value;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`stored NUMERIC ${String(value)} does not fit a float64`);
+  }
+  return parsed;
+}
+
 /**
  * The LP Wallets screen. Win rate counts closed positions only — an open
  * position has no realized result to vote on — and `dominant_strategy_type` is
  * the modal strategy across all observed positions.
  */
-export async function queryLpWalletLeaderboard(options: {
-  chain?: LpChain;
+export async function queryLpWalletLeaderboard(options: {  chain?: LpChain;
   sort?: LeaderboardSort;
   limit?: number;
 } = {}): Promise<LpLeaderboardEntry[]> {
@@ -304,8 +316,8 @@ export async function queryLpWalletLeaderboard(options: {
     chain: row.chain,
     walletAddress: row.wallet_address,
     label: row.label,
-    realizedPnlUsd: Number(row.realized_pnl_usd),
-    winRate: row.win_rate === null ? null : Number(row.win_rate),
+    realizedPnlUsd: toSafeNumber(row.realized_pnl_usd),
+    winRate: row.win_rate === null ? null : toSafeNumber(row.win_rate),
     closedPositionCount: Number(row.closed_position_count),
     dominantStrategyType: row.dominant_strategy_type
   }));

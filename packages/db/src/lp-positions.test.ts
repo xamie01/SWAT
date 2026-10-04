@@ -19,7 +19,7 @@ vi.mock('./client.js', () => ({
   pool: { connect: mocks.connect }
 }));
 
-import { createLpPosition, listPositionsForMonitor, setLpPositionAutoRebalance, sumOpenLpDeposits, sumOpenLpPoolExposure, transitionLpPosition } from './lp-positions.js';
+import { createLpPosition, getLpPositionAnyOwner, listPositionsForMonitor, setLpPositionAutoRebalance, sumOpenLpDeposits, sumOpenLpPoolExposure, transitionLpPosition } from './lp-positions.js';
 import { crossTenantScope, forUser } from './tenancy.js';
 
 const scope = forUser('11111111-1111-1111-1111-111111111111');
@@ -255,5 +255,18 @@ describe('lp-positions state machine', () => {
   it('an empty exposure sum reads as 0, not null', async () => {
     mocks.query.mockImplementation(async () => [{ total: null }]);
     await expect(sumOpenLpDeposits(scope)).resolves.toBe(0);
+  });
+
+  it('the worker read refuses a user scope and queries by id alone', async () => {
+    await expect(getLpPositionAnyOwner(scope, 'pos-1')).rejects.toThrow('crossTenantScope');
+    expect(mocks.query).not.toHaveBeenCalled();
+
+    mocks.query.mockImplementation(async () => [positionRow({ user_id: 'someone-else' })]);
+    const position = await getLpPositionAnyOwner(crossTenantScope('lp execution worker'), 'pos-1');
+    expect(position?.userId).toBe('someone-else');
+    const [sql, params] = mocks.query.mock.calls[0];
+    expect(String(sql)).toContain('WHERE id = $1');
+    expect(String(sql)).not.toContain('AND user_id');
+    expect(params).toEqual(['pos-1']);
   });
 });

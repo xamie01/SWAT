@@ -96,6 +96,22 @@ describe('lp-tracked-wallets', () => {
     expect(mocks.clientQuery).not.toHaveBeenCalled();
   });
 
+  it('rejects an unprefixed observation pool address before writing anything', async () => {
+    await expect(
+      recordLpWalletIndexPass('wallet-1', [
+        {
+          positionAddress: 'solana:posA',
+          poolAddress: 'poolA',
+          capturedAt: new Date(),
+          positionValueUsd: 10,
+          uncollectedFeesUsd: 0,
+          inRange: true
+        }
+      ])
+    ).rejects.toThrow('pool address must be chain-prefixed');
+    expect(mocks.clientQuery).not.toHaveBeenCalled();
+  });
+
   it('rejects a non-finite net result', async () => {
     await expect(
       upsertLpWalletPositionResult('wallet-1', {
@@ -167,5 +183,22 @@ describe('lp-tracked-wallets', () => {
   it('rejects an out-of-range leaderboard limit', async () => {
     await expect(queryLpWalletLeaderboard({ limit: 0 })).rejects.toThrow('limit');
     expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('a NUMERIC pnl that does not fit a float64 throws instead of rounding silently', async () => {
+    mocks.query.mockResolvedValueOnce([
+      {
+        tracked_wallet_id: 'wallet-1',
+        chain: 'solana',
+        wallet_address: 'solana:9xQe',
+        label: null,
+        realized_pnl_usd: '1e400',
+        win_rate: null,
+        closed_position_count: 1,
+        dominant_strategy_type: null
+      }
+    ]);
+
+    await expect(queryLpWalletLeaderboard({})).rejects.toThrow('does not fit a float64');
   });
 });

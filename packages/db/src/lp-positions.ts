@@ -224,6 +224,23 @@ export async function getLpPosition(scope: UserScope, positionId: string): Promi
   return rows[0] ? toPosition(rows[0]) : null;
 }
 
+/**
+ * Worker-side read of one position regardless of owner. Platform sweep — pass
+ * `crossTenantScope(reason)`. The execution worker receives only the position
+ * id in its job payload and must be able to see any user's row to refuse
+ * acting on one that closed (or never left `building`) between enqueue and run.
+ */
+export async function getLpPositionAnyOwner(scope: UserScope, positionId: string): Promise<LpPosition | null> {
+  if (!isCrossTenant(scope)) {
+    throw new Error('getLpPositionAnyOwner is a platform read; pass crossTenantScope(reason)');
+  }
+  const rows = await query<PositionRow>(
+    `SELECT ${POSITION_COLUMNS} FROM lp_positions WHERE id = $1`,
+    [positionId]
+  );
+  return rows[0] ? toPosition(rows[0]) : null;
+}
+
 export async function listLpPositions(
   scope: UserScope,
   options: { includeClosed?: boolean; limit?: number } = {}
