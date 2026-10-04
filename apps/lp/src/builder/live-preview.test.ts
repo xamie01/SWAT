@@ -54,8 +54,9 @@ describe('buildLivePreview (Track I2)', () => {
       rungCount: 4,
       distribution: 'bidask'
     });
-    // bidask: far edge heaviest
-    expect(preview.rungs[3]?.weight).toBeGreaterThan(preview.rungs[0]?.weight ?? 0);
+    // bidask: both edges heavier than the middle rungs (symmetric shape).
+    expect(preview.rungs[0]?.weight).toBeGreaterThan(preview.rungs[1]!.weight);
+    expect(preview.rungs[3]?.weight).toBeGreaterThan(preview.rungs[2]!.weight);
   });
 
   it('validates user-edited params exactly as the confirm handler will', () => {

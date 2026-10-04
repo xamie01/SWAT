@@ -9,22 +9,40 @@ import {
 } from './ladder-plan.js';
 
 describe('computeRungWeights', () => {
+  const bounds = computeRungPriceBounds(100, 200, 4);
+
   it('spot weights are equal', () => {
     const weights = computeRungWeights('spot', 4);
     expect(weights).toHaveLength(4);
     weights.forEach((weight) => expect(weight).toBeCloseTo(0.25, 12));
   });
 
-  it('curve weights front-load toward the current price', () => {
-    const weights = computeRungWeights('curve', 4);
-    expect(weights[0]).toBeGreaterThan(weights[3]!);
-    const sum = weights.reduce((a, b) => a + b, 0);
-    expect(sum).toBeCloseTo(1, 9);
+  it('curve weights front-load toward the rung nearest the current price', () => {
+    // Price near the top of the range: the top rung is heaviest (dump-capture
+    // over a down-tilted range), decaying toward the bottom.
+    const topAnchored = computeRungWeights('curve', 4, { currentPrice: 190, bounds });
+    expect(topAnchored[3]).toBeGreaterThan(topAnchored[0]!);
+    expect(topAnchored.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+
+    // Price near the bottom: the shape flips, it does not stay index-anchored.
+    const bottomAnchored = computeRungWeights('curve', 4, { currentPrice: 110, bounds });
+    expect(bottomAnchored[0]).toBeGreaterThan(bottomAnchored[3]!);
+
+    // The same price outside the range still loads the nearest rung most.
+    const below = computeRungWeights('curve', 4, { currentPrice: 50, bounds });
+    expect(below[0]).toBeGreaterThan(below[1]!);
   });
 
-  it('bidask weights load the far edge', () => {
+  it('curve weights demand the anchor', () => {
+    expect(() => computeRungWeights('curve', 4)).toThrow('anchor');
+  });
+
+  it('bidask weights load both edges and dip in the middle', () => {
     const weights = computeRungWeights('bidask', 4);
-    expect(weights[3]).toBeGreaterThan(weights[0]!);
+    expect(weights[0]).toBeGreaterThan(weights[1]!);
+    expect(weights[3]).toBeGreaterThan(weights[2]!);
+    // Symmetric shape: the two edges are (within float error) equal.
+    expect(weights[0]).toBeCloseTo(weights[3]!, 12);
     const sum = weights.reduce((a, b) => a + b, 0);
     expect(sum).toBeCloseTo(1, 9);
   });

@@ -8,11 +8,14 @@ import type { LpProtocol } from '../scanner/types.js';
  * one range, with per-rung weights shaped by the strategy distribution:
  *
  *   - `spot`    — equal weights. Tight ranges; classic market-making shape.
- *   - `curve`   — weights decay from the rung nearest the current price
- *                 (front-loaded), matching where fill probability concentrates.
- *   - `bidask`  — weights concentrate at the two edges of the range (the bid
- *                 and the ask), the accumulation shape: heavy where price
- *                 would have to travel far to reach you.
+ *   - `curve`   — weights decay from the rung nearest the CURRENT PRICE (in log
+ *                 space), decaying outward in both directions. Where the price
+ *                 sits inside the range decides which end is loaded: a
+ *                 down-tilted range loads its top rung (catching dumps), an
+ *                 up-tilted one its bottom (catching pumps).
+ *   - `bidask`  — weights concentrate at BOTH edges of the range (the bid and
+ *                 the ask), dipping in the middle — the accumulation shape:
+ *                 heavy where price would have to travel far to reach you.
  *
  * Meteora rungs snap to bin ids; Uniswap rungs snap to tick boundaries. Both
  * snap from the same continuous price math here, so the two builders only
@@ -62,8 +65,27 @@ function assertPositive(name: string, value: number): void {
   }
 }
 
-/** Weights per rung by distribution; sums to 1 within float error. */
-export function computeRungWeights(distribution: LpStrategyType, rungCount: number): number[] {
+/** The context curve weights need: where the price sits across the rung bounds. */
+export interface RungWeightAnchor {
+  /** Current quote-per-base price the curve tilts toward. */
+  readonly currentPrice: number;
+  /** The rung bounds (from `computeRungPriceBounds`), in order. */
+  readonly bounds: readonly { readonly priceLower: number; readonly priceUpper: number }[];
+}
+
+/**
+ * Weights per rung by distribution; sums to 1 within float error.
+ *
+ * `curve` requires the anchor (price + bounds) because "nearest the current
+ * price" is meaningless without them; `spot` and `bidask` are anchor-free
+ * shapes. `bidask` loads both edges symmetrically — one exponential anchored
+ * at each edge, summed — so the shape is a dip in the middle, not a ramp.
+ */
+export function computeRungWeights(
+  distribution: LpStrategyType,
+  rungCount: number,
+  anchor?: RungWeightAnchor
+): number[] {
   if (!Number.isInteger(rungCount) || rungCount < 1 || rungCount > 64) {
     throw new Error(`rungCount must be an integer in 1..64, got ${rungCount}`);
   }
@@ -73,19 +95,42 @@ export function computeRungWeights(distribution: LpStrategyType, rungCount: numb
     return Array.from({ length: rungCount }, () => 1 / rungCount);
   }
 
-  // Exponential shape parameter: curve front-loads toward the current price,
-  // bidask does the reverse (edges heaviest). lambda = 1.2 gives a visible
-  // tilt without degenerate rungs.
+  // Exponential shape parameter: lambda = 1.2 gives a visible tilt without
+  // degenerate rungs.
   const lambda = 1.2;
   const rawWeights: number[] = [];
-  for (let index = 0; index < rungCount; index += 1) {
-    const position = index / (rungCount - 1); // 0 .. 1 across the range
-    rawWeights.push(
-      distribution === 'curve'
-        ? Math.exp(-lambda * position)
-        : Math.exp(-lambda * (1 - position))
-    );
+
+  if (distribution === 'curve') {
+    if (!anchor) {
+      throw new Error('curve weights need the current price and rung bounds to anchor at');
+    }
+    if (anchor.bounds.length !== rungCount) {
+      throw new Error(`curve weights need ${rungCount} rung bounds, got ${anchor.bounds.length}`);
+    }
+    if (!Number.isFinite(anchor.currentPrice) || anchor.currentPrice <= 0) {
+      throw new Error(`currentPrice must be a positive finite number, got ${anchor.currentPrice}`);
+    }
+    // Distances are normalized by the ladder's total log width so lambda means
+    // the same tilt on a ±2% scalp as on a ±60% passive range. A price outside
+    // the range still loads the nearest rung most — the shape degrades, it
+    // does not invert.
+    const logWidth =
+      Math.log(anchor.bounds[anchor.bounds.length - 1]!.priceUpper) -
+      Math.log(anchor.bounds[0]!.priceLower);
+    for (const bound of anchor.bounds) {
+      const midpoint = Math.sqrt(bound.priceLower * bound.priceUpper);
+      const distance = Math.abs(Math.log(midpoint) - Math.log(anchor.currentPrice));
+      rawWeights.push(Math.exp(-lambda * (distance / logWidth)));
+    }
+  } else {
+    // bidask: one decay anchored at each edge, summed — both edges heavy,
+    // symmetric regardless of where the price sits.
+    for (let index = 0; index < rungCount; index += 1) {
+      const position = index / (rungCount - 1); // 0 .. 1 across the range
+      rawWeights.push(Math.exp(-lambda * position) + Math.exp(-lambda * (1 - position)));
+    }
   }
+
   const total = rawWeights.reduce((sum, weight) => sum + weight, 0);
   return rawWeights.map((weight) => weight / total);
 }
@@ -146,7 +191,10 @@ export function buildLadderPlan(input: LadderPlanInput): LadderPlan {
   }
 
   const bounds = computeRungPriceBounds(input.rangeLower, input.rangeUpper, input.rungCount);
-  const weights = computeRungWeights(input.distribution, input.rungCount);
+  const weights = computeRungWeights(input.distribution, input.rungCount, {
+    currentPrice: input.currentPrice,
+    bounds
+  });
   const lastIndex = bounds.length - 1;
 
   const rungs = bounds.map((bound, index) => {
