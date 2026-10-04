@@ -2,7 +2,7 @@
 
 Liquidity-provider operations for WAKE: discover pools on **Meteora DLMM (Solana)** and **Uniswap v3/v4 (Robinhood Chain)**, score them for risk, deploy laddered positions from named strategy presets, monitor them against price drift, rebalance only when the economics justify it, and enforce per-user risk guardrails — all under the same paper-mode and execution-certification gates as the rest of WAKE.
 
-Built from the 40-task plan in [`WAKE LP Dashboard — Coding Build Plan (GLM 5.3 Flash).md`](./WAKE%20LP%20Dashboard%20—%20Coding%20Build%20Plan%20(GLM%205.3%20Flash).md), Tracks A through H, one tested checkpoint per track.
+Built from the 40-task plan in [`WAKE LP Dashboard — Coding Build Plan (GLM 5.3 Flash).md`](./WAKE%20LP%20Dashboard%20—%20Coding%20Build%20Plan%20(GLM%205.3%20Flash).md), Tracks A through H plus **Track I (manual position builder)** and the E5/F6 behavior changes, one tested checkpoint per track.
 
 ---
 
@@ -13,8 +13,10 @@ Built from the 40-task plan in [`WAKE LP Dashboard — Coding Build Plan (GLM 5.
                                         │
  LP wallet indexer (D) ──▶ leaderboard ──┤
                                         ▼
-                       Deploy Ladder button (H5)
-                                │  guardrails (G1: exposure cap)
+             ladder preview (I2: live bins/ticks, read-only)
+                                │  E5 resolver pre-fills; user may edit
+                                ▼
+             Deploy confirm (H5) ── guardrails (G1: exposure cap)
                                 ▼
                     buildPosition() entrypoint (E6)
                                 │  template or custom ladder (E5, E2/E4)
@@ -60,6 +62,7 @@ apps/lp/                        the service (this package)
       active-tvl.ts             bins-near-active-bin / ticks-near-current-tick, one interface
       fee-apr.ts                realized fee APR (trailing fees ÷ TVL)
       ranking.ts                volume-to-active-liquidity sort
+      solana-bins.ts            Track I1: live DLMM bins via raw RPC (SDK-free)
       scan-job.ts               wires 1–5 into one scheduled pass
     risk/                       Track C
       types.ts                  finding shapes + stable flag codes
@@ -82,6 +85,8 @@ apps/lp/                        the service (this package)
       evm-ladder.ts             swap-then-mint steps in tick space (port)
       plan-ports.ts             plan-only ports (paper mode's "bundle")
       build-position.ts         THE entrypoint: gates → plan → persist → steps
+      live-preview.ts           Track I2: read-only preview calculator
+      live-context.ts           Track I1: live context source + cache fallback
     monitor/                    Track F
       classifier.ts             active / near_edge / out_of_range (pure)
       economic-check.ts         rebalance only if it pays for itself (pure)
@@ -109,7 +114,12 @@ packages/db/
   src/lp-tracked-wallets.ts     tracked wallets, snapshots, results, leaderboard query
 ```
 
-## The data model (migration `059_lp_dashboard.sql`)
+## The data model (migrations `059` + `060`)
+
+`060_lp_auto_rebalance.sql` (Track I) adds `lp_positions.auto_rebalance BOOLEAN
+NOT NULL DEFAULT FALSE` and replaces the transition trigger to widen the state
+machine with `active → rebalancing` (the manual trigger may re-center an
+in-range position; the scheduled monitor never uses that edge).
 
 | Table | Role | Precedent followed |
 |---|---|---|
@@ -136,7 +146,8 @@ building ──▶ active ⇄ near_edge ⇄ out_of_range ──▶ rebalancing �
 Enforced **twice, on purpose**:
 
 1. **Code** — `canTransitionLpPosition` in `@swat/shared`
-   (`LP_POSITION_TRANSITIONS` is the readable source of truth).
+   (`LP_POSITION_TRANSITIONS` is the readable source of truth), covered by its
+   own unit tests (`packages/shared/src/lp-lifecycle.test.ts`).
 2. **SQL** — the `enforce_lp_position_state_transition` trigger on
    `lp_positions` (cloned from the `copy_executions` trigger in `028`).
 
@@ -196,14 +207,54 @@ custom params (both at once is an error) → plan → persist as `building` →
 execution steps. Guardrail refusals return `rejectionReasons` with an empty
 bundle (HTTP 403 with reasons, not a generic 500).
 
+### Manual position builder (Track I)
+
+The builder flow is **preview → confirm**:
+
+1. **Live context (I1)** — `GET /v1/lp/ladder-preview` fetches the selected
+   pool's bin/tick state *now*. On Solana this reads the DLMM program directly
+   over RPC with no SDK — `@meteora-ag/dlmm@1.9.14` cannot be imported in this
+   environment (broken ESM re-exports; CJS build missing the `DLMM` class), so
+   `scanner/solana-bins.ts` speaks the wire format itself:
+   `getAccountInfo` on the pool decodes `active_id` (i32 @76), `bin_step`
+   (u16 @80) and the token mints (@88/@120); `getProgramAccounts` with a
+   memcmp filter at offset **24** (the `lb_pair` field inside `BinArray` — the
+   folk recipe's offset 16 returns zero accounts; both were tested live)
+   fetches the pool's bin arrays, decoded with a 144-byte stride
+   (`amount_x` u64, `amount_y` u64, price as Q64.64 u128). Every offset was
+   verified byte-by-byte against mainnet, and the live decode was smoke-tested
+   against a real pool (active bin price matched `(1+binStep/10000)^activeId`).
+   On Robinhood Chain the context comes from the viem pool reader
+   (`slot0` → tick + price). If a live fetch fails, the source degrades to the
+   scan cache **with an explicit warning on the context** — a preview backing
+   a real deposit must say when it is stale.
+2. **Preview calculator (I2)** — `buildLivePreview` resolves the template
+   (E5 pre-fill) or validates the user-edited custom params, snaps rungs to the
+   live granularity, and annotates each rung with the share of the pool's
+   *live* liquidity already sitting in that rung's range. Read-only: nothing
+   persisted, no chain writes.
+3. **Confirm (I3)** — the UI posts the (possibly edited) params to
+   `POST /v1/lp/positions/deploy` as `custom`, which re-validates them and
+   runs E6 behind the existing guardrails. The deploy body also carries
+   `autoRebalance` (Track I opt-in) and `PATCH
+   /v1/lp/positions/:positionId/auto-rebalance` flips it later.
+
 ### Monitor + rebalancer (Tracks F1–F6)
 Every `LP_POSITION_MONITOR_CRON`, the monitor prices each open position and
-classifies it. The state transition happens only on change — but the
-**economic gate runs every pass** for near_edge/out_of_range positions,
-because fee projections move even when the label does not. A rebalance is
-queued only when `evaluateRebalanceEconomics` is strictly positive, through
-the chain's concurrency-1 execution queue. A refused transition (racing a
-close) logs and moves on.
+classifies it. The state transition happens only on change — and that
+re-labeled state **is** the recommendation the position manager surfaces.
+
+**F6 change (Track I): the monitor no longer auto-fires rebalances by
+default.** For a `near_edge`/`out_of_range` position whose owner has not set
+`auto_rebalance`, the monitor records
+`rebalancesDeclined: [{ reason: 'auto-rebalance-not-opted-in' }]` and stops —
+no economics estimate, no queue job. Only an opted-in position runs the
+economic gate (`evaluateRebalanceEconomics` strictly positive) and gets
+queued on the chain's concurrency-1 execution queue. Manual triggers bypass
+the flag entirely (the user IS the consent): `POST
+/v1/lp/positions/:positionId/rebalance` queues the job and transitions the
+position to `rebalancing`. A refused transition (racing a close) logs and
+moves on.
 
 ### Guardrails (Tracks G1–G4)
 - **Exposure cap (G1)**: `(poolExposure + request) / (deployed + request) ≤
@@ -262,7 +313,10 @@ parameterized ones; limits are clamped server-side.
 | `GET /v1/lp/wallets/leaderboard?chain=&sort=pnl\|winRate&limit=` | any | aggregates closed-position results |
 | `GET /v1/lp/positions?includeClosed=` | **user only** | each open position carries `rebalanceRecommended` (true in `near_edge`/`out_of_range`) |
 | `GET /v1/lp/strategy-templates` | any | the four presets with widths/rung counts |
-| `POST /v1/lp/positions/deploy` | **user only** | body: `{ chain, poolAddress, template? , custom?, depositAmount, depositAsset }`; guardrail refusals → `403 { reasons }`; validation → `400`; success → `{ positionId, mode, rungs, steps }` |
+| `GET /v1/lp/ladder-preview` (query: `chain`, `poolAddress`, `template` or `rangeLower`+`rangeUpper`+`rungCount`+`distribution`, `depositAmount`) | any | Track I2: read-only live preview — resolved params, per-rung allocation, live liquidity share per rung; `contextWarning` says when it fell back to the scan cache |
+| `POST /v1/lp/positions/deploy` | **user only** | body: `{ chain, poolAddress, template? , custom?, depositAmount, depositAsset, autoRebalance? }`; guardrail refusals → `403 { reasons }`; validation → `400`; success → `{ positionId, mode, rungs, steps }` |
+| `POST /v1/lp/positions/:positionId/rebalance` | **user only** | Track I: manual trigger — queues the rebalance job and transitions to `rebalancing`; bypasses the `autoRebalance` flag; `409` on building/closed/raced positions |
+| `PATCH /v1/lp/positions/:positionId/auto-rebalance` | **user only** | Track I: flips the opt-in; body `{ enabled: boolean }` |
 
 Deploy example:
 
@@ -280,14 +334,29 @@ from `apps/api` login: `swat_session` + `swat_csrf` with `x-csrf-token`.)
 ## How to test
 
 ```bash
-pnpm --filter @swat/lp test          # 133 unit tests (vitest, colocated)
+pnpm --filter @swat/lp test          # 159 unit tests (vitest, colocated)
 pnpm --filter @swat/lp typecheck     # tsc --noEmit
 pnpm --filter @swat/lp build         # emit to dist/ (NodeNext ESM)
-pnpm --filter @swat/db test          # 841 tests (incl. 059 migration ledger contract)
-pnpm --filter @swat/shared test      # 444 tests
+pnpm --filter @swat/db test          # 844 tests (incl. 059+060 migration ledger contracts)
+pnpm --filter @swat/shared test      # 451 tests (incl. the LP lifecycle machine)
 node scripts/check-env-coverage.mjs  # governed env vars documented
 node scripts/check-public-secrets.mjs
 ```
+
+Live verification (requires only an internet connection, no keys — run from
+`apps/lp` after `pnpm --filter @swat/lp build`):
+
+```bash
+# The RPC bin source against a real mainnet MET/USDC DLMM pool:
+node -e "import('./dist/scanner/solana-bins.js').then(async ({ createRpcSolanaBinSource }) => {
+  const source = createRpcSolanaBinSource({ rpcUrl: 'https://api.mainnet-beta.solana.com' });
+  const { bins, activeBinId, binStep } = await source.fetchBins('solana:5hbf9JP8k5zdrZp9pokPypFQoBse5mGCmW6nqodurGcd');
+  console.log('active bin', activeBinId, 'binStep', binStep, 'bins', bins.length);
+})"
+```
+
+The fixture tests encode the same byte offsets verified on mainnet, so an
+upstream layout change fails the unit suite before it fails live.
 
 What the suites cover, by design:
 
@@ -320,13 +389,11 @@ These are implemented and typed but cannot execute in the build environment
 
 - **Migration 059 has never been applied.** First `pnpm db:migrate` against a
   real database is the moment to watch.
-- **Live chain reads**: the Meteora SDK bin source seam is defined but the
-  SDK is intentionally not wired — `@meteora-ag/dlmm@1.9.14` cannot be
-  imported at all (its ESM build re-exports anchor paths only CJS resolution
-  accepts; its CJS build does not export the `DLMM` class — verified by
-  probe). The REST scanner path works without it (`activeTvlExact: false`).
-  The Uniswap tick-band walker is likewise a documented seam (in-range
-  liquidity only for now).
+- **Live chain reads**: the Solana side is now **live-verified** — the RPC
+  bin source fetched real bins from mainnet, and the scanner's active-TVL
+  uses it. The Uniswap tick-band walker remains a documented seam (in-range
+  liquidity only for now), and the EVM live preview path (slot0 reads) is
+  implemented but runtime-unproven (no Robinhood Chain RPC here).
 - **Live execution**: the workers record paper plans and throw a explicit
   error on live jobs; the SDK-backed signing ports land behind the same
   interfaces (`MeteoraLiquidityPort`, `EvmPositionPort`, rebalance ports) at
@@ -334,6 +401,20 @@ These are implemented and typed but cannot execute in the build environment
 - **Integration tests**: written against a migrated `INTEGRATION_DATABASE_URL`
   database; unrun here per the build handoff. `schema-guard.ts` already lists
   the lp_* tables.
+
+## Open question: guardrail enforcement mode (Track G)
+
+**Not decided.** The exposure cap and gate are currently *hard-enforced*
+(`buildPosition` returns a refusal bundle; the route returns 403 with
+reasons). The open question is whether G should stay hard-enforced or become
+a *confirmation* flow — the deploy proceeds, but the client must explicitly
+acknowledge the guardrail breach (`acknowledgeRisk: true`) and the breach is
+journaled. Hard caps protect users from themselves but can block legitimate
+concentrated strategies; confirmations preserve user agency but shift the
+risk decision onto the user at the worst possible moment (mid-trade). Nothing
+is built for the confirmation variant — the current hard gate is the shipping
+behavior, and changing it touches `guardrails/exposure-cap.ts`, the deploy
+route, and the guard contract tests in one coherent change.
 
 ## Conventions this code follows (repo invariants)
 
