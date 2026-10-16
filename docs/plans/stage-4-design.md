@@ -861,6 +861,27 @@ the `046` collision. Stage 4 consumes `047`–`050`. The R5 contract migration
 takes a number from whatever is free at the time and is recorded then; reserving
 it now would repeat the collision from the other direction.
 
+### 5.3 Master attribution — `S4-M3`
+
+`copy_positions` is the aggregate physical position for one user/venue
+account/chain/token. It must not be repurposed as the source-master ledger. The
+accepted inventory decision is recorded in
+[`ADR-0007`](../adr/0007-master-attributed-inventory.md): add a master-attributed
+lot subledger, dual-write aggregate and lot state from confirmed evidence, and
+make every sell, reservation, rebuild, wind-down, manual exit, redemption, and
+position-exit claim carry the same attribution scope.
+
+The critical behavior is that a master sell applies its source fraction only to
+that master's lot. Aggregate manual exits and Polymarket redemption can close the
+actual venue position, but their evidence must then be allocated across the
+affected lots. A master wallet column on `copy_positions` alone is not a complete
+implementation; the position locks, `copy_position_applications`, exit race keys,
+stop-loss, capacity, P&L, and integration fixtures must agree on the same model.
+
+S4-M3 remains open until the ADR's two-level ledger and race semantics are
+implemented and proven against a live database. No additional migration number is
+reserved by this design note.
+
 ---
 
 ## 6. Deposit and withdraw (`S4-11`, `S4-12`, D11 anti-theft core)
@@ -1703,5 +1724,4 @@ mutation-testing the scanner itself.
 | Withdrawal to a non-linked address under manual review | An escape hatch is exactly the control an attacker would target via support. If it is ever added, it needs its own threat model, not an exception to §6.3. |
 | Cross-chain balance aggregation for sizing | Sizing reads the balance on the chain being traded. Summing across chains would let a Solana balance authorise a Polygon position the user cannot fund. |
 | `resolveRiskPolicy` cache eviction by size | §8 flags it. It is a memory-growth issue, not a correctness one; a bounded LRU lands with fan-out but does not gate the design. |
-
 

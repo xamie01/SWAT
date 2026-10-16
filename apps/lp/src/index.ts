@@ -74,7 +74,7 @@ const solanaRpcUrl = process.env.SOLANA_RPC_URL
   ?? (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : undefined);
 
 const meteoraFetcher = createMeteoraPoolFetcher({
-  apiBase: process.env.METEORA_API_URL ?? 'https://dlmm-api.meteora.ag',
+  apiBase: process.env.METEORA_API_URL ?? 'https://dlmm.datapi.meteora.ag',
   maxPairs: Number(process.env.LP_SCAN_MAX_PAIRS ?? 200),
   // Live bins for active-TVL now that the RPC bin source exists (Track I1).
   binSource: solanaRpcUrl
@@ -97,7 +97,8 @@ const robinhoodFetcher = createRobinhoodPoolFetcher({
   reader: createViemRobinhoodPoolReader({
     rpcUrl: process.env.ROBINHOOD_RPC_URL ?? '',
     configuredPools: robinhoodPools
-  })
+  }),
+  stableQuoteToken: process.env.ROBINHOOD_SANITY_TOKEN ?? '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
 });
 
 const scanStore = {

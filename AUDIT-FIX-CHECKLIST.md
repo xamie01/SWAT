@@ -41,7 +41,7 @@ than missing features: `S4-M34` (a one-line check that could be a live bug on ev
 does not cover).
 
 ---
-## Where the project stands — 2026-08-22
+## Where the project stands — 2026-10-04
 
 Counts are generated from this file, not maintained by hand. Regenerate with the snippet at the
 end of this block after any batch of ticks.
@@ -53,29 +53,29 @@ end of this block after any batch of ticks.
 | 4. Stage 1 — auth & tenancy | 22 | 0 | 0 | **closed** |
 | 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
-| 7. Stage 4 — custody & per-user execution | 24 | 52 | 4 | **the live front.** Open grew because verification kept finding real defects — `S4-M39`, `S4-M40`, `S4-M41` were all filed this session, not discovered late |
+| 7. Stage 4 — custody & per-user execution | 31 | 43 | 4 | **the live front.** Fan-out and book-feed work has landed; S4-M3 is active uncommitted accounting work and remains runtime-gated |
 | 8. Stage 5 — billing | 0 | 6 | 0 | not started; needs the Stripe MCP server first |
 | 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **80** | **139** | **15** | |
+| **Total** | **82** | **125** | **15** | |
 
-**Regenerated 2026-08-31.** Counts are from the file, not maintained by hand. Two things worth reading in
+**Regenerated 2026-10-04.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
 surfaced three genuine defects (`S4-M39` config drift, `S4-M40` an undecided fork, `S4-M41` a fabricated
 zero cost) — a checklist whose open count only ever falls is one that has stopped looking. And **`[=]`
 means the engineering is done but an external gate is not**: `S4-P10` (needs on-chain enforcement),
 `S4-M13` (needs the runtime router lookup), `S4-M39` (structural fix shipped; one address pending).
 
-**How to read the open column, because the raw number misleads.** Of 135 open:
+**How to read the open column, because the raw number misleads.** Of 125 open:
 
-- **14 are `(ext)`** — funded wallets, a human reviewer, a canary, **or a fact/decision we do not
+- **15 are `(ext)`** — funded wallets, a human reviewer, a canary, **or a fact/decision we do not
   have**. **No amount of engineering closes these.** 11 sit in Stage 3 certification, which is why
   Stage 3 looks unfinished while its code is largely written; the rest are in **§0**, each with what
   would close it.
-- **46 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
+- **45 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
   means discovering the API is missing.
 - **6 are billing (§8)**, blocked on the Stripe MCP server being added.
-- That leaves roughly **76 backend/infra items**, and Stage 4 §7.5 is where the work actually is.
+- That leaves roughly **59 backend/infra items**, and Stage 4 §7.5 is where the work actually is.
 
 **What is NOT in the open column any more**, because it was never buildable work: standing
 constraints (`[=]`) and pointers (`[→]`). See the legend. Four items moved out of `[ ]` on
@@ -89,14 +89,14 @@ is not done.** Each names its single blocker.
 
 | Item | What exists | What it needs to be ticked |
 |---|---|---|
-| `S4-M2` forward-only joins | Predicate + 21 tests, mutation-verified | A **per-user enumeration to call it from**. Today's signal path is per-master; the call site is fan-out (`S4-13`/`S4-14`), which does not exist. |
-| `S4-M3` subscription states | `051` + state machine + 38 tests | `copy_positions` carries **no master-wallet column**, so unsubscribe cannot tell `winding_down` from `ended`. Fan-out must put the master on the position row first. |
+| `S4-M2` forward-only joins | Predicate, fan-out call site, and mutation-sensitive coverage are landed; `c85c33c` | No checklist gap remains in the implementation. DB-backed integration is written but unrun, so the item remains open under the runtime verification gate. |
+| `S4-M3` master-attributed inventory | ADR-0007, migration 058, lot ledger, source-scoped sell bounds, unsubscribe transitions, unit/integration coverage are in the current worktree | Finish aggregate exit allocation, lot-aware downstream consumers, close-all, race/replay cases, and run against migrated Postgres before ticking. |
 | `S4-M4` position cap | `049` column, clamp, warning, 23 tests | **An API route.** `apps/api` exposes no execution-settings endpoint at all, so `upsertUserExecutionSettings` is unreachable over HTTP for every field. Then the UI (`S6-25`). |
 | `S4-M6` capacity cap | `053` + 52 tests, mutation-verified | Four things, all in `apps/`: a pre-fan-out liquidity read (**new work for Polymarket**), a cohort notional, a follower count, and **the ledger writer**. Until the writer runs, an empty ledger reads as "no capacity used" and **the cap permits everything**. |
 | `S4-M10` independence warning | — | Depends on `S4-M11`'s label source below. |
 | `S4-M11` funder degree | Band `2..25` wired in SQL + 43 tests | **A wallet label source.** Nothing ever sets `wallets.status = 'blacklisted'`, and observed degree alone cannot catch a quiet exchange. Needs a `wallet_labels` table or `wallets.role` — a schema change. |
-| `S4-M16` mirror price bound | Planner + 22 tests, reachable from the copy path | **A test at the call site.** No test reaches the Polymarket branch of `handleJob`; building that fixture is its own piece of work. |
-| `S4-M17` exit escalation | Rung ladder + 20 tests | **A caller.** `polymarket.ts` imports one constant from it and invokes none of its functions. Must go through the existing guarded `reconcilePending` loop, never a second timer (`C1`). |
+| `S4-M16` mirror price bound | Planner, copy path, and Polygon `handleJob` caller coverage; 36 focused Polymarket tests passed | No implementation gap remains; retain the focused tests when executor changes. |
+| `S4-M17` exit escalation | Rung ladder, existing guarded `reconcilePending` caller, and caller tests | No implementation gap remains; do not add a second timer. |
 
 <details>
 <summary>Regenerate the counts</summary>
@@ -196,7 +196,7 @@ what 115 unit tests structurally cannot cover.
 Also runnable at this stage, against a throwaway database:
 
 ```bash
-pnpm db:migrate                    # needs Postgres; applies all 57 migrations
+pnpm db:migrate                    # needs Postgres; applies migrations through 058
 pnpm test:integration              # refuses to run unless the DB name ends _integration/_test
 pnpm acceptance:g0-d11
 pnpm acceptance:polymarket-context
@@ -925,7 +925,8 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Schema change required before fan-out ships, not after.** Retrofitting this means reconstructing which open position came from which subscription, and that information is not recoverable once positions exist. `044_user_wallet_subscriptions` has no state column today.
   **Schema and state machine landed 2026-08-20; the unsubscribe *call site* has not.** `051_subscription_states.sql` adds `state` (CHECK'd to the three values, `DEFAULT 'active'` — exact rather than a fallback, since no fan-out has run so no existing row can be mid-wind-down), `active_since`, `wound_down_at`, `ended_at`, `close_all_requested_at`, a coherence CHECK that makes `winding_down` with a NULL `wound_down_at` unrepresentable and fails closed on an unrecognised state, and the two partial indexes the fan-out and the stuck-wind-down sweep need. `packages/db/src/subscriptions.ts` holds the pure `evaluateSubscriptionTransition` (the only definition of legality) plus `mirrorEligibilityForState`, which is the term `S4-13` consumes and which returns `'none'` for any state this build does not recognise. 38 unit tests; the DB-backed suite is `tests/integration/subscription-states.integration.test.ts`.
   **Three decisions worth not re-litigating.** (1) State is a *column*, not a lifecycle table: 044 already settled that `(user_id, wallet_address)` IS the fact, nothing FKs the table, and a side table would put a lateral join in front of the one question fan-out asks per signal. (2) That PK forbids a second row, so **re-subscribe is an `ended → active` transition on the same row**, which makes `created_at` unusable as the forward-only boundary — a row created in January, ended in March and revived in August still reads January. Hence `active_since`, reset on every entry into `active`; **`S4-M2` must filter on it, not on `created_at`.** (3) `winding_down → active` is legal: refusing it would mean a user who changed their mind cannot re-subscribe until every position happens to close, and there is no correctness cost because those positions came from this subscription and `active_since` still moves forward. `ended → winding_down` is refused — `ended` means nothing is open to wind down.
-  **What is NOT done, and why it is not a half-measure.** `unsubscribeFromWallet` still hard-deletes the row, and `DELETE /v1/me/wallets/:address` still calls it. Choosing between `winding_down` and `ended` requires knowing whether the subscription has an open position, and **nothing in the schema can answer that yet**: `copy_positions` is keyed `(target_account, chain, token_mint)` + `user_id` (`028`, `050`) and carries no master-wallet column, so a position cannot be attributed to the subscription that opened it. Defaulting every unsubscribe to `winding_down` would strand it in a state nothing can ever clear — no reaper exists — which is worse than today. So the state model is in place *before* positions exist, exactly as this item requires, and the two follow-ups are: fan-out (`S4-13`/`S4-15`) must carry the master wallet onto the position/execution row, and the route then switches to `beginWindDown` / `endSubscription`. Also outstanding: `pauseUnsubscribedWallets` (`packages/db/src/scoring-queries.ts`) counts an `ended` row as a subscriber, so a retained row keeps a wallet indexed forever — it needs `AND state <> 'ended'` in both of its `NOT EXISTS` sub-selects; and `tests/integration/helpers/schema-guard.ts` needs `['user_wallet_subscriptions', 'state']` as its newest `REQUIRED_COLUMNS` entry.
+  **Implementation now underway.** Migration `058_master_attributed_inventory.sql` adds `copy_position_lots`, carries `master_wallet_address` and `lot_id` on evidence applications, and backfills both from immutable source trades. `requestCopyExecution` and `claimSourceSignalForCopyExecution` now cap sells by the source master's unreserved lot as well as the aggregate venue position; evidence rebuilds both ledgers transactionally. `unsubscribeFromWallet` no longer deletes the subscription: it selects `winding_down` when that master owns an open or reserved lot and `ended` otherwise, while `endSubscription` refuses to end an open lot. The remaining work is aggregate manual/redemption exit allocation, stop-loss/P&L/capacity consumers, the close-all executor, and the database-backed race cases. `pauseUnsubscribedWallets` already uses `state <> 'ended'` in both `NOT EXISTS` predicates, and the integration schema guard now requires the new lot table/columns.
+  **Design decision recorded 2026-10-03:** [`docs/adr/0007-master-attributed-inventory.md`](./docs/adr/0007-master-attributed-inventory.md) chooses master-attributed lots over the aggregate venue position. Migration `058` now adds the replay-safe lot/application schema and backfills attribution from immutable source trades. This item remains open until lifecycle writers, reservation/sell sizing, subscription transitions, aggregate exits, and the required database-backed integration cases are complete.
 - [ ] **S4-M4** **Per-user concurrent-position cap**, in `049`, API → UI, with a platform hard ceiling. Plus a *derived* warning at the point of configuration: beyond N positions at the user's balance, each copy falls below venue minimum order size and every trade is skipped. Better said at the slider than discovered in a skip reason.
   **Data layer done 2026-08-20/21, commit `346bcc9`; API and UI are not — unticked.** `049` gains `max_concurrent_positions SMALLINT NOT NULL DEFAULT 5` by `ALTER ... IF NOT EXISTS` with a separately guarded CHECK, because the file's `CREATE TABLE IF NOT EXISTS` body is skipped on every database where `049` has already run — stating the column once in an ALTER makes fresh and existing databases converge. `packages/db/src/position-cap.ts` holds the pure half: `clampConcurrentPositionCap` (platform ceiling) and `assessPositionCap` (the derived warning). 20 tests, plus 3 in the settings suite. Exported from the barrel.
   **The clamp is applied on write, not only in the validator**, so a caller that reaches `upsertUserExecutionSettings` with an out-of-range integer still cannot store one; `049`'s CHECK mirrors it, making two independent layers. An out-of-range *integer* is clamped rather than rejected so the UI can show what the user will actually get and say which bound moved it — but a non-integer **throws**, because `500` is a coherent wish the platform declines while `2.5` is not a wish about position counts at all, and rounding it would be guessing. Floor is 1, not 0: a cap of 0 means "never open a position", which is a halt masquerading as a risk setting.
@@ -1425,7 +1426,7 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 
 ## 11. Migration number ledger
 
-Highest applied: **`053`**. Next free: **`052`** — the range is no longer contiguous, and that is deliberate rather than a slip: `052` stays reserved for `users.email_verified_at` (`S6-17`), which is unwritten, while `053` landed first because `S4-M6` was worked before it. Reserved to prevent the collision that stalled the old plan (S1-B6):
+Highest allocated: **`058`**; it is written in the current worktree but not yet applied or committed. Next free: **`052`** remains reserved for `users.email_verified_at` (`S6-17`); the next allocatable number after the reserved slot is **`059`**. The range is intentionally non-contiguous because Stage 4 work landed before the reserved Stage 6 item. Reserved to prevent the collision that stalled the old plan (S1-B6):
 
 | Range | Stage | Contents |
 |---|---|---|
@@ -1433,13 +1434,14 @@ Highest applied: **`053`**. Next free: **`052`** — the range is no longer cont
 | `044`–`045` | 2 | user_wallet_subscriptions, user_token_watches |
 | `046` | 3 | polymarket_redemptions *(taken — see the correction below)* |
 | `047`–`050` | 4 | user_execution_grants, user_balances, user_execution_settings + user_chain_execution_settings, tenancy key on trades/copy_executions/copy_positions *(all written 2026-08-18/19)* |
-| `051`–`053` | 4 (ADR-0005) | subscription states (`S4-M3`) — `051` **written 2026-08-20**; `users.email_verified_at` (`S6-17`) — `052` **still free**; per-master capacity accounting (`S4-M6`) — `053` **written 2026-08-22** as `053_master_capacity.sql` |
-| `054`–`055` | 5 | subscriptions, payments |
-| `056`–`059` | 7 | chains registry, chain FK conversion |
+| `051`–`053` | 4 (ADR-0005) | subscription states (`S4-M3`) — `051`; `users.email_verified_at` (`S6-17`) — `052` reserved; per-master capacity accounting (`S4-M6`) — `053` |
+| `054`–`058` | 4 (ADR-0005) | quote-unit evidence (`S4-M35`) — `054`; Polymarket exit claims (`S4-M19`) — `055`; master membership (`S4-M43`) — `056`; manual Polymarket exit trigger (`S4-M45`) — `057`; master-attributed inventory (`S4-M3`) — `058` |
+| `059`–`062` | 7 | chains registry, chain FK conversion |
+| `063`–`064` | 5 | subscriptions, payments |
 
 **Correction (2026-08-05).** Stage 3 needed a table the ledger had not anticipated — `polymarket_redemptions` — and took `046`, which was reserved for Stage 4's `user_trading_wallets`. This is the exact failure S1-B6 created the ledger to prevent, reappearing because the ledger was not updated at the moment the file was written. Stage 4 now starts at `047`. The lesson is procedural, not arithmetic: **update this table in the same commit as the migration**, never afterwards.
 
-**Correction (2026-08-19).** ADR-0005 introduced schema work with no reserved range, and `S4-M3` was briefly written against `051` — already reserved for Stage 5 billing. Caught before either file existed. Since everything from `051` up was unwritten, the reservations were renumbered rather than the new work pushed to the end, so numeric order still matches build order: ADR-0005 takes `051`–`053`, billing moves to `054`–`055`, Stage 7 to `056`–`059`. `S5-1`, `S5-2`, `S7-1` and `S7-3` were updated in the same commit. **Second time this ledger has caught a collision — the range table is doing its job, but only because it was checked before writing the file, which is the habit to keep.**
+**Correction (2026-10-03; refreshed 2026-10-04).** The ledger had stopped at `053` even though `054`–`057` were already present in `packages/db/sql/`. It also listed those files under Stage 5/Stage 7 despite their Stage 4 ownership. This reconciliation records `054`–`057`, allocates `058` to the active S4-M3 work, keeps `052` reserved, and moves the still-unwritten Stage 7 and billing ranges after the allocated Stage 4 work. Migration 058 remains unverified until Postgres is available. Every future migration number must be checked against both this table and the SQL directory before writing a file.
 
 Whoever lands first inside a range takes the next number and updates this table. Every file idempotent; `migrate.ts` re-runs all of them on every invocation and there is no applied-migrations table.
 

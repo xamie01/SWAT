@@ -518,40 +518,84 @@ export async function subscribeToWallet(
 }
 
 /**
- * Removes one user's subscription **row**, permanently.
+ * Whether this user's open accounting inventory came from this master.
+ *
+ * The aggregate `copy_positions` row cannot answer this once two masters share
+ * a token. The lot ledger is the attribution authority, and a reserved exit
+ * counts as open until the execution reaches terminal evidence.
+ */
+async function hasOpenMasterLot(
+  client: PoolClient,
+  userId: string,
+  masterWalletAddress: string
+): Promise<boolean> {
+  const result = await client.query<{ open: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1
+         FROM copy_position_lots
+        WHERE user_id = $1
+          AND master_wallet_address = $2
+          AND (confirmed_quantity > 0 OR reserved_sell_quantity > 0)
+     ) AS open`,
+    [userId, masterWalletAddress]
+  );
+  return result.rows[0]?.open === true;
+}
+
+/**
+ * Unsubscribe without deleting attribution: open lots enter exits-only
+ * wind-down, while a subscription with no open lot can end immediately.
  *
  * **Never touches the global wallet row.** Another tenant may be subscribed to
- * it, and the platform may be scoring it — deleting it here would be a
- * cross-tenant data loss triggered by an ordinary unsubscribe.
- *
- * **This is the pre-fan-out unsubscribe and it is not the ADR-0005 one.** Once
- * a subscription can have opened a copy position, deleting the row is exactly
- * the abandonment §3.7 rejects: the position's exit was going to arrive as the
- * master's sell mirror, and the row is what says so. The ADR-0005 operations
- * are `beginWindDown` (stop entries, keep honouring sells) and
- * `endSubscription` (nothing left open).
- *
- * It is deliberately left in place rather than redirected to `beginWindDown`,
- * because choosing between `winding_down` and `ended` requires knowing whether
- * the subscription has an open position, and **nothing in the schema can answer
- * that yet**: `copy_positions` is keyed `(target_account, chain, token_mint)`
- * plus `user_id` (028, 050) and carries no master-wallet column, so a position
- * cannot be attributed to the subscription that opened it. Defaulting to
- * `winding_down` would strand every unsubscribe in a state nothing can clear,
- * which is worse than the current behaviour. Redirect this at the moment
- * fan-out lands that attribution (S4-13/S4-15), not before.
+ * it, and the platform may be scoring it.
  */
 export async function unsubscribeFromWallet(
   scope: UserScope,
   walletAddress: string
 ): Promise<boolean> {
-  const rows = await query<{ wallet_address: string }>(
-    `DELETE FROM user_wallet_subscriptions
-      WHERE user_id = $1 AND wallet_address = $2
-      RETURNING wallet_address`,
-    [scope.userId, walletAddress]
-  );
-  return rows.length > 0;
+  return withTransaction(async (client) => {
+    const locked = await client.query<SubscriptionRow>(
+      `SELECT ${SUBSCRIPTION_COLUMNS}
+         FROM user_wallet_subscriptions
+        WHERE user_id = $1 AND wallet_address = $2
+        FOR UPDATE`,
+      [scope.userId, walletAddress]
+    );
+    const current = locked.rows[0];
+    if (!current) return false;
+
+    const shouldWindDown = current.state !== 'ended'
+      && await hasOpenMasterLot(client, scope.userId, walletAddress);
+    const targetState: 'winding_down' | 'ended' = shouldWindDown ? 'winding_down' : 'ended';
+    const verdict = evaluateSubscriptionTransition(current.state, targetState);
+    if (verdict.kind === 'illegal') {
+      throw new IllegalSubscriptionTransitionError(verdict.from, verdict.to, verdict.reason);
+    }
+    if (verdict.kind === 'noop') return true;
+
+    if (targetState === 'winding_down') {
+      await client.query(
+        `UPDATE user_wallet_subscriptions
+            SET state = 'winding_down',
+                wound_down_at = COALESCE(wound_down_at, NOW()),
+                membership_slot = NULL,
+                membership_grandfathered = FALSE
+          WHERE user_id = $1 AND wallet_address = $2`,
+        [scope.userId, walletAddress]
+      );
+    } else {
+      await client.query(
+        `UPDATE user_wallet_subscriptions
+            SET state = 'ended',
+                ended_at = NOW(),
+                membership_slot = NULL,
+                membership_grandfathered = FALSE
+          WHERE user_id = $1 AND wallet_address = $2`,
+        [scope.userId, walletAddress]
+      );
+    }
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -614,6 +658,10 @@ async function applyTransition(
     }
     if (verdict.kind === 'noop') {
       return { subscription: toSubscription(current), changed: false };
+    }
+
+    if (to === 'ended' && await hasOpenMasterLot(client, scope.userId, walletAddress)) {
+      throw new Error('Cannot end subscription while attributed positions remain open');
     }
 
     // One statement per target rather than a single clever one, so each write

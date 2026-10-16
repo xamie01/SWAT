@@ -4,6 +4,29 @@ Liquidity-provider operations for WAKE: discover pools on **Meteora DLMM (Solana
 
 Built from the 40-task plan in [`WAKE LP Dashboard — Coding Build Plan (GLM 5.3 Flash).md`](./WAKE%20LP%20Dashboard%20—%20Coding%20Build%20Plan%20(GLM%205.3%20Flash).md), Tracks A through H plus **Track I (manual position builder)** and the E5/F6 behavior changes, one tested checkpoint per track.
 
+## Current capability boundary
+
+The service is currently a **read-only discovery, valuation, preview, and paper-mode operations service**. It is not yet the live position-custody service for the whole WAKE platform.
+
+### Working now
+
+- Scans Meteora DLMM pools through Meteora's current Data API (`/pools`) with pagination, live token prices, fees, volume, and nested pool metadata.
+- Reads Solana DLMM bins directly from mainnet RPC and calculates exact active TVL when the pool has usable token prices.
+- Scans the configured Robinhood Chain Uniswap v3 pools through the configured EVM RPC.
+- Reads live pool state, token decimals, current ticks, bitmap words, initialized ticks, signed `liquidityNet`, and reconstructs tick liquidity bands.
+- Calculates decimal-normalized Robinhood active TVL. The configured WETH/USDG pools can use USDG as the stable quote and derive the WETH USD price from the live pool price.
+- Provides risk filtering, pool ranking, strategy-template resolution, ladder math, live Solana/EVM context, and read-only per-rung liquidity previews.
+- Provides authenticated position-management routes and paper-mode plans. Paper mode records intent and refuses to sign or broadcast transactions.
+
+### Intentionally deferred
+
+- Robinhood swap-log indexing for 24-hour volume and fee metrics; those fields remain zero until an indexed/log-based source is wired.
+- Live position ownership and valuation: Meteora position accounts and Uniswap v3 position NFTs are not yet the service's production wallet index.
+- Live transaction construction, signing, broadcasting, and receipt recovery for Meteora or Robinhood positions.
+- Full Postgres/Redis deployment and integration testing against a migrated environment.
+
+The live chain work completed here is deliberately read-only. Adding a private key or enabling live mode does not turn these readers into a production execution system.
+
 ---
 
 ## What the product does, end to end
@@ -302,7 +325,7 @@ Config (all optional unless noted — see `.env.example` "LP Dashboard" block):
 | Var | Default | Purpose |
 |---|---|---|
 | `LP_PORT` | `3010` | Fastify API port |
-| `METEORA_API_URL` | `https://dlmm-api.meteora.ag` | pool scan source |
+| `METEORA_API_URL` | `https://dlmm.datapi.meteora.ag` | Meteora Data API `/pools` source; supports `page`, `page_size`, `query`, and `sort_by` |
 | `LP_POOL_SCAN_CRON` | `*/30 * * * *` | pool scan |
 | `LP_POSITION_MONITOR_CRON` | `*/5 * * * *` | monitor pass |
 | `LP_RISK_PASS_CRON` | `*/10 * * * *` | risk attach |
@@ -408,11 +431,12 @@ These are implemented and typed but cannot execute in the build environment
 
 - **Migration 059 has never been applied.** First `pnpm db:migrate` against a
   real database is the moment to watch.
-- **Live chain reads**: the Solana side is now **live-verified** — the RPC
-  bin source fetched real bins from mainnet, and the scanner's active-TVL
-  uses it. The Uniswap tick-band walker remains a documented seam (in-range
-  liquidity only for now), and the EVM live preview path (slot0 reads) is
-  implemented but runtime-unproven (no Robinhood Chain RPC here).
+- **Live chain reads**: the Solana side is **live-verified** — the RPC bin
+  source fetched real bins from mainnet, and the scanner's active-TVL uses it.
+  The Robinhood Chain side is also **live-verified for the configured v3 pools**:
+  the Alchemy RPC returned pool state, tick bitmap data, initialized ticks, and
+  reconstructed bands; one-pool decimal-normalized active TVL passed at runtime.
+  Volume and fee metrics remain unpopulated because no swap-log source is wired.
 - **Live execution**: the workers record paper plans (after checking the
   position is still actionable) and throw an explicit error on live jobs; the
   SDK-backed signing ports land behind the same interfaces

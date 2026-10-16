@@ -6,31 +6,43 @@ import type { NormalizedPool, PoolFetcher } from './types.js';
 /**
  * Meteora DLMM pool-list fetcher (Track B1).
  *
- * Pool list comes from Meteora's public DLMM REST API; bins around the active
- * bin come from an injected `binSource` (the `@meteora-ag/dlmm` SDK in the
- * live service) because the REST list does not carry per-bin liquidity. When
- * bins or prices are unavailable the fetcher degrades to `activeTvl = tvl`
- * with `activeTvlExact: false` — a ceiling, never an underestimate.
- *
- * `fetchImpl` and `binSource` are injectable; fixtures replace both.
+ * Pool metadata comes from Meteora's current Data API. Bins around the active
+ * bin come from an injected RPC source because the pool list does not carry
+ * per-bin liquidity. When bins or prices are unavailable the fetcher degrades
+ * to `activeTvl = tvl` with `activeTvlExact: false`.
  */
 
-const DEFAULT_API_BASE = 'https://dlmm-api.meteora.ag';
+const DEFAULT_API_BASE = 'https://dlmm.datapi.meteora.ag';
+const MAX_PAGE_SIZE = 1000;
 
-/** The fields of a `/pair/all` row this fetcher consumes. Extra fields are ignored. */
+type NumericWindow = Readonly<Record<string, number | string | undefined>>;
+
+export interface MeteoraTokenApiRow {
+  readonly address: string;
+  readonly price?: number | string;
+}
+
 export interface MeteoraPairApiRow {
   readonly address: string;
   readonly name: string;
-  readonly mint_x: string;
-  readonly mint_y: string;
-  readonly bin_step: number;
-  /** Fraction, e.g. 0.002 = 0.2% = 20 bps. */
-  readonly base_fee_percentage?: number | string;
+  readonly token_x: MeteoraTokenApiRow;
+  readonly token_y: MeteoraTokenApiRow;
+  readonly pool_config: {
+    readonly bin_step: number;
+    readonly base_fee_pct?: number | string;
+  };
   readonly current_price?: number | string;
   readonly tvl?: number | string;
-  readonly trade_volume_24h?: number | string;
-  readonly fees_24h?: number | string;
-  readonly fees_7d?: number | string;
+  readonly volume?: NumericWindow;
+  readonly fees?: NumericWindow;
+}
+
+export interface MeteoraPoolsApiResponse {
+  readonly total: number;
+  readonly pages: number;
+  readonly current_page: number;
+  readonly page_size: number;
+  readonly data: readonly MeteoraPairApiRow[];
 }
 
 export interface MeteoraTokenPrices {
@@ -41,23 +53,18 @@ export interface MeteoraTokenPrices {
 }
 
 export interface MeteoraBinSource {
-  /**
-   * Bins around the active bin, human-scale. `binStep` rides along when the
-   * source knows it (the RPC source reads it from the LbPair) so callers can
-   * snap ladder plans without a second lookup.
-   */
   fetchBins(poolAddress: string): Promise<{ bins: readonly MeteoraBin[]; activeBinId: number; binStep?: number }>;
 }
 
 export interface MeteoraPoolFetcherOptions {
   readonly apiBase?: string;
   readonly fetchImpl?: typeof fetch;
-  /** Restrict the scan to one pair, e.g. `SOL/USDC`. Omitted = all pairs. */
+  /** Restrict the scan to one pair, e.g. `SOL/USDC`. */
   readonly searchTerm?: string;
+  /** Maximum number of pools returned across all API pages. */
   readonly maxPairs?: number;
   readonly tokenPrices?: MeteoraTokenPrices;
   readonly binSource?: MeteoraBinSource;
-  /** Bins each side of the active bin counted as "active" liquidity. */
   readonly activeBinRange?: number;
 }
 
@@ -67,9 +74,33 @@ function toNumber(value: number | string | undefined, fallback: number | null = 
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function fractionToBps(value: number | string | undefined): number {
-  const fraction = toNumber(value, 0) ?? 0;
-  return fraction * 10_000;
+function windowValue(window: NumericWindow | undefined, key: string, fallback: number | null = null): number | null {
+  return toNumber(window?.[key], fallback);
+}
+
+function percentToBps(value: number | string | undefined): number {
+  return (toNumber(value, 0) ?? 0) * 100;
+}
+
+function isApiResponse(value: unknown): value is MeteoraPoolsApiResponse {
+  if (!value || typeof value !== 'object') return false;
+  const response = value as Partial<MeteoraPoolsApiResponse>;
+  return Number.isInteger(response.total)
+    && Number.isInteger(response.pages)
+    && Number.isInteger(response.current_page)
+    && Number.isInteger(response.page_size)
+    && Array.isArray(response.data);
+}
+
+function isPoolRow(value: unknown): value is MeteoraPairApiRow {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Partial<MeteoraPairApiRow>;
+  return typeof row.address === 'string'
+    && row.address.length > 0
+    && typeof row.name === 'string'
+    && Boolean(row.token_x && typeof row.token_x.address === 'string' && row.token_x.address.length > 0)
+    && Boolean(row.token_y && typeof row.token_y.address === 'string' && row.token_y.address.length > 0)
+    && Boolean(row.pool_config && Number.isFinite(Number(row.pool_config.bin_step)));
 }
 
 export function createMeteoraPoolFetcher(options: MeteoraPoolFetcherOptions = {}): PoolFetcher {
@@ -77,48 +108,78 @@ export function createMeteoraPoolFetcher(options: MeteoraPoolFetcherOptions = {}
   const fetchImpl = options.fetchImpl ?? fetch;
   const activeBinRange = options.activeBinRange ?? 10;
   const activeTvlCalculator = createActiveTvlCalculator();
+  const requestedMax = options.maxPairs === undefined
+    ? MAX_PAGE_SIZE
+    : Math.max(0, Math.floor(options.maxPairs));
 
   return {
     chain: 'solana',
     protocol: 'meteora-dlmm',
     async fetch(): Promise<readonly NormalizedPool[]> {
-      const url = new URL('/pair/all', apiBase);
-      if (options.searchTerm) url.searchParams.set('searchTerm', options.searchTerm);
-      if (options.maxPairs) url.searchParams.set('limit', String(options.maxPairs));
+      if (requestedMax === 0) return [];
 
-      const response = await fetchImpl(url, { method: 'GET' });
-      if (!response.ok) {
-        throw new Error(`Meteora DLMM API returned ${response.status} for ${url.pathname}`);
-      }
-      const rows = (await response.json()) as readonly MeteoraPairApiRow[];
-      if (!Array.isArray(rows)) {
-        throw new Error('Meteora DLMM API returned a non-array payload');
+      const pageSize = Math.min(requestedMax, MAX_PAGE_SIZE);
+      const rows: MeteoraPairApiRow[] = [];
+      let page = 1;
+      let pages = 1;
+
+      while (page <= pages && rows.length < requestedMax) {
+        const url = new URL('/pools', apiBase);
+        url.searchParams.set('page', String(page));
+        url.searchParams.set('page_size', String(pageSize));
+        url.searchParams.set('sort_by', 'volume_24h:desc');
+        if (options.searchTerm) url.searchParams.set('query', options.searchTerm);
+
+        const response = await fetchImpl(url, { method: 'GET' });
+        if (!response.ok) {
+          throw new Error(`Meteora DLMM API returned ${response.status} for ${url.pathname}`);
+        }
+        const payload: unknown = await response.json();
+        if (!isApiResponse(payload)) {
+          throw new Error('Meteora DLMM API returned an invalid paginated payload');
+        }
+
+        pages = Math.max(page, payload.pages);
+        for (const row of payload.data) {
+          if (isPoolRow(row)) rows.push(row);
+          if (rows.length >= requestedMax) break;
+        }
+        if (payload.data.length === 0) break;
+        page += 1;
       }
 
       const pools: NormalizedPool[] = [];
-      for (const row of rows) {
-        if (!row?.address || !row.mint_x || !row.mint_y) continue;
-
+      for (const row of rows.slice(0, requestedMax)) {
         const poolAddress = prefixChainValue(row.address, 'solana');
-        const baseTokenMint = prefixChainValue(row.mint_x, 'solana');
-        const quoteTokenMint = prefixChainValue(row.mint_y, 'solana');
-
+        const baseTokenMint = prefixChainValue(row.token_x.address, 'solana');
+        const quoteTokenMint = prefixChainValue(row.token_y.address, 'solana');
         const tvl = toNumber(row.tvl, 0) ?? 0;
-        const volume24h = toNumber(row.trade_volume_24h, 0) ?? 0;
-        const fees24h = toNumber(row.fees_24h, 0) ?? 0;
-        const fees7d = toNumber(row.fees_7d);
-
-        const activeTvl = await resolveActiveTvl(poolAddress, baseTokenMint, quoteTokenMint, tvl, options, activeTvlCalculator);
+        const volume24h = windowValue(row.volume, '24h', 0) ?? 0;
+        const fees24h = windowValue(row.fees, '24h', 0) ?? 0;
+        const apiPrices = new Map<string, number>();
+        const baseApiPrice = toNumber(row.token_x.price);
+        const quoteApiPrice = toNumber(row.token_y.price);
+        if (baseApiPrice !== null) apiPrices.set(baseTokenMint, baseApiPrice);
+        if (quoteApiPrice !== null) apiPrices.set(quoteTokenMint, quoteApiPrice);
+        const activeTvl = await resolveActiveTvl(
+          poolAddress,
+          baseTokenMint,
+          quoteTokenMint,
+          tvl,
+          options,
+          activeTvlCalculator,
+          apiPrices
+        );
 
         pools.push({
           chain: 'solana',
           protocol: 'meteora-dlmm',
           poolAddress,
-          pairLabel: row.name ?? `${row.mint_x}/${row.mint_y}`,
+          pairLabel: row.name,
           baseTokenMint,
           quoteTokenMint,
-          feeBps: fractionToBps(row.base_fee_percentage),
-          binStep: toNumber(row.bin_step) ?? null,
+          feeBps: percentToBps(row.pool_config.base_fee_pct),
+          binStep: toNumber(row.pool_config.bin_step),
           tickSpacing: null,
           currentPrice: toNumber(row.current_price),
           tvl,
@@ -126,7 +187,7 @@ export function createMeteoraPoolFetcher(options: MeteoraPoolFetcherOptions = {}
           activeTvlExact: activeTvl.exact,
           volume24h,
           fees24h,
-          fees7d
+          fees7d: null
         });
       }
       return pools;
@@ -140,12 +201,13 @@ async function resolveActiveTvl(
   quoteTokenMint: string,
   tvl: number,
   options: MeteoraPoolFetcherOptions,
-  activeTvlCalculator: ReturnType<typeof createActiveTvlCalculator>
+  activeTvlCalculator: ReturnType<typeof createActiveTvlCalculator>,
+  apiPrices: ReadonlyMap<string, number>
 ): Promise<{ usd: number; exact: boolean }> {
   const binSource = options.binSource;
-  const prices = options.tokenPrices?.prices;
-  const basePriceUsd = prices?.get(baseTokenMint) ?? null;
-  const quotePriceUsd = prices?.get(quoteTokenMint) ?? options.tokenPrices?.stableQuotePriceUsd ?? null;
+  const prices = options.tokenPrices?.prices ?? apiPrices;
+  const basePriceUsd = prices.get(baseTokenMint) ?? null;
+  const quotePriceUsd = prices.get(quoteTokenMint) ?? options.tokenPrices?.stableQuotePriceUsd ?? null;
 
   if (binSource && basePriceUsd !== null && quotePriceUsd !== null) {
     try {

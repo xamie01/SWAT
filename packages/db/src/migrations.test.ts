@@ -63,4 +63,72 @@ describe('migration contracts', () => {
     expect(sql).toContain('source_sell_fraction > 0');
     expect(sql).toContain('source_sell_fraction <= 1');
   });
+
+  it('backfills master-attributed copy lots from immutable source trades', async () => {
+    const sql = await readFile(resolve(sqlDir, '058_master_attributed_inventory.sql'), 'utf8');
+
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS copy_position_lots');
+    expect(sql).toContain('master_wallet_address VARCHAR(128) NOT NULL');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS master_wallet_address VARCHAR(128)');
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS lot_id UUID');
+    expect(sql).toContain('JOIN source_trades source ON source.id = execution.source_trade_id');
+    expect(sql).toContain('REFERENCES copy_position_lots(id) ON DELETE RESTRICT');
+    expect(sql).toContain('ALTER COLUMN master_wallet_address SET NOT NULL');
+    expect(sql).toContain('ALTER COLUMN lot_id SET NOT NULL');
+    expect(sql).toContain('NULLS NOT DISTINCT');
+    expect(sql).not.toMatch(/DROP TABLE\s+copy_position_lots/i);
+    expect(sql).not.toMatch(/DELETE\s+FROM\s+copy_position/i);
+  });
+
+  it('enforces the LP position state machine twice and caches pools safely', async () => {
+    const sql = await readFile(resolve(sqlDir, '059_lp_dashboard.sql'), 'utf8');
+
+    // Every statement replays: tables, indexes, and the trigger all IF NOT EXISTS.
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS lp_pools');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS lp_positions');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS lp_guardrail_configs');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS lp_tracked_wallets');
+    expect(sql).not.toMatch(/CREATE (UNIQUE )?INDEX (?!IF NOT EXISTS)/);
+    expect(sql).toContain('DROP TRIGGER IF EXISTS trg_lp_position_state_transition');
+
+    // Fund-touching: the SQL half of the state machine must mirror
+    // LP_POSITION_TRANSITIONS in @swat/shared, and every transition journals.
+    expect(sql).toContain('enforce_lp_position_state_transition');
+    expect(sql).toContain(
+      "(OLD.state = 'building' AND NEW.state IN ('active', 'closed'))"
+    );
+    expect(sql).toContain(
+      "(OLD.state = 'active' AND NEW.state IN ('near_edge', 'out_of_range', 'closed'))"
+    );
+    expect(sql).toContain(
+      "(OLD.state = 'near_edge' AND NEW.state IN ('active', 'out_of_range', 'rebalancing', 'closed'))"
+    );
+    expect(sql).toContain(
+      "(OLD.state = 'out_of_range' AND NEW.state IN ('active', 'rebalancing', 'closed'))"
+    );
+    expect(sql).toContain(
+      "(OLD.state = 'rebalancing' AND NEW.state IN ('active', 'near_edge', 'out_of_range', 'closed'))"
+    );
+
+    // LP is narrower than the platform: polygon is not an LP chain.
+    expect(sql).toContain("CHECK (chain IN ('solana', 'robinhood-chain'))");
+    // Unassessed pools never reach the Discover feed's index.
+    expect(sql).toContain('WHERE risk_score IS NOT NULL');
+    expect(sql).not.toMatch(/DROP TABLE\s+lp_/i);
+  });
+
+  it('adds the auto-rebalance opt-in and widens the LP state machine forward', async () => {
+    const sql = await readFile(resolve(sqlDir, '060_lp_auto_rebalance.sql'), 'utf8');
+
+    expect(sql).toContain('ADD COLUMN IF NOT EXISTS auto_rebalance BOOLEAN NOT NULL DEFAULT FALSE');
+    // The trigger function is replaced (CREATE OR REPLACE), not dropped and
+    // recreated: the existing trigger keeps working through the replay.
+    expect(sql).toContain('CREATE OR REPLACE FUNCTION enforce_lp_position_state_transition');
+    // Track I: the manual trigger may re-center an in-range position; the
+    // scheduled monitor never uses this edge.
+    expect(sql).toContain(
+      "(OLD.state = 'active' AND NEW.state IN ('near_edge', 'out_of_range', 'rebalancing', 'closed'))"
+    );
+    expect(sql).not.toMatch(/DROP TABLE/i);
+  });
 });

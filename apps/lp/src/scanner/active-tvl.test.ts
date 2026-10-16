@@ -77,6 +77,19 @@ describe('activeTvlCalculator — uniswap v3/v4', () => {
     expect(value).toBeCloseTo(5_000 * (1 / sqrt(-100) - 1 / sqrt(0)), 9);
   });
 
+  it('normalizes raw token amounts by WETH/USDG decimals', () => {
+    const rawValue = calculator.calculateActiveTvl({
+      ...context,
+      bands: [{ tickLower: -50, tickUpper: 50, liquidity: 2_000_000_000_000_000_000 }],
+      baseTokenDecimals: 18,
+      quoteTokenDecimals: 6
+    });
+    const sqrt = (tick: number) => Math.sqrt(1.0001 ** tick);
+    const expectedBase = 2 * (1 / sqrt(0) - 1 / sqrt(50));
+    const expectedQuote = 2_000_000_000_000 * (sqrt(50) - sqrt(0));
+    expect(rawValue).toBeCloseTo(expectedBase + expectedQuote, 3);
+  });
+
   it('returns null when prices are missing', () => {
     expect(calculator.calculateActiveTvl({ ...context, basePriceUsd: null })).toBeNull();
   });

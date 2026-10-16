@@ -45,6 +45,9 @@ export interface UniswapActiveTvlContext {
   readonly range: number;
   readonly basePriceUsd: number | null;
   readonly quotePriceUsd: number | null;
+  /** Token decimals for raw Uniswap liquidity math; defaults to human-scale (0). */
+  readonly baseTokenDecimals?: number;
+  readonly quoteTokenDecimals?: number;
 }
 
 export type ActiveTvlContext = MeteoraActiveTvlContext | UniswapActiveTvlContext;
@@ -110,6 +113,16 @@ function uniswapActiveTvl(context: UniswapActiveTvlContext): number | null {
   if (context.basePriceUsd === null || context.quotePriceUsd === null) return null;
   const basePriceUsd = priceOrThrow('basePriceUsd', context.basePriceUsd);
   const quotePriceUsd = priceOrThrow('quotePriceUsd', context.quotePriceUsd);
+  const baseTokenDecimals = context.baseTokenDecimals ?? 0;
+  const quoteTokenDecimals = context.quoteTokenDecimals ?? 0;
+  if (!Number.isInteger(baseTokenDecimals) || baseTokenDecimals < 0 || baseTokenDecimals > 80) {
+    throw new Error(`baseTokenDecimals must be an integer in 0..80, got ${baseTokenDecimals}`);
+  }
+  if (!Number.isInteger(quoteTokenDecimals) || quoteTokenDecimals < 0 || quoteTokenDecimals > 80) {
+    throw new Error(`quoteTokenDecimals must be an integer in 0..80, got ${quoteTokenDecimals}`);
+  }
+  const baseScale = 10 ** baseTokenDecimals;
+  const quoteScale = 10 ** quoteTokenDecimals;
 
   let total = 0;
   for (const band of context.bands) {
@@ -118,7 +131,7 @@ function uniswapActiveTvl(context: UniswapActiveTvlContext): number | null {
     }
     if (band.tickUpper - band.tickLower > context.range * 2) continue;
     const { baseAmount, quoteAmount } = bandAmounts(band, context.currentTick);
-    total += baseAmount * basePriceUsd + quoteAmount * quotePriceUsd;
+    total += (baseAmount / baseScale) * basePriceUsd + (quoteAmount / quoteScale) * quotePriceUsd;
   }
   return total;
 }
