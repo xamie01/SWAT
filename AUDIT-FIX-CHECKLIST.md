@@ -1,18 +1,273 @@
-# SWAT Build Checklist — Current State → Multi-Tenant SaaS
+# SWAT / WAKE Build Checklist — Current State → Multi-Tenant SaaS
 
-**The execution tracker.** Every task needed to take this codebase from where it is today to the destination in `docs/plans/saas-conversion-plan.md`, in the stage order set by `docs/plans/BUILDER-GUIDE.md`.
+**The execution tracker and the single build authority.** Every task needed to take this codebase
+from where it is today to the destination in `docs/plans/saas-conversion-plan.md`, in the stage order
+set by `docs/plans/BUILDER-GUIDE.md` — plus, in **§0**, how to continue the build: the environment
+constraints, the current checkpoint, the decisions already made, and the build loop.
 
 | Doc | Role |
 |---|---|
 | `docs/plans/BUILDER-GUIDE.md` | **Why this order.** Stage definitions, standing rules, decision gates. Wins on any sequencing conflict. |
-| **`AUDIT-FIX-CHECKLIST.md`** (this) | **What to build, in order.** Numbered tasks, files, done-when. Check items off here. |
+| **`AUDIT-FIX-CHECKLIST.md`** (this) | **What to build, in order, and where the build stands.** Numbered tasks, files, done-when, plus the environment rules and the current checkpoint. Check items off here. |
 | `docs/plans/saas-conversion-plan.md` | SaaS design detail — schemas, routes, packages. See §2 for four corrections that override it. |
 | `docs/plans/production-decisions.md` | D1–D18 infrastructure/security decisions. |
 | `docs/plans/audit-history.md` | Archived evidence log for every audit ID (`F-CORE7`, `G5-R3`, …). Read-only. |
 
 Audit IDs are kept inline for traceability. `S<n>-<k>` is this document's own task numbering.
 
-## 0. Information needed — items engineering cannot close alone
+**This is the single working file, and it absorbed the former `docs/agents/continue-build.md`
+on 2026-10-16.** That brief had drifted from this document and contradicted it in places —
+it described S4-M16/M17 as caller-less and S4-M3 as blocked on a column migration `058` had
+already written. Two files each claiming to be the authority is how that happens, so there is
+now one. Everything the brief uniquely carried — the environment constraints, the checkpoint, the
+decisions already made, the subagent playbook, the build loop — lives in **§0.2–§0.8** below.
+
+## 0. How to continue this build
+
+### 0.1 Read first
+
+Read [`CLAUDE.md`](./CLAUDE.md) for repository invariants and service details, then this file.
+[`docs/PRD.md`](./docs/PRD.md) carries the product framing and [`README.md`](./README.md) the current
+WAKE product state. Under ADR-0005, cluster detectors are for discovery/alerting; copy trades
+originate from a single master's activity.
+
+**In a fresh conversation, say:** *"Read `AUDIT-FIX-CHECKLIST.md` and continue the build from there."*
+Reading the file beats pasting a wall of text — it stays in git, stays current, and the agent gets it
+at full fidelity.
+
+### 0.2 Hard constraints — the current working environment
+
+**CI IS NOT RUNNING — do not rely on it.** GitHub Actions fails at startup with the account billing
+lock. Local package typechecks and unit tests are the only verification available. Integration tests
+require Postgres and must not be run in this environment.
+
+1. Never run `pnpm build`, `pnpm dev`, or `docker-compose up`. The machine crashes under a full
+   workspace build. A single `pnpm --filter @swat/db build` or `@swat/shared build` is allowed only
+   after changing that package's `src/` when a consumer needs fresh `dist/`; this is required because
+   package consumers resolve `dist/`.
+2. Use per-package `tsc --noEmit` and focused Vitest suites. Do not run `pnpm db:migrate` or
+   `pnpm test:integration`; no database is available. Write integration tests and leave them unrun.
+3. Keep `TRADING_MODE=paper` and `AUTO_EXECUTE=false`. Never bypass live certification.
+4. Commit to the feature branch; never push without asking. Conventional Commits. Do not commit until
+   review and verification are complete.
+5. Report exactly what ran and what did not. A typecheck is not runtime proof.
+6. Read `CLAUDE.md`, `docs/PRD.md`, this file, and `docs/stale-dist-hazards.md` before substantial work.
+7. Every migration replays. Make every statement idempotent and guard constraint changes on shape, not
+   a potentially truncated name.
+
+### 0.3 Current checkpoint — 2026-10-16
+
+Recent relevant commits include S4-M2 forward-only (`c85c33c`), the Polymarket book feed (`d8192ca`),
+per-user breaker/risk-key corrections (`77f279b`), the reconciled trackers and S4-M3 implementation
+(`2b9831b`), and the read-only lot enumeration (`b67469d`). Inspect `git status` before continuing and
+preserve existing local changes.
+
+**Branch note.** The work currently sits on `feat/lp-dashboard`, which contains all of
+`feat/multi-tenant-foundation` (`c85c33c` is an ancestor). The `@swat/lp` microservice is a separate
+service under the WAKE umbrella; its integration with the core pipeline is **deferred and not yet
+designed**. Do not treat LP work as part of a Stage 4 exit gate.
+
+**S4-M16 and S4-M17 — done, do not re-do.** Both are implemented and caller-tested.
+`execution-lifecycle.test.ts` reaches the Polygon branch of `handleJob` and covers master fill price,
+null/missing source price, sell copies, and manual orders; focused verification passed 36 tests.
+S4-M17's exit escalation is called from the existing guarded `reconcilePending` pass, with caller tests
+covering rung progression, terminal alerts, redemption, and no extra timer. Do not duplicate or rewire
+these.
+
+**S4-M3 — implementation landed, verification outstanding.** ADR-0007 records the selected semantics:
+`copy_positions` remains the aggregate venue balance, while `copy_position_lots` records confirmed
+inventory by user, chain-prefixed source master, chain, and token. A source sell reduces only its
+master's lot and is bounded by the user's aggregate unreserved balance.
+
+Landed and committed in `2b9831b` / `b67469d`:
+
+- migration `058_master_attributed_inventory.sql` — creates the lot table, adds
+  `master_wallet_address` and `lot_id` to `copy_position_applications`, repairs tenant attribution from
+  `copy_executions`, and backfills source-master identity from immutable `source_trades`;
+- `packages/db/src/copy-trade-lifecycle.ts` — ensures and locks the aggregate row then the master lot,
+  rebuilds both ledgers from active evidence, writes both application identities in one transaction,
+  caps direct and signal-claimed source sells by both the aggregate balance and the selling master's
+  unreserved lot, and uses execution-before-inventory lock ordering so a request and fill evidence
+  cannot deadlock;
+- `listSubscriptionMasterLots` — the read-only enumeration of a subscription's open (confirmed or
+  reserved) lots, with a shared row type, column list and mapper so the rebuild and read paths cannot
+  drift;
+- `unsubscribeFromWallet` — retains the subscription, choosing `winding_down` when that master has an
+  open or reserved lot and `ended` when it has none; `endSubscription` refuses to end while attributed
+  inventory remains open.
+
+Still open for S4-M3 (see the item in §7.5):
+
+- aggregate manual-exit and Polymarket-redemption allocation across lots;
+- master-scoped exit race keys — the `(user_id, position_key)` Polymarket claim cannot distinguish one
+  master's lot exit from another's, or from an aggregate redemption;
+- stop-loss, P&L, capacity, and cleanup consumers that need lot scope;
+- close-all execution for one subscription's lots (the flag exists; nothing consumes it);
+- database-backed race/replay cases, including two masters sharing one token;
+- runtime proof against a migrated Postgres database.
+
+Integration coverage is written in `tests/integration/master-attributed-inventory.integration.test.ts`
+and the schema guard requires migration `058`, but integration tests remain unrun here.
+
+### 0.4 Critical build order
+
+1. Run the Stage B Redis and Postgres acceptance gates when infrastructure is available (§"How to test
+   what has been built"). The current environment explicitly prohibits those commands.
+2. Close the fan-out chain with evidence: candidate enumeration, forward-only eligibility, capacity
+   assessment, per-user planning, per-chain queue, risk keys, and idempotent ledger writes.
+3. Finish the selected S4-M3 inventory-attribution design: aggregate exits, master-scoped race keys,
+   lot-aware consumers, close-all, and DB integration verification as one coherent item.
+4. S4-M4 execution-settings API/UI and the remaining S4-15/16/17 fan-out wiring follow their backend
+   dependencies.
+5. Do not start frontend user workflows before their backend endpoints exist.
+
+### 0.5 Build loop — mandatory, and it binds orchestrators too
+
+**One item at a time. Never batch.** This is the project's working method, not a suggestion, and it
+applies identically to a lead agent and to every subagent it spawns. An orchestrator that fans out five
+agents and ticks five boxes at the end has violated it just as much as an agent that skips a test.
+
+For each checklist item, in this order:
+
+1. **Implement that one item.** Not the item plus two neighbours that looked related.
+2. **Write a test where a test is meaningful.** Meaningful means behaviour that can regress silently —
+   an auth guard, a state transition, a fail-closed branch, a constraint the database is supposed to
+   reject. Not meaningful: pixel snapshots, or a test that restates the implementation. If an item
+   genuinely needs no test, say why in the commit rather than staying quiet about it.
+   **Done means mutation-verified wherever the item is a control.** A test that still passes with the
+   feature removed is not evidence: break it, watch a *named* test fail, restore it, and report which.
+   This project has several recorded cases of complete-but-inert features whose suites stayed green —
+   Jito tip accounting that called none of its own imports, the `S4-M19` exit claim that was inert in
+   production while 705 tests passed, and the simulation gate with nothing constructing it. A green
+   suite licenses the assumption it never checked.
+3. **Check for errors.** `tsc --noEmit` for every package touched, plus the relevant vitest file or
+   suite. Fix what breaks before moving on.
+4. **Only then tick the box** here, recording the commit hash beside it.
+5. **Record what you found, not only what you fixed.** A defect discovered and worked around is worth
+   more to the next person than a clean diff. This file is the project's memory; an unrecorded fix gets
+   re-litigated in three weeks.
+
+**Never tick an item whose test has not run.** If no database is available and the test is an
+integration test, the item stays unticked and the entry says "written, not run" — see `S4-10`, which is
+deliberately open for exactly this reason.
+
+**Do not tick an item because it typechecks.** A whole workstream once reported done while its new code
+path was never called; it typechecked because unused imports are not errors.
+
+**Before claiming anything is done:** per-package `tsc --noEmit` clean for every package touched; the
+relevant suites run and passing with counts stated; the item's **Done when** re-read with each clause
+addressed or explicitly noted as unmet; anything written-but-unrun said plainly; and this file updated
+per steps 4 and 5.
+
+### 0.6 Decisions already made — do NOT re-litigate
+
+Recorded because every one of these was argued once and settled. Re-opening one costs a session and
+usually regresses it.
+
+| Decision | Answer |
+| --- | --- |
+| Alpha model | Single-master mirroring, not cluster consensus |
+| Buy sizing | **Hybrid**: `min(max_position_pct, master_fraction × scale)`, scale 1.0. Below the portfolio-coverage threshold, fall back to flat pct and mark **sized-without-conviction** |
+| Joining a master | **Forward-only.** No catch-up buying into existing positions |
+| Unsubscribe | **Exits-only wind-down.** Not liquidation (a market action the user did not request), not abandonment (orphans positions whose exit was the sell mirror). Needs states `active`/`winding_down`/`ended` |
+| Per-master capacity cap | **In v1**, denominated in **price impact**: copy notional per `(master, token, window)` as a fraction of usable liquidity. Follower count is the wrong unit |
+| When capacity binds | **Everyone skipped uniformly.** No tier priority |
+| Capacity messaging | Generic "at capacity, scaling infrastructure" to users; specific internal reason code for ops. Do **not** itemise the relayer quota to users |
+| Solana execution | **Jupiter + Jito bundles.** Retire Trojan — but order it certify (`S3-9`) → flip `SOLANA_EXECUTOR` → delete (`S3-6`). Never compress it |
+| Jito vs multi-path | Jito-only to start. Priority fee stays unset while Jito-only (correct — the tip buys inclusion); becomes mandatory if we ever fan out |
+| EVM MEV protection | **Do not build it.** Robinhood Chain runs a single sequencer, so no public mempool exists to front-run. Document the sequencer-trust assumption instead (ADR-0006) |
+| Polymarket order type | **FAK with a max price bound from the master's fill.** A resting order is not mirroring |
+| Master metrics | Out-of-sample over **24h / 7d / 30d**; never raw ROI; minimum trade count per window; divergence across windows is itself the finding |
+| Follower counts | **Never displayed.** Creates reflexive crowding and tells masters when to farm followers |
+| Position cap | **Per-user setting**, API → UI, with a platform hard ceiling |
+| Backfill UX copy | *"copying now; performance history still loading"* — never "a few seconds" (Solana takes 90 s–2.5 min for an active wallet) |
+| Email provider | Resend |
+| Polymarket custody | ADR-0003 fork (b): venue-scoped signer key, disclosed |
+| Legal / `DG-2` | Out of engineering scope. Leave it alone |
+| Existing `apps/web` | A **mockup**, not production code — no auth, no user concept. Harvest its visual language; do not preserve its data flow |
+| Operator console | **Kept, but relocated** into an `(admin)` route group behind `role=admin` + IP allowlist. A separate product — not reachable, linkable, or discoverable from the user app. `/clusters` must not exist in the user app at all |
+| `NEXT_PUBLIC_API_KEY` | **DELETED 2026-08-25** (`S6-3`). Replaced by cookie sessions plus a double-submit CSRF token through `apps/web/lib/api.ts`, which has no way to send an API key. `scripts/check-public-secrets.mjs` has an **empty** allowlist and is now a plain gate rather than a ratchet |
+| **First admin — read before running the dashboard** | The console is admin-only and signing up creates a plain `user`, never an admin. Set `ADMIN_EMAIL` + `ADMIN_INITIAL_PASSWORD` and run `pnpm --filter @swat/db seed:admin` once. Idempotent; never rewrites an existing admin's password; refuses under 12 characters |
+| Frontend design system | **Reuse the existing tokens verbatim** — Geist / Geist Mono / Material Symbols, the Material 3 surface families, and the semantic chain accents `solana-teal #14F195`, `polymarket-violet #8B5CF6`, `robinhood-amber #FFB800`. Full table in §9 |
+
+**Closed open questions — do not re-open:**
+
+- **OQ-3 (2026-08-19): Robinhood Chain supports Permit2.** `S4-M13` is "use Permit2", fallback
+  dropped. A mirror becomes one transaction instead of approve-then-swap, and `S4-P10`'s
+  argument-level check moves off `approve`'s spender onto the permit's token/spender/amount/deadline
+  fields.
+- **OQ-4 (2026-08-19): Helius FREE tier.** This re-scoped `S4-M21`. gRPC is Business+,
+  preconfirmations and preprocessed transactions are Professional+, raw shreds are $1,000/mo per IP
+  seat. The available upgrade is **LaserStream WebSocket** (Free+, no replay). Do not design against
+  gRPC or shreds. Also **withdraws** the backfill "cheap win" — `BACKFILL_BATCH_SIZE=5` plus 150 ms
+  pacing is correct on this plan, not timid.
+- **OQ-5 (2026-08-19): essentially no user UI exists.** `apps/web` is a single-operator mockup.
+  Console kept but relocated; user app built new against the existing design tokens.
+- **OQ-2 / DG-9 fork (c) (2026-08-19): fork (b) ships; fork (c) is not pursued in v1 and blocks
+  nothing**, because `047`'s `grant_kind` CHECK was written as a generic keyless/keyed split. The
+  ~10-minute test is specified as `S4-P21`. Not a prerequisite.
+
+### 0.7 Subagent playbook
+
+Subagents are authorized for build work. Use them for genuinely parallel, file-disjoint tasks. Every
+brief must contain:
+
+- **The §0.2 hard constraints, verbatim.** Agents will otherwise run `pnpm build`.
+- **The §0.5 build loop, verbatim.** One item, then a test where meaningful, then `tsc --noEmit` and
+  the suite, then tick the box. A subagent that returns five finished items and no tests has done the
+  wrong job even if the code is right.
+- **An explicit allowlist of files it may create or edit, and an explicit list it must NOT touch**
+  (naming the other agents' files). File-level ownership is what makes parallelism safe.
+- **"Do not edit barrel files** (`packages/db/src/index.ts`, `packages/shared/src/index.ts`) — report
+  needed exports and the orchestrator wires them." Barrels are the one guaranteed collision point.
+- **"Do not `git commit` or `git add`."** The orchestrator reviews first.
+- **"Do not invent an endpoint, parameter, or figure. If you cannot verify it, say so and leave the
+  existing behaviour in place."**
+- **"Write each file to disk as soon as you draft it."** Agents die to stream-idle timeouts on long
+  thinking passes; the survivors' work was recoverable precisely because it was on disk.
+
+**The ownership rule, written down because it has already cost something.** File ownership is
+exclusive — two agents editing one file produces a merge the orchestrator must referee, and the losing
+edit is usually the one with the better reasoning attached. Migration numbers are **allocated in the
+dispatch, never chosen by the agent**: two agents both taking "the next free number" collide, and the
+collision surfaces as a migration that silently never runs. **No agent edits this file** — have them
+report proposed entry text and paste it yourself, which also forces you to read what you are ticking.
+
+**Nobody but the orchestrator edits the two barrel files — `packages/db/src/index.ts` and
+`packages/shared/src/index.ts`.** Both are re-emitted to `dist/`, so an agent that edits one cannot
+observe the consequence of its own change: its own package stays green while a *different* package
+breaks. There are four recorded occurrences. Agents report the exports they need; the orchestrator
+wires them and then rebuilds that package.
+
+**Infrastructure findings — read before spawning anything:**
+
+1. **An over-long MCP tool name kills subagents with a 400.** The API caps tool names at **64**
+   characters including the `mcp__<server>__<tool>` prefix, so a long server name can make every agent
+   handed the full tool list die with `400 tools.N.name`. Check
+   `len('mcp__' + server + '__' + longest_tool) <= 64` before adding an MCP server.
+2. **Inventory disk before respawning.** Re-running an agent over completed output wastes a cycle and
+   risks conflicting edits. `git status --porcelain` first, every time.
+
+**Lessons that each cost real debugging:**
+
+1. **An agent can report "done" when nothing is wired.** A draft once added every import for tip
+   accounting and called **none** of them; it typechecked because unused imports are not errors.
+   **Grep the call sites; do not trust the report.**
+2. **Agents leave syntax errors that fail a whole package.** Run `tsc --noEmit` per package after every
+   agent returns.
+3. **Agents skip the acceptance test.** Check the **Done when** explicitly, as a separate step from
+   reading the code.
+4. **An agent's defect report is a hypothesis, not a finding.** `S4-M29` was a false positive whose
+   "fix" produced `polygon:polygon:...` and turned a passing test red; `S4-M32` was reported as
+   cosmetic churn and was actually live data loss. **Verify the claim, not the confidence.**
+5. **Check the barrel before concluding a layer is unbuilt.** `packages/db/src/index.ts` once silently
+   omitted four modules, making that entire layer and its tests invisible to consumers — which is why
+   the per-user cap looked unreachable.
+6. **Ask agents to state what they could not verify.**
+
+---
+
+### 0.8 Information needed — items engineering cannot close alone
 
 **Added 2026-08-22.** These are blocked on a **fact or a decision**, not on effort. Each one was
 being picked up, half-built and put down again because the checklist gave no way to tell it apart
@@ -41,7 +296,40 @@ than missing features: `S4-M34` (a one-line check that could be a live bug on ev
 does not cover).
 
 ---
-## Where the project stands — 2026-10-04
+
+## Verification baselines — 2026-10-16
+
+**Do not regress these.** Measured locally on the current tree; every agent reports its package's
+numbers against this table. Counts include the S4-M3 lot work (`2b9831b`, `b67469d`).
+
+| Package | Tests passed |
+|---|---:|
+| `@swat/db` | 852 |
+| `@swat/trade-executor` | 770 |
+| `@swat/shared` | 451 |
+| `@swat/indexer` | 206 |
+| `@swat/signal-engine` | 159 |
+| `@swat/scorer` | 74 |
+| `@swat/api` | 58 |
+| `@swat/alert-service` | 13 |
+| `@swat/lp` | 180 |
+| **Total** | **2,763** |
+
+All packages typecheck clean. `pnpm check:secrets` and `pnpm check:env` are expected to exit 0.
+
+**How to reproduce one package:**
+
+```bash
+pnpm --filter @swat/<pkg> typecheck
+pnpm --filter @swat/<pkg> exec vitest run
+```
+
+**What these numbers are not.** They are unit tests against mocked clients. They prove the
+*decisions*, not that any SQL or Redis call works — see the Stage A/B split above. A rising total
+here is not evidence that a migration applies.
+
+---
+## Where the project stands — 2026-10-16
 
 Counts are generated from this file, not maintained by hand. Regenerate with the snippet at the
 end of this block after any batch of ticks.
@@ -59,7 +347,7 @@ end of this block after any batch of ticks.
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
 | **Total** | **82** | **125** | **15** | |
 
-**Regenerated 2026-10-04.** Counts are from the file, not maintained by hand. Two things worth reading in
+**Regenerated 2026-10-16.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
 surfaced three genuine defects (`S4-M39` config drift, `S4-M40` an undecided fork, `S4-M41` a fabricated
 zero cost) — a checklist whose open count only ever falls is one that has stopped looking. And **`[=]`
@@ -70,7 +358,7 @@ means the engineering is done but an external gate is not**: `S4-P10` (needs on-
 
 - **15 are `(ext)`** — funded wallets, a human reviewer, a canary, **or a fact/decision we do not
   have**. **No amount of engineering closes these.** 11 sit in Stage 3 certification, which is why
-  Stage 3 looks unfinished while its code is largely written; the rest are in **§0**, each with what
+  Stage 3 looks unfinished while its code is largely written; the rest are in **§0.8**, each with what
   would close it.
 - **45 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
   means discovering the API is missing.
@@ -131,7 +419,7 @@ EOF
   added 2026-08-22: an item blocked on "which labels feed do we use" is as unclosable by
   engineering as one blocked on a funded wallet, and hiding it among ordinary open work meant it
   was picked up, half-built, and put down again. Every such item is listed in
-  **§0 Information needed** with what would close it.
+  **§0.8 Information needed** with what would close it.
 - `[=]` — **standing constraint.** A rule every other item must honour, not a task. It has no done
   state; it is listed so nobody re-opens it as a gap or builds against it by accident.
 - `[→]` — **pointer.** Not separate work. Closes when the item it names closes.
@@ -208,7 +496,7 @@ The migrations are idempotent *by inspection*, which is not the same as verified
 ### Stage C — needs funded wallets and a reviewed certification
 
 Live execution stays gated behind `LIVE_ENABLED_CHAINS` **and** an active `chain_certifications` row.
-`TRADING_MODE=paper` and `AUTO_EXECUTE=false` stay set until that review happens. Everything in §0
+`TRADING_MODE=paper` and `AUTO_EXECUTE=false` stay set until that review happens. Everything in §0.8
 that is marked `(ext)` blocks this stage, not the two above it.
 
 ### The recommendation

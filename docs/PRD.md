@@ -12,7 +12,7 @@
 ## 0. Where the build actually is
 
 Read this before anything else; it is the part that goes stale fastest.
-UPDATE THE AGENTS/continue-build.md file with the progress made at the end of each build iteration ensure the fileis clear and details the task we built and have been build using the audit-checklist.md file to show progress
+UPDATE THE AUDIT-FIX-CHECKLIST.md file with the progress made at the end of each build iteration — ensure it is clear and details the tasks we built, using its own checklist entries to show progress. (This absorbed the former AGENTS/continue-build.md on 2026-10-16.)
 
 **Branch** `feat/multi-tenant-foundation`, pushed. **CI is not running at all:** every Actions run fails in ~4 seconds with *"your account is locked due to a billing issue"*, and the same failure appears on the 2026-08-09 run — so nothing has been CI-validated since at least then. No integration suite has ever executed, including the cross-tenant leakage tests. Local `tsc --noEmit` and the unit suites are currently the only verification. Unblocking this is operator-side.
 

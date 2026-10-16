@@ -10,7 +10,7 @@ Close an item by ticking it and recording the commit. Delete the file when all t
 are closed — it is a tracker, not a reference.
 
 > **Do not resolve these by running `pnpm build`.** The operator's machine crashes
-> under it (hard constraint §1 of `docs/agents/continue-build.md`). Per-package
+> under it (hard constraint §0.2 of `AUDIT-FIX-CHECKLIST.md`). Per-package
 > `tsc --noEmit` emits nothing and is not a build; emitting is.
 
 ---
@@ -178,8 +178,9 @@ detectable.
 
 ## Related
 
-- `docs/agents/continue-build.md` §1 (hard constraints — no builds), §8 (the original
-  stale-`dist` finding, which this file supersedes with measurements).
+- `AUDIT-FIX-CHECKLIST.md` §0.2 (hard constraints — no builds). The original stale-`dist`
+  finding lived in the former `docs/agents/continue-build.md`, which this file supersedes
+  with measurements and which was absorbed into the checklist on 2026-10-16.
 - `AUDIT-FIX-CHECKLIST.md` §6.4 `S3-25` — the entry these items came out of.
 - `CLAUDE.md` — "`packages/shared` … Built output (`dist/`) is what services import,
   so run `pnpm --filter @swat/shared build` if a service can't resolve a new export."

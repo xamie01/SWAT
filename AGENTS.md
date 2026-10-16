@@ -3,7 +3,7 @@
 ## Read first
 
 - Read [`CLAUDE.md`](./CLAUDE.md) for repository invariants and service details.
-- Read [`docs/agents/continue-build.md`](./docs/agents/continue-build.md) before substantial work; it is the current handoff, checkpoint, and build-loop authority. Preserve existing local changes.
+- Read [`AUDIT-FIX-CHECKLIST.md`](./AUDIT-FIX-CHECKLIST.md) before substantial work; it is the single build authority — the current checkpoint, the environment constraints (§0.2), the decisions already made (§0.6), and the build loop (§0.5). It absorbed the former `docs/agents/continue-build.md` on 2026-10-16. Preserve existing local changes.
 - Read [`README.md`](./README.md) for the current WAKE product state. Under ADR-0005, cluster detectors are for discovery/alerting; copy trades originate from a single master's activity.
 - Use [`AUDIT-FIX-CHECKLIST.md`](./AUDIT-FIX-CHECKLIST.md) as the execution tracker: choose the next open numbered item, read its `Done when` and linked plan docs, and tick it only after the build loop's required evidence. Use [`docs/plans/BUILDER-GUIDE.md`](./docs/plans/BUILDER-GUIDE.md) when sequencing conflicts.
 
