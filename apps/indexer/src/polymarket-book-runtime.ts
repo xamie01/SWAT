@@ -307,9 +307,9 @@ export interface PolymarketBooksFetcherOptions {
   };
 }
 
-/** The documented request body: `{"token_ids": [...]}`. */
+/** The documented request body: `[{"token_id":"..."}]`. */
 export function polymarketBooksRequestBody(tokenIds: readonly string[]): string {
-  return JSON.stringify({ token_ids: [...tokenIds] });
+  return JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
 }
 
 /**

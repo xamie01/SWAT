@@ -157,11 +157,18 @@ export async function runPolymarketBookAcceptance(): Promise<void> {
     const rows = await createPolymarketBooksFetcher({
       logger: { warn: (message, error) => console.warn(`[book-acceptance] ${message}`, error ?? '') }
     })(tokenIds);
+    const hasRows = rows.length > 0;
     record(
       'POST /books returned rows',
-      rows.length > 0,
+      hasRows,
       `${rows.length} row(s) for ${tokenIds.length} token(s)`
     );
+    if (!hasRows) {
+      throw new Error(
+        `POST /books returned no rows for ${tokenIds.length} discovered token(s); `
+        + 'the REST prerequisite failed, so the stream phase was not started.'
+      );
+    }
 
     const firstRow = rows[0];
     const rowHasLadder =
@@ -234,26 +241,38 @@ export async function runPolymarketBookAcceptance(): Promise<void> {
     );
 
     // ── 5. The whole point: a PRICED verdict, not a plausible unknown ─────
-    const verdict = assessPolymarketBookDepth(snapshot.cache, {
-      tokenMint: `polygon:${subscribed}`,
-      cohortDirection: 'buy',
-      impactCapBps: CAP_BPS,
-      now: snapshot.readAt
-    });
+    // Gamma's highest-volume markets can still be one-sided at the instant of
+    // the smoke test. Evaluate every streamed token and use an assessed book;
+    // failing because the first token has no asks would test market selection,
+    // not the feed.
+    const verdicts = tokenIds.flatMap((tokenId) =>
+      (['buy', 'sell'] as const).map((cohortDirection) => ({
+        tokenId,
+        cohortDirection,
+        verdict: assessPolymarketBookDepth(snapshot.cache, {
+          tokenMint: `polygon:${tokenId}`,
+          cohortDirection,
+          impactCapBps: CAP_BPS,
+          now: snapshot.readAt
+        })
+      }))
+    );
+    const priced = verdicts.find(({ verdict }) => verdict.outcome === 'assessed');
+    const verdict = priced?.verdict ?? verdicts[0]!.verdict;
     record(
       'depth model priced the book',
-      verdict.outcome === 'assessed',
-      verdict.outcome === 'assessed'
-        ? `usable liquidity $${verdict.liquidity.usableLiquidityUsd?.toFixed(2) ?? '?'} `
-          + `at ${CAP_BPS}bps; capacity $${verdict.capacity?.capacityNotionalUsd.toFixed(2) ?? '?'}`
+      priced !== undefined,
+      priced !== undefined
+        ? `token ${priced.tokenId} (${priced.cohortDirection}): usable liquidity $${priced.verdict.liquidity.usableLiquidityUsd?.toFixed(2) ?? '?'} `
+          + `at ${CAP_BPS}bps; capacity $${priced.verdict.capacity?.capacityNotionalUsd.toFixed(2) ?? '?'}`
         : `${verdict.reasonCode} — ${verdict.detail}`
     );
 
     // A no-depth-within-bound outcome is a legitimate venue condition rather
-    // than a defect, so it is reported distinctly instead of counted as failure.
-    if (verdict.outcome === 'no-depth-within-bound') {
+    // than a feed fault, but it cannot prove the priced depth path in this run.
+    if (priced === undefined && verdict.outcome === 'no-depth-within-bound') {
       console.log(
-        '[book-acceptance] NOTE the ladder was read and is genuinely empty inside the bound. '
+        '[book-acceptance] NOTE every discovered ladder was genuinely empty inside the bound. '
           + 'That is a real market condition, not a feed fault — re-run against a busier market.'
       );
     }
