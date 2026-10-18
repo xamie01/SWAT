@@ -200,7 +200,8 @@ describe('listFanoutCandidates against PostgreSQL', () => {
       chain: 'solana' as const,
       masterWalletAddress: master,
       tokenMint: 'solana:SomeMint',
-      score: 90
+      score: 90,
+      eventAt: new Date('2026-09-02T00:00:00.000Z')
     };
 
     expect(planFanout(candidates, { ...signal, direction: 'sell' }, platform).eligible)

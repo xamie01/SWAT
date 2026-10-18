@@ -256,6 +256,10 @@ describe('the writer is idempotent per fan-out event', () => {
 
 describe('the window aggregate', () => {
   it('sums only this master, this token and this window', async () => {
+    await pool.query(
+      'DELETE FROM master_capacity_ledger WHERE master_wallet_address = ANY($1)',
+      [[MASTER, OTHER_MASTER]]
+    );
     const now = Date.now();
     const inWindow = new Date(now - 60_000);
     const outOfWindow = new Date(now - 6 * 60 * 60 * 1000);

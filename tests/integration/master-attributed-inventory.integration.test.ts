@@ -21,10 +21,44 @@ import { createUser } from '../../packages/db/src/users.js';
  */
 
 const runId = randomUUID().replace(/-/g, '').slice(0, 12);
-const targetAccount = `solana:PAPER${runId}`;
-const tokenMint = `solana:Token${runId}`;
-const masterA = `solana:MasterA${runId}`;
-const masterB = `solana:MasterB${runId}`;
+
+function encodeBase58(bytes: Uint8Array): string {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      carry += digits[index]! << 8;
+      digits[index] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let result = '';
+  for (const byte of bytes) {
+    if (byte !== 0) break;
+    result += alphabet[0];
+  }
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    result += alphabet[digits[index]!];
+  }
+  return result;
+}
+
+function fixtureAddress(role: number): string {
+  const bytes = new Uint8Array(32);
+  bytes.set(Buffer.from(runId, 'hex'), 0);
+  bytes[31] = role;
+  return `solana:${encodeBase58(bytes)}`;
+}
+
+const targetAccount = fixtureAddress(1);
+const tokenMint = fixtureAddress(2);
+const masterA = fixtureAddress(3);
+const masterB = fixtureAddress(4);
 const createdSourceTradeIds: string[] = [];
 const createdExecutionIds: string[] = [];
 let userId: string | null = null;

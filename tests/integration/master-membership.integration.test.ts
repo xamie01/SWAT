@@ -103,9 +103,10 @@ describe('membership cap under concurrency (S4-M43)', () => {
     // check-then-insert, all cap+10 of these observe a pre-insert occupancy
     // below the cap and all cap+10 insert.
     const address = walletFor('race');
-    const users = await Promise.all(
-      Array.from({ length: MASTER_MEMBERSHIP_CAP + 10 }, () => makeUser())
-    );
+    const users = [];
+    for (let index = 0; index < MASTER_MEMBERSHIP_CAP + 10; index += 1) {
+      users.push(await makeUser());
+    }
 
     const results = await Promise.allSettled(
       users.map((user) => subscribe(user.id, 'operator', address))
@@ -128,9 +129,10 @@ describe('membership cap under concurrency (S4-M43)', () => {
 
   it('refuses the next joiner once the cap is reached', async () => {
     const address = walletFor('full');
-    const users = await Promise.all(
-      Array.from({ length: MASTER_MEMBERSHIP_CAP }, () => makeUser())
-    );
+    const users = [];
+    for (let index = 0; index < MASTER_MEMBERSHIP_CAP; index += 1) {
+      users.push(await makeUser());
+    }
     for (const user of users) await subscribe(user.id, 'operator', address);
 
     const outsider = await makeUser();

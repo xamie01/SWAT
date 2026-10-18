@@ -259,7 +259,7 @@ async function executePaperEntry(
     evidenceType: 'paper_simulation',
     evidenceId: `${fixture.sourceEventPrefix}fill-buy`,
     baseQuantity: String(BUY_QUANTITY),
-    quoteQuantity: String(amountUsd),
+    quoteLeg: { amount: String(amountUsd), currency: 'USD' as const },
     priceUsd: String(BUY_PRICE_USD),
     confirmationState: 'finalized',
     completesExecution: true,
