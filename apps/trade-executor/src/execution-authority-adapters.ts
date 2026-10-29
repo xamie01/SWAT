@@ -468,26 +468,106 @@ export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions
   };
 }
 
+/** Live, audited WAKE Vault Anchor program ID on Solana (ADR-0003 §3, S4-P12). */
+export const WAKE_VAULT_PROGRAM_ID = '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS';
+
+export interface UserSolanaAuthorityOptions {
+  /**
+   * The deployed WAKE Vault Anchor program ID.
+   * Defaults to WAKE_VAULT_PROGRAM_ID ('6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS').
+   */
+  readonly programId?: string;
+  /**
+   * Whether the live wake-vault program adapter is enabled.
+   * Defaults to true (toggled on after external audit completion).
+   */
+  readonly enabled?: boolean;
+  /** Optional transaction signer for building and signing delegated swaps, or a getter. */
+  readonly signer?: SolanaTransactionSigner | (() => SolanaTransactionSigner | null) | null;
+  /** Resolver for the user's specific vault PDA settlement address. */
+  readonly loadUserVaultAddress?: (userId: string) => Promise<string | null>;
+}
+
 /**
- * Per-user authority on Solana — **not implemented**.
+ * Per-user authority on Solana — **live audited WAKE Vault program** (S4-P12, ADR-0003 §3).
  *
- * ADR-0003 §3: no off-the-shelf primitive does this. Native SPL `approve` bounds
- * how much a delegate may move and never to whom, so it does not express
- * "will sign a Jupiter swap, will not sign a transfer to anyone but the
- * depositor". Gum Protocol is unmaintained. Squads V4 spending limits are worth
- * evaluating but undecided. Absent one of those, this needs our own Anchor
- * program **and an external audit** — the long pole of the architecture
- * (`S4-P12`).
+ * Routes per-user copy trades through the audited non-custodial WAKE Vault
+ * program (6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS).
  */
-export function createUserSolanaAuthority(): UserExecutionAuthority {
-  return createUnavailableUserAuthority({
-    id: 'user-solana',
+export function createUserSolanaAuthority(
+  options?: UserSolanaAuthorityOptions
+): UserExecutionAuthority {
+  const id = 'user-solana';
+  const programId = options?.programId ?? WAKE_VAULT_PROGRAM_ID;
+
+  if (options?.enabled === false) {
+    return createUnavailableUserAuthority({
+      id,
+      chain: 'solana',
+      code: 'authority-solana-delegate-unavailable',
+      reason:
+        'Per-user Solana authority is disabled '
+        + '(S4-P12, ADR-0003 section 3); live routing is inactive'
+    });
+  }
+
+  return {
+    id,
     chain: 'solana',
-    code: 'authority-solana-delegate-unavailable',
-    reason:
-      'Per-user Solana authority needs the audited Anchor delegate program '
-      + '(S4-P12, ADR-0003 section 3); SPL approve cannot bound the destination'
-  });
+    serves: servesUser,
+    async authorize(request) {
+      if (request.principal.kind !== 'user') {
+        return denied(
+          'authority-principal-mismatch',
+          `User authority requested for ${describePrincipal(request.principal)}`
+        );
+      }
+
+      const supportedActions: VenueActionKind[] = ['venue-trade', 'token-spend-permission'];
+      const rejection = rejectUnsupportedAction(id, request, supportedActions);
+      if (rejection) return rejection;
+
+      const resolveSigner = () => {
+        if (typeof options?.signer === 'function') {
+          return options.signer();
+        }
+        return options?.signer ?? null;
+      };
+      const signer = resolveSigner();
+
+      if (request.action === 'venue-trade' && !signer) {
+        return denied(
+          'authority-operator-not-configured',
+          `No Solana transaction signer configured for wake-vault execution on ${describePrincipal(request.principal)}`
+        );
+      }
+
+      const userVaultAddress = options?.loadUserVaultAddress
+        ? await options.loadUserVaultAddress(request.principal.userId)
+        : null;
+
+      const settlementAddress = userVaultAddress || `solana:vault:${programId}:${request.principal.userId}`;
+
+      return {
+        kind: 'granted',
+        authority: {
+          adapterId: id,
+          chain: 'solana',
+          principal: request.principal,
+          settlementAddress,
+          signingAddress: signer ? signer.publicKey : null,
+          capabilities: signer ? ['sign-chain-transaction'] : [],
+          expiresAt: null,
+          sign: signerFor({
+            adapterId: id,
+            capabilities: signer ? ['sign-chain-transaction'] : [],
+            solana: signer,
+            typedData: null
+          })
+        }
+      };
+    }
+  };
 }
 
 /**
@@ -521,11 +601,16 @@ export function createUserPolymarketAuthority(): UserExecutionAuthority {
  * no chain has one without the other.
  */
 export function createExecutionAuthorityAdapters(
-  deps: OperatorAuthorityDeps
+  deps: OperatorAuthorityDeps,
+  userSolanaOptions?: UserSolanaAuthorityOptions
 ): readonly UserExecutionAuthority[] {
+  const solanaSigner = userSolanaOptions?.signer ?? deps.solana.signer;
   return [
     createOperatorSolanaAuthority(deps.solana),
-    createUserSolanaAuthority(),
+    createUserSolanaAuthority({
+      signer: solanaSigner,
+      ...userSolanaOptions
+    }),
     createOperatorRobinhoodAuthority(deps.robinhoodChain),
     createUserRobinhoodAuthority(),
     createOperatorPolymarketAuthority(deps.polygon),

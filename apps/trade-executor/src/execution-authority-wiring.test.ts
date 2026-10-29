@@ -477,11 +477,47 @@ describe('a denial never falls through to another authority', () => {
 
   it('refuses a per-user job with the chain mechanism code, using the real adapters', async () => {
     // No stub here: the default ports, the real six adapters. A job carrying a
-    // `userId` must reach the per-user Solana adapter and be refused, because
-    // the delegate program of ADR-0003 section 3 does not exist. The failure this
-    // guards is the opposite — the operator adapter quietly satisfying it, which
-    // would spend the operator's SOL on someone else's signal and *fill*.
+    // `userId` must reach the per-user Solana adapter and be refused when no
+    // transaction signer is configured for the live wake-vault program. The failure
+    // this guards is the opposite — the operator adapter quietly satisfying it,
+    // which would spend the operator's SOL on someone else's signal and *fill*.
     const result = await handleJob({ data: { ...liveSolanaJob, userId: 'alice' } });
+
+    expect(result.status).toBe('skipped');
+    expect(result.reason).toContain('authority-operator-not-configured');
+    expect(result.reason).toContain('user:alice');
+    expect(runtimeMocks.triggerTrojan).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchSolanaTrade).not.toHaveBeenCalled();
+    expect(db.insertTrade).not.toHaveBeenCalled();
+    expect(db.insertTradeAndMarkSignalExecuted).not.toHaveBeenCalled();
+  });
+
+  it('refuses a per-user job with authority-solana-delegate-unavailable when explicitly disabled', async () => {
+    const { createExecutionAuthorityAdapters } = await import('./execution-authority-adapters.js');
+    const { createExecutionAuthorityRegistry } = await import('./execution-authority.js');
+    const disabledPorts: ExecutorJobPorts = {
+      authorize: createExecutionAuthorityRegistry(
+        createExecutionAuthorityAdapters(
+          {
+            solana: {
+              trojanWalletAddress: () => 'TrojanWallet1111111111111111111111111111111',
+              signer: () => null
+            },
+            robinhoodChain: {
+              accountAddress: () => null,
+              typedDataSigner: () => null
+            },
+            polygon: {
+              identity: () => null,
+              typedDataSigner: () => null
+            }
+          },
+          { enabled: false }
+        )
+      )
+    };
+
+    const result = await handleJob({ data: { ...liveSolanaJob, userId: 'alice' } }, disabledPorts);
 
     expect(result.status).toBe('skipped');
     expect(result.reason).toContain('authority-solana-delegate-unavailable');
@@ -489,7 +525,6 @@ describe('a denial never falls through to another authority', () => {
     expect(runtimeMocks.triggerTrojan).not.toHaveBeenCalled();
     expect(runtimeMocks.dispatchSolanaTrade).not.toHaveBeenCalled();
     expect(db.insertTrade).not.toHaveBeenCalled();
-    expect(db.insertTradeAndMarkSignalExecuted).not.toHaveBeenCalled();
   });
 
   it('reports an expired grant as lapsed with authority-grant-expired, never as generic execution failure (S4-P9)', async () => {

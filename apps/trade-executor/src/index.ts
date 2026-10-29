@@ -1861,6 +1861,12 @@ export async function handleJob(
             liveResult = { status: 'rejected', reason: outcome.reason };
           }
         } else {
+        if (principal.kind !== 'operator') {
+          return {
+            status: 'rejected',
+            reason: `Venue-managed Trojan submission is only available for operator execution; user ${principal.userId} requires a delegated transaction signer`
+          };
+        }
         const result = await triggerTrojan({
           signalId: canonicalExecution?.clientOrderId ?? payload.signalId,
           tokenMint: cleanMint,

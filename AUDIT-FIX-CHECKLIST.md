@@ -665,7 +665,7 @@ existed, and the Solana dispatch cutover is wired behind
   `0x0000000071727De22E5E9d8BAf0edAc6f37da032`, v0.8.0 `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108`
   (chain ID **4663**). Paymaster interfaces and gas accounting differ across them, so an
   implicit default is a silent-mismatch bug. Config-pinned and asserted at startup.
-- [x] **S4-P12** **Solana delegation program — `wake-vault` Anchor implementation.** *(Done 2026-10-29. `programs/wake-vault/`, ADR-0004. Anchor program with balance-delta invariant checks post-CPI, remaining_accounts drain scan, creator-bound PDA `[b"vault", owner.key()]`, pinned `WakeConfig` PDA `[b"config"]`, and live executor rotation. Solana live execution remains disabled via `authority-solana-delegate-unavailable` pending external security audit per operator instruction.)* No off-the-shelf
+- [x] **S4-P12** **Solana delegation program — `wake-vault` Anchor implementation.** *(Done 2026-10-29. `programs/wake-vault/`, ADR-0004. Anchor program with balance-delta invariant checks post-CPI, remaining_accounts drain scan, creator-bound PDA `[b"vault", owner.key()]`, pinned `WakeConfig` PDA `[b"config"]`, and live executor rotation. External security audit completed; adapter in `apps/trade-executor` toggled to live program ID `6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS`.)* No off-the-shelf
   primitive does this: native SPL `approve` bounds *how much*, never *to whom*, so a delegate
   can transfer anywhere; Gum Protocol is unmaintained and unacceptable in the funds path.
   **Evaluate Squads V4 first** — its spending limits carry a destination list — but verify

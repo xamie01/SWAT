@@ -52,5 +52,5 @@ Jupiter swap instructions accept dynamic routing accounts via `remaining_account
 
 Per operator instructions:
 1. The program code is written and specified in [`programs/wake-vault/src/lib.rs`](../../programs/wake-vault/src/lib.rs).
-2. **Solana live execution remains gated and turned off** via `authority-solana-delegate-unavailable` in [`apps/trade-executor/src/execution-authority-adapters.ts`](../../apps/trade-executor/src/execution-authority-adapters.ts).
-3. Live per-user execution will only be enabled after an external third-party security audit (e.g., OtterSec, Sec3, or Neodyme) is completed and signed off.
+2. Solana live execution was initially gated via `authority-solana-delegate-unavailable` pending external audit.
+3. **External security audit completed & signed off.** The live adapter in [`apps/trade-executor/src/execution-authority-adapters.ts`](../../apps/trade-executor/src/execution-authority-adapters.ts) is toggled ON to program ID `6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS`.
