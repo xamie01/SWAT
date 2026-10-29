@@ -19,12 +19,15 @@ import {
   resolveRiskPolicy,
   claimStopLossTrigger,
   releaseStopLossTrigger,
+  listCloseAllLotJobs,
+  claimLotExitExecution,
   endCompletedCloseAllSubscriptions
 } from '@swat/db';
 import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger, tradeQueueForChain } from '@swat/shared';
 import type { Chain } from '@swat/shared';
 import { runAttributionReporting } from './expectancy.js';
 import { runStopLossSweep } from './stop-loss.js';
+import { runCloseAllSweep } from './close-all.js';
 import {
   runMasterMetricsBatch,
   listMasterCandidates,
@@ -233,15 +236,31 @@ async function runMarkToMarket() {
     console.error('[scorer] Stop-loss sweep failed:', e);
   }
 
-  // Close-all is driven by confirmed lot reductions, not by queue admission.
-  // Running the terminal sweep after the mark/stop-loss pass means a final
-  // reduction made by a prior executor run can release the subscription without
-  // racing an in-flight enqueue into an ended state.
+  // Close-all sweep: claims exact lot exits, enqueues sells, and ends completed subscriptions.
   try {
-    const ended = await endCompletedCloseAllSubscriptions();
-    if (ended > 0) console.log(`[scorer] Close-all: ended ${ended} completed subscription(s).`);
+    const sweep = await runCloseAllSweep({
+      listJobs: listCloseAllLotJobs,
+      claimExit: claimLotExitExecution,
+      enqueueSell: (job, jobId, chain) => {
+        const queue = tradeQueues.get(chain);
+        if (!queue) throw new Error(`No trade queue configured for chain ${chain}`);
+        return queue.add('close-all-sell', job, {
+          jobId,
+          removeOnComplete: true,
+          attempts: 4,
+          backoff: { type: 'exponential', delay: 5000 }
+        });
+      },
+      endCompleted: endCompletedCloseAllSubscriptions
+    });
+    if (sweep.scanned > 0 || sweep.ended > 0) {
+      console.log(
+        `[scorer] Close-all: scanned ${sweep.scanned}, claimed ${sweep.claimed}, ` +
+        `queued ${sweep.queued}, ended ${sweep.ended}, failed ${sweep.failed}.`
+      );
+    }
   } catch (e) {
-    console.error('[scorer] Close-all completion sweep failed:', e);
+    console.error('[scorer] Close-all sweep failed:', e);
   }
 }
 

@@ -39,6 +39,7 @@ import {
   resolveChainMode,
   transitionCopyExecution,
   accrueMasterCapacityFillNotional,
+  getCopyExecutionById,
   claimPolymarketPositionExit,
   confirmPolymarketPositionExit,
   releasePolymarketPositionExit,
@@ -1385,6 +1386,9 @@ export async function handleJob(
     manual?: boolean;
     direction?: 'buy' | 'sell';
     stopLoss?: boolean;
+    closeAll?: boolean;
+    exitLotId?: string;
+    copyExecutionId?: string;
     sellTokenAmount?: number;
     /**
      * Whose trade this is. Absent on every job the current producers enqueue,
@@ -1437,11 +1441,11 @@ export async function handleJob(
     console.warn(`[trade-executor] WARNING: ${clampReason} | requested: ${chain} live`);
   }
 
-  // Auto-execute gate. A stop-loss is exempt: it only ever reduces an existing
-  // position, and gating it behind the entry switch would leave every position
+  // Auto-execute gate. A stop-loss or close-all is exempt: it only ever reduces an existing
+  // position/lot, and gating it behind the entry switch would leave every position
   // opened while AUTO_EXECUTE was off permanently unprotected. The chain's
   // execution mode (including the 'off' kill switch) still applies above.
-  if (!payload.manual && !payload.stopLoss && (!AUTO_EXECUTE || score < AUTO_EXECUTE_MIN_SCORE)) {
+  if (!payload.manual && !payload.stopLoss && !payload.closeAll && (!AUTO_EXECUTE || score < AUTO_EXECUTE_MIN_SCORE)) {
     console.log(`[trade-executor] SKIPPED: auto-execute=${AUTO_EXECUTE}, score=${score}, threshold=${AUTO_EXECUTE_MIN_SCORE} | token: ${payload.tokenMint}`);
     return {
       status: 'skipped',
@@ -1459,17 +1463,17 @@ export async function handleJob(
   const exposureAccount = resolveExecutionPrincipal(payload);
   const jobUserId = exposureAccount.kind === 'user' ? exposureAccount.userId : null;
 
-  // A stop-loss closes the whole position, so the quantity is dictated by the
+  // A stop-loss or close-all closes the position/lot, so the quantity is dictated by the
   // ledger rather than by balance-aware sizing.
   let stopLossSellQuantity: number | null = null;
-  if (payload.stopLoss) {
+  if (payload.stopLoss || payload.closeAll) {
     if (direction !== 'sell') {
-      throw new UnrecoverableError(`Stop-loss job ${payload.signalId} must be a sell`);
+      throw new UnrecoverableError(`${payload.closeAll ? 'Close-all' : 'Stop-loss'} job ${payload.signalId} must be a sell`);
     }
     const quantity = Number(payload.sellTokenAmount);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new UnrecoverableError(
-        `Stop-loss job ${payload.signalId} needs a positive sellTokenAmount`
+        `${payload.closeAll ? 'Close-all' : 'Stop-loss'} job ${payload.signalId} needs a positive sellTokenAmount`
       );
     }
     stopLossSellQuantity = quantity;
@@ -2384,9 +2388,12 @@ export async function handleJob(
     }
     if (execMode === 'paper' || (execMode === 'live+shadow' && liveTradeId && liveWasConfirmed)) {
       const submittedAt = new Date();
-      const paperExecution = execMode === 'live+shadow'
+      let paperExecution = execMode === 'live+shadow'
         ? canonicalExecutions.shadow
         : canonicalExecutions.paper;
+      if (!paperExecution && payload.copyExecutionId) {
+        paperExecution = (await getCopyExecutionById(payload.copyExecutionId)) ?? undefined;
+      }
       try {
       if (paperExecution?.state === 'confirmed') {
         paperResult = { status: 'already-executed', signalId: payload.signalId };
@@ -2561,7 +2568,7 @@ export async function handleJob(
       await persistTrade({
         signalId: payload.signalId,
         sourceTradeId: payload.sourceTradeId,
-        copyExecutionId: paperExecution?.id,
+        copyExecutionId: paperExecution?.id ?? payload.copyExecutionId,
         tokenMint: payload.tokenMint,
         size,
         amountUsd: simAmountUsd ?? (chain === 'polygon' ? size : undefined),

@@ -2692,6 +2692,16 @@ export async function recordCopyExecutionEvidenceWithClient(
   return operation();
 }
 
+export async function getCopyExecutionById(id: string): Promise<CopyExecutionRecord | null> {
+  const rows = await query<CopyExecutionDbRow>(
+    `SELECT ${COPY_EXECUTION_COLUMNS}
+       FROM copy_executions
+      WHERE id = $1`,
+    [assertIdentifier('id', id, 128)]
+  );
+  return rows[0] ? mapCopyExecution(rows[0]) : null;
+}
+
 export async function getCopyExecutionByClientOrderId(input: {
   chain: Chain;
   targetAccount: string;
