@@ -229,6 +229,11 @@ export type ExecutionAuthorityDenialCode =
   | 'authority-grant-revoked'
   /** No execution authority grant was found for this user and chain. */
   | 'authority-grant-missing'
+  // ── Paymaster budget / rate limits (S4-P8) ─────────────────────────────────
+  /** User exceeded daily sponsored UserOperation cap. */
+  | 'authority-paymaster-user-rate-limited'
+  /** Global daily sponsored UserOperation budget exhausted. */
+  | 'authority-paymaster-global-budget-exhausted'
   // ── Granted, but not for this ───────────────────────────────────────────
   /** The grant exists but cannot perform this action or signing shape. */
   | 'authority-capability-unsupported'

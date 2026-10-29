@@ -14,6 +14,7 @@ import {
   type UserExecutionAuthority
 } from './execution-authority.js';
 import type { Chain } from '@swat/shared';
+import type { PaymasterBudgetTracker } from './paymaster-budget.js';
 
 /**
  * The six adapters behind `UserExecutionAuthority` (checklist `S4-P7`).
@@ -392,13 +393,15 @@ function createUnavailableUserAuthority(input: {
 }
 
 /**
- * Options for resolving per-user grants and session-key validity (`S4-P9`).
+ * Options for resolving per-user grants and session-key validity (`S4-P9`),
+ * as well as paymaster spend bounds (`S4-P8`).
  */
 export interface UserGrantAuthorityOptions {
   readonly loadGrant?: (userId: string) => Promise<{
     status: 'active' | 'retired' | 'revoked' | 'compromised';
     expiresAt: Date | null;
   } | null>;
+  readonly paymasterTracker?: PaymasterBudgetTracker;
   readonly now?: () => Date;
 }
 
@@ -442,6 +445,17 @@ export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions
             'authority-grant-expired',
             `Execution authority session key expired at ${grant.expiresAt?.toISOString() ?? 'unknown'} for user ${request.principal.userId}`
           );
+        }
+      }
+      if (options?.paymasterTracker) {
+        const now = options.now?.() ?? new Date();
+        const budget = options.paymasterTracker.checkBudget(request.principal.userId, now);
+        if (!budget.allowed && budget.code) {
+          const denialCode: ExecutionAuthorityDenialCode =
+            budget.code === 'paymaster-user-rate-limited'
+              ? 'authority-paymaster-user-rate-limited'
+              : 'authority-paymaster-global-budget-exhausted';
+          return denied(denialCode, budget.reason ?? 'Paymaster budget exhausted');
         }
       }
       return denied(

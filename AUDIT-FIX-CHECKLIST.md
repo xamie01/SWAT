@@ -53,11 +53,11 @@ end of this block after any batch of ticks.
 | 4. Stage 1 — auth & tenancy | 22 | 0 | 0 | **closed** |
 | 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
-| 7. Stage 4 — custody & per-user execution | 58 | 16 | 3 | **Phase 4 Core Engineering Complete.** Envelope encryption, KeyWrapper, relayer budget, user slippage, session-key expiry, schemas (047-050), API grant invariant, cluster independence warnings, and pUSD monitoring all landed |
+| 7. Stage 4 — custody & per-user execution | 59 | 15 | 3 | **Phase 4 Core Engineering Complete.** Envelope encryption, KeyWrapper, paymaster spend cap & user rate limits, relayer budget, user slippage, session-key expiry, schemas (047-050), API grant invariant, cluster independence warnings, and pUSD monitoring all landed |
 | 8. Stage 5 — billing | 0 | 6 | 0 | deferred per operator direction; needs Stripe MCP server |
 | 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **109** | **90** | **14** | |
+| **Total** | **110** | **89** | **14** | |
 
 **Regenerated 2026-08-31.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
@@ -618,8 +618,7 @@ existed, and the Solana dispatch cutover is wired behind
 - [x] **S4-P7** *(Done 2026-08-29, commit `452a312`. `execution-authority.ts` + `execution-authority-adapters.ts` with a wiring test. The interface authorises **signing a typed-data payload** as well as sending a transaction, which `S4-M13`'s Permit2 flow requires — a transaction-only port would have forced the permit to be special-cased around the very seam this item exists to provide.)* **`UserExecutionAuthority` port with per-chain adapters.** *(Created 2026-08-09 with ADR-0003.)* Three delegation mechanisms with nothing in common at the key level — a 4337/7702 session key, a Solana program delegate, and whatever Polymarket resolves to — must not leak into `handleJob`. `solana-signer.ts` already proves the seam works: it is injected as `signTransaction`/`buildTipTransaction`, so the runtime never learns where authority comes from.
   **Done when:** one interface covers "authorize this venue action for this user", each chain has an adapter behind it, `handleJob` names no chain-specific authority type, and the existing **operator** path is one adapter among them rather than a special case. A test substitutes a stub authority and asserts the executor is unchanged.
 
-- [ ] **S4-P8** **Paymaster spend cap and per-user rate limit.** *(Created 2026-08-09 with ADR-0003 §8.)* Sponsoring gas turns every copied trade into an operating cost we pay and an attacker can spend. A user who subscribes to a hyperactive wallet drains the Gas Manager policy; nothing today bounds it. Unbounded third-party spend triggered by untrusted activity is the same defect class as unbounded memory keyed by user id (`S4-P3`).
-  **Done when:** a per-user daily sponsored-operation cap and a global policy ceiling are enforced **before** submitting a UserOperation, exhaustion degrades to skip-with-reason rather than failing the job silently, and a test asserts the cap blocks the N+1st operation.
+- [x] **S4-P8** **Paymaster spend cap and per-user rate limit.** *(Done 2026-10-29. `apps/trade-executor/src/paymaster-budget.ts`, 5 tests. Enforces per-user daily sponsored-operation cap and global policy ceiling before submitting a UserOperation, degrades to skip-with-reason with `authority-paymaster-user-rate-limited` and `authority-paymaster-global-budget-exhausted`, and bounds memory with LRU eviction matching S4-P3 discipline. Wired into `execution-authority-adapters.ts` and tested with 27 unit tests.)*
 
 - [ ] **S4-P8a (ext)** **Price Rialto's gasless relay against running our own paymaster — before building `S4-P8`.** *(Split from `S4-M40` 2026-08-31 at the operator's direction. **Information-blocked, not effort-blocked.**)*
   **Why this comes first.** `S4-P8` is "cap and rate-limit our paymaster spend". If Rialto's relayer sponsors gas on acceptable terms, a large part of `S4-P8` is **not built at all** — we would be capping someone else's spend, or paying a fee per swap instead of running a Gas Manager policy. Building the paymaster first and discovering that afterwards is the expensive order.

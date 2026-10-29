@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PaymasterBudgetTracker } from './paymaster-budget.js';
 import {
   createExecutionAuthorityAdapters,
   createOperatorPolymarketAuthority,
@@ -430,6 +431,55 @@ describe('the full adapter set', () => {
         kind: 'denied',
         code: 'authority-grant-expired'
       });
+    });
+  });
+
+  describe('paymaster spend cap and per-user rate limit (S4-P8)', () => {
+    it('denies with authority-paymaster-user-rate-limited when user daily limit exceeded', async () => {
+      const tracker = new PaymasterBudgetTracker({
+        globalDailyCap: 100,
+        userDailyCap: 2
+      });
+      const now = new Date('2026-10-29T10:00:00Z');
+      tracker.recordOperation('alice', now);
+      tracker.recordOperation('alice', now);
+
+      const adapter = createUserRobinhoodAuthority({
+        paymasterTracker: tracker,
+        now: () => now
+      });
+
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-paymaster-user-rate-limited'
+      });
+      if (verdict.kind === 'denied') {
+        expect(verdict.reason).toContain('Paymaster user daily sponsored operation limit exceeded for alice');
+      }
+    });
+
+    it('denies with authority-paymaster-global-budget-exhausted when global daily budget exhausted', async () => {
+      const tracker = new PaymasterBudgetTracker({
+        globalDailyCap: 1,
+        userDailyCap: 10
+      });
+      const now = new Date('2026-10-29T10:00:00Z');
+      tracker.recordOperation('bob', now);
+
+      const adapter = createUserRobinhoodAuthority({
+        paymasterTracker: tracker,
+        now: () => now
+      });
+
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-paymaster-global-budget-exhausted'
+      });
+      if (verdict.kind === 'denied') {
+        expect(verdict.reason).toContain('Paymaster global daily sponsored budget exhausted');
+      }
     });
   });
 });
