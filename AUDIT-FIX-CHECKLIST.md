@@ -53,9 +53,9 @@ end of this block after any batch of ticks.
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
 | 7. Stage 4 — custody & per-user execution | 64 | 12 | 2 | **Phase 4 Core Engineering Closed.** Envelope encryption, KeyWrapper, paymaster spend cap & user rate limits, relayer budget, user slippage, session-key expiry, schemas (047-050), API grant invariant, cluster independence warnings, pUSD monitoring, wake-vault Anchor PDA program (ADR-0004), withdrawal 24h cooling-off & email OTP, master fee capture, and neg-risk guards all landed |
 | 8. Stage 5 — billing | 0 | 6 | 0 | deferred per operator direction; needs Stripe MCP server |
-| 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
+| 9. Stage 6 — frontend | 2 | 54 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **115** | **86** | **13** | |
+| **Total** | **115** | **95** | **13** | |
 
 **Regenerated 2026-10-29.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
@@ -1235,6 +1235,7 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 
 - [ ] **S6-4** react-query for polling and cache. Needed before the mirror feed, or every view invents its own refetch.
 - [ ] **S6-16** Error, empty, loading and **offline** states as shared primitives. Every screen below has all four; specifying them once is the difference between a product and a demo.
+- [ ] **S6-58** **Real-Time Stream Connectivity & Resync Status Indicator.** Header status pill reflecting live SSE stream health (`/v1/me/stream` and `/v1/me/feed` via ticketed auth): distinct visual states for `connected` (green), `reconnecting` (amber with attempt counter), and `offline` (red). Triggers automatic react-query invalidation and resync on reconnection to reconcile missed events.
 
 ### 9.2 Auth and onboarding
 - [ ] **S6-5** Real signup / login / forgot-password and an onboarding flow.
@@ -1246,6 +1247,9 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-19** **A grant flow per chain, because the mechanisms differ** (ADR-0003): Solana is a keyless PDA vault, EVM is a scoped session key with an expiry, Polymarket is a **venue-scoped key WAKE holds**. Show scope, expiry, and revocation for each.
 - [ ] **S6-20** **Polymarket custody disclosure — an explicit, unskippable consent step**, stating plainly that WAKE holds this key, that the blast radius is that venue's trading float, and that withdrawal exits custody without leaving the product. ADR-0003 §4 requires this before the fork ships; copy is reviewed with `DG-2`.
 - [ ] **S6-21** **Revocation is a first-class control, not buried in settings.** Solana revocation is on-chain and immediate; the UI must not imply the others are equally instant when they are not.
+- [ ] **S6-49** **Polymarket Deposit Wallet & Cross-Chain Bridge Widget.** Present the dedicated Deposit Wallet address (ERC-7739) with a copyable QR code. Integrate an embedded cross-chain bridge widget (Across Protocol / Relay.link) allowing users to deposit native USDC or ETH directly from Arbitrum, Base, Ethereum, or Solana into pUSD in 15–30 seconds without manually bridging. Display geoblocking re-verification status and expiration timer (`apps/trade-executor/src/polymarket-geo.ts`).
+- [ ] **S6-50** **Solana `wake-vault` PDA Interface & Rent/Gas Reserves.** Dedicated card displaying the user's on-chain Anchor PDA address (`6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS`), live rent-exemption lamport reserve, live SOL gas float (recomputed on render against the $10 USD minimum), and an unmediated on-chain revocation button that interacts directly with Phantom/Solflare to close or revoke executor permissions.
+- [ ] **S6-51** **Robinhood Chain 4663 Session Key & Gas Sponsorship Telemetry.** Display active ERC-4337 session key / EIP-7702 delegation status, remaining validity duration, and one-click re-authorization. Surfacing the Paymaster sponsorship badge: *"Gas 100% Sponsored by Platform"* with a live daily usage meter (`X/50 sponsored ops used today` per [`paymaster-budget.ts`](file:///root/SWAT/apps/trade-executor/src/paymaster-budget.ts)).
 
 ### 9.4 Funding and balances
 - [ ] **S6-8** Stage-4 UI: trading wallet page (deposit QR, balances, withdraw), risk settings — `RiskExecutionView` rebuilt per-user with their exposure against their agreed risk %, plus a personal kill switch.
@@ -1280,6 +1284,7 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-38** Open positions with cost basis, unrealised P&L, and which master and subscription each came from. `copy_positions` now carries the tenancy key (`050`) so this is per-user for the first time.
 - [ ] **S6-39** Performance view: realised P&L net of fees, per master and per chain. **Consult the `dataviz` skill before writing chart code or choosing chart colours** — and note the chain accents above are already semantic, so series colour is constrained, not free.
 - [ ] **S6-40** Paper vs live is unmistakable everywhere a number appears. Paper is the default for every free-tier user, so an ambiguous figure is the common case, not the edge case.
+- [ ] **S6-52** **Manual Position Exit & Emergency Close-All Controls.** Provide an actionable *"Exit Now"* button on each open position in `copy_positions` (triggering laddered exit escalation on Polymarket or immediate market sell on Solana/Robinhood via [`manual-exit.ts`](file:///root/SWAT/apps/trade-executor/src/manual-exit.ts)), and a master-level *"Close All Positions Now"* emergency button on active subscriptions (`POST /v1/me/wallets/:address/close-all`). Global emergency account kill-switch (`PUT /v1/me/execution-settings/kill-switch`) persistently accessible in header.
 
 ### 9.10 Withdrawal — the anti-theft surface
 - [ ] **S6-41** Withdraw flow: destination limited to a **verified linked wallet**, email confirmation, per-day cap, and the linked-wallet **cooling-off window** made visible (`S4-12`). An address that is linked but not yet spendable must say when it becomes spendable.
@@ -1291,11 +1296,19 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-44** Admin actions are audited (`audit_log`) and the kill switches are reachable — global `'*' = 'off'`, per-chain mode, per-master pause.
 
 ### 9.12 Quality bars
-- [ ] **S6-10** Stage-5 UI: billing page. Stage-7 UI: Ultra chain manager.
 - [ ] **S6-12** `G7-A3` — component-wide regression suite proving no uncaught promise rejection on config-load failure.
 - [ ] **S6-45** SEO per the section NOTE: metadata per route, Open Graph, sitemap, robots. Marketing and auth pages are indexable; **everything behind a session is `noindex`**.
 - [ ] **S6-46** Accessibility: keyboard reachable, focus visible, form labels bound, and contrast checked against the token palette — Material 3 `on-*` pairs are designed for it, so verify rather than assume. Status must never be conveyed by colour alone; `status-success` and `status-error` need an icon or text partner.
 - [ ] **S6-47** Responsive down to mobile. A user checking whether their copy filled will do it on a phone.
+
+### 9.13 Billing & Subscription Management (Stage 5 UI)
+- [ ] **S6-53** **Tier Comparison Matrix & Live Quota Meters.** Detailed billing dashboard comparing Free, Operator, and Ultra tiers. Surfacing real-time capability meters for the current user: tracked wallets used vs tier quota (`/v1/me/wallets`), contract backfills used vs 24h limit, API keys minted vs limit, and signal feed delay (15m vs 0s).
+- [ ] **S6-54** **Stripe Checkout & Customer Billing Portal.** One-click checkout buttons triggering `POST /v1/billing/stripe/checkout-session` for recurring monthly subscriptions (`operator` / `ultra`). Direct redirect to Stripe Customer Portal via `POST /v1/billing/stripe/portal-session` for managing payment methods, viewing invoices, and canceling without custom form handling.
+- [ ] **S6-55** **USDC Crypto Payment Rail & Lifetime Tier Modal.** On-chain USDC payment modal: displays unique per-user deposit reference memo, treasury deposit addresses on Solana and Polygon, and live watcher confirmation feedback. Supports one-time lifetime tier purchases (`tier_expires_at = NULL`).
+- [ ] **S6-56** **Subscription Status & Grace Period Alert Banner.** Persistent alert banner when payment fails or enters grace period (`status: past_due`), displaying a 3-day countdown before automatic downgrade to `free`. Surfacing canceled state (`cancel_at_period_end`) with active access until current period end.
+
+### 9.14 Token Watchlist & Contract Backfill Hub
+- [ ] **S6-57** **Token Watchlist & On-Demand Contract Backfill UI.** Token search and watch manager (`/v1/me/tokens/watches`). Integrated contract backfill launcher (`POST /v1/me/tokens/backfill`) with daily quota meter, displaying backfill depth (30d vs 180d vs 730d based on tier) and live backfill progress indicators.
 
 **Exit gate, per slice:** the corresponding backend stage is drivable end to end in the browser with no shared secrets and no hard-coded data — **and** no `NEXT_PUBLIC_*` secret appears in the built bundle, asserted by the §15 lint rather than by inspection.
 
