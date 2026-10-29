@@ -53,9 +53,9 @@ end of this block after any batch of ticks.
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
 | 7. Stage 4 — custody & per-user execution | 64 | 12 | 2 | **Phase 4 Core Engineering Closed.** Envelope encryption, KeyWrapper, paymaster spend cap & user rate limits, relayer budget, user slippage, session-key expiry, schemas (047-050), API grant invariant, cluster independence warnings, pUSD monitoring, wake-vault Anchor PDA program (ADR-0004), withdrawal 24h cooling-off & email OTP, master fee capture, and neg-risk guards all landed |
 | 8. Stage 5 — billing | 0 | 6 | 0 | deferred per operator direction; needs Stripe MCP server |
-| 9. Stage 6 — frontend | 2 | 54 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
+| 9. Stage 6 — frontend | 2 | 60 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **115** | **95** | **13** | |
+| **Total** | **115** | **101** | **13** | |
 
 **Regenerated 2026-10-29.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
@@ -1291,9 +1291,15 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-42** **Email-send failure blocks the withdrawal and says so.** `sendEmail` returns sent / not_sent / **unknown**, and only `sent` may proceed; the UI must distinguish "we could not send" from "we do not know whether we sent" without inviting a retry that double-sends a code.
 
 ### 9.11 Admin console — kept, relocated, hardened
-- [ ] **S6-11** Admin area: today's global pages behind `role=admin` **and** an IP allowlist.
-- [ ] **S6-43** Admin-only surfaces the user app must never expose: capacity and relayer-budget headroom with the real constraint named, per-master copy concentration (`S4-M6`), certification status per chain, ingestion health, and the skip-reason breakdown across all users.
-- [ ] **S6-44** Admin actions are audited (`audit_log`) and the kill switches are reachable — global `'*' = 'off'`, per-chain mode, per-master pause.
+- [ ] **S6-11** **Admin Area Route Architecture & RBAC Isolation.** Relocate all operator console pages into the dedicated `(admin)` route group, strictly gated by `role === 'admin'` and optional IP allowlist. Never expose or link admin navigation from the user app.
+- [ ] **S6-43** **Executive Overview & System Health Scorecard.** Top-level KPI scorecard: total users by tier (Free, Operator, Ultra), active copiers today, 24h trading volume (paper vs live), open copy positions across the fleet, queue lag per chain (`TRADE_QUEUES_BY_CHAIN`), and live ingestion health across Solana (Helius), Robinhood, and Polymarket. Powered by `GET /v1/admin/overview`.
+- [ ] **S6-44** **Global Emergency Controls & Trading Governance.** Reachable platform kill switches: global emergency off (`POST /v1/trading/emergency-off`), per-chain mode selectors (`off` / `paper` / `live` via `POST /v1/trading/mode`), per-master copy pause, and cache flush controls. Every action writes to `audit_log` with admin actor ID, IP, and reason.
+- [ ] **S6-59** **Chain Execution Certification & RPC Diagnostics Console.** Real-time status for the three execution venues: Solana (audited `wake-vault` Anchor program ID, Jito block engine liveness, priority fee percentiles), Robinhood Chain 4663 (Uniswap V3 router state, Permit2 status, EntryPoint v0.7.0 liveness), and Polymarket (CLOB connectivity, WSS orderbook sync state). Surfacing active `chain_certifications` records with canary tx links and expiry dates. Powered by `GET /v1/admin/certifications`.
+- [ ] **S6-60** **Operational Budgets & Rate Limit Monitors.** Live progress meters for platform-level quotas: Polymarket Relayer daily usage (orders today vs 10,000 quota, reset countdown), Robinhood Alchemy Paymaster daily gas spend ($ spent vs `$PAYMASTER_DAILY_BUDGET`), rate-limited users count today (`authority-paymaster-user-rate-limited`), and Solana cumulative Jito tip spend. Powered by `GET /v1/admin/budgets`.
+- [ ] **S6-61** **Master Capacity, Membership & Cohort Congestion Dashboard.** Comprehensive table of all tracked master wallets across all chains: active follower count against the 50-person hard cap (`X/50` per [`056_master_membership.sql`](file:///root/SWAT/packages/db/sql/056_master_membership.sql)), aggregate cohort price-impact % in active windows, 24h cohort trading volume, and capacity saturation warnings. Powered by `GET /v1/admin/capacity`.
+- [ ] **S6-62** **Multi-Tenant User Management & Subscription Audit Hub.** Paginated, searchable user directory: user ID, email, role, current tier, tier expiration timestamp, linked identity wallets, active execution grant type (`solana_vault`, `session_key_4337`, `polymarket_signer`), user kill-switch state, and 3-day grace period status. Powered by `GET /v1/admin/users`.
+- [ ] **S6-63** **Live System Logs & Searchable Audit Log Explorer.** Integrated real-time log viewer streaming backend stdout/stderr via ticketed SSE (`GET /v1/logs/stream`). Interactive audit log table querying `audit_log` with filters for event type (`auth.*`, `billing.*`, `admin.*`), actor ID, IP address, and date range. Powered by `GET /v1/admin/audit-log`.
+- [ ] **S6-64** **Skip Reason & Execution Failure Analytics Breakdown.** Global aggregate chart and breakdown of why copied trades were skipped across all users in the last 24h (underfunded balance, venue minimum order size, price impact cap, stale signal, geo-blocked, paymaster rate limited). Gives operators immediate visibility into why users aren't getting fills. Powered by `GET /v1/admin/skips`.
 
 ### 9.12 Quality bars
 - [ ] **S6-12** `G7-A3` — component-wide regression suite proving no uncaught promise rejection on config-load failure.
