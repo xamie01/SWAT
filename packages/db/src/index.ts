@@ -25,6 +25,7 @@ export * from './evm-nonce.js';
 export * from './position-cap.js';
 export * from './forward-only.js';
 export * from './independence.js';
+export * from './independence-queries.js';
 export * from './master-capacity.js';
 /**
  * Active-follower counts per (master, chain) -- the `activeFollowerCount` input

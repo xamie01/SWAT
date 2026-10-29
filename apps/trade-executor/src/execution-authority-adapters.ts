@@ -392,24 +392,66 @@ function createUnavailableUserAuthority(input: {
 }
 
 /**
- * Per-user authority on Robinhood Chain — **not implemented**.
- *
- * Cheapest of the three to build and therefore first in ADR-0003's build order:
- * EntryPoint v0.6/v0.7/v0.8, an Alchemy bundler and a paymaster all exist on
- * chain 4663 today, and EIP-7702 lets a user's existing EOA delegate without
- * moving funds to a new address. What is missing is ours: grant issuance
- * (`S4-2`), the `user_execution_grants` table (`S4-7`), the paymaster spend cap
- * (`S4-P8`) and expiry monitoring (`S4-P9`).
+ * Options for resolving per-user grants and session-key validity (`S4-P9`).
  */
-export function createUserRobinhoodAuthority(): UserExecutionAuthority {
-  return createUnavailableUserAuthority({
+export interface UserGrantAuthorityOptions {
+  readonly loadGrant?: (userId: string) => Promise<{
+    status: 'active' | 'retired' | 'revoked' | 'compromised';
+    expiresAt: Date | null;
+  } | null>;
+  readonly now?: () => Date;
+}
+
+/**
+ * Per-user authority on Robinhood Chain (`S4-P9`).
+ *
+ * Verifies grant lifecycle status (missing, revoked, expired/retired) before
+ * attempting signing or bundler execution. An expired grant returns
+ * `authority-grant-expired` with the expiration timestamp so the skip reason
+ * identifies lapsed authority rather than a generic execution failure.
+ */
+export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions): UserExecutionAuthority {
+  return {
     id: 'user-robinhood-chain',
     chain: 'robinhood-chain',
-    code: 'authority-evm-session-key-unavailable',
-    reason:
-      'Per-user Robinhood Chain authority needs a 4337 session key or EIP-7702 '
-      + 'delegation; grant issuance (S4-2) and user_execution_grants (S4-7) are unbuilt'
-  });
+    serves: servesUser,
+    async authorize(request) {
+      if (request.principal.kind !== 'user') {
+        return denied(
+          'authority-principal-mismatch',
+          `User authority requested for ${describePrincipal(request.principal)}`
+        );
+      }
+      if (options?.loadGrant) {
+        const grant = await options.loadGrant(request.principal.userId);
+        if (!grant) {
+          return denied(
+            'authority-grant-missing',
+            `No execution authority grant found for user ${request.principal.userId}`
+          );
+        }
+        if (grant.status === 'revoked' || grant.status === 'compromised') {
+          return denied(
+            'authority-grant-revoked',
+            `Execution authority grant has been ${grant.status} for user ${request.principal.userId}`
+          );
+        }
+        const now = options.now?.() ?? new Date();
+        if (grant.status === 'retired' || (grant.expiresAt && grant.expiresAt.getTime() <= now.getTime())) {
+          return denied(
+            'authority-grant-expired',
+            `Execution authority session key expired at ${grant.expiresAt?.toISOString() ?? 'unknown'} for user ${request.principal.userId}`
+          );
+        }
+      }
+      return denied(
+        'authority-evm-session-key-unavailable',
+        'Per-user Robinhood Chain authority needs a 4337 session key or EIP-7702 '
+        + 'delegation; grant issuance (S4-2) and user_execution_grants (S4-7) are unbuilt '
+        + `(requested for ${describePrincipal(request.principal)})`
+      );
+    }
+  };
 }
 
 /**

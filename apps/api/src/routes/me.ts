@@ -11,6 +11,8 @@ import {
   beginWindDown,
   requestCloseAll,
   query,
+  checkWalletClusterIndependence,
+  checkWalletHubStatus,
   type UserScope
 } from '@swat/db';
 import {
@@ -121,6 +123,19 @@ export async function registerMeRoutes(
     // preserves Solana case — never hand-build the prefix.
     const resolved = resolveChainAddress(parsed.data.address, parsed.data.chain);
 
+    // S4-M11: Refuse exchange hubs with an actionable reason
+    const hub = await checkWalletHubStatus(resolved.prefixed, resolved.raw, parsed.data.chain);
+    if (hub.isHub) {
+      return reply.code(400).send({
+        error: 'Cannot subscribe to exchange hub',
+        reason: 'exchange-hub-refused',
+        message: hub.reason
+      });
+    }
+
+    // S4-M10: Advisory cluster independence warning
+    const independence = await checkWalletClusterIndependence(resolved.prefixed);
+
     try {
       const result = await subscribeToWallet(scope, {
         walletAddress: resolved.prefixed,
@@ -149,6 +164,7 @@ export async function registerMeRoutes(
           source: result.subscription.source,
           subscribedAt: result.subscription.createdAt
         },
+        warning: independence.warning,
         backfillQueued: result.walletCreated
       });
     } catch (error) {

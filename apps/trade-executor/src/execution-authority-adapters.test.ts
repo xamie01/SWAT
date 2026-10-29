@@ -379,4 +379,57 @@ describe('the full adapter set', () => {
       expect(onChain.filter((adapter) => adapter.serves(ALICE))).toHaveLength(1);
     }
   });
+
+  describe('grant lifecycle evaluation (S4-P9)', () => {
+    it('denies with authority-grant-missing when no grant row exists', async () => {
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => null
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toEqual({
+        kind: 'denied',
+        code: 'authority-grant-missing',
+        reason: 'No execution authority grant found for user alice'
+      });
+    });
+
+    it('denies with authority-grant-revoked when grant was revoked or compromised', async () => {
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => ({ status: 'revoked', expiresAt: null })
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toEqual({
+        kind: 'denied',
+        code: 'authority-grant-revoked',
+        reason: 'Execution authority grant has been revoked for user alice'
+      });
+    });
+
+    it('denies with authority-grant-expired when session key has passed its expiresAt (S4-P9)', async () => {
+      const expiry = new Date('2026-08-01T00:00:00Z');
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => ({ status: 'active', expiresAt: expiry }),
+        now: () => new Date('2026-08-02T00:00:00Z')
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-grant-expired'
+      });
+      if (verdict.kind === 'denied') {
+        expect(verdict.reason).toContain('expired at 2026-08-01T00:00:00.000Z');
+      }
+    });
+
+    it('denies with authority-grant-expired when grant status is retired', async () => {
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => ({ status: 'retired', expiresAt: null })
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-grant-expired'
+      });
+    });
+  });
 });

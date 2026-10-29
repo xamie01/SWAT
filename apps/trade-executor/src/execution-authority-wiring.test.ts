@@ -492,6 +492,22 @@ describe('a denial never falls through to another authority', () => {
     expect(db.insertTradeAndMarkSignalExecuted).not.toHaveBeenCalled();
   });
 
+  it('reports an expired grant as lapsed with authority-grant-expired, never as generic execution failure (S4-P9)', async () => {
+    const { ports } = denyingAuthority(
+      'authority-grant-expired',
+      'Execution authority session key expired at 2026-08-01T00:00:00.000Z for user alice'
+    );
+
+    const result = await handleJob({ data: { ...liveSolanaJob, userId: 'alice' } }, ports);
+
+    expect(result.status).toBe('skipped');
+    expect(result.reason).toContain('Execution authority denied [authority-grant-expired]');
+    expect(result.reason).toContain('expired at 2026-08-01T00:00:00.000Z');
+    expect(runtimeMocks.triggerTrojan).not.toHaveBeenCalled();
+    expect(runtimeMocks.dispatchSolanaTrade).not.toHaveBeenCalled();
+    expect(db.insertTrade).not.toHaveBeenCalled();
+  });
+
   it('still grants the operator through the real adapters', async () => {
     // The control for the case above: same default ports, no `userId`, and the
     // operator's certified path runs exactly as before. Without this, "denies
