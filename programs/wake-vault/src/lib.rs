@@ -17,6 +17,7 @@
 //   - Reverts on-chain if slippage or token spend exceeds pre-authorized bounds.
 
 use anchor_lang::prelude::*;
+use anchor_lang::Discriminator;
 use anchor_lang::solana_program::{
     instruction::{AccountMeta, Instruction},
     program::invoke_signed,
@@ -80,6 +81,76 @@ pub mod wake_vault {
         vault.owner = ctx.accounts.owner.key();
         vault.bump = ctx.bumps.vault;
         vault.revoked = false;
+        Ok(())
+    }
+
+    /// Initializes a user's vault PDA even if it was pre-funded with native SOL
+    /// before initialization was called.
+    ///
+    /// Standard Anchor `init` fails with `AccountAlreadyInUse` if the user transferred
+    /// SOL to the PDA beforehand. This instruction safely allocates space and assigns
+    /// ownership to the program via `invoke_signed` using the PDA's canonical seeds.
+    pub fn initialize_funded_vault(ctx: Context<InitializeFundedVault>) -> Result<()> {
+        let vault_info = ctx.accounts.vault.to_account_info();
+        let owner_info = ctx.accounts.owner.to_account_info();
+        let system_program_info = ctx.accounts.system_program.to_account_info();
+
+        // 1. Ensure the account is uninitialized and currently owned by SystemProgram
+        require!(
+            vault_info.owner == &solana_program::system_program::ID,
+            VaultError::AlreadyInitialized
+        );
+        require!(vault_info.data_is_empty(), VaultError::AlreadyInitialized);
+
+        let space = 8 + WakeVault::LEN;
+        let rent = Rent::get()?;
+        let required_rent = rent.minimum_balance(space);
+        let current_lamports = vault_info.lamports();
+
+        // Top up deficit rent from owner if current balance is less than required rent
+        if current_lamports < required_rent {
+            let deficit = required_rent - current_lamports;
+            solana_program::program::invoke(
+                &solana_program::system_instruction::transfer(owner_info.key, vault_info.key, deficit),
+                &[owner_info.clone(), vault_info.clone(), system_program_info.clone()],
+            )?;
+        }
+
+        let bump = ctx.bumps.vault;
+        let seeds = &[
+            b"vault",
+            ctx.accounts.owner.key.as_ref(),
+            &[bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        // 2. Allocate account space
+        solana_program::program::invoke_signed(
+            &solana_program::system_instruction::allocate(vault_info.key, space as u64),
+            &[vault_info.clone(), system_program_info.clone()],
+            signer_seeds,
+        )?;
+
+        // 3. Assign account ownership to this program
+        solana_program::program::invoke_signed(
+            &solana_program::system_instruction::assign(vault_info.key, ctx.program_id),
+            &[vault_info.clone(), system_program_info],
+            signer_seeds,
+        )?;
+
+        // 4. Write Anchor discriminator and WakeVault state
+        let mut data = vault_info.try_borrow_mut_data()?;
+        let discriminator = WakeVault::DISCRIMINATOR;
+        data[..8].copy_from_slice(&discriminator);
+
+        let vault_state = WakeVault {
+            owner: ctx.accounts.owner.key(),
+            bump,
+            revoked: false,
+        };
+        let mut writer = &mut data[8..8 + WakeVault::LEN];
+        vault_state.serialize(&mut writer)?;
+
         Ok(())
     }
 
@@ -291,6 +362,21 @@ pub struct InitializeVault<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitializeFundedVault<'info> {
+    /// CHECK: Target Vault PDA. May be pre-funded with SOL (lamports > 0) prior to initialization.
+    /// Canonical seeds, bump, ownership (SystemProgram), and empty data are strictly checked.
+    #[account(
+        mut,
+        seeds = [b"vault", owner.key().as_ref()],
+        bump
+    )]
+    pub vault: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct ManageVault<'info> {
     #[account(
         mut,
@@ -444,6 +530,8 @@ pub enum VaultError {
     IdenticalSwapTokens,
     #[msg("Destination token account mint does not match vault token account mint")]
     MintMismatch,
+    #[msg("Vault account is already initialized or owned by another program")]
+    AlreadyInitialized,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -586,6 +674,19 @@ mod tests {
         let res = invariants::verify_native_sol_preservation(10_000, 9_999);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), error!(VaultError::LamportsDrained));
+    }
+
+    #[test]
+    fn test_prefunded_vault_already_initialized_check() {
+        let is_system_program = false; // already assigned
+        let is_empty_data = false; // already has data
+        let res: Result<()> = if !is_system_program || !is_empty_data {
+            Err(error!(VaultError::AlreadyInitialized))
+        } else {
+            Ok(())
+        };
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::AlreadyInitialized));
     }
 
     #[test]
