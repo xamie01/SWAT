@@ -24,6 +24,17 @@ type PositionTrade = {
   fee_usd: number | string | null;
 };
 
+type OpenMasterLot = {
+  lot_id: string;
+  signal_id: string;
+  user_id: string;
+  master_wallet_address: string;
+  token_mint: string;
+  chain: string;
+  remaining_quantity: number | string;
+  remaining_cost_basis_usd: number | string | null;
+};
+
 /**
  * One tenant's slice of one signal's trade ledger -- the unit this pass values.
  *
@@ -169,6 +180,36 @@ export async function markToMarketOpenPositions(
   const positions: OpenPositionSnapshot[] = [];
   let skipped = 0;
 
+  // Lot rows are the authoritative tenant/master identity once confirmed copy
+  // evidence has created them. The trade-ledger path remains the compatibility
+  // fallback for legacy rows and for tenants whose evidence predates migration 058.
+  const hasTenantLedger = [...grouped.values()].some((group) => group.key.userId !== null);
+  const openMasterLots = hasTenantLedger
+    ? await query<OpenMasterLot>(
+        `SELECT
+           lot.id AS lot_id,
+           lot.signal_id,
+           lot.user_id,
+           lot.master_wallet_address,
+           lot.token_mint,
+           lot.chain,
+           lot.remaining_quantity,
+           lot.remaining_cost_basis_usd
+           FROM copy_position_master_lots lot
+          WHERE lot.remaining_quantity > 0
+            AND ($1::uuid IS NULL OR lot.signal_id = $1)
+          ORDER BY lot.signal_id, lot.user_id, lot.master_wallet_address, lot.acquired_at, lot.id`,
+        [signalId ?? null]
+      )
+    : [];
+  const lotsByLedger = new Map<string, OpenMasterLot[]>();
+  for (const lot of openMasterLots) {
+    const key = ledgerKey(lot.signal_id, lot.user_id);
+    const existing = lotsByLedger.get(key);
+    if (existing) existing.push(lot);
+    else lotsByLedger.set(key, [lot]);
+  }
+
   // Per signal: every ledger that resolved, and whether any failed to. Both are needed
   // before a signal-level total can be written, so the rollup happens after the loop.
   const bySignal = new Map<string, { valued: ValuedLedger[]; incomplete: boolean }>();
@@ -256,21 +297,31 @@ export async function markToMarketOpenPositions(
 
     entry.valued.push({ key: group.key, tokenMint, pnl, currentPriceUsd: currentPrice });
 
-    if (pnl.openQuantity > 1e-12 && currentPrice !== null) {
+    const lots = group.key.userId === null
+      ? []
+      : lotsByLedger.get(ledgerKey(group.key.signalId, group.key.userId)) ?? [];
+    const snapshotLots = lots.length > 0 ? lots : [null];
+    for (const lot of snapshotLots) {
+      const lotQuantity = lot ? Number(lot.remaining_quantity) : pnl.openQuantity;
+      const lotCostBasis = lot
+        ? (lot.remaining_cost_basis_usd === null ? null : Number(lot.remaining_cost_basis_usd))
+        : pnl.openCostBasisUsd;
+      if (!Number.isFinite(lotQuantity) || lotQuantity <= 1e-12) continue;
+      if (lotCostBasis === null || !Number.isFinite(lotCostBasis) || currentPrice === null) continue;
       const separator = tokenMint.indexOf(':');
       const chain = separator >= 0 ? tokenMint.slice(0, separator) : 'solana';
-      if (isChain(chain)) {
-        positions.push({
-          signalId: group.key.signalId,
-          userId: group.key.userId,
-          tokenMint,
-          chain,
-          openQuantity: pnl.openQuantity,
-          openCostBasisUsd: pnl.openCostBasisUsd,
-          unrealizedPnlUsd: pnl.unrealizedPnlUsd,
-          currentPriceUsd: currentPrice
-        });
-      }
+      if (!isChain(chain)) continue;
+      positions.push({
+        signalId: group.key.signalId,
+        userId: group.key.userId,
+        ...(lot ? { positionKey: lot.lot_id } : {}),
+        tokenMint,
+        chain,
+        openQuantity: lotQuantity,
+        openCostBasisUsd: lotCostBasis,
+        unrealizedPnlUsd: lotQuantity * currentPrice - lotCostBasis,
+        currentPriceUsd: currentPrice
+      });
     }
   }
 

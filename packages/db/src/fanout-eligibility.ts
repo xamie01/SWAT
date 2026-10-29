@@ -1,5 +1,6 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { capabilitiesFor, effectiveTier, tierAllowsChain, type UserTier } from '@swat/shared';
+import { evaluateForwardOnlyMirror, type ForwardOnlySkipCode } from './forward-only.js';
 import { mirrorEligibilityForState, type MirrorEligibility } from './subscriptions.js';
 
 /**
@@ -66,12 +67,31 @@ export type FanoutExclusionCode =
   /** Capacity could not be assessed. Fails closed. */
   | 'capacity-unknown'
   /** Chain mode could not be resolved. Fails closed. */
-  | 'chain-mode-unknown';
+  | 'chain-mode-unknown'
+  /**
+   * The master made this entry before the subscription's current active period
+   * began (`S4-M2`). Following it would be catch-up buying into a position at a
+   * cost basis the user never had.
+   */
+  | 'source-event-precedes-active-since'
+  /** The signal's own event time is missing or unreadable, so the entry cannot be shown to postdate the subscription. Fails closed. */
+  | 'source-event-time-unknown'
+  /** The subscription's `active_since` is missing or unreadable, so no window can be evaluated. Fails closed. */
+  | 'subscription-window-unknown';
 
 /** One subscriber's inputs, all pre-fetched. */
 export interface FanoutCandidate {
   readonly userId: string;
   readonly subscriptionState: unknown;
+  /**
+   * Start of the subscription's **current** active period (`051`.`active_since`),
+   * or `null` when it could not be read.
+   *
+   * Consumed by the `S4-M2` gate below on buys only. `null` fails closed with
+   * `subscription-window-unknown` — never treated as "the beginning of time",
+   * which would mirror the master's entire history to a brand-new subscriber.
+   */
+  readonly activeSince: Date | null;
   readonly tier: UserTier;
   readonly tierExpiresAt: Date | null;
   readonly autoExecute: boolean;
@@ -95,6 +115,8 @@ export interface FanoutSignal {
   readonly tokenMint: string;
   readonly direction: 'buy' | 'sell';
   readonly score: number;
+  /** The master's source event time, used for forward-only buy gating. */
+  readonly eventAt: Date | null;
 }
 
 export interface FanoutPlatformInputs {
@@ -148,6 +170,27 @@ function excluded(userId: string, code: FanoutExclusionCode): FanoutVerdict {
   return { kind: 'excluded', userId, code };
 }
 
+function forwardOnlyExclusionCode(code: ForwardOnlySkipCode): FanoutExclusionCode {
+  switch (code) {
+    case 'source-event-precedes-active-since':
+      return 'source-event-precedes-active-since';
+    case 'source-event-timestamp-unreadable':
+      return 'source-event-time-unknown';
+    case 'active-since-unreadable':
+    case 'no-subscription-window':
+      return 'subscription-window-unknown';
+    case 'subscription-entries-stopped':
+    case 'subscription-not-mirroring':
+      return 'subscription-window-unknown';
+    case 'source-side-unrecognised':
+      return 'source-event-time-unknown';
+    default: {
+      const exhaustive: never = code;
+      throw new Error(`Unhandled forward-only skip code: ${String(exhaustive)}`);
+    }
+  }
+}
+
 /**
  * Decides one candidate. Order matters only for which code is reported first;
  * every check is independent, and the cheapest and most-specific come first so
@@ -165,6 +208,26 @@ export function assessFanoutCandidate(
   // one means "not subscribed", the other means "subscribed, buys only".
   if (mirrors === 'sells-only' && signal.direction === 'buy') {
     return excluded(candidate.userId, 'winding-down-buy-refused');
+  }
+
+  if (signal.direction === 'buy') {
+    if (signal.eventAt === null) return excluded(candidate.userId, 'source-event-time-unknown');
+    if (candidate.activeSince === null) {
+      return excluded(candidate.userId, 'subscription-window-unknown');
+    }
+    const forwardOnly = evaluateForwardOnlyMirror({
+      side: signal.direction,
+      eventAt: signal.eventAt,
+      subscription: {
+        userId: candidate.userId,
+        walletAddress: signal.masterWalletAddress,
+        state: candidate.subscriptionState,
+        activeSince: candidate.activeSince
+      }
+    });
+    if (forwardOnly.kind === 'skip') {
+      return excluded(candidate.userId, forwardOnlyExclusionCode(forwardOnly.code));
+    }
   }
 
   if (candidate.killed) return excluded(candidate.userId, 'user-killed');

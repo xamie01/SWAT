@@ -27,11 +27,13 @@ const signal: FanoutSignal = {
   masterWalletAddress: 'solana:MASTER',
   tokenMint: 'solana:TOKEN',
   direction: 'buy',
-  score: 90
+  score: 90,
+  eventAt: new Date('2026-09-02T00:00:00.000Z')
 };
 
 const candidate: FanoutCandidate = {
   userId: 'u1',
+  activeSince: new Date('2026-09-01T00:00:00.000Z'),
   subscriptionState: 'active',
   tier: 'ultra',
   tierExpiresAt: null,
@@ -96,6 +98,52 @@ describe('assessFanoutCandidate (S4-13)', () => {
         platform
       );
       expect(verdict).toMatchObject({ kind: 'eligible', mirrors: 'sells-only' });
+    });
+  });
+
+  describe('forward-only subscription window (S4-M2)', () => {
+    it('excludes a buy that predates the current active period', () => {
+      const verdict = assessFanoutCandidate(
+        of({ activeSince: new Date('2026-09-03T00:00:00.000Z') }),
+        signal,
+        platform
+      );
+      expect(verdict).toEqual({
+        kind: 'excluded',
+        userId: 'u1',
+        code: 'source-event-precedes-active-since'
+      });
+    });
+
+    it('admits a buy exactly at the active boundary', () => {
+      const verdict = assessFanoutCandidate(
+        of({ activeSince: signal.eventAt }),
+        signal,
+        platform
+      );
+      expect(verdict.kind).toBe('eligible');
+    });
+
+    it('fails closed when the source event time is unavailable', () => {
+      const verdict = assessFanoutCandidate(
+        candidate,
+        { ...signal, eventAt: null },
+        platform
+      );
+      expect(verdict).toEqual({
+        kind: 'excluded',
+        userId: 'u1',
+        code: 'source-event-time-unknown'
+      });
+    });
+
+    it('does not gate sells on the forward-only window', () => {
+      const verdict = assessFanoutCandidate(
+        of({ activeSince: null }),
+        { ...signal, direction: 'sell', eventAt: null },
+        platform
+      );
+      expect(verdict).toMatchObject({ kind: 'eligible', mirrors: 'buys-and-sells' });
     });
   });
 

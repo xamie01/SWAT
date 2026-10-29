@@ -10,6 +10,7 @@
     "typecheck": "turbo run typecheck && pnpm typecheck:tools && tsc --noEmit -p tsconfig.integration.json",
     "typecheck:tools": "tsc -p tsconfig.tools.json",
     "db:migrate": "pnpm --filter @swat/db migrate",
+    "db:migrate:lp": "pnpm --filter @swat/db migrate:lp",
     "acceptance:g0-d11": "pnpm --filter @swat/indexer acceptance:g0-d11",
     "acceptance:polymarket-context": "pnpm --filter @swat/indexer acceptance:polymarket-context",
     "dev:api": "pnpm --filter @swat/api dev",
@@ -24,7 +25,8 @@
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "check:secrets": "node scripts/check-public-secrets.mjs",
     "check:env": "node scripts/check-env-coverage.mjs",
-    "seed:admin": "pnpm --filter @swat/db seed:admin"
+    "seed:admin": "pnpm --filter @swat/db seed:admin",
+    "acceptance:polymarket-book": "pnpm --filter @swat/indexer acceptance:polymarket-book"
   },
   "devDependencies": {
     "@fastify/cookie": "^11.1.2",

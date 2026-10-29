@@ -271,6 +271,7 @@ describe('decideMasterMembership — the winding_down interaction (S4-M45)', () 
     const verdict = assessFanoutCandidate(
       {
         userId: scope.userId,
+        activeSince: new Date('2026-09-01T00:00:00.000Z'),
         subscriptionState: 'winding_down',
         tier: 'operator',
         tierExpiresAt: null,
@@ -286,7 +287,8 @@ describe('decideMasterMembership — the winding_down interaction (S4-M45)', () 
         masterWalletAddress: MASTER,
         tokenMint: 'solana:TOKEN',
         direction: 'sell',
-        score: 80
+        score: 80,
+        eventAt: null
       },
       {
         chainMode: { effectiveMode: 'paper' },

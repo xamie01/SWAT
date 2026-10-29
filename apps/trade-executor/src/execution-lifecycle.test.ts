@@ -38,6 +38,15 @@ const eligibilityFixtures = vi.hoisted(() => ({
 }));
 
 vi.mock('@swat/db', () => ({
+  // S4-M6: `persistCanonicalFill` accrues the priced capacity numerator after
+  // every confirmed fill. Declared here even though nothing in this file asserts
+  // it -- an export missing from a `vi.mock` factory does not read as `undefined`,
+  // it makes vitest THROW at the call site, and that throw replaces the error
+  // under test. That is how a shadow-isolation test once failed inside
+  // `persistTrade` with a stack pointing at production code.
+  accrueMasterCapacityFillNotional: vi.fn().mockResolvedValue({
+    applied: true, code: 'accrue', deltaUsd: '0'
+  }),
   claimCircuitBreakerProbe: vi.fn(),
   claimSourceSignalForCopyExecution: vi.fn(),
   claimSignalForExecution: vi.fn(),
@@ -69,7 +78,28 @@ vi.mock('@swat/db', () => ({
   readCircuitBreakerState: vi.fn(),
   recordCircuitBreakerFailure: vi.fn(),
   recordCircuitBreakerSuccess: vi.fn(),
-  recordCopyExecutionEvidence: vi.fn(),
+  // Returns a result rather than `undefined`, because `persistCanonicalFill` now
+  // reads `fillValuation.currency` and the execution's confirmed total off it to
+  // accrue the capacity numerator (S4-M6). A bare `vi.fn()` resolves to undefined
+  // and the read throws -- which surfaces as a mirror-bound assertion failing,
+  // several layers from the actual cause.
+  //
+  // `usdAmount: null` with a `no-quote-leg` code is a shape the real function
+  // genuinely returns, and it makes the accrual a no-op here: these tests are
+  // about the mirror bound, not about capacity.
+  recordCopyExecutionEvidence: vi.fn().mockResolvedValue({
+    execution: { confirmedQuoteQuantity: null },
+    position: {},
+    fillValuation: {
+      code: 'no-quote-leg',
+      currency: null,
+      nativeAmount: null,
+      nativeUsdPrice: null,
+      usdAmount: null,
+      reason: 'stubbed in execution-lifecycle.test.ts'
+    },
+    confirmedQuoteTotal: { code: 'no-confirmed-fills', usdAmount: null, unassessedFillCount: 0 }
+  }),
   releaseSignalClaim: vi.fn(),
   resolveChainMode: vi.fn(),
   transitionCopyExecution: vi.fn(),
@@ -121,17 +151,18 @@ vi.mock('@swat/shared', async () => {
   // evaluateCopyPolicy is pure decision math with its own suite in
   // packages/shared; stubbing it would only test the stub.
   const actual = await vi.importActual<typeof import('@swat/shared')>('@swat/shared');
-  // Imported from source rather than from `actual`, because `@swat/shared`
-  // resolves to its built `dist` here and that artifact lags the source (see the
-  // handoff's stale-dist note). Re-implementing the derivation in this mock would
-  // let it drift from the one the producers route on, which is the whole point of
-  // S3-25 having a single definition.
-  const { chainFromTokenMint } = await vi.importActual<
-    typeof import('../../../packages/shared/src/constants.js')
-  >('../../../packages/shared/src/constants.js');
+  // Taken from `actual` rather than re-implemented: `chainFromTokenMint` is the
+  // single definition of a job's chain (S3-25), and a local copy in this mock
+  // would be free to drift from the one the producers actually route on.
+  //
+  // Reaching into `packages/shared/src` directly instead — as an earlier version
+  // of this mock did — pulls a file outside this package's `rootDir` into the
+  // program and breaks `tsc -p tsconfig.json` with TS6059, which is what `pnpm
+  // typecheck` and CI run. The export is present on the built `dist` barrel, so
+  // the package import is both correct and sufficient.
   return {
     DEFAULT_RISK_CONFIG: { maxConsecutiveFailures: 3 },
-    chainFromTokenMint,
+    chainFromTokenMint: actual.chainFromTokenMint,
     evaluateCopyPolicy: actual.evaluateCopyPolicy,
     // Pure resolution math with its own suite; a stub would test the stub.
     resolveSlippageBps: actual.resolveSlippageBps,

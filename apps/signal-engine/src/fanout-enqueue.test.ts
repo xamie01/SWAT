@@ -367,6 +367,7 @@ describe('the contract with planFanout', () => {
     // here is produced by the real decision layer, not hand-built.
     const candidate = (userId: string, overrides: Partial<FanoutCandidate> = {}): FanoutCandidate => ({
       userId,
+      activeSince: new Date('2026-09-01T00:00:00.000Z'),
       subscriptionState: 'active',
       tier: 'ultra',
       tierExpiresAt: null,
@@ -383,7 +384,8 @@ describe('the contract with planFanout', () => {
       masterWalletAddress: 'solana:Master1111',
       tokenMint: SOLANA_MINT,
       direction: 'buy',
-      score: 91
+      score: 91,
+      eventAt: new Date('2026-09-02T00:00:00.000Z')
     };
     const platform: FanoutPlatformInputs = {
       chainMode: { effectiveMode: 'paper' },

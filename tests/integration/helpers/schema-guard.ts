@@ -37,7 +37,8 @@ const REQUIRED_TABLES = [
   'user_execution_grants',       // 047
   'user_balances',               // 048
   'user_execution_settings',     // 049
-  'user_chain_execution_settings' // 049
+  'user_chain_execution_settings', // 049
+  'copy_position_master_lots'        // 058 core lot accounting
 ] as const;
 
 /** Columns whose absence would otherwise surface as an opaque SQL error. */
@@ -60,7 +61,8 @@ const REQUIRED_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> 
   // 053. Without this a database at 051 fails the capacity suite with an opaque
   // "relation master_capacity_ledger does not exist".
   ['master_capacity_ledger', 'notional_basis'],
-  ['user_wallet_subscriptions', 'active_since']
+  ['user_wallet_subscriptions', 'active_since'],
+  ['copy_position_master_lots', 'master_wallet_address']
 ];
 
 export async function assertIntegrationSchemaCurrent(): Promise<void> {

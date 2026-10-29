@@ -314,14 +314,15 @@ END $$;
 DROP INDEX IF EXISTS uq_copy_executions_source_target_mode_user;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_copy_executions_source_target_mode_user
   ON copy_executions (source_trade_id, target_account, execution_mode, user_id)
-  NULLS NOT DISTINCT;
+  NULLS NOT DISTINCT
+  WHERE source_trade_id IS NOT NULL;
 
 -- Same collision on the signal-scoped key from 030.
 DROP INDEX IF EXISTS unq_copy_executions_signal_target_mode;
 CREATE UNIQUE INDEX IF NOT EXISTS unq_copy_executions_signal_target_mode
   ON copy_executions (signal_id, target_account, execution_mode, user_id)
   NULLS NOT DISTINCT
-  WHERE signal_id IS NOT NULL;
+  WHERE signal_id IS NOT NULL AND source_trade_id IS NOT NULL;
 
 -- Deliberately NOT widened:
 --

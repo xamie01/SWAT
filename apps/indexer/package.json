@@ -13,7 +13,8 @@
     "acceptance:polymarket-context": "tsx --env-file=../../.env ../../scripts/polymarket-context-acceptance.ts",
     "lint": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "acceptance:polymarket-book": "tsx --env-file=../../.env ../../scripts/polymarket-book-acceptance.ts"
   },
   "dependencies": {
     "@swat/db": "workspace:*",

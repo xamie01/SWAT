@@ -86,7 +86,29 @@ vi.mock('@swat/db', () => ({
   query: vi.fn().mockResolvedValue([]),
   readCircuitBreakerState: vi.fn(),
   recordCopyEligibilityRejection: vi.fn().mockResolvedValue(true),
-  recordCopyExecutionEvidence: vi.fn(),
+  // S4-M6: persistCanonicalFill accrues the capacity numerator after a
+  // confirmed fill. A missing export here THROWS rather than reading as
+  // undefined, and the throw replaces the error under test.
+  accrueMasterCapacityFillNotional: vi.fn().mockResolvedValue({
+    applied: true, code: 'accrue', deltaUsd: '0'
+  }),
+  // Returns a result rather than undefined: `persistCanonicalFill` reads
+  // `fillValuation.currency` and the confirmed total off it (S4-M6). A bare
+  // `vi.fn()` resolves to undefined and the read throws several layers from the
+  // grant assertion this file is actually about.
+  recordCopyExecutionEvidence: vi.fn().mockResolvedValue({
+    execution: { confirmedQuoteQuantity: null },
+    position: {},
+    fillValuation: {
+      code: 'no-quote-leg',
+      currency: null,
+      nativeAmount: null,
+      nativeUsdPrice: null,
+      usdAmount: null,
+      reason: 'stubbed in execution-authority-wiring.test.ts'
+    },
+    confirmedQuoteTotal: { code: 'no-confirmed-fills', usdAmount: null, unassessedFillCount: 0 }
+  }),
   recordCircuitBreakerFailure: vi.fn(),
   recordCircuitBreakerSuccess: vi.fn(),
   releaseSignalClaim: vi.fn(),
@@ -384,6 +406,17 @@ describe('the grant is load-bearing, not decorative', () => {
         targetAccount: 'StubSettlement1111111111111111111111111111',
         executionMode: 'live'
       })
+    );
+
+    // S4-M6 wiring: a CONFIRMED fill must accrue the priced capacity numerator.
+    // Asserted here rather than in a capacity-specific file because this is the
+    // only suite that drives `handleJob` all the way through a real fill, and the
+    // wiring is otherwise invisible: the ledger row stays `unpriced`, the cap
+    // measures its own projection against zero committed flow, and every test
+    // stays green. That is the correct-but-inert shape this repo has been burned
+    // by five times.
+    expect(db.accrueMasterCapacityFillNotional).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceTradeId: expect.anything() })
     );
   });
 

@@ -43,6 +43,8 @@ export * from './auth-wallets.js';
 export * from './audit-log.js';
 export * from './seed-admin.js';
 export * from './subscriptions.js';
+export * from './lot-allocation.js';
+export * from './close-all.js';
 
 /**
  * Quote-leg valuation (S4-M35).
@@ -81,3 +83,9 @@ export * from './master-membership.js';
  * decision lives in `fanout-eligibility.js`.
  */
 export * from './fanout-candidates.js';
+
+/**
+ * Which Polymarket markets the book feed subscribes to (S4-M38). Read plus a
+ * pure decider; the eviction rule lives in `selectPolymarketBookSubscriptions`.
+ */
+export * from './polymarket-book-subscriptions.js';

@@ -59,6 +59,7 @@ const NOW = new Date('2026-09-05T12:00:00.000Z');
 function candidate(overrides: Partial<FanoutCandidate> = {}): FanoutCandidate {
   return {
     userId: overrides.userId ?? 'user-1',
+    activeSince: new Date('2026-09-01T00:00:00.000Z'),
     subscriptionState: 'active',
     tier: 'ultra',
     tierExpiresAt: null,
@@ -77,7 +78,8 @@ const SIGNAL: FanoutSignal = {
   masterWalletAddress: MASTER,
   tokenMint: TOKEN,
   direction: 'buy',
-  score: 90
+  score: 90,
+  eventAt: new Date('2026-09-02T00:00:00.000Z')
 };
 
 const PLATFORM: Omit<FanoutPlatformInputs, 'capacity'> = {
@@ -351,6 +353,199 @@ describe('capacityGateFor', () => {
     });
     expect(resolved.decision?.reasonCode).toBe('capacity-not-assessable');
     expect(resolved.capacity).toBeNull();
+  });
+
+  it('calls the injected book reader with the cap actually in force (S4-M38)', async () => {
+    const readPolymarketBook = vi.fn(async () => ({
+      chain: 'polygon' as const,
+      tokenMint: POLY_TOKEN,
+      usableLiquidityUsd: 5_000_000,
+      basis: 'order-book-depth' as const,
+      approximate: true,
+      note: 'walked ladder'
+    }));
+
+    const resolved = await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    // The reader must be reached at all -- the inert-wiring failure this repo has
+    // hit repeatedly is a value accepted by the pure helper and never fetched.
+    expect(readPolymarketBook).toHaveBeenCalledTimes(1);
+    expect(resolved.capacity).not.toBeNull();
+    expect(resolved.decision?.reasonCode).not.toBe('capacity-not-assessable');
+  });
+
+  it('hands the reader the platform default cap when no override exists', async () => {
+    const readPolymarketBook = vi.fn(async () => ({
+      chain: 'polygon' as const,
+      tokenMint: POLY_TOKEN,
+      usableLiquidityUsd: 5_000_000,
+      basis: 'order-book-depth' as const,
+      approximate: true,
+      note: 'walked ladder'
+    }));
+
+    await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    expect(readPolymarketBook).toHaveBeenCalledWith(
+      expect.objectContaining({ impactCapBps: PLATFORM_MAX_AGGREGATE_IMPACT_BPS.polygon })
+    );
+  });
+
+  it("hands the reader the master's override cap, not the platform default", async () => {
+    // The reason the read is deferred into this function at all. The published
+    // reserve is exact only at its own cap, so pricing the book at the default
+    // while the cap judges it at 42bps is a fail-open arithmetic error.
+    dbMocks.fetchMasterCapacityPolicy.mockResolvedValue({
+      policy: { maxAggregateImpactBps: 42 },
+      dailyBudgetShareBps: null
+    });
+    const readPolymarketBook = vi.fn(async () => ({
+      chain: 'polygon' as const,
+      tokenMint: POLY_TOKEN,
+      usableLiquidityUsd: 5_000_000,
+      basis: 'order-book-depth' as const,
+      approximate: true,
+      note: 'walked ladder'
+    }));
+
+    await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    expect(readPolymarketBook).toHaveBeenCalledWith(
+      expect.objectContaining({ impactCapBps: 42 })
+    );
+    expect(readPolymarketBook).not.toHaveBeenCalledWith(
+      expect.objectContaining({ impactCapBps: PLATFORM_MAX_AGGREGATE_IMPACT_BPS.polygon })
+    );
+  });
+
+  it('defaults the cohort direction to buy, the side the cap governs', async () => {
+    const readPolymarketBook = vi.fn(async () => ({
+      chain: 'polygon' as const,
+      tokenMint: POLY_TOKEN,
+      usableLiquidityUsd: 5_000_000,
+      basis: 'order-book-depth' as const,
+      approximate: true,
+      note: 'walked ladder'
+    }));
+
+    await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    expect(readPolymarketBook).toHaveBeenCalledWith(
+      expect.objectContaining({ cohortDirection: 'buy' })
+    );
+  });
+
+  it('does not read the book on a chain priced from pool TVL', async () => {
+    const readPolymarketBook = vi.fn();
+
+    await resolveFanoutCapacity({
+      masterWalletAddress: 'solana:master',
+      chain: 'solana',
+      tokenMint: 'solana:So11111111111111111111111111111111111111112',
+      poolTvlUsd: 4_000_000,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    expect(readPolymarketBook).not.toHaveBeenCalled();
+  });
+
+  it('prefers an explicitly supplied book over the reader', async () => {
+    const readPolymarketBook = vi.fn();
+
+    await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      polymarketBook: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    expect(readPolymarketBook).not.toHaveBeenCalled();
+  });
+
+  it('still excludes everyone when the reader returns an unknown book', async () => {
+    const readPolymarketBook = vi.fn(async () => ({
+      chain: 'polygon' as const,
+      tokenMint: POLY_TOKEN,
+      usableLiquidityUsd: null,
+      basis: 'unknown' as const,
+      approximate: false,
+      note: 'polymarket-book-snapshot-stale'
+    }));
+
+    const resolved = await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    // A stale book must not admit anybody. This is the fail-closed direction and
+    // the reason the reader never substitutes a last-known value.
+    expect(resolved.capacity).toBeNull();
+    expect(resolved.decision?.reasonCode).toBe('capacity-not-assessable');
+  });
+
+  it('survives a reader that throws, degrading to no feed rather than aborting', async () => {
+    const readPolymarketBook = vi.fn(async () => {
+      throw new Error('redis unreachable');
+    });
+
+    const resolved = await resolveFanoutCapacity({
+      masterWalletAddress: POLY_MASTER,
+      chain: 'polygon',
+      tokenMint: POLY_TOKEN,
+      poolTvlUsd: null,
+      readPolymarketBook,
+      projection: projectCohortNotionalUsd([candidate()], SIGNAL, PLATFORM),
+      now: NOW
+    });
+
+    // `decision` is still formed: a thrown reader must not collapse the whole
+    // resolution the way a failed window read does.
+    expect(resolved.decision).not.toBeNull();
+    expect(resolved.capacity).toBeNull();
+    expect(resolved.logLine).toContain('polymarket book read threw');
   });
 
   it('admits a polygon cohort once a book verdict is threaded through (S4-M38)', async () => {
