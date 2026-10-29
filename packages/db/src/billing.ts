@@ -13,6 +13,7 @@ import { query } from './client.js';
 import { recordAuditEventStrict } from './audit-log.js';
 import type { UserScope } from './tenancy.js';
 import { withTransaction } from './transaction.js';
+import { invalidateUserSessionCache } from './users.js';
 
 export class DuplicatePaymentTransactionError extends Error {
   constructor(readonly chain: BillingChain, readonly txHash: string) {
@@ -215,6 +216,7 @@ export async function recordCryptoPaymentAndGrantTier(input: {
       'UPDATE users SET tier = $2, tier_expires_at = $3, updated_at = NOW() WHERE id = $1',
       [input.scope.userId, extension.tier, extension.expiresAt]
     );
+    invalidateUserSessionCache(input.scope.userId);
 
     // 4. If there was a matching intent, mark it as completed
     if (input.memo) {
@@ -405,6 +407,7 @@ export async function runTierDowngradeSweep(now = new Date()): Promise<{
       "UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1",
       [user.id]
     );
+    invalidateUserSessionCache(user.id);
 
     downgradedUserIds.push(user.id);
 

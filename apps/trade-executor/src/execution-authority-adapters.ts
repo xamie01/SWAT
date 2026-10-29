@@ -11,7 +11,8 @@ import {
   type ExecutionAuthorityVerdict,
   type ExecutionPrincipal,
   type GrantedExecutionAuthority,
-  type UserExecutionAuthority
+  type UserExecutionAuthority,
+  type VenueActionKind
 } from './execution-authority.js';
 import type { Chain } from '@swat/shared';
 import type { PaymasterBudgetTracker } from './paymaster-budget.js';

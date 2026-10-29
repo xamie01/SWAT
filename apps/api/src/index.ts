@@ -772,6 +772,28 @@ app.get('/v1/logs', async () => {
   };
 });
 
+// Shared singleton Redis subscriber for logs streaming. Multiplexes all SSE client
+// connections over one TCP connection to Redis rather than spawning a new Redis
+// client socket per visitor (which exhausts Redis connection limits and leaks on abrupt disconnects).
+const sharedLogsSubscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const activeLogListeners = new Set<(message: string) => void>();
+
+sharedLogsSubscriber.subscribe('swat:logs:stream').catch((err) => {
+  app.log.error(err, '[api] failed to subscribe to swat:logs:stream');
+});
+
+sharedLogsSubscriber.on('message', (channel, message) => {
+  if (channel === 'swat:logs:stream') {
+    for (const listener of activeLogListeners) {
+      try {
+        listener(message);
+      } catch {
+        activeLogListeners.delete(listener);
+      }
+    }
+  }
+});
+
 app.get('/v1/logs/stream', async (req, reply) => {
   reply.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -780,16 +802,19 @@ app.get('/v1/logs/stream', async (req, reply) => {
     'Access-Control-Allow-Origin': '*'
   });
   reply.hijack();
-  
-  const sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
-  await sub.subscribe('swat:logs:stream');
-  
-  sub.on('message', (channel, message) => {
-    reply.raw.write(`data: ${message}\n\n`);
-  });
-  
-  req.raw.on('close', async () => {
-    await sub.quit();
+
+  const listener = (message: string) => {
+    try {
+      reply.raw.write(`data: ${message}\n\n`);
+    } catch {
+      activeLogListeners.delete(listener);
+    }
+  };
+
+  activeLogListeners.add(listener);
+
+  req.raw.on('close', () => {
+    activeLogListeners.delete(listener);
   });
 });
 
