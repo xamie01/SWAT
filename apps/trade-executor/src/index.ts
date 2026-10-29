@@ -1282,26 +1282,28 @@ async function persistCanonicalFill(input: {
   // inserts evidence `ON CONFLICT DO NOTHING`, so a replayed job leaves the
   // cumulative total unmoved, the delta is zero and no statement is issued. A
   // genuine partial-then-remainder moves the total and only the increment accrues.
-  const accrual = await accrueMasterCapacityFillNotional({
-    sourceTradeId: input.execution.sourceTradeId,
-    executionMode: input.execution.executionMode,
-    quoteCurrency: result.fillValuation.currency,
-    confirmedQuoteUsdBefore: input.execution.confirmedQuoteQuantity,
-    confirmedQuoteUsdAfter: result.execution.confirmedQuoteQuantity
-  }).catch((error: unknown) => ({
-    applied: false as const,
-    code: 'accrual-failed' as const,
-    reason: error instanceof Error ? error.message : String(error)
-  }));
+  if (input.execution.sourceTradeId) {
+    const accrual = await accrueMasterCapacityFillNotional({
+      sourceTradeId: input.execution.sourceTradeId,
+      executionMode: input.execution.executionMode,
+      quoteCurrency: result.fillValuation.currency,
+      confirmedQuoteUsdBefore: input.execution.confirmedQuoteQuantity,
+      confirmedQuoteUsdAfter: result.execution.confirmedQuoteQuantity
+    }).catch((error: unknown) => ({
+      applied: false as const,
+      code: 'accrual-failed' as const,
+      reason: error instanceof Error ? error.message : String(error)
+    }));
 
-  if (!accrual.applied) {
-    // Never thrown: this runs AFTER a confirmed fill, and throwing here would make
-    // the executor treat a filled order as failed. Both `ledger-row-missing` and
-    // `accrual-failed` UNDER-count, which fails open on the cap -- so these deserve
-    // an alert rather than a log line once alerting exists (S4-M6's follow-up).
-    console.warn(
-      `[trade-executor] capacity numerator not accrued (${accrual.code}): ${accrual.reason}`
-    );
+    if (!accrual.applied) {
+      // Never thrown: this runs AFTER a confirmed fill, and throwing here would make
+      // the executor treat a filled order as failed. Both `ledger-row-missing` and
+      // `accrual-failed` UNDER-count, which fails open on the cap -- so these deserve
+      // an alert rather than a log line once alerting exists (S4-M6's follow-up).
+      console.warn(
+        `[trade-executor] capacity numerator not accrued (${accrual.code}): ${accrual.reason}`
+      );
+    }
   }
 }
 

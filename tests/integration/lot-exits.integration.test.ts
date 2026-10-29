@@ -17,6 +17,7 @@ const executionIds: string[] = [];
 const sourceIds: string[] = [];
 const occurredAt = new Date('2026-10-01T00:00:00Z');
 
+async function acquire(quantity = '10') {
   const sourceEventId = `${runId}:${randomUUID()}`;
   const source = await recordSourceTradeEvent({
     chain: 'robinhood-chain', sourceEventType: 'transaction',
