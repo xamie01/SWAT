@@ -41,7 +41,7 @@ than missing features: `S4-M34` (a one-line check that could be a live bug on ev
 does not cover).
 
 ---
-## Where the project stands — 2026-08-22
+## Where the project stands — 2026-10-29
 
 Counts are generated from this file, not maintained by hand. Regenerate with the snippet at the
 end of this block after any batch of ticks.
@@ -53,11 +53,11 @@ end of this block after any batch of ticks.
 | 4. Stage 1 — auth & tenancy | 22 | 0 | 0 | **closed** |
 | 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
-| 7. Stage 4 — custody & per-user execution | 24 | 52 | 4 | **the live front.** Open grew because verification kept finding real defects — `S4-M39`, `S4-M40`, `S4-M41` were all filed this session, not discovered late |
+| 7. Stage 4 — custody & per-user execution | 41 | 33 | 3 | **Batches 1–5 completed.** Venue execution gaps, detector isolation, integration typecheck, tracking difference API, EntryPoint pinning, SOL reserve, and fan-out foundation all landed |
 | 8. Stage 5 — billing | 0 | 6 | 0 | not started; needs the Stripe MCP server first |
 | 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **80** | **139** | **15** | |
+| **Total** | **92** | **107** | **14** | |
 
 **Regenerated 2026-08-31.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
