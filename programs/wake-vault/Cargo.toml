@@ -1,3 +1,10 @@
+[workspace]
+members = [
+    ".",
+    "trident-tests/fuzz_0",
+]
+resolver = "2"
+
 [package]
 name = "wake-vault"
 version = "0.1.0"

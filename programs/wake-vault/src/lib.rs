@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 // programs/wake-vault/src/lib.rs
 //
 // WAKE Non-Custodial Delegated Execution Vault for Solana
@@ -21,12 +23,12 @@ use anchor_lang::solana_program::{
 };
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
-declare_id!("WakeVau1t11111111111111111111111111111111111");
+declare_id!("6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS");
 
 pub mod jupiter {
     use super::*;
     // Jupiter Aggregator v6 Program ID
-    pub const ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV");
+    pub const ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 }
 
 #[program]
@@ -131,8 +133,15 @@ pub mod wake_vault {
         let available = current_lamports.saturating_sub(min_rent);
         require!(amount <= available, VaultError::InsufficientFunds);
 
-        **vault_info.try_borrow_mut_lamports()? -= amount;
-        **ctx.accounts.owner.try_borrow_mut_lamports()? += amount;
+        let new_vault_lamports = current_lamports
+            .checked_sub(amount)
+            .ok_or(VaultError::ArithmeticUnderflow)?;
+        let new_owner_lamports = ctx.accounts.owner.lamports()
+            .checked_add(amount)
+            .ok_or(VaultError::ArithmeticOverflow)?;
+
+        **vault_info.try_borrow_mut_lamports()? = new_vault_lamports;
+        **ctx.accounts.owner.try_borrow_mut_lamports()? = new_owner_lamports;
 
         Ok(())
     }
@@ -142,8 +151,9 @@ pub mod wake_vault {
     /// Security Controls:
     ///   - Must be signed by config.executor (checked live).
     ///   - Vault must not be revoked.
-    ///   - Swaps strictly between vault-owned token accounts.
+    ///   - Swaps strictly between disjoint vault-owned token accounts.
     ///   - Scans remaining_accounts to prevent rogue vault ATAs from being drained.
+    ///   - Asserts native SOL lamport preservation (vault lamports cannot decrease).
     ///   - Asserts post-CPI balance deltas: spent <= max_in, received >= min_out.
     pub fn execute_swap<'info>(
         ctx: Context<'_, '_, '_, 'info, ExecuteSwap<'info>>,
@@ -161,27 +171,32 @@ pub mod wake_vault {
             VaultError::UnknownCpiTarget
         );
 
-        // Record baseline token balances before swap
+        let in_key = ctx.accounts.vault_token_in.key();
+        let out_key = ctx.accounts.vault_token_out.key();
+        require_keys_neq!(in_key, out_key, VaultError::IdenticalSwapTokens);
+
+        // Record baseline token balances and native lamports before swap
         ctx.accounts.vault_token_in.reload()?;
         ctx.accounts.vault_token_out.reload()?;
         let in_before = ctx.accounts.vault_token_in.amount;
         let out_before = ctx.accounts.vault_token_out.amount;
+        let vault_lamports_before = ctx.accounts.vault.to_account_info().lamports();
 
         // Scan remaining_accounts to reject any other writable vault-owned token accounts
         let vault_key = vault.key();
-        let in_key = ctx.accounts.vault_token_in.key();
-        let out_key = ctx.accounts.vault_token_out.key();
         let token_prog_key = ctx.accounts.token_program.key();
 
         for acc in ctx.remaining_accounts.iter() {
-            if acc.is_writable && acc.owner == &token_prog_key {
-                if acc.key() != in_key && acc.key() != out_key {
-                    let ata_data = TokenAccount::try_deserialize(&mut &acc.data.borrow()[..])?;
-                    require!(
-                        ata_data.owner != vault_key,
-                        VaultError::UnauthorizedVaultAccount
-                    );
-                }
+            if acc.is_writable
+                && acc.owner == &token_prog_key
+                && acc.key() != in_key
+                && acc.key() != out_key
+            {
+                let ata_data = TokenAccount::try_deserialize(&mut &acc.data.borrow()[..])?;
+                require!(
+                    ata_data.owner != vault_key,
+                    VaultError::UnauthorizedVaultAccount
+                );
             }
         }
 
@@ -216,12 +231,14 @@ pub mod wake_vault {
         ctx.accounts.vault_token_out.reload()?;
         let in_after = ctx.accounts.vault_token_in.amount;
         let out_after = ctx.accounts.vault_token_out.amount;
+        let vault_lamports_after = ctx.accounts.vault.to_account_info().lamports();
 
-        let in_spent = in_before.checked_sub(in_after).ok_or(VaultError::ArithmeticUnderflow)?;
-        let out_received = out_after.checked_sub(out_before).ok_or(VaultError::ArithmeticUnderflow)?;
+        // Ensure native SOL in vault PDA was not drained by CPI instruction
+        invariants::verify_native_sol_preservation(vault_lamports_before, vault_lamports_after)?;
 
-        require!(in_spent <= max_in, VaultError::ExcessiveSpend);
-        require!(out_received >= min_out, VaultError::SlippageExceeded);
+        // Ensure token deltas strictly observe maximum spend and minimum return bounds
+        invariants::verify_token_in_delta(in_before, in_after, max_in)?;
+        invariants::verify_token_out_delta(out_before, out_after, min_out)?;
 
         Ok(())
     }
@@ -304,6 +321,7 @@ pub struct WithdrawSpl<'info> {
     #[account(
         mut,
         token::authority = owner,
+        constraint = destination_token.mint == vault_token.mint @ VaultError::MintMismatch,
     )]
     pub destination_token: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
@@ -356,7 +374,8 @@ pub struct ExecuteSwap<'info> {
     )]
     pub vault_token_out: Account<'info, TokenAccount>,
 
-    /// CHECK: Target DEX routing program verified against allowlist (Jupiter)
+    /// CHECK: Target DEX routing program verified against allowlist (Jupiter v6)
+    #[account(address = jupiter::ID @ VaultError::UnknownCpiTarget)]
     pub swap_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
 }
@@ -417,4 +436,306 @@ pub enum VaultError {
     SlippageExceeded,
     #[msg("Arithmetic underflow occurred during balance delta reconciliation")]
     ArithmeticUnderflow,
+    #[msg("Arithmetic overflow occurred during balance calculation")]
+    ArithmeticOverflow,
+    #[msg("Vault native SOL lamports were decreased during swap execution")]
+    LamportsDrained,
+    #[msg("Input and output token accounts must be distinct")]
+    IdenticalSwapTokens,
+    #[msg("Destination token account mint does not match vault token account mint")]
+    MintMismatch,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure Invariant Verification Modules (For Fuzzing & Static Analysis)
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub mod invariants {
+    use super::*;
+
+    /// Verifies the vault token spend invariant: spent <= max_in
+    pub fn verify_token_in_delta(in_before: u64, in_after: u64, max_in: u64) -> Result<u64> {
+        let in_spent = in_before.checked_sub(in_after).ok_or(VaultError::ArithmeticUnderflow)?;
+        require!(in_spent <= max_in, VaultError::ExcessiveSpend);
+        Ok(in_spent)
+    }
+
+    /// Verifies the minimum token return invariant: received >= min_out
+    pub fn verify_token_out_delta(out_before: u64, out_after: u64, min_out: u64) -> Result<u64> {
+        let out_received = out_after.checked_sub(out_before).ok_or(VaultError::ArithmeticUnderflow)?;
+        require!(out_received >= min_out, VaultError::SlippageExceeded);
+        Ok(out_received)
+    }
+
+    /// Verifies native SOL preservation invariant: lamports cannot decrease
+    pub fn verify_native_sol_preservation(lamports_before: u64, lamports_after: u64) -> Result<()> {
+        require!(lamports_after >= lamports_before, VaultError::LamportsDrained);
+        Ok(())
+    }
+
+    /// Verifies unauthorized withdrawal invariant: only owner key may withdraw
+    pub fn verify_withdrawal_authorization(caller: Pubkey, vault_owner: Pubkey) -> Result<()> {
+        require_keys_eq!(caller, vault_owner, VaultError::UnauthorizedOwner);
+        Ok(())
+    }
+
+    /// Verifies executor authorization invariant: must match active config executor and not revoked
+    pub fn verify_executor_authorization(
+        caller: Pubkey,
+        config_executor: Pubkey,
+        vault_revoked: bool,
+    ) -> Result<()> {
+        require!(!vault_revoked, VaultError::ExecutorRevoked);
+        require_keys_eq!(caller, config_executor, VaultError::UnauthorizedExecutor);
+        Ok(())
+    }
+
+    /// Verifies remaining accounts safety: no unauthorized vault-owned token account can be writable
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_remaining_account_safety(
+        acc_key: Pubkey,
+        is_writable: bool,
+        account_owner: Pubkey,
+        token_program_id: Pubkey,
+        ata_owner: Option<Pubkey>,
+        vault_key: Pubkey,
+        in_key: Pubkey,
+        out_key: Pubkey,
+    ) -> Result<()> {
+        if is_writable
+            && account_owner == token_program_id
+            && acc_key != in_key
+            && acc_key != out_key
+        {
+            if let Some(owner) = ata_owner {
+                require!(owner != vault_key, VaultError::UnauthorizedVaultAccount);
+            }
+        }
+        Ok(())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Invariant Verification Tests & Fuzzing Harness
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vault_conservation_invariant_exact_spend() {
+        let res = invariants::verify_token_in_delta(1_000, 500, 500);
+        assert_eq!(res.unwrap(), 500);
+    }
+
+    #[test]
+    fn test_vault_conservation_invariant_less_spend() {
+        let res = invariants::verify_token_in_delta(1_000, 700, 500);
+        assert_eq!(res.unwrap(), 300);
+    }
+
+    #[test]
+    fn test_vault_conservation_invariant_excessive_spend_fails() {
+        let res = invariants::verify_token_in_delta(1_000, 400, 500);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::ExcessiveSpend));
+    }
+
+    #[test]
+    fn test_vault_conservation_invariant_underflow_fails() {
+        let res = invariants::verify_token_in_delta(100, 200, 500);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::ArithmeticUnderflow));
+    }
+
+    #[test]
+    fn test_minimum_return_invariant_exact_return() {
+        let res = invariants::verify_token_out_delta(100, 300, 200);
+        assert_eq!(res.unwrap(), 200);
+    }
+
+    #[test]
+    fn test_minimum_return_invariant_higher_return() {
+        let res = invariants::verify_token_out_delta(100, 450, 200);
+        assert_eq!(res.unwrap(), 350);
+    }
+
+    #[test]
+    fn test_minimum_return_invariant_slippage_exceeded_fails() {
+        let res = invariants::verify_token_out_delta(100, 250, 200);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::SlippageExceeded));
+    }
+
+    #[test]
+    fn test_minimum_return_invariant_underflow_fails() {
+        let res = invariants::verify_token_out_delta(300, 100, 50);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::ArithmeticUnderflow));
+    }
+
+    #[test]
+    fn test_native_sol_preservation_ok() {
+        assert!(invariants::verify_native_sol_preservation(10_000, 10_000).is_ok());
+        assert!(invariants::verify_native_sol_preservation(10_000, 12_000).is_ok());
+    }
+
+    #[test]
+    fn test_native_sol_preservation_drain_fails() {
+        let res = invariants::verify_native_sol_preservation(10_000, 9_999);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::LamportsDrained));
+    }
+
+    #[test]
+    fn test_withdrawal_authorization_owner_ok() {
+        let owner = Pubkey::new_unique();
+        assert!(invariants::verify_withdrawal_authorization(owner, owner).is_ok());
+    }
+
+    #[test]
+    fn test_withdrawal_authorization_attacker_fails() {
+        let owner = Pubkey::new_unique();
+        let attacker = Pubkey::new_unique();
+        let res = invariants::verify_withdrawal_authorization(attacker, owner);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::UnauthorizedOwner));
+    }
+
+    #[test]
+    fn test_executor_authorization_ok() {
+        let executor = Pubkey::new_unique();
+        assert!(invariants::verify_executor_authorization(executor, executor, false).is_ok());
+    }
+
+    #[test]
+    fn test_executor_authorization_revoked_fails() {
+        let executor = Pubkey::new_unique();
+        let res = invariants::verify_executor_authorization(executor, executor, true);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::ExecutorRevoked));
+    }
+
+    #[test]
+    fn test_executor_authorization_wrong_caller_fails() {
+        let executor = Pubkey::new_unique();
+        let impostor = Pubkey::new_unique();
+        let res = invariants::verify_executor_authorization(impostor, executor, false);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::UnauthorizedExecutor));
+    }
+
+    #[test]
+    fn test_remaining_account_safety_unauthorized_vault_ata_fails() {
+        let vault = Pubkey::new_unique();
+        let token_prog = Pubkey::new_unique();
+        let rogue_ata = Pubkey::new_unique();
+        let in_key = Pubkey::new_unique();
+        let out_key = Pubkey::new_unique();
+
+        let res = invariants::verify_remaining_account_safety(
+            rogue_ata,
+            true, // is_writable
+            token_prog,
+            token_prog,
+            Some(vault), // owner is vault!
+            vault,
+            in_key,
+            out_key,
+        );
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::UnauthorizedVaultAccount));
+    }
+
+    #[test]
+    fn test_remaining_account_safety_third_party_accounts_allowed() {
+        let vault = Pubkey::new_unique();
+        let token_prog = Pubkey::new_unique();
+        let jup_route_ata = Pubkey::new_unique();
+        let pool_owner = Pubkey::new_unique();
+        let in_key = Pubkey::new_unique();
+        let out_key = Pubkey::new_unique();
+
+        let res = invariants::verify_remaining_account_safety(
+            jup_route_ata,
+            true,
+            token_prog,
+            token_prog,
+            Some(pool_owner), // belongs to DEX pool, not vault
+            vault,
+            in_key,
+            out_key,
+        );
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_fuzz_stateful_invariants_100k_iterations() {
+        // Fast PRNG for stateful invariant fuzzing
+        let mut seed: u64 = 0xdeadbeefcafebabe;
+        let mut prng = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        let owner = Pubkey::new_unique();
+        let executor = Pubkey::new_unique();
+
+        for _ in 0..100_000 {
+            let r1 = prng();
+            let r2 = prng();
+            let r3 = prng();
+
+            let max_in = (r1 % 10_000_000) + 1;
+            let min_out = (r2 % 10_000_000) + 1;
+
+            let in_before = (r3 % 20_000_000) + max_in;
+            let actual_spend = prng() % (max_in * 2);
+            let in_after = in_before.saturating_sub(actual_spend);
+
+            let res_in = invariants::verify_token_in_delta(in_before, in_after, max_in);
+            if actual_spend <= max_in {
+                assert!(res_in.is_ok(), "Invariant violated: valid spend rejected");
+                assert_eq!(res_in.unwrap(), actual_spend);
+            } else {
+                assert!(res_in.is_err(), "Invariant violated: excessive spend admitted");
+            }
+
+            let out_before = prng() % 5_000_000;
+            let actual_received = prng() % (min_out * 2);
+            let out_after = out_before.saturating_add(actual_received);
+
+            let res_out = invariants::verify_token_out_delta(out_before, out_after, min_out);
+            if actual_received >= min_out {
+                assert!(res_out.is_ok(), "Invariant violated: valid return rejected");
+                assert_eq!(res_out.unwrap(), actual_received);
+            } else {
+                assert!(res_out.is_err(), "Invariant violated: slippage exceeded admitted");
+            }
+
+            // Invariant: Non-owner withdrawal must always fail
+            let caller_is_owner = (prng() % 2) == 0;
+            let caller = if caller_is_owner { owner } else { Pubkey::new_unique() };
+            let res_withdraw = invariants::verify_withdrawal_authorization(caller, owner);
+            if caller_is_owner {
+                assert!(res_withdraw.is_ok());
+            } else {
+                assert!(res_withdraw.is_err());
+            }
+
+            // Invariant: Revoked vault or unauthorized executor must always fail
+            let revoked = (prng() % 2) == 0;
+            let caller_is_exec = (prng() % 2) == 0;
+            let exec_caller = if caller_is_exec { executor } else { Pubkey::new_unique() };
+            let res_exec = invariants::verify_executor_authorization(exec_caller, executor, revoked);
+            if !revoked && caller_is_exec {
+                assert!(res_exec.is_ok());
+            } else {
+                assert!(res_exec.is_err());
+            }
+        }
+    }
 }
