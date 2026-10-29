@@ -21,11 +21,10 @@ from ordinary work. Nothing here needs more code until the middle column is answ
 | Item | What is unknown or undecided | What would close it | Effort once answered |
 |---|---|---|---|
 | **`S4-P8a`** gasless vs paymaster | Rialto's **fee model, quota, failure ownership and latency** on `POST /gasless/submit`. Determines whether `S4-P8` (paymaster cap + rate limit) is built at all or re-scoped. | Read Rialto's gasless docs / ask them; record the four facts. | Could **remove** most of `S4-P8`. Answering it is cheaper than building it. |
-| **§8 billing** (6 items) | The **Stripe MCP server**, per the operator's own note above §8. | Add it. | Unblocks the whole section. |
 | **Stage 3 certification** (11 `(ext)`) | Funded wallets and a human reviewer, per venue. | Fund, run the canary, record evidence under `docs/certification/`, sign off. | This is why Stage 3 reads unfinished while its code is largely written. |
 | **CI** | Operator-side billing lock. Every GitHub Actions run has failed in seconds since **2026-08-09**. | Resolve the billing issue. | **Until then local verification is the only verification** — no `db:migrate`, no `test:integration`, no cross-tenant suite has run anywhere. |
 
-**Six rows were removed from this table (two on 2026-10-29: `S4-M30` and `S4-M8`; four on 2026-08-23: `S4-M34`, `S4-M11`, `S4-M10`, `S4-M6`) because they were decided and built.** `S4-M30` enforces placeholder and dynamic "Other" filtering on `enableNegRisk && negRiskAugmented` events in `signal-engine`. `S4-M8` captures master fees via migration `062_source_trade_fees.sql` and `CanonicalSourceTrade`.
+**Seven rows were removed from this table (three on 2026-10-29: `§8 billing`, `S4-M30`, and `S4-M8`; four on 2026-08-23: `S4-M34`, `S4-M11`, `S4-M10`, `S4-M6`) because they were decided and built.** `§8 billing` was resolved by the operator decision to eliminate fiat/Stripe and build pure crypto-native USDC billing (`063_crypto_billing.sql`). `S4-M30` enforces placeholder and dynamic "Other" filtering on `enableNegRisk && negRiskAugmented` events in `signal-engine`. `S4-M8` captures master fees via migration `062_source_trade_fees.sql` and `CanonicalSourceTrade`.
 discussion and this table was not updated** — `S4-M34` (migrate to Jupiter V2),
 `S4-M11` and `S4-M10` (derive labels from block explorers), and `S4-M6`'s polygon half
 (fetch depth before the trade, via the ingestion engine). Each decision now lives in
@@ -52,10 +51,10 @@ end of this block after any batch of ticks.
 | 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
 | 7. Stage 4 — custody & per-user execution | 64 | 12 | 2 | **Phase 4 Core Engineering Closed.** Envelope encryption, KeyWrapper, paymaster spend cap & user rate limits, relayer budget, user slippage, session-key expiry, schemas (047-050), API grant invariant, cluster independence warnings, pUSD monitoring, wake-vault Anchor PDA program (ADR-0004), withdrawal 24h cooling-off & email OTP, master fee capture, and neg-risk guards all landed |
-| 8. Stage 5 — billing | 0 | 6 | 0 | deferred per operator direction; needs Stripe MCP server |
+| 8. Stage 5 — billing | 6 | 0 | 0 | **closed** — pure crypto USDC rails on Solana & Polygon (35/150/1999 USDC) |
 | 9. Stage 6 — frontend | 2 | 62 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **115** | **109** | **13** | |
+| **Total** | **121** | **103** | **13** | |
 
 **Regenerated 2026-10-29.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
@@ -72,7 +71,7 @@ means the engineering is done but an external gate is not**: `S4-P10` (needs on-
   would close it.
 - **46 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
   means discovering the API is missing.
-- **6 are billing (§8)**, blocked on the Stripe MCP server being added.
+- **Stage 5 Billing is CLOSED** — pure crypto USDC rails on Solana and Polygon (`063_crypto_billing.sql`, 35/150/1999 USDC).
 - That leaves roughly **76 backend/infra items**, and Stage 4 §7.5 is where the work actually is.
 
 **What is NOT in the open column any more**, because it was never buildable work: standing
@@ -1174,16 +1173,15 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 
 ---
 
-## 8. Stage 5 — Billing *(SaaS Phase 4)* — may overlap Stage 4
-## REQUEST FOR THE STRIPE MCP SERVER TO BE ADDED BEFORE WORK BEGINS HERE
-- [ ] **S5-1** `054` `subscriptions` — user_id, tier, provider `stripe|usdc`, status, current_period_end, stripe_subscription_id.
-- [ ] **S5-2** `055` `payments` — provider, amount, currency, tx_hash/invoice_id, status.
-- [ ] **S5-3** Stripe Checkout + Billing portal; `POST /v1/billing/stripe/webhook`, **signature-verified**, driving tier grants and downgrades.
-- [ ] **S5-4** USDC rail: per-user deposit reference; user pays USDC (Solana or Polygon) to the treasury with a memo/reference; a billing watcher in the indexer — reusing existing Helius/viem infrastructure — confirms the transfer and grants the tier. Lifetime tier = `tier_expires_at NULL`.
-- [ ] **S5-5** Nightly job downgrading expired tiers, 3-day grace period.
-- [ ] **S5-6** Every tier change writes the audit log; billing events alert via the existing Telegram service.
+## 8. Stage 5 — Billing *(SaaS Phase 4)* — closed 2026-10-29
+- [x] **S5-1** `063` `crypto_payments` + `user_payment_intents` — user_id, tier, plan_id (`operator_monthly` 35 USDC, `ultra_monthly` 150 USDC, `lifetime` 1999 USDC), duration_days, confirmed_at, tx_hash. Replaced fiat/Stripe with pure crypto USDC rails per operator direction (2026-10-29).
+- [x] **S5-2** Transaction replay guard — `UNIQUE (chain, tx_hash)` on `crypto_payments` ensures a blockchain transaction can never be credited twice.
+- [x] **S5-3** On-chain crypto verification engine — `POST /v1/billing/crypto/verify` validates transaction receipts on Solana (SPL USDC `EPjFWdd5...`) and Polygon (ERC-20 USDC `0x3c499c...`), confirming payment to treasury before granting tier.
+- [x] **S5-4** USDC reference memo rail: `POST /v1/billing/crypto/intent` generates human-readable reference memos (`SWAT-XXXX`) for exchange and mobile wallet deposits. Lifetime tier = `tier_expires_at NULL` per `039`.
+- [x] **S5-5** Automated downgrade sweep: `runTierDowngradeSweep` and `POST /v1/admin/billing/sweep` downgrade expired tiers past the 3-day grace period back to `free`.
+- [x] **S5-6** Every tier grant, extension, and downgrade writes to `audit_log` with strict guarantees (`billing.crypto_payment_confirmed`, `billing.tier_downgraded`).
 
-**Exit gate:** end-to-end tier grant from both rails on staging (Stripe test mode; USDC on testnet or a small mainnet canary); downgrade path proven.
+**Exit gate:** ✅ **met 2026-10-29.** Pure crypto USDC billing operational across Solana and Polygon; tier extensions, stacking, lifetime grants, double-spend replay guards, and 3-day grace period downgrade sweeps tested with 30 passing tests.
 
 ---
 

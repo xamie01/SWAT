@@ -95,7 +95,7 @@ function csrfValid(request: FastifyRequest): boolean {
  * open until somebody remembered to add it, which is exactly the failure mode
  * that makes tenancy controls decorative.
  */
-const USER_REACHABLE_PREFIXES = ['/v1/auth/', '/v1/me/'] as const;
+const USER_REACHABLE_PREFIXES = ['/v1/auth/', '/v1/me/', '/v1/billing/'] as const;
 
 export function isUserReachable(path: string): boolean {
   if (path === '/v1/health') return true;

@@ -90,3 +90,4 @@ export * from './fanout-candidates.js';
  * pure decider; the eviction rule lives in `selectPolymarketBookSubscriptions`.
  */
 export * from './polymarket-book-subscriptions.js';
+export * from './billing.js';
