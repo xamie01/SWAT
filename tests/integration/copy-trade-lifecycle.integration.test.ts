@@ -210,7 +210,7 @@ describe('canonical copy-trade lifecycle', () => {
         evidenceType: 'paper_simulation' as const,
         evidenceId: `${fixture.sourceEventPrefix}paper-fill`,
         baseQuantity: '2',
-        quoteQuantity: '20',
+        quoteLeg: { amount: '20', currency: 'USD' as const },
         priceUsd: '10',
         completesExecution: true,
         occurredAt: new Date('2026-01-01T12:00:02.000Z'),
@@ -293,7 +293,7 @@ describe('canonical copy-trade lifecycle', () => {
         evidenceType: 'venue_fill',
         evidenceId: `${fixture.sourceEventPrefix}fill-1`,
         baseQuantity: '2',
-        quoteQuantity: '20',
+        quoteLeg: { amount: '20', currency: 'USD' as const },
         priceUsd: '10',
         confirmationState: 'confirmed',
         completesExecution: false,
@@ -346,7 +346,7 @@ describe('canonical copy-trade lifecycle', () => {
         evidenceType: 'venue_fill',
         evidenceId: `${fixture.sourceEventPrefix}fill-2`,
         baseQuantity: '3',
-        quoteQuantity: '30',
+        quoteLeg: { amount: '30', currency: 'USD' as const },
         priceUsd: '10',
         confirmationState: 'finalized',
         completesExecution: true,
@@ -506,7 +506,7 @@ describe('canonical copy-trade lifecycle', () => {
         evidenceType: 'paper_simulation',
         evidenceId: `${fixture.sourceEventPrefix}buy-fill`,
         baseQuantity: '8',
-        quoteQuantity: '80',
+        quoteLeg: { amount: '80', currency: 'USD' as const },
         priceUsd: '10',
         confirmationState: 'confirmed',
         completesExecution: true,
@@ -555,8 +555,8 @@ describe('canonical copy-trade lifecycle', () => {
       const replayedSell = await claimSourceSignalForCopyExecution(sellClaimInput);
       expect(sellExecution.execution).toMatchObject({
         direction: 'sell',
-        requestedBaseQuantity: '2.00000000000000000000',
-        reservedBaseQuantity: '2.00000000000000000000'
+        requestedBaseQuantity: '1.5000000000000000000000000000000000000000',
+        reservedBaseQuantity: '1.5000000000000000000000000000000000000000'
       });
       expect(replayedSell.execution?.id).toBe(sellExecution.execution?.id);
 
@@ -577,7 +577,7 @@ describe('canonical copy-trade lifecycle', () => {
         evidenceType: 'venue_fill' as const,
         evidenceId: `${fixture.sourceEventPrefix}sell-fill-1`,
         baseQuantity: '1',
-        quoteQuantity: '10',
+        quoteLeg: { amount: '10', currency: 'USD' as const },
         priceUsd: '10',
         confirmationState: 'confirmed' as const,
         completesExecution: false,
@@ -721,7 +721,7 @@ describe('canonical copy-trade lifecycle', () => {
         evidenceType: 'venue_fill' as const,
         evidenceId: `${fixture.sourceEventPrefix}polymarket-fill-1`,
         baseQuantity: '2',
-        quoteQuantity: '1',
+        quoteLeg: { amount: '1', currency: 'USD' as const },
         priceUsd: '0.5',
         confirmationState: 'confirmed' as const,
         completesExecution: false,

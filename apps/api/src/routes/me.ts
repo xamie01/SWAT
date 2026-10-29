@@ -8,7 +8,8 @@ import {
   QuotaExceededError,
   requestTokenWatch,
   subscribeToWallet,
-  unsubscribeFromWallet,
+  beginWindDown,
+  requestCloseAll,
   query,
   type UserScope
 } from '@swat/db';
@@ -167,11 +168,36 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
     const { address } = request.params as { address: string };
-    // Removes the subscription only. The global wallet row is never deleted here
-    // — another tenant may be subscribed, and the platform may be scoring it.
-    const removed = await unsubscribeFromWallet(scope, address);
-    if (!removed) return reply.code(404).send({ error: 'Not subscribed' });
-    return reply.send({ ok: true });
+    // Unsubscribe is an exits-only wind-down. Retaining the row preserves the
+    // attribution and sell-mirror path for positions opened while active.
+    try {
+      const result = await beginWindDown(scope, address);
+      return reply.send({ ok: true, state: result.subscription.state });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'WalletNotSubscribedError') {
+        return reply.code(404).send({ error: 'Not subscribed' });
+      }
+      throw error;
+    }
+  });
+
+  app.post('/v1/me/wallets/:address/close-all', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { address } = request.params as { address: string };
+    try {
+      const result = await requestCloseAll(scope, address);
+      return reply.send({
+        ok: true,
+        state: result.subscription.state,
+        closeAllRequestedAt: result.subscription.closeAllRequestedAt
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'WalletNotSubscribedError') {
+        return reply.code(404).send({ error: 'Not subscribed' });
+      }
+      throw error;
+    }
   });
 
   /**

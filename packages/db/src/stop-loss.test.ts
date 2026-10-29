@@ -101,7 +101,7 @@ describe('claimStopLossTrigger', () => {
     await expect(claimStopLossTrigger(claim)).resolves.toBe(true);
 
     const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('ON CONFLICT (account, signal_id) DO NOTHING');
+    expect(sql).toContain('ON CONFLICT (account, signal_id, position_key) DO NOTHING');
     expect(sql).toContain('RETURNING signal_id');
     expect(params).toEqual([
       'operator',
@@ -112,7 +112,8 @@ describe('claimStopLossTrigger', () => {
       22.5,
       100,
       1000,
-      8.5
+      8.5,
+      ''
     ]);
   });
 
@@ -127,7 +128,7 @@ describe('claimStopLossTrigger', () => {
 
     const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('DELETE FROM signal_stop_losses');
-    expect(params).toEqual(['operator', 'signal-1']);
+    expect(params).toEqual(['operator', 'signal-1', '']);
   });
 
   it('carries a user id into the account column, on one signal, for two tenants (S4-M46)', async () => {
@@ -166,6 +167,6 @@ describe('claimStopLossTrigger', () => {
 
     const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('WHERE account = $1 AND signal_id = $2');
-    expect(params).toEqual(['11111111-1111-4111-8111-111111111111', 'shared-signal']);
+    expect(params).toEqual(['11111111-1111-4111-8111-111111111111', 'shared-signal', '']);
   });
 });

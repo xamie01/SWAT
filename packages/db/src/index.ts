@@ -43,6 +43,8 @@ export * from './auth-wallets.js';
 export * from './audit-log.js';
 export * from './seed-admin.js';
 export * from './subscriptions.js';
+export * from './lot-allocation.js';
+export * from './close-all.js';
 
 /**
  * Quote-leg valuation (S4-M35).

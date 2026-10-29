@@ -18,7 +18,8 @@ import {
   persistExpectancyReport,
   resolveRiskPolicy,
   claimStopLossTrigger,
-  releaseStopLossTrigger
+  releaseStopLossTrigger,
+  endCompletedCloseAllSubscriptions
 } from '@swat/db';
 import { calculateCompositeScore, scoreToTier, REDIS_CHANNELS, initLogger, tradeQueueForChain } from '@swat/shared';
 import type { Chain } from '@swat/shared';
@@ -230,6 +231,17 @@ async function runMarkToMarket() {
     }
   } catch (e) {
     console.error('[scorer] Stop-loss sweep failed:', e);
+  }
+
+  // Close-all is driven by confirmed lot reductions, not by queue admission.
+  // Running the terminal sweep after the mark/stop-loss pass means a final
+  // reduction made by a prior executor run can release the subscription without
+  // racing an in-flight enqueue into an ended state.
+  try {
+    const ended = await endCompletedCloseAllSubscriptions();
+    if (ended > 0) console.log(`[scorer] Close-all: ended ${ended} completed subscription(s).`);
+  } catch (e) {
+    console.error('[scorer] Close-all completion sweep failed:', e);
   }
 }
 
