@@ -106,7 +106,7 @@ The items remaining open are **NOT unwritten architectural blockers**. They fall
 #### C. Robinhood Chain (ERC-4337 / EIP-7702)
 | Item | Type | Title | Description & What Is Needed to Close |
 |---|---|---|---|
-| **S4-P10** | On-Chain Deployment | Deploy Permission Validator Module on Chain 4663 | The TypeScript rule engine (`permission-policy.ts`, 71 tests) and calldata decoder are complete. To achieve full Defense-in-Depth against an attacker bypassing our server, deploy the permission validator module to an Arbitrum Orbit testnet account and verify that a non-allowlisted `approve` reverts on-chain. |
+| **S4-P10** | On-Chain Deployment | Deploy Permission Validator Module on Chain 4663 | The TypeScript rule engine (`permission-policy.ts`, 71 tests) and calldata decoder are complete. To achieve full Defense-in-Depth against an attacker bypassing our server, execute **Option A** (§3.1 below) to deploy/activate an audited standard session-key validator module on Robinhood Chain (4663) and verify that non-allowlisted actions revert on-chain. |
 | **S4-P8a** | Vendor Decision | Rialto Gasless Relayer vs Self-Hosted Paymaster | Evaluate Rialto’s `POST /gasless/submit` (feature ID 3) against running an Alchemy / ZeroDev paymaster on chain 4663. Price fee structures, rate limits, and latency implications. |
 | **S4-M39 & S4-M40** | Address Resolution | Router & Permit2 Path Selection on Chain 4663 | Confirm whether swaps route through the native Uniswap V3 router or Rialto’s meta-aggregation router on chain 4663, and supply the verified contract addresses in `.env`. |
 | **S4-2** | User Interface (Stage 6) | Interactive Session Key Grant Onboarding Flow | Build the frontend modal (Stage 6) where a user signs an EIP-7702 delegation or creates an ERC-4337 session key restricted to the approved router and expiration window. |
@@ -162,6 +162,56 @@ flowchart TD
     C4 --> D1
     D1 --> D2
 ```
+
+---
+
+### 3.1 Operational Runbook: Option A — Robinhood Chain (4663) Standard 4337 Validator Module Deployment & Activation
+
+This runbook resolves **S4-P10** and **S4-P8a** using industry-standard, battle-tested Account Abstraction modules (ZeroDev Kernel / Safe 4337 Module) rather than custom unaudited contracts:
+
+#### Prerequisites
+1. **RPC Access:** Active RPC endpoint for Robinhood Chain (Chain ID `4663`, e.g. Alchemy `https://robinhood-mainnet.g.alchemy.com/v2/<API_KEY>` or Robinhood's direct RPC).
+2. **Funded Operator Wallet:** An EVM private key (`EVM_PRIVATE_KEY` in `.env`) holding ~$2–$5 worth of native gas on Chain 4663 to pay the one-time contract deployment gas fee.
+3. **Bundler & Paymaster Account:** An account on **Alchemy Gas Manager** or **ZeroDev** with Robinhood Chain 4663 enabled.
+
+#### Step 1: Check Deterministic Deployment on Chain 4663
+ZeroDev and Safe use standard deterministic deployment factories (`CREATE2`), meaning standard modules deploy to identical addresses across all EVM chains.
+- *Already Live on 4663:* **EntryPoint v0.7.0** (`0x0000000071727De22E5E9d8BAf0edAc6f37da032`) and **Safe 4337 Module v0.3.0** (`0x75cf11467937ce3F2f357CE24ffc3DBF8fD5c226`) are verified live on Robinhood Chain 4663.
+- Run an RPC check (`eth_getCode`) against the candidate SessionKeyValidator address on Chain 4663:
+  ```bash
+  curl -s -X POST $ROBINHOOD_RPC_URL \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","method":"eth_getCode","params":["<VALIDATOR_ADDRESS>","latest"],"id":1}'
+  ```
+- If the result returns runtime bytecode (`0x6080...`), the contract is already live on-chain. Skip directly to Step 3.
+
+#### Step 2: Deploy Standard Module (If Not Already Live)
+If the address returns `0x` (empty):
+1. Obtain the official compiled JSON artifact from ZeroDev (`@zerodev/session-key`) or Safe deployments.
+2. Deploy using `viem` / Foundry `forge` using `EVM_PRIVATE_KEY`:
+   ```bash
+   forge create src/SessionKeyValidator.sol:SessionKeyValidator \
+     --rpc-url $ROBINHOOD_RPC_URL \
+     --private-key $EVM_PRIVATE_KEY
+   ```
+3. Record the returned contract address.
+
+#### Step 3: Configure Alchemy / ZeroDev Bundler & Paymaster
+1. In the Alchemy (or ZeroDev) dashboard:
+   - Create an App targeting **Robinhood Chain (Chain ID 4663)**.
+   - In Gas Manager, configure a sponsorship policy (deposit ~$20–$50 in gas credits).
+   - Set spending limits matching [`apps/trade-executor/src/paymaster-budget.ts`](file:///root/SWAT/apps/trade-executor/src/paymaster-budget.ts) (50 ops/user/day, 10,000 ops/global/day).
+2. Set the configuration variables in `.env`:
+   ```bash
+   ROBINHOOD_BUNDLER_RPC_URL="https://robinhood-mainnet.g.alchemy.com/v2/<API_KEY>"
+   ROBINHOOD_PAYMASTER_POLICY_ID="<POLICY_ID>"
+   ROBINHOOD_PERMISSION_VALIDATOR_ADDRESS="0x<DEPLOYED_ADDRESS>"
+   ```
+
+#### Step 4: Verification & Acceptance Test
+1. Submit an authorized copy-trade UserOperation to the bundler: verify that the swap executes on-chain and gas is sponsored by the paymaster.
+2. Submit a simulated malicious UserOperation (e.g. attempting to transfer tokens or call an un-whitelisted recipient): verify that the smart account / validator module reverts on-chain with validation failure.
+3. Sign off `S4-P10` in `AUDIT-FIX-CHECKLIST.md`.
 
 ---
 
