@@ -66,6 +66,7 @@ import {
   resolvePolymarketStalenessPolicy,
   type PolymarketStalenessPolicy
 } from './polymarket-staleness.js';
+import { globalPolymarketRelayerBudget } from './polymarket-relayer-budget.js';
 
 /**
  * The staleness policy, resolved once (`S4-M18`).
@@ -855,8 +856,14 @@ export async function triggerPolymarket(params: {
       throw new UnrecoverableError('Polymarket signed order omitted the configured builder code');
     }
 
+    const relayerBudget = globalPolymarketRelayerBudget.checkBudget();
+    if (!relayerBudget.allowed) {
+      throw new UnrecoverableError(relayerBudget.reason!);
+    }
+
     const startTime = Date.now();
     const response = await client.postOrder(order);
+    globalPolymarketRelayerBudget.recordExecution();
     const latencyMs = Date.now() - startTime;
     if (!response.ok) {
       throw new UnrecoverableError(`Polymarket order rejected: ${response.code}: ${response.message}`);
@@ -1038,7 +1045,13 @@ export async function submitPolymarketExitRung(params: {
     throw new UnrecoverableError('Polymarket signed exit rung omitted the configured builder code');
   }
 
+  const relayerBudget = globalPolymarketRelayerBudget.checkBudget();
+  if (!relayerBudget.allowed) {
+    throw new UnrecoverableError(relayerBudget.reason!);
+  }
+
   const response = await client.postOrder(order);
+  globalPolymarketRelayerBudget.recordExecution();
   if (!response.ok) {
     throw new UnrecoverableError(
       `Polymarket exit rung rejected: ${response.code}: ${response.message}`

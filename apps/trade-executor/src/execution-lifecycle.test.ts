@@ -648,6 +648,43 @@ describe('executor trade-state routing', () => {
     expect(db.insertTradeAndMarkSignalExecuted).not.toHaveBeenCalled();
   });
 
+  it('respects user-provided maxSlippageBps override without widening to chain default (S4-P4)', async () => {
+    vi.mocked(db.resolveChainMode).mockResolvedValue({
+      requestedMode: 'live',
+      effectiveMode: 'live',
+      certified: true
+    });
+    vi.mocked(db.claimSignalForExecution).mockResolvedValue(true);
+    runtimeMocks.triggerTrojan.mockResolvedValue({
+      status: 'pending_confirmation',
+      clientOrderId: 'custom-slip-signal',
+      transactionIdentity: 'solana-custom-slip-signature',
+      order: {},
+      firstAttemptAt: new Date(),
+      lastAttemptAt: new Date(),
+      acknowledgedAt: new Date(),
+      attempts: 1
+    });
+
+    await handleJob({
+      data: {
+        signalId: 'custom-slip-signal',
+        tokenMint: 'solana:token-1',
+        score: 90,
+        manual: true,
+        direction: 'sell',
+        maxSlippageBps: 50
+      }
+    });
+
+    expect(runtimeMocks.triggerTrojan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signalId: 'custom-slip-signal',
+        slippageBps: 50
+      })
+    );
+  });
+
   it('keeps live execution moving when proportional shadow preparation has no position', async () => {
     vi.mocked(db.resolveChainMode).mockResolvedValue({
       requestedMode: 'live+shadow',

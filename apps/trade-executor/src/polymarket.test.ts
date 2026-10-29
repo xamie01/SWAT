@@ -505,6 +505,30 @@ describe('Polymarket live executor', () => {
   });
 
   describe('triggerPolymarket', () => {
+    it('refuses order submission when daily relayer capacity is exhausted (S4-P15)', async () => {
+      const { globalPolymarketRelayerBudget } = await import('./polymarket-relayer-budget.js');
+      polymarketActionMocks.fetchBalanceAllowance.mockResolvedValue({
+        balance: '5000000',
+        allowances: {}
+      });
+      client.fetchOrderBook.mockResolvedValue(orderBook({
+        tokenId: 'token-relayer-test',
+        asks: [{ price: '0.50', size: '100' }]
+      }));
+
+      globalPolymarketRelayerBudget.setUsedForTest(10_000);
+      try {
+        await expect(triggerPolymarket({
+          signalId: 'sig-relayer-cap',
+          tokenID: 'token-relayer-test',
+          spendAmountUsd: 10,
+          direction: 'buy'
+        })).rejects.toThrow(/Polymarket daily relayer capacity exhausted/);
+      } finally {
+        globalPolymarketRelayerBudget.reset();
+      }
+    });
+
     it('throws on honeypot bounds', async () => {
       client.fetchOrderBook.mockResolvedValue(orderBook({
         tokenId: 'token-999',

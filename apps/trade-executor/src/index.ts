@@ -1391,6 +1391,11 @@ export async function handleJob(
     copyExecutionId?: string;
     sellTokenAmount?: number;
     /**
+     * Optional user-configured max slippage in basis points (S4-P4).
+     * When present, overrides the chain default tolerance without clamping up.
+     */
+    maxSlippageBps?: number | null;
+    /**
      * Whose trade this is. Absent on every job the current producers enqueue,
      * which resolves to the operator principal. Present under fan-out (`S4-7`),
      * where it selects a per-user authority adapter.
@@ -1657,13 +1662,10 @@ export async function handleJob(
   // Slippage tolerance for every venue call below (`S4-P4`). Resolved once per
   // job rather than repeated as a literal at each call site, where it appeared as
   // 1500 on Solana and 300 on Robinhood in fourteen places.
-  //
-  // `null` means "no user preference", which resolves to the chain default and is
-  // byte-identical to the constants it replaces — this is a refactor, not a
-  // behaviour change. Migration `049` adds
-  // `user_chain_execution_settings.max_slippage_bps`, at which point this one line
-  // reads the user's value and every call site downstream is already correct.
-  const slippageBps = resolveSlippageBps(chain, null);
+  // User-configured slippage tolerance (S4-P4).
+  // `null` or undefined resolves to the chain default (e.g. 1500 for Solana, 300 for EVM).
+  // A tighter user preference (e.g. 50 bps) is preserved and never widened to the chain default.
+  const slippageBps = resolveSlippageBps(chain, payload.maxSlippageBps ?? null);
 
   try {
     let paperResult: ExecutorJobResult | null = null;
