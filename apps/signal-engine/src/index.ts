@@ -48,6 +48,7 @@ import {
   evaluateMirrorableActivity,
   resolveMinimumMirrorableNotionalUsd
 } from './mirrorable-activity.js';
+import { probeTokenRoutability } from './routability-probe.js';
 
 initLogger('signal-engine');
 
@@ -583,6 +584,14 @@ export async function processSourceTradeSignals(sourceTradeId?: string): Promise
     if (mirrorable.kind === 'skip') {
       console.log(
         `[signal-engine] not mirrorable (${mirrorable.code}) | source ${candidate.sourceTradeId} | ${mirrorable.reason}`
+      );
+      continue;
+    }
+
+    const routability = await probeTokenRoutability(candidate.tokenMint);
+    if (routability.kind === 'skip') {
+      console.log(
+        `[signal-engine] not routable (${routability.code}) | source ${candidate.sourceTradeId} | ${routability.reason}`
       );
       continue;
     }
