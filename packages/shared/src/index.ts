@@ -50,3 +50,4 @@ export * from './polymarket-book-depth.js';
  * signal-engine. This is the bridge, over an injected key-value port.
  */
 export * from './polymarket-book-transport.js';
+export * from './sol-reserve.js';

@@ -11,3 +11,4 @@
  */
 export * from './permission-policy.js';
 export * from './evm-calldata.js';
+export * from './entrypoint.js';
