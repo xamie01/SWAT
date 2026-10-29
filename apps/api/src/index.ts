@@ -1,8 +1,10 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   deleteWalletCascade,
   getIngestionHealth24h,
@@ -13,7 +15,8 @@ import {
   getAttributionDashboard,
   getAttributionLatencyReport,
   getLatestExpectancyReport,
-  getLiveShadowCostReport
+  getLiveShadowCostReport,
+  loadTrackingDifferenceSummary
 } from '@swat/db';
 import {
   buildIngestionHealthSnapshots,
@@ -37,6 +40,10 @@ import {
   updateTradingMode
 } from './trading-control.js';
 import { registerAttributionRoutes } from './attribution-routes.js';
+import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
+import { registerAuthRoutes } from './auth/routes.js';
+import { registerMeRoutes } from './routes/me.js';
+import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 
 initLogger('api');
 
@@ -109,14 +116,6 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
   const providedHash = createHash('sha256').update(value).digest();
   return timingSafeEqual(providedHash, API_KEY_HASH);
 }
-
-import { randomBytes } from 'node:crypto';
-import cookie from '@fastify/cookie';
-import rateLimit from '@fastify/rate-limit';
-import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
-import { registerAuthRoutes } from './auth/routes.js';
-import { registerMeRoutes } from './routes/me.js';
-import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 
 await app.register(cookie);
 
@@ -551,6 +550,14 @@ app.get('/v1/signals/:id', async (req, reply) => {
   return { item: signal };
 });
 
+app.get('/v1/signals/:id/tracking-difference', async (req) => {
+  const { id } = req.params as { id: string };
+  return loadTrackingDifferenceSummary(query, {
+    signalId: id,
+    limit: 50
+  });
+});
+
 app.post('/v1/signals/:id/ignore', async (req, reply) => {
   const { id } = req.params as { id: string };
   await query(`UPDATE signals SET status = 'rejected' WHERE id = $1`, [id]);
@@ -711,6 +718,22 @@ app.get('/v1/trading/trades', async () => {
     LIMIT 50
   `);
   return { items };
+});
+
+app.get('/v1/trading/tracking-difference', async (req) => {
+  const queryParams = req.query as {
+    signalId?: string;
+    targetAccount?: string;
+    userId?: string;
+    limit?: string;
+  };
+  const limit = queryParams.limit ? Math.min(100, Math.max(1, Number(queryParams.limit))) : 50;
+  return loadTrackingDifferenceSummary(query, {
+    signalId: queryParams.signalId,
+    targetAccount: queryParams.targetAccount,
+    userId: queryParams.userId,
+    limit
+  });
 });
 
 registerAttributionRoutes(app, {

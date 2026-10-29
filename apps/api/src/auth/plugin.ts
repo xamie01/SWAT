@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import '@fastify/cookie';
 import { findUserById, resolveSession, forUser, type UserScope, type UserRecord } from '@swat/db';
 
 /**

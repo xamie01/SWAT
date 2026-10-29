@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import '@fastify/cookie';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import {

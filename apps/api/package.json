@@ -19,7 +19,7 @@
     "@swat/shared": "workspace:*",
     "bs58": "^6.0.0",
     "bullmq": "^5.52.1",
-    "fastify": "^5.2.2",
+    "fastify": "5.11.2",
     "ioredis": "^5.6.1",
     "tweetnacl": "^1.0.3",
     "viem": "^2.55.1",
