@@ -45,6 +45,7 @@ import { registerAuthRoutes } from './auth/routes.js';
 import { registerMeRoutes } from './routes/me.js';
 import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 import { registerBillingRoutes } from './routes/billing.js';
+import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
 
 initLogger('api');
 
@@ -217,6 +218,7 @@ app.post('/v1/auth/ticket', async (request, reply) => {
 await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
 await registerExecutionSettingsRoutes(app);
 await registerBillingRoutes(app);
+registerAdminPortfolioRoutes(app);
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
 // Query-string values are always strings. Coerce + bound them so a caller can't

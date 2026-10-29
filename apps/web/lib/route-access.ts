@@ -36,6 +36,7 @@ const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password'] as const;
  * required) rather than 'public'.
  */
 const ADMIN_PREFIXES = [
+  '/admin',
   '/workspace',
   '/signals',
   '/wallets',
