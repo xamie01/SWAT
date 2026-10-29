@@ -529,6 +529,25 @@ describe('Polymarket live executor', () => {
       }
     });
 
+    it('refuses order submission when geo-eligibility is stale or unverified (S4-P16)', async () => {
+      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      await expect(triggerPolymarket({
+        signalId: 'sig-geo-stale',
+        tokenID: 'token-geo-test',
+        spendAmountUsd: 10,
+        direction: 'buy',
+        geoVerifiedAt: eightDaysAgo
+      })).rejects.toThrow(/polymarket-geo-eligibility-stale/);
+
+      await expect(triggerPolymarket({
+        signalId: 'sig-geo-null',
+        tokenID: 'token-geo-test',
+        spendAmountUsd: 10,
+        direction: 'buy',
+        geoVerifiedAt: null
+      })).rejects.toThrow(/polymarket-geo-unverified/);
+    });
+
     it('throws on honeypot bounds', async () => {
       client.fetchOrderBook.mockResolvedValue(orderBook({
         tokenId: 'token-999',

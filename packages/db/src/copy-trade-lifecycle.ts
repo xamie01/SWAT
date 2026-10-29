@@ -48,6 +48,7 @@ export interface SourceTradeEventInput {
   quantity: DecimalInput;
   amountUsd?: DecimalInput | null;
   priceUsd?: DecimalInput | null;
+  feeUsd?: DecimalInput | null;
   eventAt: Date;
   observedAt?: Date;
   confirmationState: SourceConfirmationState;
@@ -67,6 +68,7 @@ export interface CanonicalSourceTrade {
   quantity: string;
   amountUsd: string | null;
   priceUsd: string | null;
+  feeUsd?: string | null;
   eventAt: Date;
   observedAt: Date;
   confirmationState: SourceConfirmationState;
@@ -141,6 +143,7 @@ export interface SourceTradeSignalCandidate {
   quantity: string;
   amountUsd: string | null;
   priceUsd: string | null;
+  feeUsd?: string | null;
   eventAt: Date;
   walletScore: number;
   walletTier: string | null;
@@ -186,6 +189,7 @@ type SourceTradeDbRow = QueryResultRow & {
   quantity: string;
   amount_usd: string | null;
   price_usd: string | null;
+  fee_usd?: string | null;
   event_at: Date;
   observed_at: Date;
   confirmation_state: SourceConfirmationState;
@@ -239,6 +243,7 @@ const SOURCE_TRADE_COLUMNS = `
   token_amount::text AS quantity,
   amount_usd::text AS amount_usd,
   price_usd::text AS price_usd,
+  fee_usd::text AS fee_usd,
   event_at,
   observed_at,
   confirmation_state`;
@@ -362,6 +367,7 @@ function mapSourceTrade(row: SourceTradeDbRow): CanonicalSourceTrade {
     quantity: row.quantity,
     amountUsd: row.amount_usd,
     priceUsd: row.price_usd,
+    feeUsd: row.fee_usd ?? null,
     eventAt: row.event_at,
     observedAt: row.observed_at,
     confirmationState: row.confirmation_state
@@ -616,6 +622,7 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
   const quantity = decimal('quantity', input.quantity);
   const amountUsd = optionalDecimal('amountUsd', input.amountUsd);
   const priceUsd = optionalDecimal('priceUsd', input.priceUsd);
+  const feeUsd = optionalDecimal('feeUsd', input.feeUsd);
   const eventAt = assertDate('eventAt', input.eventAt);
   const observedAt = assertDate('observedAt', input.observedAt ?? new Date());
   const confirmationEvidenceId = assertIdentifier(
@@ -627,12 +634,12 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO source_trades (
          chain, transaction_hash, wallet_address, token_mint, direction,
-         amount_usd, token_amount, price_usd, status, source_event_type,
+         amount_usd, token_amount, price_usd, fee_usd, status, source_event_type,
          source_event_id, source_event_index, event_at, observed_at,
          confirmation_state, confirmation_updated_at
        ) VALUES (
-         $1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9::text, $10,
-         $11, $12, $13, $14, $9::text, $14
+         $1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::text, $11,
+         $12, $13, $14, $15, $10::text, $15
        )
        ON CONFLICT (chain, source_event_type, source_event_id, source_event_index) DO NOTHING
        RETURNING id`,
@@ -645,6 +652,7 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
         amountUsd,
         quantity,
         priceUsd,
+        feeUsd,
         input.confirmationState,
         input.sourceEventType,
         sourceEventId,
@@ -883,6 +891,7 @@ export async function listSourceTradeSignalCandidates(input: {
     quantity: row.quantity,
     amountUsd: row.amount_usd,
     priceUsd: row.price_usd,
+    feeUsd: row.fee_usd ?? null,
     eventAt: row.event_at,
     walletScore: Number(row.wallet_score),
     walletTier: row.wallet_tier,

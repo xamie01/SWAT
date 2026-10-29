@@ -37,7 +37,10 @@ import {
   resolveFanoutCapacity
 } from './capacity-inputs.js';
 import { createPolymarketBookLiquidityReader } from './polymarket-book-reader.js';
-import { requirePolymarketSignalContext } from './polymarket-context.js';
+import {
+  isPlaceholderOrUnstableOutcome,
+  requirePolymarketSignalContext
+} from './polymarket-context.js';
 import { mayPatternTrade } from './trade-eligibility.js';
 import {
   enqueueFanoutTradeJobs,
@@ -402,10 +405,28 @@ async function enqueueSignal(opts: {
   }
 
   if (chain === 'polygon') {
-    const context = requirePolymarketSignalContext(
-      await getPolymarketOutcomeContext(opts.tokenMint),
-      opts.tokenMint
+    const rawContext = await getPolymarketOutcomeContext(opts.tokenMint);
+    const context = requirePolymarketSignalContext(rawContext, opts.tokenMint);
+
+    // Augmented negative-risk placeholder and dynamic "Other" outcome guard (S4-M30)
+    const negRiskAssessment = isPlaceholderOrUnstableOutcome(
+      {
+        enableNegRisk: Boolean(rawContext?.negRisk),
+        negRiskAugmented: Boolean((rawContext as any)?.negRiskAugmented)
+      },
+      {
+        outcome: rawContext?.outcome ?? '',
+        groupItemTitle: (rawContext as any)?.groupItemTitle
+      }
     );
+    if (negRiskAssessment.isPlaceholder) {
+      console.log(
+        `[signal-engine] SKIPPED: Polymarket token ${opts.tokenMint} is an unstable/placeholder outcome (${negRiskAssessment.code}): ${negRiskAssessment.reason}`
+      );
+      if (opts.sourceTrade) await markSourceTradeSignalDispatched(opts.sourceTrade.sourceTradeId);
+      return;
+    }
+
     tokenName = context.tokenName;
     tokenSymbol = context.tokenSymbol;
     Object.assign(opts.triggerData, context.triggerData);

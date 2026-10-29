@@ -67,6 +67,7 @@ import {
   type PolymarketStalenessPolicy
 } from './polymarket-staleness.js';
 import { globalPolymarketRelayerBudget } from './polymarket-relayer-budget.js';
+import { checkPolymarketGeoEligibility } from './polymarket-geo.js';
 
 /**
  * The staleness policy, resolved once (`S4-M18`).
@@ -654,6 +655,8 @@ export async function triggerPolymarket(params: {
   sourceEventAt?: Date;
   /** Per-user override; falls back to the POLYMARKET_STALENESS_* environment. */
   stalenessPolicy?: Partial<PolymarketStalenessPolicy>;
+  /** Timestamp when user's geo-eligibility was verified via interactive session (S4-P16). */
+  geoVerifiedAt?: Date | null;
   /** Injected clock, so the staleness boundary is testable without faking time. */
   now?: () => number;
 }) {
@@ -662,6 +665,16 @@ export async function triggerPolymarket(params: {
   }
   if (!polymarketSigner) {
     throw new UnrecoverableError('Polymarket signer is not initialized');
+  }
+
+  if (params.geoVerifiedAt !== undefined) {
+    const geo = checkPolymarketGeoEligibility({
+      geoVerifiedAt: params.geoVerifiedAt,
+      now: params.now ? new Date(params.now()) : undefined
+    });
+    if (!geo.eligible) {
+      throw new UnrecoverableError(`Polymarket Protection: [${geo.code}] ${geo.reason}`);
+    }
   }
 
   try {
