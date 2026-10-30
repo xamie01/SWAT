@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AdminNav } from '../../components/AdminNav.js';
 import { api } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
+import { connectSolanaWallet, connectEvmWallet } from '../../lib/wallets.js';
 
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<any[]>([]);
@@ -176,6 +177,29 @@ export default function WalletsPage() {
                 marginTop: '0.5rem'
               }}
             />
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={async () => {
+                  setError('');
+                  try {
+                    if (singleChain === 'solana') {
+                      const { address } = await connectSolanaWallet();
+                      setSingleAddress(address);
+                    } else {
+                      const { address } = await connectEvmWallet();
+                      setSingleAddress(address);
+                    }
+                  } catch (err: any) {
+                    setError(err.message || 'Could not connect wallet.');
+                  }
+                }}
+                className="text-xs font-semibold text-primary underline flex items-center gap-1 hover:opacity-80 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-sm">bolt</span>
+                <span>Auto-fill from active {singleChain === 'solana' ? 'Solana' : 'EVM'} wallet extension</span>
+              </button>
+            </div>
             <button
               type="submit"
               disabled={loading || !singleAddress.trim()}
@@ -250,6 +274,29 @@ export default function WalletsPage() {
                 fontFamily: 'monospace'
               }}
             />
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={async () => {
+                  setError('');
+                  try {
+                    if (bulkChain === 'solana') {
+                      const { address } = await connectSolanaWallet();
+                      setBulkAddresses((prev) => prev.trim() ? `${prev.trim()}\n${address}` : address);
+                    } else {
+                      const { address } = await connectEvmWallet();
+                      setBulkAddresses((prev) => prev.trim() ? `${prev.trim()}\n${address}` : address);
+                    }
+                  } catch (err: any) {
+                    setError(err.message || 'Could not connect wallet.');
+                  }
+                }}
+                className="text-xs font-semibold text-primary underline flex items-center gap-1 hover:opacity-80 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-sm">bolt</span>
+                <span>Append active {bulkChain === 'solana' ? 'Solana' : 'EVM'} wallet address</span>
+              </button>
+            </div>
             <button
               type="submit"
               disabled={loading || !bulkAddresses.trim()}

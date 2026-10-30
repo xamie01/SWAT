@@ -226,9 +226,25 @@ export async function registerAuthRoutes(
     const address = normaliseAddress(parsed.data.chainKind, parsed.data.address);
     const nonce = generateNonce();
     const issuedAt = new Date().toISOString();
+
+    const rawOrigin = (typeof request.headers.origin === 'string' && request.headers.origin.trim().length > 0)
+      ? request.headers.origin.trim()
+      : null;
+    let requestDomain = options.domain;
+    let requestUri = options.uri;
+    if (rawOrigin) {
+      try {
+        const u = new URL(rawOrigin);
+        requestDomain = u.host;
+        requestUri = `${u.protocol}//${u.host}`;
+      } catch {
+        // Fallback to options
+      }
+    }
+
     const message = buildSignInMessage({
-      domain: options.domain,
-      uri: options.uri,
+      domain: requestDomain,
+      uri: requestUri,
       address,
       nonce,
       issuedAt,
@@ -238,7 +254,7 @@ export async function registerAuthRoutes(
     // cannot be spent proving control of another.
     await redis.set(
       `swat:siwe:${nonce}`,
-      `${parsed.data.chainKind}:${address}`,
+      JSON.stringify({ chainKind: parsed.data.chainKind, address, domain: requestDomain, uri: requestUri }),
       'EX',
       NONCE_TTL_SECONDS
     );
@@ -267,7 +283,26 @@ export async function registerAuthRoutes(
     // pair would allow.
     const bound = await redis.getdel(`swat:siwe:${nonce}`);
     if (!bound) return reply.code(410).send({ error: 'Nonce expired or already used' });
-    if (bound !== `${parsed.data.chainKind}:${address}`) {
+
+    let boundChain = parsed.data.chainKind;
+    let boundAddr = address;
+    let expectedDomain = options.domain;
+    let expectedUri = options.uri;
+
+    try {
+      const parsedBound = JSON.parse(bound);
+      boundChain = parsedBound.chainKind;
+      boundAddr = parsedBound.address;
+      expectedDomain = parsedBound.domain || options.domain;
+      expectedUri = parsedBound.uri || options.uri;
+    } catch {
+      // Legacy string format fallback
+      if (bound !== `${parsed.data.chainKind}:${address}`) {
+        return reply.code(401).send({ error: 'Invalid signature' });
+      }
+    }
+
+    if (boundChain !== parsed.data.chainKind || boundAddr !== address) {
       return reply.code(401).send({ error: 'Invalid signature' });
     }
 
@@ -277,8 +312,8 @@ export async function registerAuthRoutes(
       message: parsed.data.message,
       signature: parsed.data.signature,
       expectedNonce: nonce,
-      expectedDomain: options.domain,
-      expectedUri: options.uri
+      expectedDomain,
+      expectedUri
     });
     if (!result.ok) {
       await recordAuditEvent({
