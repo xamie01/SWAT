@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { SaaSNav } from '../../components/SaaSNav.js';
+import { AdminNav } from '../../components/AdminNav.js';
 import { TierBadge, LoadingSkeleton, ErrorBanner } from '../../components/UIPrimitives.js';
 import { api } from '../../lib/api.js';
 
@@ -16,24 +18,55 @@ interface BillingStatus {
   activeUntil: string | null;
 }
 
+interface PlanItem {
+  id: string;
+  tier: string;
+  durationDays: number | null;
+  priceUsdc: number;
+  displayName: string;
+  description: string;
+  features: string[];
+  isPopular?: boolean;
+}
+
 interface PlanCatalog {
-  plans: Array<{
-    id: string;
-    tier: string;
-    durationDays: number | null;
-    priceUsdc: number;
-    displayName: string;
-    description: string;
-    features: string[];
-    isPopular?: boolean;
-  }>;
+  plans: PlanItem[];
   treasuryAddresses: {
     solana: string;
     polygon: string;
   };
 }
 
-export default function BillingPage() {
+const DEFAULT_FEATURES: Record<string, string[]> = {
+  operator: [
+    '0s Real-Time Signal Stream & Execution',
+    'Up to 5 Active Master Tracking Slots',
+    'Solana Anchor PDA & 4337 Smart Account',
+    'Autonomous Stop-Loss & Laddered Exits',
+    '30 Days Stackable Access Duration',
+  ],
+  ultra: [
+    'Everything in Operator Pass',
+    'Up to 25 Active Master Tracking Slots',
+    'Priority Sub-Second Trade Fan-Out Queue',
+    'Dynamic Custom Chains Registry API',
+    'Dedicated Quant Webhook Streams',
+    '30 Days Stackable Access Duration',
+  ],
+  lifetime: [
+    'Permanent Ultra Tier Benefits Forever',
+    'Zero Recurring Subscription Fees',
+    'Priority Fleet Execution Allocation',
+    'Direct Core Engineer Telegram Desk',
+    'Exclusive Early Access to Beta Modules',
+  ],
+};
+
+function BillingView() {
+  const searchParams = useSearchParams();
+  const autoSelectTier = searchParams.get('selected');
+
+  const [role, setRole] = useState<'admin' | 'user'>('user');
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [catalog, setCatalog] = useState<PlanCatalog | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,10 +87,15 @@ export default function BillingPage() {
   const fetchBilling = async () => {
     setLoading(true);
     try {
-      const [statusRes, catalogRes] = await Promise.all([
+      const [statusRes, catalogRes, meRes] = await Promise.all([
         api.get<BillingStatus>('/v1/billing/status').catch(() => null),
-        api.get<PlanCatalog>('/v1/billing/plans').catch(() => null),
+        api.get<any>('/v1/billing/plans').catch(() => null),
+        api.get<{ user?: { role?: string } }>('/v1/auth/me').catch(() => null),
       ]);
+
+      if (meRes?.user?.role === 'admin') {
+        setRole('admin');
+      }
 
       setStatus(
         statusRes || {
@@ -72,63 +110,72 @@ export default function BillingPage() {
         }
       );
 
-      setCatalog(
-        catalogRes || {
-          plans: [
-            {
-              id: 'operator_monthly',
-              tier: 'operator',
-              durationDays: 30,
-              priceUsdc: 35,
-              displayName: 'Operator Pass',
-              description: 'Real-time multi-chain automated execution across Solana, Robinhood, and Polymarket.',
-              features: [
-                '0s real-time feeds & execution',
-                'Up to 5 active master tracking slots',
-                'Solana Anchor PDA & 4337 Smart Account support',
-                'Autonomous stop-loss & laddered exit engine',
-                '30 days access (Stackable time extension)',
-              ],
-              isPopular: true,
-            },
-            {
-              id: 'ultra_monthly',
-              tier: 'ultra',
-              durationDays: 30,
-              priceUsdc: 150,
-              displayName: 'Ultra Tier',
-              description: 'Institutional-grade bandwidth, priority fan-out queue, and custom dynamic chains.',
-              features: [
-                'Everything in Operator',
-                'Up to 25 active master tracking slots',
-                'Priority sub-second trade fan-out queue',
-                'Dynamic chains registry API access',
-                'Dedicated quant webhook streams',
-                '30 days access (Stackable time extension)',
-              ],
-            },
-            {
-              id: 'lifetime',
-              tier: 'ultra',
-              durationDays: null,
-              priceUsdc: 1999,
-              displayName: 'Lifetime Pass',
-              description: 'Permanent unrestricted access to WAKE with no recurring monthly subscription fees ever.',
-              features: [
-                'Permanent Ultra Tier benefits forever',
-                'Zero recurring subscription payments',
-                'Priority execution allocation across fleet',
-                'Direct Telegram support with core engineers',
-                'Exclusive early access to all beta modules',
-              ],
-            },
-          ],
-          treasuryAddresses: {
-            solana: 'SWATtreasury11111111111111111111111111111111',
-            polygon: '0x000000000000000000000000000000000000dEaD',
-          },
+      // Safe normalization of catalog plans to prevent undefined features crash
+      const rawPlans = Array.isArray(catalogRes?.plans) ? catalogRes.plans : [];
+      const fallbackPlans = [
+        {
+          id: 'operator_monthly',
+          tier: 'operator',
+          durationDays: 30,
+          priceUsdc: 35,
+          name: 'Operator Pass',
+          description: 'Real-time multi-chain automated execution across Solana, Robinhood, and Polymarket.',
+          features: DEFAULT_FEATURES.operator,
+          isPopular: true,
+        },
+        {
+          id: 'ultra_monthly',
+          tier: 'ultra',
+          durationDays: 30,
+          priceUsdc: 150,
+          name: 'Ultra Tier',
+          description: 'Institutional-grade bandwidth, priority fan-out queue, and custom dynamic chains.',
+          features: DEFAULT_FEATURES.ultra,
+        },
+        {
+          id: 'lifetime',
+          tier: 'ultra',
+          durationDays: null,
+          priceUsdc: 1999,
+          name: 'Lifetime Pass',
+          description: 'Permanent unrestricted access to Wake Protocol with no recurring subscription fees ever.',
+          features: DEFAULT_FEATURES.lifetime,
+        },
+      ];
+
+      const sourcePlans = rawPlans.length > 0 ? rawPlans : fallbackPlans;
+      const normalizedPlans: PlanItem[] = sourcePlans.map((p: any) => {
+        const tierKey = p.id === 'lifetime' ? 'lifetime' : p.tier || 'operator';
+        const defaultFeats = DEFAULT_FEATURES[tierKey] || DEFAULT_FEATURES.operator;
+        return {
+          id: p.id,
+          tier: p.tier || 'operator',
+          durationDays: p.durationDays !== undefined ? p.durationDays : 30,
+          priceUsdc: Number(p.priceUsdc || (p.id === 'lifetime' ? 1999 : p.tier === 'ultra' ? 150 : 35)),
+          displayName: p.displayName || p.name || p.id,
+          description: p.description || '',
+          features: Array.isArray(p.features) && p.features.length > 0 ? p.features : defaultFeats,
+          isPopular: p.isPopular ?? (p.id === 'operator_monthly' || p.tier === 'operator'),
+        };
+      });
+
+      const treasuryAddresses = {
+        solana: catalogRes?.treasuryAddresses?.solana || 'WAKETreasurySolana1111111111111111111111111',
+        polygon: catalogRes?.treasuryAddresses?.polygon || '0xWAKETreasuryPolygon00000000000000000000000',
+      };
+
+      setCatalog({
+        plans: normalizedPlans,
+        treasuryAddresses,
+      });
+
+      // Auto-open modal if specified in query string
+      if (autoSelectTier) {
+        const match = normalizedPlans.find((p) => p.id === autoSelectTier || p.tier === autoSelectTier);
+        if (match) {
+          handleOpenPayment(match.id);
         }
-      );
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch billing status');
     } finally {
@@ -141,7 +188,6 @@ export default function BillingPage() {
     setVerificationSuccess(false);
     setTxHash('');
     try {
-      // Generate reference memo
       const intent = await api.post<{ referenceMemo: string }>('/v1/billing/crypto/intent', { planId });
       setReferenceMemo(intent.referenceMemo);
     } catch {
@@ -172,19 +218,25 @@ export default function BillingPage() {
 
   return (
     <div className="bg-background text-on-background min-h-screen antialiased font-sans">
-      <SaaSNav />
+      {/* Role-adaptive Navigation Header */}
+      {role === 'admin' ? <AdminNav /> : <SaaSNav />}
 
-      <main className="max-w-[1440px] mx-auto px-6 py-8">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">
-              Subscription & Crypto Billing Rail
+              Subscription &amp; Crypto Billing Rail
             </h1>
             <p className="text-body-sm text-on-surface-variant">
               Pure crypto-native USDC payments with zero banking bottlenecks. Instant automated on-chain activation.
             </p>
           </div>
+          {role === 'admin' && (
+            <span className="self-start sm:self-auto px-2 py-1 rounded bg-status-error/10 text-status-error border border-status-error/30 text-xs font-mono font-bold">
+              OPERATOR FLEET VIEW
+            </span>
+          )}
         </div>
 
         {error && <div className="mb-6"><ErrorBanner message={error} onRetry={fetchBilling} /></div>}
@@ -213,7 +265,7 @@ export default function BillingPage() {
         {/* Current Subscription Status Card */}
         <section className="bg-surface-container-lowest border border-border-subtle rounded-xl p-6 mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-primary">
+            <div className="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center text-primary shrink-0">
               <span className="material-symbols-outlined text-2xl">verified</span>
             </div>
             <div>
@@ -221,20 +273,20 @@ export default function BillingPage() {
                 <span className="font-headline-md text-lg font-bold text-primary">Active Plan</span>
                 {status && <TierBadge tier={status.effectiveTier} />}
               </div>
-              <p className="text-body-sm text-on-surface-variant">
+              <p className="text-body-sm text-on-surface-variant mt-1">
                 {status?.isLifetime
                   ? 'Permanent Lifetime Pass active with unlimited duration.'
-                  : status?.daysRemaining !== null
-                  ? `${status?.daysRemaining} days remaining in current billing cycle.`
+                  : status?.daysRemaining !== null && status?.daysRemaining !== undefined
+                  ? `${status.daysRemaining} days remaining in current billing cycle.`
                   : 'Free tier with paper-only simulation.'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {status?.tierExpiresAt && (
-              <div className="text-right">
-                <span className="text-[11px] text-on-surface-variant uppercase font-semibold">Valid Until</span>
+              <div className="text-left sm:text-right">
+                <span className="text-[11px] text-on-surface-variant uppercase font-semibold block">Valid Until</span>
                 <div className="font-mono font-bold text-sm text-primary">
                   {new Date(status.tierExpiresAt).toLocaleDateString()}
                 </div>
@@ -261,8 +313,8 @@ export default function BillingPage() {
         {loading ? (
           <LoadingSkeleton rows={4} />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-            {catalog?.plans.map((plan) => {
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 mb-12">
+            {(catalog?.plans || []).map((plan) => {
               const isLifetime = plan.id === 'lifetime';
               return (
                 <div
@@ -291,7 +343,7 @@ export default function BillingPage() {
                     </div>
 
                     <div className="space-y-3 border-t border-border-subtle pt-6 mb-6">
-                      {plan.features.map((feat) => (
+                      {(plan.features || []).map((feat) => (
                         <div key={feat} className="flex items-start gap-2 text-xs">
                           <span className="material-symbols-outlined text-status-success text-base shrink-0">
                             check_circle
@@ -322,7 +374,7 @@ export default function BillingPage() {
         {/* Crypto Payment Rail Modal */}
         {selectedPlanId && selectedPlan && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-fade-in">
+            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
                 <div>
                   <h3 className="font-headline-md text-lg font-bold text-primary">
@@ -344,13 +396,13 @@ export default function BillingPage() {
                   </div>
                   <h4 className="font-bold text-lg text-primary">Payment Verified Successfully!</h4>
                   <p className="text-xs text-on-surface-variant max-w-sm mx-auto">
-                    Your account has been granted {selectedPlan.displayName} benefits. Your new duration has been added to your profile.
+                    Your account has been granted {selectedPlan.displayName} benefits. Your duration has been updated.
                   </p>
                   <button
                     onClick={() => setSelectedPlanId(null)}
                     className="px-6 py-2 bg-primary text-white font-bold text-sm rounded-lg hover:opacity-90"
                   >
-                    Back to Dashboard
+                    Return to Billing
                   </button>
                 </div>
               ) : (
@@ -393,16 +445,17 @@ export default function BillingPage() {
                     <span className="text-[10px] text-on-surface-variant uppercase font-semibold block mb-1">
                       Treasury Deposit Address ({chain.toUpperCase()})
                     </span>
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs text-primary truncate max-w-[320px]">
-                        {catalog?.treasuryAddresses[chain] || 'SWATtreasury11111111111111111111111111111111'}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs text-primary truncate">
+                        {catalog?.treasuryAddresses[chain] || 'WAKETreasurySolana1111111111111111111111111'}
                       </span>
                       <button
+                        type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(catalog?.treasuryAddresses[chain] || '');
                           alert('Address copied to clipboard');
                         }}
-                        className="text-xs font-semibold text-primary underline"
+                        className="text-xs font-semibold text-primary underline shrink-0"
                       >
                         Copy
                       </button>
@@ -417,11 +470,12 @@ export default function BillingPage() {
                           Required Reference Memo (for external/exchange deposits)
                         </span>
                         <button
+                          type="button"
                           onClick={() => {
                             navigator.clipboard.writeText(referenceMemo);
-                            alert('Memo copied');
+                            alert('Memo copied to clipboard');
                           }}
-                          className="text-xs font-semibold text-amber-700 dark:text-amber-400 underline"
+                          className="text-xs font-semibold text-amber-700 dark:text-amber-400 underline shrink-0"
                         >
                           Copy
                         </button>
@@ -460,7 +514,7 @@ export default function BillingPage() {
                     ) : (
                       <>
                         <span className="material-symbols-outlined text-base">verified</span>
-                        <span>Verify & Unlock Tier</span>
+                        <span>Verify &amp; Unlock Tier</span>
                       </>
                     )}
                   </button>
@@ -471,5 +525,13 @@ export default function BillingPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <BillingView />
+    </Suspense>
   );
 }

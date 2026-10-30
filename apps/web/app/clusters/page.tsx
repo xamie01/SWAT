@@ -148,7 +148,7 @@ export default function ClustersPage() {
                             border: '1px solid var(--border-color)'
                           }}
                         >
-                          <code style={{ fontSize: '0.85rem', color: 'var(--accent)' }}>
+                          <code className="break-all font-mono" style={{ fontSize: '0.85rem', color: 'var(--accent)' }}>
                             {member.address}
                           </code>
                           {member.tier && (

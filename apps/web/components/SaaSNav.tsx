@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { WakeLogo } from './WakeLogo.js';
 import { StatusPill, type StreamState } from './StatusPill.js';
 import { TierBadge } from './UIPrimitives.js';
 import { api } from '../lib/api.js';
@@ -56,9 +57,9 @@ export function SaaSNav() {
     <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/90 backdrop-blur-md border-b border-border-subtle">
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-4 md:gap-8">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <span className="font-headline-md text-xl font-black tracking-tight text-primary">WAKE</span>
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-primary text-white">SAAS</span>
+          <Link href="/dashboard" className="flex items-center gap-2 hover:opacity-90 transition-opacity">
+            <WakeLogo size="sm" />
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-primary text-white">TRADER</span>
           </Link>
 
           {/* Desktop Nav */}

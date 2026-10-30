@@ -16,17 +16,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'WAKE | Operational Cross-Chain Intelligence',
-  description: 'Operational cross-chain intelligence layer',
+  title: 'Wake Protocol | Operational Cross-Chain Intelligence',
+  description: 'Wake Protocol: Cross-chain copy-trading intelligence across Solana, Robinhood, and Polymarket',
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://wake.trade'),
+  icons: {
+    icon: '/logo.svg',
+  },
   robots: {
     index: true,
     follow: true,
   },
   openGraph: {
-    title: 'WAKE | Operational Cross-Chain Intelligence',
+    title: 'Wake Protocol | Operational Cross-Chain Intelligence',
     description: 'Operational cross-chain copy-trading intelligence across Solana, Robinhood, and Polymarket',
-    siteName: 'WAKE',
+    siteName: 'Wake Protocol',
     type: 'website',
   },
 };

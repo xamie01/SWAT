@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { WakeLogo } from '../components/WakeLogo.js';
 
 export default function LandingPage() {
   const router = useRouter();
@@ -19,13 +20,8 @@ export default function LandingPage() {
     <div className="bg-background text-on-background min-h-screen antialiased font-sans">
       {/* Top Navigation Shell */}
       <nav className="fixed top-0 left-0 right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-md z-50 border-b border-border-subtle px-6 md:px-12 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-4 hover:opacity-80 transition-opacity">
-          <img 
-            alt="WAKE Logo" 
-            className="h-8 w-auto" 
-            src="https://lh3.googleusercontent.com/aida/AP1WRLtWod_shvYwZo04JI9qz9KbCkE4ccfvLt5YPoZfWK9_5IWgDMRxVww6XBAGkZRs0T-1jmcBXgmhsCcR8eu3dkshLlD6BnHpBiyrEunns1F0WH2lTlznG7mzTzzj4AeokEA0E_YMu73Zl7jCGS4uT0bRbBz2ViYg97kcTe_MBHntKuHo1vbl-A-yjjaHUil_JfO9AItouKrQCMCDBsCiM7mFfBKz_TwWyqrffxRbNdYPgyTdQ2oShfFx3O4" 
-          />
-          <span className="font-headline-md text-xl font-black tracking-tighter text-primary">WAKE</span>
+        <Link href="/" className="hover:opacity-85 transition-opacity">
+          <WakeLogo size="md" />
         </Link>
         
         <div className="flex items-center gap-4 md:gap-8 text-body-sm font-medium">
@@ -491,13 +487,8 @@ export default function LandingPage() {
       <footer className="bg-surface-container-lowest border-t border-border-subtle py-20 px-6 md:px-12">
         <div className="max-w-[1440px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-12">
           <div className="md:col-span-5">
-            <div className="flex items-center gap-3 mb-8">
-              <img 
-                alt="WAKE" 
-                className="h-7 w-auto grayscale opacity-80" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLtWod_shvYwZo04JI9qz9KbCkE4ccfvLt5YPoZfWK9_5IWgDMRxVww6XBAGkZRs0T-1jmcBXgmhsCcR8eu3dkshLlD6BnHpBiyrEunns1F0WH2lTlznG7mzTzzj4AeokEA0E_YMu73Zl7jCGS4uT0bRbBz2ViYg97kcTe_MBHntKuHo1vbl-A-yjjaHUil_JfO9AItouKrQCMCDBsCiM7mFfBKz_TwWyqrffxRbNdYPgyTdQ2oShfFx3O4" 
-              />
-              <span className="text-2xl font-black tracking-tighter opacity-80">WAKE</span>
+            <div className="mb-6">
+              <WakeLogo size="md" />
             </div>
             <p className="text-sm md:text-base text-on-surface-variant max-w-sm leading-relaxed">Operational cross-chain intelligence for professional crypto operators.</p>
           </div>

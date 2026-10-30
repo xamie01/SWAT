@@ -238,7 +238,7 @@ export default function SetupPage() {
             Add token mint contract addresses (e.g. stablecoins USDC/USDT, or specific spam/honeypots) that you want to ignore. Coordinated buys/sells on these tokens will not generate intelligence signals.
           </p>
           <form onSubmit={addToBlacklist}>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 placeholder="Token Mint Address to blacklist..."

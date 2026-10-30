@@ -123,7 +123,7 @@ export default function WalletsPage() {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: '2rem' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
         {/* Single wallet form */}
         <div className="card">
           <h3>Add Single Wallet</h3>
@@ -322,7 +322,7 @@ export default function WalletsPage() {
               <div key={wallet.address} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1 }}>
-                    <code style={{ fontSize: '0.9rem', color: 'var(--accent)' }}>
+                    <code className="break-all font-mono" style={{ fontSize: '0.9rem', color: 'var(--accent)' }}>
                       {wallet.address.includes(':') ? wallet.address.split(':')[1] : wallet.address}
                     </code>
                     <span className="badge" style={{

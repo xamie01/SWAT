@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { WakeLogo } from '../../components/WakeLogo.js';
 import WorkspaceView from './views/WorkspaceView';
 import CommandCenterView from './views/CommandCenterView';
 import SignalsView from './views/SignalsView';
@@ -68,16 +69,8 @@ export default function WorkspaceShell() {
         mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
       }`}>
         <div className="p-4 flex items-center justify-between border-b border-outline-variant/30">
-          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <img 
-              alt="WAKE Whale Fin Logo" 
-              className="w-8 h-8 object-contain" 
-              src="https://lh3.googleusercontent.com/aida/AP1WRLtbiJamaZZC7KwG5HAC1bnTyrrpCooabzkx-afw4Hp3qnVeDYAxIj9CLKbXPMe92O_IlprpgSWFQtrJZtapEqhgnCmjmkhv1LuJYEAbn2qfgPjlfX3MnBwrz-NwtXz4Z-EEAR3Se7g1jQv9ih8wMXyH5w_5ItNZkzn3ToFuhTgeAt6kCATuziBpGQsuYGlz4yx3GgwHDVkghvJpYolBYA_-A1cOUIGqWivShnnDEsXeOA5JXcwqWUD4se4" 
-            />
-            <div>
-              <h1 className="text-headline-md font-bold text-primary leading-none">WAKE</h1>
-              <p className="text-[10px] font-bold text-on-surface-variant leading-none uppercase tracking-wider mt-1">Operational Intel</p>
-            </div>
+          <Link href="/" className="hover:opacity-85 transition-opacity">
+            <WakeLogo size="sm" />
           </Link>
           <button
             onClick={() => setMobileSidebarOpen(false)}

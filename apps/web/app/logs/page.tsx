@@ -323,6 +323,7 @@ export default function LogsPage() {
           borderRadius: '10px',
           height: '60vh',
           overflowY: 'auto',
+          overflowX: 'auto',
           padding: '1rem',
           fontFamily: 'Consolas, Monaco, "Courier New", Courier, monospace',
           fontSize: '0.85rem',

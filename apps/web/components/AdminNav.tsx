@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { WakeLogo } from './WakeLogo.js';
 import { api } from '../lib/api.js';
 
 export function AdminNav() {
@@ -50,6 +51,7 @@ export function AdminNav() {
     { label: 'Clusters', href: '/clusters', icon: 'dataset' },
     { label: 'Logs', href: '/logs', icon: 'terminal' },
     { label: 'Performance', href: '/performance', icon: 'monitoring' },
+    { label: 'Billing', href: '/billing', icon: 'credit_card' },
     { label: 'Setup', href: '/setup', icon: 'settings' },
   ];
 
@@ -57,8 +59,8 @@ export function AdminNav() {
     <header className="sticky top-0 z-40 w-full bg-surface-container-lowest/90 backdrop-blur-md border-b border-border-subtle">
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-4 lg:gap-8">
-          <Link href="/admin/portfolio" className="flex items-center gap-2">
-            <span className="font-headline-md text-xl font-black tracking-tight text-primary">WAKE</span>
+          <Link href="/admin/portfolio" className="flex items-center gap-2 hover:opacity-90 transition-opacity">
+            <WakeLogo size="sm" />
             <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-status-error text-white">OPERATOR</span>
           </Link>
 
@@ -138,7 +140,7 @@ export function AdminNav() {
       {mobileMenuOpen && (
         <div className="lg:hidden border-t border-border-subtle bg-surface-container-lowest px-4 py-4 space-y-2 animate-fade-in shadow-xl max-h-[calc(100vh-4rem)] overflow-y-auto">
           <div className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider px-2 py-1">
-            Operator Console
+            Wake Protocol Operator Console
           </div>
           <nav className="flex flex-col gap-1">
             {navLinks.map((link) => {

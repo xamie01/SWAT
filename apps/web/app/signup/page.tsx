@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { WakeLogo } from '../../components/WakeLogo.js';
 import { api, ApiError } from '../../lib/api.js';
 
 function SignupForm() {
@@ -83,8 +84,8 @@ function SignupForm() {
   return (
     <div className="bg-background text-on-background min-h-screen antialiased font-sans flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-md">
-        <Link href="/" className="flex items-center gap-3 mb-8 hover:opacity-80 transition-opacity">
-          <span className="font-headline-md text-xl font-black tracking-tighter text-primary">WAKE</span>
+        <Link href="/" className="inline-block mb-8 hover:opacity-85 transition-opacity">
+          <WakeLogo size="md" />
         </Link>
 
         <h1 className="font-headline-md text-2xl font-bold tracking-tight mb-2">Create Account</h1>
