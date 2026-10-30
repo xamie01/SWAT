@@ -271,6 +271,7 @@ async function checkSystemHealth(reply: any) {
   // 3. Current active RPC endpoints
   const activeSolanaRpc = getActiveRpcUrl('solana');
   const activePolygonRpc = getActiveRpcUrl('polygon');
+  const activeRobinhoodRpc = getActiveRpcUrl('robinhood');
 
   const allHealthy = dbHealthy && redisHealthy;
   const statusCode = allHealthy ? 200 : 503;
@@ -291,7 +292,8 @@ async function checkSystemHealth(reply: any) {
       },
       rpc: {
         solana: { activeUrl: activeSolanaRpc },
-        polygon: { activeUrl: activePolygonRpc }
+        polygon: { activeUrl: activePolygonRpc },
+        robinhood: { activeUrl: activeRobinhoodRpc }
       }
     }
   });
@@ -301,15 +303,17 @@ app.get('/health', async (req, reply) => checkSystemHealth(reply));
 app.get('/v1/health', async (req, reply) => checkSystemHealth(reply));
 
 app.get('/v1/health/rpc', async () => {
-  const [solanaPool, polygonPool] = await Promise.all([
+  const [solanaPool, polygonPool, robinhoodPool] = await Promise.all([
     probeRpcPool('solana'),
-    probeRpcPool('polygon')
+    probeRpcPool('polygon'),
+    probeRpcPool('robinhood')
   ]);
   return {
     timestamp: new Date().toISOString(),
     pools: {
       solana: solanaPool,
-      polygon: polygonPool
+      polygon: polygonPool,
+      robinhood: robinhoodPool
     }
   };
 });

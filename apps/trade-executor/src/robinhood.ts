@@ -18,6 +18,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { UnrecoverableError } from 'bullmq';
+import { getActiveRpcUrl } from '@swat/shared';
 import { capBaseUnitSpend } from './balances.js';
 
 export type RobinhoodRouterAbiVersion = 'uniswap-v3-swap-router-01' | 'uniswap-v3-swap-router-02';
@@ -177,7 +178,7 @@ export function parseRobinhoodExecutionConfig(
 
   return {
     chainId,
-    rpcUrl: required(values, 'ROBINHOOD_RPC_URL'),
+    rpcUrl: values.ROBINHOOD_RPC_URL ?? getActiveRpcUrl('robinhood', values),
     router,
     quoter,
     weth9,
@@ -196,7 +197,7 @@ export function parseRobinhoodExecutionConfig(
   };
 }
 
-const rpcUrl = process.env.ROBINHOOD_RPC_URL ?? 'http://127.0.0.1:8545';
+const rpcUrl = getActiveRpcUrl('robinhood');
 export const robinhoodPublicClient: PublicClient = createPublicClient({
   transport: http(rpcUrl)
 }) as PublicClient;

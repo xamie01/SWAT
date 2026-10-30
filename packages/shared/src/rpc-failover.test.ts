@@ -48,6 +48,16 @@ describe('Resilient Multi-Provider RPC Failover', () => {
       expect(urls[0]).toBe('https://alchemy.polygon.example');
       expect(urls).toContain('https://polygon-bor-rpc.publicnode.com');
     });
+
+    it('resolves robinhood URLs correctly with comma-separated fallbacks', () => {
+      const urls = resolveConfiguredRpcUrls('robinhood', {
+        ROBINHOOD_RPC_URL: 'https://rpc.mainnet.chain.robinhood.com',
+        ROBINHOOD_RPC_URLS: 'https://orbit-fallback.robinhood.example'
+      });
+      expect(urls[0]).toBe('https://rpc.mainnet.chain.robinhood.com');
+      expect(urls[1]).toBe('https://orbit-fallback.robinhood.example');
+      expect(urls).toContain('https://rpc.mainnet.chain.robinhood.com');
+    });
   });
 
   describe('prioritizeRpcEndpoints & circuit breaker', () => {

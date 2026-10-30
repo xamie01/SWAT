@@ -43,13 +43,16 @@ const DEFAULT_COOLDOWN_BASE_MS = 15_000;
 const MAX_COOLDOWN_MS = 120_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 
-export const DEFAULT_FALLBACK_RPCS: Record<'solana' | 'polygon', readonly string[]> = {
+export const DEFAULT_FALLBACK_RPCS: Record<Chain, readonly string[]> = {
   solana: [
     'https://api.mainnet-beta.solana.com'
   ],
   polygon: [
     'https://polygon-bor-rpc.publicnode.com',
     'https://polygon.llamarpc.com'
+  ],
+  'robinhood-chain': [
+    'https://rpc.mainnet.chain.robinhood.com'
   ]
 };
 
@@ -81,11 +84,20 @@ export function resetEndpointRegistry(): void {
  * Parses comma-separated URLs or falls back to singular env var and built-in public fallbacks.
  */
 export function resolveConfiguredRpcUrls(
-  chain: 'solana' | 'polygon',
+  chain: Chain | 'robinhood',
   env: Record<string, string | undefined> = process.env
 ): string[] {
-  const pluralEnvKey = chain === 'solana' ? 'SOLANA_RPC_URLS' : 'POLYGON_RPC_URLS';
-  const singularEnvKey = chain === 'solana' ? 'SOLANA_RPC_URL' : 'POLYGON_RPC_URL';
+  const normalizedChain: Chain = chain === 'robinhood' ? 'robinhood-chain' : chain;
+  let pluralEnvKey = 'SOLANA_RPC_URLS';
+  let singularEnvKey = 'SOLANA_RPC_URL';
+
+  if (normalizedChain === 'polygon') {
+    pluralEnvKey = 'POLYGON_RPC_URLS';
+    singularEnvKey = 'POLYGON_RPC_URL';
+  } else if (normalizedChain === 'robinhood-chain') {
+    pluralEnvKey = 'ROBINHOOD_RPC_URLS';
+    singularEnvKey = 'ROBINHOOD_RPC_URL';
+  }
 
   const pluralVal = env[pluralEnvKey];
   const singularVal = env[singularEnvKey];
@@ -109,7 +121,7 @@ export function resolveConfiguredRpcUrls(
   }
 
   // Append built-in public fallbacks if not already present
-  for (const fallback of DEFAULT_FALLBACK_RPCS[chain]) {
+  for (const fallback of (DEFAULT_FALLBACK_RPCS[normalizedChain] ?? [])) {
     if (!gathered.includes(fallback)) {
       gathered.push(fallback);
     }
@@ -186,7 +198,7 @@ export function recordRpcSuccess(url: string, latencyMs: number, now: number = D
  * Tries candidates sequentially across the prioritized pool.
  */
 export async function executeWithRpcFailover<T>(options: {
-  chain: 'solana' | 'polygon';
+  chain: Chain | 'robinhood';
   action: (rpcUrl: string) => Promise<T>;
   maxAttempts?: number;
   env?: Record<string, string | undefined>;
@@ -224,7 +236,7 @@ export async function executeWithRpcFailover<T>(options: {
  */
 export async function probeRpcEndpoint(
   url: string,
-  chain: 'solana' | 'polygon',
+  chain: Chain | 'robinhood',
   timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS
 ): Promise<RpcEndpointProbe> {
   const start = Date.now();
@@ -279,7 +291,7 @@ export async function probeRpcEndpoint(
  * Probes all endpoints in the pool for a chain and returns a comprehensive report.
  */
 export async function probeRpcPool(
-  chain: 'solana' | 'polygon',
+  chain: Chain | 'robinhood',
   env: Record<string, string | undefined> = process.env
 ): Promise<RpcPoolReport> {
   const urls = resolveConfiguredRpcUrls(chain, env);
@@ -308,7 +320,7 @@ export async function probeRpcPool(
  * Returns the currently most preferred healthy RPC URL for a chain.
  */
 export function getActiveRpcUrl(
-  chain: 'solana' | 'polygon',
+  chain: Chain | 'robinhood',
   env: Record<string, string | undefined> = process.env
 ): string {
   const urls = resolveConfiguredRpcUrls(chain, env);
