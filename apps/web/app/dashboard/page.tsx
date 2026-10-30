@@ -292,7 +292,9 @@ export default function DashboardPage() {
                 title="No Open Positions"
                 description="Your automated copy-trading engine is active and waiting for your subscribed masters to execute an entry signal."
                 actionLabel="Explore Masters"
-                onAction={() => {}}
+                onAction={() => {
+                  document.getElementById('alpha-masters-section')?.scrollIntoView({ behavior: 'smooth' });
+                }}
               />
             )}
           </div>
@@ -380,7 +382,7 @@ export default function DashboardPage() {
         </section>
 
         {/* Suggested Alpha Masters Section */}
-        <section className="bg-surface-container-lowest border border-border-subtle rounded-xl p-6 mt-8">
+        <section id="alpha-masters-section" className="bg-surface-container-lowest border border-border-subtle rounded-xl p-6 mt-8 scroll-mt-20">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="font-headline-md text-lg font-bold text-primary">Explore & Copy Alpha Masters</h2>

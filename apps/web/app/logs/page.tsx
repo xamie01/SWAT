@@ -28,6 +28,45 @@ function apiBase(): string {
   );
 }
 
+function formatLogMessage(raw: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const msg = parsed.msg || parsed.message || '';
+      const extra = { ...parsed };
+      delete extra.msg;
+      delete extra.message;
+      delete extra.level;
+      delete extra.time;
+      delete extra.pid;
+      delete extra.hostname;
+      delete extra.reqId;
+      
+      if (parsed.req && parsed.req.method) {
+        return `[HTTP REQUEST] ${parsed.req.method} ${parsed.req.url} from ${parsed.req.remoteAddress}`;
+      }
+      if (parsed.res && parsed.res.statusCode) {
+        return `[HTTP RESPONSE] Status ${parsed.res.statusCode} (${Math.round(parsed.responseTime || 0)}ms)`;
+      }
+      if (parsed.err && parsed.err.message) {
+        return `[ERROR] ${parsed.err.message}`;
+      }
+      
+      delete extra.req;
+      delete extra.res;
+      delete extra.responseTime;
+      const extraDetails = Object.keys(extra).length > 0 ? ` — ${JSON.stringify(extra)}` : '';
+      if (msg) return `${msg}${extraDetails}`;
+      return JSON.stringify(parsed);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
 const SERVICE_COLORS: Record<string, string> = {
   api: '#60a5fa',            // blue
   indexer: '#34d399',        // emerald
@@ -394,8 +433,8 @@ export default function LogsPage() {
                 )}
 
                 {/* Message */}
-                <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                  {log.message}
+                <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1, fontFamily: 'monospace' }}>
+                  {formatLogMessage(log.message)}
                 </span>
               </div>
             );

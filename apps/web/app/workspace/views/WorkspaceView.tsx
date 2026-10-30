@@ -119,19 +119,25 @@ export default function WorkspaceView() {
       {/* Workspace Controls Sub-header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface p-4 rounded-xl border border-outline-variant shadow-sm">
         <div>
-          <h2 className="text-lg font-bold text-primary">Custom Dashboard</h2>
-          <p className="text-xs text-on-surface-variant">Configure your operational layout and active widget set.</p>
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="w-2 h-2 rounded-full bg-status-success animate-pulse" />
+            <h2 className="text-lg font-bold text-primary">Fleet Intelligence &amp; Operations Canvas</h2>
+          </div>
+          <p className="text-xs text-on-surface-variant">Real-time pipeline monitoring, cross-chain ingestion line-speed, and active syndicate telemetry.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-surface border border-outline text-xs font-medium hover:bg-surface-container-low transition-colors rounded-lg">
-            <span className="material-symbols-outlined text-[18px]">edit</span> Edit Layout
-          </button>
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-surface border border-outline text-xs font-medium hover:bg-surface-container-low transition-colors rounded-lg">
-            <span className="material-symbols-outlined text-[18px]">add</span> Add Widget
-          </button>
-          <button className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors rounded-lg">
-            <span className="material-symbols-outlined text-[18px]">save</span> Save Template
-          </button>
+          <a
+            href="/admin/portfolio"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-colors rounded-lg shadow-sm"
+          >
+            <span className="material-symbols-outlined text-[16px]">hub</span> Trading Matrix
+          </a>
+          <a
+            href="/logs"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-outline text-xs font-medium hover:bg-surface-container-low transition-colors rounded-lg text-primary"
+          >
+            <span className="material-symbols-outlined text-[16px]">terminal</span> System Logs
+          </a>
         </div>
       </div>
 
@@ -322,38 +328,44 @@ export default function WorkspaceView() {
           </div>
         </section>
 
-        {/* 4. Quick Execution Tile */}
-        <section className="col-span-12 lg:col-span-5 bg-primary text-on-primary border border-outline-variant rounded-xl shadow-md h-[320px] p-6 flex flex-col justify-between overflow-hidden relative">
-          {/* Subtle background noise/grid */}
-          <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
+        {/* 4. Execution Rails & Risk Shield Tile */}
+        <section className="col-span-12 lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-md h-[320px] p-6 flex flex-col justify-between overflow-hidden relative">
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-solana-teal">bolt</span>
-                <h3 className="text-[11px] font-bold text-surface-container-highest uppercase tracking-wider">Terminal Snipe</h3>
+                <span className="material-symbols-outlined text-status-success">shield</span>
+                <h3 className="text-[11px] font-bold text-primary uppercase tracking-wider">Execution Pipeline &amp; Protection</h3>
               </div>
-              <span className="px-2 py-1 bg-on-primary-fixed text-primary rounded text-[10px] font-bold">PAPER MODE</span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#14F195]/10 text-[#0E9F6E] dark:text-[#14F195] border border-[#14F195]/30">
+                ACTIVE RAILS
+              </span>
             </div>
-            <div className="space-y-1 mb-6">
-              <p className="text-[11px] text-on-primary-container font-bold tracking-wider">TARGET ASSET</p>
-              <h4 className="text-2xl font-bold tracking-tight">$WAKE_DEGEN</h4>
-              <p className="text-xs font-mono text-on-primary-container opacity-80">SOL: 0x937...f9a1</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-3 bg-white/10 rounded-lg border border-white/10">
-                <p className="text-[10px] text-on-primary-container font-bold uppercase tracking-wider">Confidence</p>
-                <p className="text-[18px] font-bold text-status-success">98.2%</p>
+            
+            <div className="space-y-2 mb-4 font-mono text-xs">
+              <div className="flex justify-between items-center p-2 rounded bg-surface-container-low border border-border-subtle">
+                <span className="text-on-surface-variant">Solana MEV Rail:</span>
+                <span className="font-bold text-primary">Jito Block Engine Bundles</span>
               </div>
-              <div className="p-3 bg-white/10 rounded-lg border border-white/10">
-                <p className="text-[10px] text-on-primary-container font-bold uppercase tracking-wider">Whales Buying</p>
-                <p className="text-[18px] font-bold text-on-primary">12</p>
+              <div className="flex justify-between items-center p-2 rounded bg-surface-container-low border border-border-subtle">
+                <span className="text-on-surface-variant">Robinhood Chain (L2):</span>
+                <span className="font-bold text-primary">EIP-7702 Paymaster Sponsored</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded bg-surface-container-low border border-border-subtle">
+                <span className="text-on-surface-variant">Polymarket (Polygon):</span>
+                <span className="font-bold text-primary">ERC-7739 Isolated Safe Proxies</span>
               </div>
             </div>
-          </div>
-          <div className="relative z-10 pt-4">
-            <button className="w-full py-3 bg-solana-teal text-primary text-xs font-bold rounded-lg shadow-lg hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 uppercase tracking-wide">
-              <span className="material-symbols-outlined">rocket_launch</span> Execute Pinned Signal
-            </button>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 bg-surface-container-low rounded-lg border border-border-subtle">
+                <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Capacity Cap</span>
+                <span className="font-bold text-primary">MAX 50 COPIERS / WALLET</span>
+              </div>
+              <div className="p-2.5 bg-surface-container-low rounded-lg border border-border-subtle">
+                <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Emergency Killswitch</span>
+                <span className="font-bold text-status-success">&lt;2ms REDIS PUB/SUB</span>
+              </div>
+            </div>
           </div>
         </section>
 
