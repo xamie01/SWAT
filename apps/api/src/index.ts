@@ -90,7 +90,7 @@ function parseChain(raw: unknown, fallback: WalletChain = 'solana'): WalletChain
 const corsOrigin = process.env.CORS_ORIGIN;
 await app.register(cors, {
   origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   // x-csrf-token is required, not optional: cookie auth means the browser
   // attaches credentials to cross-site requests automatically, so the API
   // rejects a cookie-authenticated mutation without the double-submit header.
@@ -153,6 +153,10 @@ await app.register(async (scope) => {
   await scope.register(rateLimit, {
     max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
     timeWindow: '15 minutes',
+    // Exclude read-only session verification from the credential-stuffing bucket.
+    // `/v1/auth/me` is called by middleware on protected route navigations and
+    // is already governed by the global rate limit (300/min).
+    allowList: (request) => request.url === '/v1/auth/me',
     // Keyed on IP + email so one attacker cannot lock out an entire NAT, and a
     // single account cannot be sprayed from one address.
     keyGenerator: (request) => {

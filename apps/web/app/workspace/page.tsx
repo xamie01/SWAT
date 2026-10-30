@@ -15,6 +15,7 @@ type Tab = 'workspace' | 'command_center' | 'signals' | 'wallet_intel' | 'health
 export default function WorkspaceShell() {
   const [activeTab, setActiveTab] = useState<Tab>('workspace');
   const [utcTime, setUtcTime] = useState('00:00:00 UTC');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     const updateTime = () => {
@@ -54,27 +55,48 @@ export default function WorkspaceShell() {
 
   return (
     <div className="bg-background text-on-surface min-h-screen relative overflow-hidden font-sans">
+      {/* MOBILE BACKDROP OVERLAY */}
+      {mobileSidebarOpen && (
+        <div
+          onClick={() => setMobileSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden animate-fade-in"
+        />
+      )}
+
       {/* SIDEBAR */}
-      <aside className="fixed left-0 top-0 h-full w-[240px] flex flex-col z-50 bg-surface border-r border-outline-variant">
-        <Link href="/" className="p-4 flex items-center gap-3 hover:opacity-80 transition-opacity">
-          <img 
-            alt="WAKE Whale Fin Logo" 
-            className="w-8 h-8 object-contain" 
-            src="https://lh3.googleusercontent.com/aida/AP1WRLtbiJamaZZC7KwG5HAC1bnTyrrpCooabzkx-afw4Hp3qnVeDYAxIj9CLKbXPMe92O_IlprpgSWFQtrJZtapEqhgnCmjmkhv1LuJYEAbn2qfgPjlfX3MnBwrz-NwtXz4Z-EEAR3Se7g1jQv9ih8wMXyH5w_5ItNZkzn3ToFuhTgeAt6kCATuziBpGQsuYGlz4yx3GgwHDVkghvJpYolBYA_-A1cOUIGqWivShnnDEsXeOA5JXcwqWUD4se4" 
-          />
-          <div>
-            <h1 className="text-headline-md font-bold text-primary leading-none">WAKE</h1>
-            <p className="text-[10px] font-bold text-on-surface-variant leading-none uppercase tracking-wider mt-1">Operational Intel</p>
-          </div>
-        </Link>
+      <aside className={`fixed left-0 top-0 h-full w-[240px] flex flex-col z-50 bg-surface border-r border-outline-variant transition-transform duration-200 ${
+        mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
+        <div className="p-4 flex items-center justify-between border-b border-outline-variant/30">
+          <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+            <img 
+              alt="WAKE Whale Fin Logo" 
+              className="w-8 h-8 object-contain" 
+              src="https://lh3.googleusercontent.com/aida/AP1WRLtbiJamaZZC7KwG5HAC1bnTyrrpCooabzkx-afw4Hp3qnVeDYAxIj9CLKbXPMe92O_IlprpgSWFQtrJZtapEqhgnCmjmkhv1LuJYEAbn2qfgPjlfX3MnBwrz-NwtXz4Z-EEAR3Se7g1jQv9ih8wMXyH5w_5ItNZkzn3ToFuhTgeAt6kCATuziBpGQsuYGlz4yx3GgwHDVkghvJpYolBYA_-A1cOUIGqWivShnnDEsXeOA5JXcwqWUD4se4" 
+            />
+            <div>
+              <h1 className="text-headline-md font-bold text-primary leading-none">WAKE</h1>
+              <p className="text-[10px] font-bold text-on-surface-variant leading-none uppercase tracking-wider mt-1">Operational Intel</p>
+            </div>
+          </Link>
+          <button
+            onClick={() => setMobileSidebarOpen(false)}
+            className="md:hidden p-1 text-on-surface-variant hover:text-primary rounded-lg"
+          >
+            <span className="material-symbols-outlined text-xl">close</span>
+          </button>
+        </div>
         
-        <nav className="mt-6 flex-1 px-3 space-y-1">
+        <nav className="mt-4 flex-1 px-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  setMobileSidebarOpen(false);
+                }}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-[13px] font-medium rounded-lg transition-all ${
                   isActive 
                     ? 'text-primary font-bold border-l-2 border-primary bg-surface-container-high' 
@@ -88,46 +110,70 @@ export default function WorkspaceShell() {
           })}
         </nav>
         
-        <div className="p-4 border-t border-outline-variant bg-surface-container-low">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
-              <span className="material-symbols-outlined text-sm">person</span>
+        <div className="p-3 border-t border-outline-variant bg-surface-container-low space-y-2">
+          <Link
+            href="/admin/portfolio"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-surface-container hover:bg-surface-container-high text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">hub</span>
+            <span>Trading Matrix</span>
+          </Link>
+          <div className="flex items-center gap-3 px-1 pt-1">
+            <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-white">
+              <span className="material-symbols-outlined text-xs">person</span>
             </div>
             <div className="overflow-hidden">
-              <p className="text-xs font-bold truncate leading-none">Operator_72</p>
-              <p className="text-[10px] text-on-surface-variant uppercase tracking-wider mt-1">Certified Level 4</p>
+              <p className="text-xs font-bold truncate leading-none">Operator Console</p>
+              <p className="text-[10px] text-on-surface-variant uppercase tracking-wider mt-0.5">Admin Verified</p>
             </div>
           </div>
         </div>
       </aside>
 
       {/* TOP NAVIGATION */}
-      <header className="fixed top-0 right-0 w-[calc(100%-240px)] flex justify-between items-center px-6 md:px-8 h-16 z-40 bg-surface border-b border-outline-variant">
-        <div className="flex items-center gap-8">
+      <header className="fixed top-0 right-0 w-full md:w-[calc(100%-240px)] flex justify-between items-center px-4 sm:px-6 md:px-8 h-16 z-40 bg-surface border-b border-outline-variant">
+        <div className="flex items-center gap-3 sm:gap-6">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            className="md:hidden p-1.5 text-on-surface-variant hover:text-primary rounded-lg hover:bg-surface-container transition-colors"
+            aria-label="Open sidebar"
+          >
+            <span className="material-symbols-outlined text-2xl">menu</span>
+          </button>
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-primary">{getTitle()}</span>
-            <span className="px-2 py-0.5 rounded bg-surface-container-high text-[10px] font-bold uppercase text-on-surface-variant border border-outline-variant tracking-wider">
-              Sandbox
+            <span className="text-base sm:text-lg font-bold text-primary truncate max-w-[150px] sm:max-w-none">{getTitle()}</span>
+            <span className="hidden xs:inline-block px-2 py-0.5 rounded bg-surface-container-high text-[10px] font-bold uppercase text-on-surface-variant border border-outline-variant tracking-wider">
+              Live
             </span>
           </div>
-          <div className="hidden md:flex items-center gap-6 text-on-surface-variant text-xs">
+          <div className="hidden lg:flex items-center gap-6 text-on-surface-variant text-xs">
             <span className="font-mono">{utcTime}</span>
             <div className="h-3 w-px bg-outline-variant"></div>
             <span>All Chains</span>
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
-          <div className="relative cursor-pointer">
-            <span className="material-symbols-outlined p-2 text-on-surface-variant hover:text-primary transition-colors">notifications</span>
-            <div className="absolute top-2 right-2 w-2 h-2 bg-status-error rounded-full ring-2 ring-surface"></div>
-          </div>
-          <span className="material-symbols-outlined p-2 text-on-surface-variant hover:text-primary transition-colors cursor-pointer">settings</span>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <Link
+            href="/admin/portfolio"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-primary border border-border-subtle transition-colors"
+          >
+            <span className="material-symbols-outlined text-sm">hub</span>
+            <span className="hidden sm:inline">Fleet Matrix</span>
+          </Link>
+          <Link
+            href="/setup"
+            className="p-1.5 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-surface-container"
+            title="Setup"
+          >
+            <span className="material-symbols-outlined text-xl">settings</span>
+          </Link>
         </div>
       </header>
 
       {/* MAIN VIEW CANVAS */}
-      <main className="ml-[240px] pt-16 h-screen overflow-y-auto custom-scrollbar bg-surface-container-low">
+      <main className="ml-0 md:ml-[240px] pt-16 h-screen overflow-y-auto custom-scrollbar bg-surface-container-low">
         {activeTab === 'workspace' && <WorkspaceView />}
         {activeTab === 'command_center' && <CommandCenterView />}
         {activeTab === 'signals' && <SignalsView />}

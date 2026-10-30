@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -130,11 +131,13 @@ export default function SetupPage() {
   };
 
   return (
-    <main>
-      <h1>Setup & Administration</h1>
-      <p style={{ color: 'var(--text-secondary)' }}>
-        Bootstrap the intelligence layer and trigger batch jobs.
-      </p>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">Setup & Administration</h1>
+        <p className="text-body-sm text-on-surface-variant mb-6">
+          Bootstrap the intelligence layer and trigger batch jobs.
+        </p>
 
       {error && (
         <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', marginTop: '1rem' }}>
@@ -429,5 +432,6 @@ export default function SetupPage() {
         </div>
       </div>
     </main>
-  );
+  </div>
+);
 }

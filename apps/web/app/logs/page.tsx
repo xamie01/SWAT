@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api, ApiError, resolveApiBase } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -182,14 +183,16 @@ export default function LogsPage() {
   });
 
   return (
-    <main style={{ maxWidth: '100%', padding: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>System Logs</h1>
-          <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>
-            Real-time live streaming logs from the SWAT backend microservices.
-          </p>
-        </div>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">System Logs</h1>
+            <p className="text-body-sm text-on-surface-variant mb-4">
+              Real-time live streaming logs from the SWAT backend microservices.
+            </p>
+          </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           {status === 'connected' && <span className="badge success" style={{ background: 'rgba(16, 185, 129, 0.1)' }}>● Stream Live</span>}
@@ -400,5 +403,6 @@ export default function LogsPage() {
         <div ref={terminalEndRef} />
       </div>
     </main>
-  );
+  </div>
+);
 }

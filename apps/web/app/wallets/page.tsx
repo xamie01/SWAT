@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -102,11 +103,13 @@ export default function WalletsPage() {
   }, []);
 
   return (
-    <main>
-      <h1>Wallet Management</h1>
-      <p style={{ color: 'var(--text-secondary)' }}>
-        Add seed wallets to bootstrap the intelligence layer. The indexer will backfill their transaction history.
-      </p>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">Wallet Management</h1>
+        <p className="text-body-sm text-on-surface-variant mb-6">
+          Add seed wallets to bootstrap the intelligence layer. The indexer will backfill their transaction history.
+        </p>
 
       {error && (
         <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', marginTop: '1rem' }}>
@@ -363,5 +366,6 @@ export default function WalletsPage() {
         )}
       </div>
     </main>
-  );
+  </div>
+);
 }

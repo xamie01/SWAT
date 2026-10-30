@@ -162,9 +162,9 @@ export default function AdminPortfolioPage() {
     <div className="bg-background text-on-background min-h-screen antialiased font-sans">
       <AdminNav />
 
-      <main className="max-w-[1440px] mx-auto px-6 py-8">
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Page Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">
               Fleet Portfolio & Copy-Trading Matrix
@@ -174,10 +174,10 @@ export default function AdminPortfolioPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={() => setShowExportModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-container-high hover:bg-surface-dim border border-border-subtle rounded-lg text-sm font-semibold transition-colors"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-surface-container-high hover:bg-surface-dim border border-border-subtle rounded-lg text-xs sm:text-sm font-semibold transition-colors"
             >
               <span className="material-symbols-outlined text-base">download</span>
               <span>Export Data</span>
@@ -187,7 +187,7 @@ export default function AdminPortfolioPage() {
                 setLoading(true);
                 Promise.all([fetchOverview(), fetchUsers(), fetchMastersAndTokens()]).finally(() => setLoading(false));
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-primary text-white rounded-lg text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
             >
               <span className="material-symbols-outlined text-base">refresh</span>
               <span>Sync Fleet</span>
@@ -198,7 +198,7 @@ export default function AdminPortfolioPage() {
         {error && <div className="mb-6"><ErrorBanner message={error} onRetry={() => setError(null)} /></div>}
 
         {/* 1. Fleet-Wide KPI Banner */}
-        <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-8">
           <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-4">
             <span className="text-label-caps text-on-surface-variant uppercase text-[11px] font-semibold">
               Total Fleet AUM
@@ -280,34 +280,36 @@ export default function AdminPortfolioPage() {
               </span>
             </div>
 
-            <form onSubmit={handleSearchSubmit} className="flex items-center gap-3">
+            <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full md:w-auto">
               <input
                 type="text"
                 placeholder="Search email or UUID..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="px-3 py-1.5 bg-surface-container border border-border-subtle rounded-lg text-sm outline-none focus:border-primary w-64"
+                className="px-3 py-1.5 bg-surface-container border border-border-subtle rounded-lg text-sm outline-none focus:border-primary w-full sm:w-64"
               />
-              <select
-                value={tierFilter}
-                onChange={(e) => {
-                  setTierFilter(e.target.value);
-                  setPage(1);
-                }}
-                className="px-3 py-1.5 bg-surface-container border border-border-subtle rounded-lg text-sm outline-none focus:border-primary"
-              >
-                <option value="">All Tiers</option>
-                <option value="free">Free</option>
-                <option value="operator">Operator</option>
-                <option value="ultra">Ultra</option>
-                <option value="lifetime">Lifetime</option>
-              </select>
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-primary text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
-              >
-                Filter
-              </button>
+              <div className="flex gap-2">
+                <select
+                  value={tierFilter}
+                  onChange={(e) => {
+                    setTierFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="flex-1 sm:flex-none px-3 py-1.5 bg-surface-container border border-border-subtle rounded-lg text-sm outline-none focus:border-primary"
+                >
+                  <option value="">All Tiers</option>
+                  <option value="free">Free</option>
+                  <option value="operator">Operator</option>
+                  <option value="ultra">Ultra</option>
+                  <option value="lifetime">Lifetime</option>
+                </select>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-primary text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Filter
+                </button>
+              </div>
             </form>
           </div>
 
@@ -318,8 +320,8 @@ export default function AdminPortfolioPage() {
               No users found matching query criteria.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto -mx-6 px-6 sm:mx-0 sm:px-0">
+              <table className="w-full text-left text-sm min-w-[850px]">
                 <thead>
                   <tr className="border-b border-border-subtle text-on-surface-variant text-[11px] font-mono uppercase tracking-wider">
                     <th className="pb-3 font-semibold">User</th>
@@ -445,8 +447,8 @@ export default function AdminPortfolioPage() {
               <h2 className="font-headline-md text-lg font-bold text-primary">Master Alpha & Follower Profitability</h2>
               <span className="text-xs text-on-surface-variant font-mono">CAP 50/MASTER</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto -mx-6 px-6 sm:mx-0 sm:px-0">
+              <table className="w-full text-left text-sm min-w-[520px]">
                 <thead>
                   <tr className="border-b border-border-subtle text-on-surface-variant text-[11px] font-mono uppercase">
                     <th className="pb-2">Master Wallet</th>
@@ -499,8 +501,8 @@ export default function AdminPortfolioPage() {
               <h2 className="font-headline-md text-lg font-bold text-primary">Fleet Token Concentration Heatmap</h2>
               <span className="text-xs text-on-surface-variant font-mono">SYSTEMIC RISK</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto -mx-6 px-6 sm:mx-0 sm:px-0">
+              <table className="w-full text-left text-sm min-w-[520px]">
                 <thead>
                   <tr className="border-b border-border-subtle text-on-surface-variant text-[11px] font-mono uppercase">
                     <th className="pb-2">Token</th>

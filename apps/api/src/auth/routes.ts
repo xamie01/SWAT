@@ -99,9 +99,12 @@ export async function registerAuthRoutes(
   ): Promise<void> {
     const session = await createSession({ userId: user.id, ip, userAgent });
     const csrf = issueCsrfToken();
+    const isSecure = process.env.COOKIE_SECURE !== undefined
+      ? process.env.COOKIE_SECURE === 'true'
+      : (options.isProduction && (reply.request.protocol === 'https' || reply.request.headers['x-forwarded-proto'] === 'https'));
     reply.setCookie(SESSION_COOKIE, session.token, {
       httpOnly: true,
-      secure: options.isProduction,
+      secure: isSecure,
       // Lax, not Strict: the wallet-linking flow can return the user via a
       // top-level cross-site navigation, which Strict would strip the cookie
       // from. The double-submit CSRF token covers what Lax does not.
@@ -114,7 +117,7 @@ export async function registerAuthRoutes(
       // header. That is the "double submit"; secrecy is not what makes it work,
       // same-origin read access is.
       httpOnly: false,
-      secure: options.isProduction,
+      secure: isSecure,
       sameSite: 'lax',
       path: '/',
       expires: session.expiresAt
