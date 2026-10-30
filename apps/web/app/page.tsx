@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { WakeLogo } from '../components/WakeLogo.js';
 
 export default function LandingPage() {
   const router = useRouter();
@@ -14,19 +15,13 @@ export default function LandingPage() {
     setOpenFaq(openFaq === index ? null : index);
   };
 
-  const enterWorkspace = () => router.push('/workspace');
 
   return (
     <div className="bg-background text-on-background min-h-screen antialiased font-sans">
       {/* Top Navigation Shell */}
       <nav className="fixed top-0 left-0 right-0 h-16 bg-surface-container-lowest/80 backdrop-blur-md z-50 border-b border-border-subtle px-6 md:px-12 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-4 hover:opacity-80 transition-opacity">
-          <img 
-            alt="WAKE Logo" 
-            className="h-8 w-auto" 
-            src="https://lh3.googleusercontent.com/aida/AP1WRLtWod_shvYwZo04JI9qz9KbCkE4ccfvLt5YPoZfWK9_5IWgDMRxVww6XBAGkZRs0T-1jmcBXgmhsCcR8eu3dkshLlD6BnHpBiyrEunns1F0WH2lTlznG7mzTzzj4AeokEA0E_YMu73Zl7jCGS4uT0bRbBz2ViYg97kcTe_MBHntKuHo1vbl-A-yjjaHUil_JfO9AItouKrQCMCDBsCiM7mFfBKz_TwWyqrffxRbNdYPgyTdQ2oShfFx3O4" 
-          />
-          <span className="font-headline-md text-xl font-black tracking-tighter text-primary">WAKE</span>
+        <Link href="/" className="hover:opacity-85 transition-opacity">
+          <WakeLogo size="md" />
         </Link>
         
         <div className="flex items-center gap-4 md:gap-8 text-body-sm font-medium">
@@ -39,18 +34,18 @@ export default function LandingPage() {
           </div>
           
           <div className="flex items-center gap-2">
-            <button 
-              onClick={enterWorkspace}
+            <Link 
+              href="/login"
               className="text-primary hover:opacity-80 transition-opacity px-3 py-2 text-sm font-bold"
             >
               Sign In
-            </button>
-            <button 
-              onClick={enterWorkspace}
+            </Link>
+            <Link 
+              href="/signup"
               className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity"
             >
               Sign Up
-            </button>
+            </Link>
           </div>
         </div>
       </nav>
@@ -67,19 +62,19 @@ export default function LandingPage() {
               The bridge between detecting alpha and capturing it. Real-time wallet clusters monitored by high-frequency ingestion engines.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              <button 
-                onClick={enterWorkspace}
+              <Link 
+                href="/signup"
                 className="bg-primary text-white px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-3 transition-transform hover:scale-[1.02]"
               >
                 Join Early Access
                 <span className="material-symbols-outlined">arrow_forward</span>
-              </button>
-              <button 
-                onClick={enterWorkspace}
+              </Link>
+              <Link 
+                href="/login"
                 className="border border-border-subtle text-primary px-8 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 bg-surface-container-lowest hover:bg-surface-container-low transition-colors"
               >
                 View Live Feed
-              </button>
+              </Link>
             </div>
           </div>
           <div className="lg:col-span-5 relative">
@@ -312,55 +307,89 @@ export default function LandingPage() {
             <h2 className="text-4xl font-black mb-4 tracking-tight">Access Tiers</h2>
             <p className="text-lg text-on-surface-variant">Scale your operations with professional infrastructure.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto items-stretch">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto items-stretch">
             {/* Free */}
-            <div className="border border-border-subtle bg-surface-container-lowest rounded-2xl p-10 flex flex-col">
-              <span className="text-[11px] font-bold text-on-surface-variant mb-6 text-center uppercase tracking-[0.2em]">Standard</span>
-              <div className="text-4xl font-black mb-10 text-center">Free</div>
-              <ul className="text-sm md:text-base text-on-surface-variant space-y-5 mb-12 flex-grow">
-                <li className="flex gap-3"><span className="text-primary font-bold">/</span> 5m Delayed Signals</li>
-                <li className="flex gap-3"><span className="text-primary font-bold">/</span> Basic Wallet Tracking</li>
-                <li className="flex gap-3"><span className="text-primary font-bold">/</span> 1 Multi-chain Cluster</li>
-              </ul>
-              <button 
-                onClick={enterWorkspace}
-                className="w-full py-4 border border-border-subtle rounded-xl font-bold hover:bg-surface-container-low transition-colors"
+            <div className="border border-border-subtle bg-surface-container-lowest rounded-2xl p-8 flex flex-col justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-on-surface-variant mb-4 block text-center uppercase tracking-[0.2em]">Standard</span>
+                <div className="text-3xl font-black mb-8 text-center">Free</div>
+                <ul className="text-sm text-on-surface-variant space-y-4 mb-8">
+                  <li className="flex gap-2.5"><span className="text-primary font-bold">/</span> 5m Delayed Signals</li>
+                  <li className="flex gap-2.5"><span className="text-primary font-bold">/</span> Basic Wallet Tracking</li>
+                  <li className="flex gap-2.5"><span className="text-primary font-bold">/</span> 1 Multi-chain Cluster</li>
+                  <li className="flex gap-2.5"><span className="text-primary font-bold">/</span> Read-Only Webhooks</li>
+                </ul>
+              </div>
+              <Link 
+                href="/signup?tier=free"
+                className="w-full py-3 text-center border border-border-subtle rounded-xl font-bold hover:bg-surface-container-low transition-colors"
               >
-                Start Browsing
-              </button>
+                Start Free
+              </Link>
             </div>
-            {/* Pro */}
-            <div className="border-2 border-primary bg-surface-container-highest rounded-2xl p-10 flex flex-col relative shadow-2xl scale-105 z-10">
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-5 py-1.5 bg-primary text-on-primary rounded-full text-[10px] font-black tracking-widest whitespace-nowrap">MOST POPULAR</div>
-              <span className="text-[11px] font-bold text-primary/60 mb-6 text-center uppercase tracking-[0.2em]">Operator</span>
-              <div className="text-4xl font-black mb-10 text-center">29 USDC <span className="text-lg font-medium opacity-60">/mo</span></div>
-              <ul className="text-sm md:text-base text-primary space-y-5 mb-12 flex-grow">
-                <li className="flex gap-3 font-bold"><span className="text-status-success">✓</span> REAL-TIME Signal Feed</li>
-                <li className="flex gap-3 font-bold"><span className="text-status-success">✓</span> Automated Execution</li>
-                <li className="flex gap-3 font-bold"><span className="text-status-success">✓</span> Unlimited Clusters</li>
-              </ul>
-              <button 
-                onClick={enterWorkspace}
-                className="w-full py-4 bg-primary text-on-primary rounded-xl font-black shadow-lg shadow-primary/20 hover:opacity-90 transition-opacity"
+
+            {/* Operator */}
+            <div className="border-2 border-primary bg-surface-container-highest rounded-2xl p-8 flex flex-col justify-between relative shadow-2xl scale-[1.02] z-10">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-primary text-on-primary rounded-full text-[10px] font-black tracking-widest whitespace-nowrap">MOST POPULAR</div>
+              <div>
+                <span className="text-[11px] font-bold text-primary/60 mb-4 block text-center uppercase tracking-[0.2em]">Operator</span>
+                <div className="text-3xl font-black mb-8 text-center">35 USDC <span className="text-sm font-medium opacity-60">/mo</span></div>
+                <ul className="text-sm text-primary space-y-4 mb-8">
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success">✓</span> 0s Real-Time Signal Stream</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success">✓</span> Automated Execution Engine</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success">✓</span> Up to 5 Master Tracking Slots</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success">✓</span> Solana PDA & 4337 Smart Account</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success">✓</span> Autonomous Stop-Loss / Exits</li>
+                </ul>
+              </div>
+              <Link 
+                href="/signup?tier=operator"
+                className="w-full py-3 text-center bg-primary text-on-primary rounded-xl font-black shadow-lg shadow-primary/20 hover:opacity-90 transition-opacity"
               >
-                Get Pro Access
-              </button>
+                Get Operator Access
+              </Link>
             </div>
-            {/* Founding */}
-            <div className="border border-border-subtle bg-surface-container-lowest rounded-2xl p-10 flex flex-col">
-              <span className="text-[11px] font-bold text-on-surface-variant mb-6 text-center uppercase tracking-[0.2em]">Lifetime</span>
-              <div className="text-4xl font-black mb-10 text-center">99 USDC</div>
-              <ul className="text-sm md:text-base text-on-surface-variant space-y-5 mb-12 flex-grow">
-                <li className="flex gap-3"><span className="text-primary font-bold">/</span> Lifetime Lock-in</li>
-                <li className="flex gap-3"><span className="text-primary font-bold">/</span> Priority Beta Features</li>
-                <li className="flex gap-3"><span className="text-primary font-bold">/</span> Discord "Founding" Role</li>
-              </ul>
-              <button 
-                onClick={enterWorkspace}
-                className="w-full py-4 border border-border-subtle rounded-xl font-bold hover:bg-surface-container-low transition-colors"
+
+            {/* Ultra */}
+            <div className="border border-border-subtle bg-surface-container-lowest rounded-2xl p-8 flex flex-col justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-on-surface-variant mb-4 block text-center uppercase tracking-[0.2em]">Ultra</span>
+                <div className="text-3xl font-black mb-8 text-center">150 USDC <span className="text-sm font-medium opacity-60">/mo</span></div>
+                <ul className="text-sm text-on-surface-variant space-y-4 mb-8">
+                  <li className="flex gap-2.5 font-semibold"><span className="text-primary font-bold">/</span> Everything in Operator</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-primary font-bold">/</span> Up to 25 Active Master Slots</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-primary font-bold">/</span> Priority Trade Fan-Out Queue</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-primary font-bold">/</span> Dynamic Chains Registry API</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-primary font-bold">/</span> Dedicated Quant Webhooks</li>
+                </ul>
+              </div>
+              <Link 
+                href="/signup?tier=ultra"
+                className="w-full py-3 text-center border border-primary text-primary rounded-xl font-bold hover:bg-primary hover:text-on-primary transition-colors"
               >
-                Secure Spot
-              </button>
+                Get Ultra Access
+              </Link>
+            </div>
+
+            {/* Lifetime */}
+            <div className="border border-border-subtle bg-surface-container-lowest rounded-2xl p-8 flex flex-col justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-on-surface-variant mb-4 block text-center uppercase tracking-[0.2em]">Lifetime</span>
+                <div className="text-3xl font-black mb-8 text-center">1,999 USDC <span className="text-xs font-medium opacity-60 block mt-1">one-time</span></div>
+                <ul className="text-sm text-on-surface-variant space-y-4 mb-8">
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success font-bold">✓</span> Permanent Ultra Access Forever</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success font-bold">✓</span> Zero Recurring Payments</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success font-bold">✓</span> Priority Fleet Execution</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success font-bold">✓</span> Direct Core Engineer Telegram</li>
+                  <li className="flex gap-2.5 font-semibold"><span className="text-status-success font-bold">✓</span> Exclusive Beta Features Access</li>
+                </ul>
+              </div>
+              <Link 
+                href="/signup?tier=lifetime"
+                className="w-full py-3 text-center border border-border-subtle rounded-xl font-bold hover:bg-surface-container-low transition-colors"
+              >
+                Secure Lifetime Spot
+              </Link>
             </div>
           </div>
         </section>
@@ -436,15 +465,18 @@ export default function LandingPage() {
               <h2 className="text-4xl md:text-6xl leading-[1.1] font-black text-on-primary mb-8 tracking-tighter">Ready for a professional desk?</h2>
               <p className="text-lg md:text-xl text-on-primary/70 max-w-2xl mx-auto mb-14 text-balance">Stop tracking and start executing. Secure your early access spot and begin capturing cross-chain signals today.</p>
               <div className="flex flex-col sm:flex-row gap-5 justify-center">
-                <button 
-                  onClick={enterWorkspace}
-                  className="bg-on-primary text-primary px-12 py-5 rounded-2xl font-bold text-lg hover:scale-[1.03] transition-transform shadow-xl"
+                <Link 
+                  href="/signup"
+                  className="bg-on-primary text-primary px-12 py-5 rounded-2xl font-bold text-lg hover:scale-[1.03] transition-transform shadow-xl text-center"
                 >
                   Join Early Access
-                </button>
-                <button className="border border-on-primary-container/30 text-on-primary px-12 py-5 rounded-2xl font-bold text-lg hover:bg-on-primary/5 transition-colors">
-                  Read the Docs
-                </button>
+                </Link>
+                <Link 
+                  href="/login"
+                  className="border border-on-primary-container/30 text-on-primary px-12 py-5 rounded-2xl font-bold text-lg hover:bg-on-primary/5 transition-colors text-center"
+                >
+                  Sign In
+                </Link>
               </div>
             </div>
           </div>
@@ -455,13 +487,8 @@ export default function LandingPage() {
       <footer className="bg-surface-container-lowest border-t border-border-subtle py-20 px-6 md:px-12">
         <div className="max-w-[1440px] mx-auto grid grid-cols-1 md:grid-cols-12 gap-12">
           <div className="md:col-span-5">
-            <div className="flex items-center gap-3 mb-8">
-              <img 
-                alt="WAKE" 
-                className="h-7 w-auto grayscale opacity-80" 
-                src="https://lh3.googleusercontent.com/aida/AP1WRLtWod_shvYwZo04JI9qz9KbCkE4ccfvLt5YPoZfWK9_5IWgDMRxVww6XBAGkZRs0T-1jmcBXgmhsCcR8eu3dkshLlD6BnHpBiyrEunns1F0WH2lTlznG7mzTzzj4AeokEA0E_YMu73Zl7jCGS4uT0bRbBz2ViYg97kcTe_MBHntKuHo1vbl-A-yjjaHUil_JfO9AItouKrQCMCDBsCiM7mFfBKz_TwWyqrffxRbNdYPgyTdQ2oShfFx3O4" 
-              />
-              <span className="text-2xl font-black tracking-tighter opacity-80">WAKE</span>
+            <div className="mb-6">
+              <WakeLogo size="md" />
             </div>
             <p className="text-sm md:text-base text-on-surface-variant max-w-sm leading-relaxed">Operational cross-chain intelligence for professional crypto operators.</p>
           </div>

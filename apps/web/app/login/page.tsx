@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { WakeLogo } from '../../components/WakeLogo.js';
 import { api, ApiError } from '../../lib/api.js';
 
 /**
@@ -17,7 +18,7 @@ import { api, ApiError } from '../../lib/api.js';
  * This component never sees, stores or forwards a token, which is the point:
  * there is nowhere for a secret to leak from because the client holds none.
  */
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get('next');
@@ -32,11 +33,26 @@ export default function LoginPage() {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/v1/auth/login', { email, password });
-      // A relative path only. `next` arrives from the query string, so treating
-      // it as a URL would let a crafted link bounce a freshly-authenticated
-      // operator to an attacker's host.
-      const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/workspace';
+      const res = await api.post<{ user: { id: string; email: string; role: string; tier: string } }>('/v1/auth/login', { email, password });
+      
+      const role = res?.user?.role;
+      const isAdminPrefix = (path: string) => [
+        '/admin', '/workspace', '/signals', '/wallets', '/logs', '/clusters', '/setup', '/performance'
+      ].some(prefix => path === prefix || path.startsWith(`${prefix}/`));
+
+      let destination = '/dashboard';
+      if (next && next.startsWith('/') && !next.startsWith('//')) {
+        if (role !== 'admin' && isAdminPrefix(next)) {
+          destination = '/dashboard';
+        } else {
+          destination = next;
+        }
+      } else if (role === 'admin') {
+        destination = '/admin/portfolio';
+      } else {
+        destination = '/dashboard';
+      }
+
       router.push(destination);
     } catch (caught) {
       // The API returns an identical body for unknown-email and wrong-password,
@@ -59,8 +75,8 @@ export default function LoginPage() {
   return (
     <div className="bg-background text-on-background min-h-screen antialiased font-sans flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <Link href="/" className="flex items-center gap-3 mb-10 hover:opacity-80 transition-opacity">
-          <span className="font-headline-md text-xl font-black tracking-tighter text-primary">WAKE</span>
+        <Link href="/" className="inline-block mb-8 hover:opacity-85 transition-opacity">
+          <WakeLogo size="md" />
         </Link>
 
         <h1 className="font-headline-md text-2xl font-bold tracking-tight mb-2">Sign in</h1>
@@ -106,20 +122,29 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={submitting || !email || !password}
-            className="mt-2 bg-primary text-on-primary rounded px-4 py-2 text-body-md font-medium disabled:opacity-50"
+            className="mt-2 bg-primary text-on-primary rounded px-4 py-2 text-body-md font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
-        {/*
-          No signup link yet, deliberately. `POST /v1/auth/signup` exists, but a
-          page for it is checklist S6-5 and linking to a route that does not
-          resolve is worse than not offering it. The first admin comes from
-          `pnpm --filter @swat/db seed:admin`, not from this form -- signup
-          creates a plain `user`, which cannot reach the operator console.
-        */}
+        <div className="mt-6 pt-6 border-t border-border-subtle text-center">
+          <p className="text-body-sm text-on-surface-variant">
+            Don't have an account?{' '}
+            <Link href="/signup" className="text-primary font-semibold hover:underline">
+              Create account
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="bg-background min-h-screen" />}>
+      <LoginForm />
+    </Suspense>
   );
 }

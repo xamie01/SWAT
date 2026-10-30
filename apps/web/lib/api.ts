@@ -202,6 +202,10 @@ export const api = {
     apiFetch<T>(path, { ...options, method: 'GET' }),
   post: <T = unknown>(path: string, body?: unknown, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
     apiFetch<T>(path, { ...options, method: 'POST', body }),
+  put: <T = unknown>(path: string, body?: unknown, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
+    apiFetch<T>(path, { ...options, method: 'PUT', body }),
+  patch: <T = unknown>(path: string, body?: unknown, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
+    apiFetch<T>(path, { ...options, method: 'PATCH', body }),
   delete: <T = unknown>(path: string, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
     apiFetch<T>(path, { ...options, method: 'DELETE' })
 };

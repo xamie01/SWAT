@@ -25,6 +25,7 @@ export * from './evm-nonce.js';
 export * from './position-cap.js';
 export * from './forward-only.js';
 export * from './independence.js';
+export * from './independence-queries.js';
 export * from './master-capacity.js';
 /**
  * Active-follower counts per (master, chain) -- the `activeFollowerCount` input
@@ -89,3 +90,5 @@ export * from './fanout-candidates.js';
  * pure decider; the eviction rule lives in `selectPolymarketBookSubscriptions`.
  */
 export * from './polymarket-book-subscriptions.js';
+export * from './billing.js';
+export * from './admin-portfolio.js';

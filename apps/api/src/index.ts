@@ -1,8 +1,10 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   deleteWalletCascade,
   getIngestionHealth24h,
@@ -13,7 +15,8 @@ import {
   getAttributionDashboard,
   getAttributionLatencyReport,
   getLatestExpectancyReport,
-  getLiveShadowCostReport
+  getLiveShadowCostReport,
+  loadTrackingDifferenceSummary
 } from '@swat/db';
 import {
   buildIngestionHealthSnapshots,
@@ -30,6 +33,8 @@ import {
   walletInputSchema
 } from '@swat/shared';
 import type { Chain } from '@swat/shared';
+import { getActiveRpcUrl, probeRpcPool } from '@swat/shared';
+import { executeBillingSweepJob } from './cron/billing-sweep.js';
 import {
   emergencyOff,
   executionModeUpdateSchema,
@@ -37,6 +42,12 @@ import {
   updateTradingMode
 } from './trading-control.js';
 import { registerAttributionRoutes } from './attribution-routes.js';
+import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
+import { registerAuthRoutes } from './auth/routes.js';
+import { registerMeRoutes } from './routes/me.js';
+import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
+import { registerBillingRoutes } from './routes/billing.js';
+import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
 
 initLogger('api');
 
@@ -79,7 +90,7 @@ function parseChain(raw: unknown, fallback: WalletChain = 'solana'): WalletChain
 const corsOrigin = process.env.CORS_ORIGIN;
 await app.register(cors, {
   origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   // x-csrf-token is required, not optional: cookie auth means the browser
   // attaches credentials to cross-site requests automatically, so the API
   // rejects a cookie-authenticated mutation without the double-submit header.
@@ -109,14 +120,6 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
   const providedHash = createHash('sha256').update(value).digest();
   return timingSafeEqual(providedHash, API_KEY_HASH);
 }
-
-import { randomBytes } from 'node:crypto';
-import cookie from '@fastify/cookie';
-import rateLimit from '@fastify/rate-limit';
-import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
-import { registerAuthRoutes } from './auth/routes.js';
-import { registerMeRoutes } from './routes/me.js';
-import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 
 await app.register(cookie);
 
@@ -150,6 +153,10 @@ await app.register(async (scope) => {
   await scope.register(rateLimit, {
     max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
     timeWindow: '15 minutes',
+    // Exclude read-only session verification from the credential-stuffing bucket.
+    // `/v1/auth/me` is called by middleware on protected route navigations and
+    // is already governed by the global rate limit (300/min).
+    allowList: (request) => request.url === '/v1/auth/me',
     // Keyed on IP + email so one attacker cannot lock out an entire NAT, and a
     // single account cannot be sprayed from one address.
     keyGenerator: (request) => {
@@ -216,6 +223,8 @@ app.post('/v1/auth/ticket', async (request, reply) => {
 
 await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
 await registerExecutionSettingsRoutes(app);
+await registerBillingRoutes(app);
+registerAdminPortfolioRoutes(app);
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
 // Query-string values are always strings. Coerce + bound them so a caller can't
@@ -232,13 +241,100 @@ function parseOptionalNumber(raw: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-// ─── Health ───────────────────────────────────────────────────────────────────
+// ─── Health & Ops Telemetry ───────────────────────────────────────────────────
 
-app.get('/v1/health', async () => ({
-  status: 'ok',
-  service: 'api',
-  ts: new Date().toISOString()
-}));
+async function checkSystemHealth(reply: any) {
+  const ts = new Date().toISOString();
+  let dbHealthy = false;
+  let dbLatencyMs = -1;
+  let redisHealthy = false;
+  let redisLatencyMs = -1;
+
+  // 1. Check PostgreSQL
+  const dbStart = Date.now();
+  try {
+    await query('SELECT 1');
+    dbHealthy = true;
+    dbLatencyMs = Date.now() - dbStart;
+  } catch (err) {
+    app.log.error(err, '[health] Database health check failed');
+  }
+
+  // 2. Check Redis
+  const redisStart = Date.now();
+  try {
+    const pingRes = await redis.ping();
+    if (pingRes === 'PONG') {
+      redisHealthy = true;
+      redisLatencyMs = Date.now() - redisStart;
+    }
+  } catch (err) {
+    app.log.error(err, '[health] Redis health check failed');
+  }
+
+  // 3. Current active RPC endpoints
+  const activeSolanaRpc = getActiveRpcUrl('solana');
+  const activePolygonRpc = getActiveRpcUrl('polygon');
+  const activeRobinhoodRpc = getActiveRpcUrl('robinhood');
+
+  const allHealthy = dbHealthy && redisHealthy;
+  const statusCode = allHealthy ? 200 : 503;
+
+  return reply.status(statusCode).send({
+    status: allHealthy ? 'ok' : 'degraded',
+    service: 'api',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: ts,
+    dependencies: {
+      database: {
+        healthy: dbHealthy,
+        latencyMs: dbLatencyMs
+      },
+      redis: {
+        healthy: redisHealthy,
+        latencyMs: redisLatencyMs
+      },
+      rpc: {
+        solana: { activeUrl: activeSolanaRpc },
+        polygon: { activeUrl: activePolygonRpc },
+        robinhood: { activeUrl: activeRobinhoodRpc }
+      }
+    }
+  });
+}
+
+app.get('/health', async (req, reply) => checkSystemHealth(reply));
+app.get('/v1/health', async (req, reply) => checkSystemHealth(reply));
+
+app.get('/v1/health/rpc', async () => {
+  const [solanaPool, polygonPool, robinhoodPool] = await Promise.all([
+    probeRpcPool('solana'),
+    probeRpcPool('polygon'),
+    probeRpcPool('robinhood')
+  ]);
+  return {
+    timestamp: new Date().toISOString(),
+    pools: {
+      solana: solanaPool,
+      polygon: polygonPool,
+      robinhood: robinhoodPool
+    }
+  };
+});
+
+// Built-in recurring billing downgrade sweep
+// Runs once every hour (or customizable via BILLING_SWEEP_INTERVAL_MS).
+// Can be disabled via DISABLE_BILLING_SWEEPER_DAEMON=true if running external cron.
+const disableSweeper = process.env.DISABLE_BILLING_SWEEPER_DAEMON === 'true';
+if (!disableSweeper && process.env.NODE_ENV !== 'test') {
+  const sweepIntervalMs = Number(process.env.BILLING_SWEEP_INTERVAL_MS ?? 3600_000);
+  const timer = setInterval(() => {
+    executeBillingSweepJob().catch((err) => {
+      app.log.error(err, '[cron] background billing sweep failed');
+    });
+  }, sweepIntervalMs);
+  timer.unref?.();
+}
 
 app.get('/v1/health/ingestion', async () => {
   const generatedAt = new Date();
@@ -551,6 +647,14 @@ app.get('/v1/signals/:id', async (req, reply) => {
   return { item: signal };
 });
 
+app.get('/v1/signals/:id/tracking-difference', async (req) => {
+  const { id } = req.params as { id: string };
+  return loadTrackingDifferenceSummary(query, {
+    signalId: id,
+    limit: 50
+  });
+});
+
 app.post('/v1/signals/:id/ignore', async (req, reply) => {
   const { id } = req.params as { id: string };
   await query(`UPDATE signals SET status = 'rejected' WHERE id = $1`, [id]);
@@ -713,6 +817,22 @@ app.get('/v1/trading/trades', async () => {
   return { items };
 });
 
+app.get('/v1/trading/tracking-difference', async (req) => {
+  const queryParams = req.query as {
+    signalId?: string;
+    targetAccount?: string;
+    userId?: string;
+    limit?: string;
+  };
+  const limit = queryParams.limit ? Math.min(100, Math.max(1, Number(queryParams.limit))) : 50;
+  return loadTrackingDifferenceSummary(query, {
+    signalId: queryParams.signalId,
+    targetAccount: queryParams.targetAccount,
+    userId: queryParams.userId,
+    limit
+  });
+});
+
 registerAttributionRoutes(app, {
   getDashboard: getAttributionDashboard,
   getExpectancy: getLatestExpectancyReport,
@@ -745,6 +865,28 @@ app.get('/v1/logs', async () => {
   };
 });
 
+// Shared singleton Redis subscriber for logs streaming. Multiplexes all SSE client
+// connections over one TCP connection to Redis rather than spawning a new Redis
+// client socket per visitor (which exhausts Redis connection limits and leaks on abrupt disconnects).
+const sharedLogsSubscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const activeLogListeners = new Set<(message: string) => void>();
+
+sharedLogsSubscriber.subscribe('swat:logs:stream').catch((err) => {
+  app.log.error(err, '[api] failed to subscribe to swat:logs:stream');
+});
+
+sharedLogsSubscriber.on('message', (channel, message) => {
+  if (channel === 'swat:logs:stream') {
+    for (const listener of activeLogListeners) {
+      try {
+        listener(message);
+      } catch {
+        activeLogListeners.delete(listener);
+      }
+    }
+  }
+});
+
 app.get('/v1/logs/stream', async (req, reply) => {
   reply.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -753,16 +895,19 @@ app.get('/v1/logs/stream', async (req, reply) => {
     'Access-Control-Allow-Origin': '*'
   });
   reply.hijack();
-  
-  const sub = new Redis(redisUrl, { maxRetriesPerRequest: null });
-  await sub.subscribe('swat:logs:stream');
-  
-  sub.on('message', (channel, message) => {
-    reply.raw.write(`data: ${message}\n\n`);
-  });
-  
-  req.raw.on('close', async () => {
-    await sub.quit();
+
+  const listener = (message: string) => {
+    try {
+      reply.raw.write(`data: ${message}\n\n`);
+    } catch {
+      activeLogListeners.delete(listener);
+    }
+  };
+
+  activeLogListeners.add(listener);
+
+  req.raw.on('close', () => {
+    activeLogListeners.delete(listener);
   });
 });
 

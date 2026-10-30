@@ -11,6 +11,9 @@ import {
   beginWindDown,
   requestCloseAll,
   query,
+  checkWalletClusterIndependence,
+  checkWalletHubStatus,
+  listAuthWallets,
   type UserScope
 } from '@swat/db';
 import {
@@ -18,7 +21,9 @@ import {
   chainSchema,
   createWalletBackfillJob,
   isValidAddressForChain,
+  loadEmailConfigFromEnv,
   resolveChainAddress,
+  sendEmail,
   tierAllowsChain,
   type Chain
 } from '@swat/shared';
@@ -35,7 +40,38 @@ import { requireUser } from '../auth/plugin.js';
 export interface MeRouteOptions {
   readonly backfillQueue: Queue;
   readonly tokenDiscoveryQueue: Queue;
+  readonly now?: () => Date;
+  readonly coolingOffMs?: number;
+  readonly otpStore?: Map<string, { code: string; expiresAt: Date; destinationAddress: string }>;
+  readonly sendWithdrawalOtpEmail?: (email: string, code: string) => Promise<boolean>;
 }
+
+export const DEFAULT_WITHDRAWAL_COOLING_OFF_MS = 24 * 60 * 60 * 1000; // 24 hours (S4-12)
+
+export function isWalletCoolingOff(
+  verifiedAt: Date,
+  now: Date = new Date(),
+  coolingOffMs: number = DEFAULT_WITHDRAWAL_COOLING_OFF_MS
+): { isCoolingOff: boolean; hoursRemaining: number } {
+  const ageMs = now.getTime() - verifiedAt.getTime();
+  if (ageMs < coolingOffMs) {
+    const hoursRemaining = Math.max(1, Math.ceil((coolingOffMs - ageMs) / (60 * 60 * 1000)));
+    return { isCoolingOff: true, hoursRemaining };
+  }
+  return { isCoolingOff: false, hoursRemaining: 0 };
+}
+
+const withdrawRequestOtpSchema = z.object({
+  destinationAddress: z.string().trim().min(32).max(120),
+  chainKind: z.enum(['evm', 'solana'])
+});
+
+const withdrawConfirmSchema = z.object({
+  destinationAddress: z.string().trim().min(32).max(120),
+  chainKind: z.enum(['evm', 'solana']),
+  amountUsd: z.number().positive().max(100_000),
+  otpCode: z.string().trim().length(6)
+});
 
 const subscribeSchema = z.object({
   address: z.string().trim().min(32).max(120),
@@ -121,6 +157,19 @@ export async function registerMeRoutes(
     // preserves Solana case — never hand-build the prefix.
     const resolved = resolveChainAddress(parsed.data.address, parsed.data.chain);
 
+    // S4-M11: Refuse exchange hubs with an actionable reason
+    const hub = await checkWalletHubStatus(resolved.prefixed, resolved.raw, parsed.data.chain);
+    if (hub.isHub) {
+      return reply.code(400).send({
+        error: 'Cannot subscribe to exchange hub',
+        reason: 'exchange-hub-refused',
+        message: hub.reason
+      });
+    }
+
+    // S4-M10: Advisory cluster independence warning
+    const independence = await checkWalletClusterIndependence(resolved.prefixed);
+
     try {
       const result = await subscribeToWallet(scope, {
         walletAddress: resolved.prefixed,
@@ -149,6 +198,7 @@ export async function registerMeRoutes(
           source: result.subscription.source,
           subscribedAt: result.subscription.createdAt
         },
+        warning: independence.warning,
         backfillQueued: result.walletCreated
       });
     } catch (error) {
@@ -371,5 +421,139 @@ export async function registerMeRoutes(
       [scope.userId]
     );
     return reply.send({ events: rows });
+  });
+
+  // ── Trading Withdrawal Routes (S4-12 anti-theft core) ──────────────────────
+
+  const withdrawalOtps = options.otpStore ?? new Map<string, { code: string; expiresAt: Date; destinationAddress: string }>();
+
+  app.post('/v1/me/trading/withdraw/request-otp', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const principal = request.principal;
+    if (principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
+
+    const parsed = withdrawRequestOtpSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Invalid payload', details: parsed.error.issues });
+    }
+
+    const { destinationAddress, chainKind } = parsed.data;
+
+    // S4-12: Destination MUST be a verified linked auth wallet
+    const linkedWallets = await listAuthWallets(scope);
+    const linked = linkedWallets.find(
+      (w) => w.chainKind === chainKind && w.address.toLowerCase() === destinationAddress.toLowerCase()
+    );
+
+    if (!linked) {
+      return reply.code(400).send({
+        error: 'destination-not-linked-auth-wallet',
+        message: 'Withdrawals are strictly permitted only to SIWE/SIWS verified linked auth wallets (S4-12)'
+      });
+    }
+
+    // S4-12: 24h cooling-off window on newly linked wallets
+    const now = options.now?.() ?? new Date();
+    const cooling = isWalletCoolingOff(linked.verifiedAt, now, options.coolingOffMs);
+    if (cooling.isCoolingOff) {
+      return reply.code(403).send({
+        error: 'wallet-cooling-off-active',
+        message: `Newly linked wallet is in a 24-hour security cooling-off period (S4-12). ${cooling.hoursRemaining} hours remaining`,
+        hoursRemaining: cooling.hoursRemaining
+      });
+    }
+
+    // Generate 6-digit OTP code with 15-minute validity
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(now.getTime() + 15 * 60 * 1000);
+    withdrawalOtps.set(scope.userId, { code: otpCode, expiresAt, destinationAddress });
+
+    // Send confirmation code via email
+    if (options.sendWithdrawalOtpEmail) {
+      await options.sendWithdrawalOtpEmail(principal.user.email, otpCode);
+    } else {
+      const emailConfig = loadEmailConfigFromEnv();
+      await sendEmail(
+        {
+          to: principal.user.email,
+          subject: 'WAKE Withdrawal Confirmation Code',
+          text: `Your withdrawal confirmation code is: ${otpCode}. It expires in 15 minutes. If you did not initiate this, please contact support immediately.`
+        },
+        emailConfig
+      ).catch((err) => {
+        request.log.error(err, 'Failed to deliver withdrawal OTP email');
+      });
+    }
+
+    return reply.code(200).send({
+      ok: true,
+      message: 'Withdrawal confirmation OTP sent to registered email address'
+    });
+  });
+
+  app.post('/v1/me/trading/withdraw', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const principal = request.principal;
+    if (principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
+
+    const parsed = withdrawConfirmSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Invalid payload', details: parsed.error.issues });
+    }
+
+    const { destinationAddress, chainKind, amountUsd, otpCode } = parsed.data;
+
+    // Verify linked wallet destination and cooling-off
+    const linkedWallets = await listAuthWallets(scope);
+    const linked = linkedWallets.find(
+      (w) => w.chainKind === chainKind && w.address.toLowerCase() === destinationAddress.toLowerCase()
+    );
+
+    if (!linked) {
+      return reply.code(400).send({
+        error: 'destination-not-linked-auth-wallet',
+        message: 'Withdrawals are strictly permitted only to SIWE/SIWS verified linked auth wallets (S4-12)'
+      });
+    }
+
+    const now = options.now?.() ?? new Date();
+    const cooling = isWalletCoolingOff(linked.verifiedAt, now, options.coolingOffMs);
+    if (cooling.isCoolingOff) {
+      return reply.code(403).send({
+        error: 'wallet-cooling-off-active',
+        message: `Newly linked wallet is in a 24-hour security cooling-off period (S4-12). ${cooling.hoursRemaining} hours remaining`,
+        hoursRemaining: cooling.hoursRemaining
+      });
+    }
+
+    // Verify OTP code
+    const storedOtp = withdrawalOtps.get(scope.userId);
+    if (
+      !storedOtp
+      || storedOtp.code !== otpCode
+      || storedOtp.expiresAt.getTime() <= now.getTime()
+      || storedOtp.destinationAddress.toLowerCase() !== destinationAddress.toLowerCase()
+    ) {
+      return reply.code(400).send({
+        error: 'invalid-or-expired-otp',
+        message: 'Invalid or expired withdrawal confirmation code'
+      });
+    }
+
+    // Burn OTP immediately (single use)
+    withdrawalOtps.delete(scope.userId);
+
+    return reply.code(200).send({
+      status: 'confirmed',
+      withdrawal: {
+        userId: scope.userId,
+        destinationAddress,
+        chainKind,
+        amountUsd,
+        confirmedAt: now.toISOString()
+      }
+    });
   });
 }

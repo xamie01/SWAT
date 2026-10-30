@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
+import { connectSolanaWallet, connectEvmWallet } from '../../lib/wallets.js';
 
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<any[]>([]);
@@ -102,11 +104,13 @@ export default function WalletsPage() {
   }, []);
 
   return (
-    <main>
-      <h1>Wallet Management</h1>
-      <p style={{ color: 'var(--text-secondary)' }}>
-        Add seed wallets to bootstrap the intelligence layer. The indexer will backfill their transaction history.
-      </p>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">Wallet Management</h1>
+        <p className="text-body-sm text-on-surface-variant mb-6">
+          Add seed wallets to bootstrap the intelligence layer. The indexer will backfill their transaction history.
+        </p>
 
       {error && (
         <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', marginTop: '1rem' }}>
@@ -120,7 +124,7 @@ export default function WalletsPage() {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: '2rem' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
         {/* Single wallet form */}
         <div className="card">
           <h3>Add Single Wallet</h3>
@@ -173,6 +177,29 @@ export default function WalletsPage() {
                 marginTop: '0.5rem'
               }}
             />
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={async () => {
+                  setError('');
+                  try {
+                    if (singleChain === 'solana') {
+                      const { address } = await connectSolanaWallet();
+                      setSingleAddress(address);
+                    } else {
+                      const { address } = await connectEvmWallet();
+                      setSingleAddress(address);
+                    }
+                  } catch (err: any) {
+                    setError(err.message || 'Could not connect wallet.');
+                  }
+                }}
+                className="text-xs font-semibold text-primary underline flex items-center gap-1 hover:opacity-80 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-sm">bolt</span>
+                <span>Auto-fill from active {singleChain === 'solana' ? 'Solana' : 'EVM'} wallet extension</span>
+              </button>
+            </div>
             <button
               type="submit"
               disabled={loading || !singleAddress.trim()}
@@ -247,6 +274,29 @@ export default function WalletsPage() {
                 fontFamily: 'monospace'
               }}
             />
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={async () => {
+                  setError('');
+                  try {
+                    if (bulkChain === 'solana') {
+                      const { address } = await connectSolanaWallet();
+                      setBulkAddresses((prev) => prev.trim() ? `${prev.trim()}\n${address}` : address);
+                    } else {
+                      const { address } = await connectEvmWallet();
+                      setBulkAddresses((prev) => prev.trim() ? `${prev.trim()}\n${address}` : address);
+                    }
+                  } catch (err: any) {
+                    setError(err.message || 'Could not connect wallet.');
+                  }
+                }}
+                className="text-xs font-semibold text-primary underline flex items-center gap-1 hover:opacity-80 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-sm">bolt</span>
+                <span>Append active {bulkChain === 'solana' ? 'Solana' : 'EVM'} wallet address</span>
+              </button>
+            </div>
             <button
               type="submit"
               disabled={loading || !bulkAddresses.trim()}
@@ -319,7 +369,7 @@ export default function WalletsPage() {
               <div key={wallet.address} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div style={{ flex: 1 }}>
-                    <code style={{ fontSize: '0.9rem', color: 'var(--accent)' }}>
+                    <code className="break-all font-mono" style={{ fontSize: '0.9rem', color: 'var(--accent)' }}>
                       {wallet.address.includes(':') ? wallet.address.split(':')[1] : wallet.address}
                     </code>
                     <span className="badge" style={{
@@ -363,5 +413,6 @@ export default function WalletsPage() {
         )}
       </div>
     </main>
-  );
+  </div>
+);
 }

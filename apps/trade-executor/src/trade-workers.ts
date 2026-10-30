@@ -39,6 +39,33 @@ export type TradeWorkerSpec = {
 export const TRADE_WORKER_CONCURRENCY = 1;
 
 /**
+ * Resolves worker concurrency per chain.
+ * Defaults strictly to 1 to preserve ordering, exposure caps, and EVM nonce isolation.
+ * For keyless Solana Anchor PDAs or Polymarket custodial signers, concurrency can be safely
+ * scaled via env (e.g. TRADE_CONCURRENCY_SOLANA=5) to drain large multi-tenant cohorts in parallel.
+ */
+export function resolveWorkerConcurrency(
+  chain: Chain | null,
+  env: Record<string, string | undefined> = process.env
+): number {
+  if (chain === 'solana') {
+    const raw = env.TRADE_CONCURRENCY_SOLANA;
+    if (raw) {
+      const parsed = parseInt(raw, 10);
+      if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 10) return parsed;
+    }
+  }
+  if (chain === 'polygon') {
+    const raw = env.TRADE_CONCURRENCY_POLYGON;
+    if (raw) {
+      const parsed = parseInt(raw, 10);
+      if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 10) return parsed;
+    }
+  }
+  return TRADE_WORKER_CONCURRENCY;
+}
+
+/**
  * The workers the executor should run.
  *
  * `drainLegacyQueue` defaults to true because at cutover the previous release's
@@ -47,7 +74,11 @@ export const TRADE_WORKER_CONCURRENCY = 1;
  * `QUEUES.trades` together) — that is the "contract" half of `S3-25`.
  */
 export function tradeWorkerSpecs(
-  options: { drainLegacyQueue?: boolean } = {}
+  options: {
+    drainLegacyQueue?: boolean;
+    concurrencyByChain?: Partial<Record<Chain, number>>;
+    env?: Record<string, string | undefined>;
+  } = {}
 ): TradeWorkerSpec[] {
   const drainLegacyQueue = options.drainLegacyQueue ?? true;
   const specs: TradeWorkerSpec[] = (
@@ -55,7 +86,7 @@ export function tradeWorkerSpecs(
   ).map(([chain, queue]) => ({
     queue,
     chain,
-    concurrency: TRADE_WORKER_CONCURRENCY,
+    concurrency: options.concurrencyByChain?.[chain] ?? resolveWorkerConcurrency(chain, options.env),
     drainOnly: false
   }));
 

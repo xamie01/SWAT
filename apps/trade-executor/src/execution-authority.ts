@@ -222,6 +222,18 @@ export type ExecutionAuthorityDenialCode =
    * exception (`S4-P13`), which is a decision, not an implementation.
    */
   | 'authority-polymarket-delegation-unsupported'
+  // ── Session key / Grant lifecycle (S4-P9) ─────────────────────────────────
+  /** The user's execution authority grant has expired/lapsed. */
+  | 'authority-grant-expired'
+  /** The user's execution authority grant was revoked. */
+  | 'authority-grant-revoked'
+  /** No execution authority grant was found for this user and chain. */
+  | 'authority-grant-missing'
+  // ── Paymaster budget / rate limits (S4-P8) ─────────────────────────────────
+  /** User exceeded daily sponsored UserOperation cap. */
+  | 'authority-paymaster-user-rate-limited'
+  /** Global daily sponsored UserOperation budget exhausted. */
+  | 'authority-paymaster-global-budget-exhausted'
   // ── Granted, but not for this ───────────────────────────────────────────
   /** The grant exists but cannot perform this action or signing shape. */
   | 'authority-capability-unsupported'

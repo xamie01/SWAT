@@ -28,6 +28,7 @@ import {
 } from '@polymarket/client/actions';
 import { builderApiKey, type BuilderApiKeyCreds } from '@polymarket/client/node';
 import { signerFrom } from '@polymarket/client/ethers-v5';
+import { getActiveRpcUrl } from '@swat/shared';
 import { ethers } from 'ethers';
 import { UnrecoverableError } from 'bullmq';
 import {
@@ -66,6 +67,8 @@ import {
   resolvePolymarketStalenessPolicy,
   type PolymarketStalenessPolicy
 } from './polymarket-staleness.js';
+import { globalPolymarketRelayerBudget } from './polymarket-relayer-budget.js';
+import { checkPolymarketGeoEligibility } from './polymarket-geo.js';
 
 /**
  * The staleness policy, resolved once (`S4-M18`).
@@ -91,7 +94,7 @@ export const POLYMARKET_SHARE_DECIMALS = 2;
 const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY;
 
 export const polygonProvider = new ethers.providers.JsonRpcProvider(
-  process.env.POLYGON_RPC_URL ?? 'https://polygon-bor-rpc.publicnode.com'
+  getActiveRpcUrl('polygon')
 );
 
 export const polymarketSigner = EVM_PRIVATE_KEY
@@ -653,6 +656,8 @@ export async function triggerPolymarket(params: {
   sourceEventAt?: Date;
   /** Per-user override; falls back to the POLYMARKET_STALENESS_* environment. */
   stalenessPolicy?: Partial<PolymarketStalenessPolicy>;
+  /** Timestamp when user's geo-eligibility was verified via interactive session (S4-P16). */
+  geoVerifiedAt?: Date | null;
   /** Injected clock, so the staleness boundary is testable without faking time. */
   now?: () => number;
 }) {
@@ -661,6 +666,16 @@ export async function triggerPolymarket(params: {
   }
   if (!polymarketSigner) {
     throw new UnrecoverableError('Polymarket signer is not initialized');
+  }
+
+  if (params.geoVerifiedAt !== undefined) {
+    const geo = checkPolymarketGeoEligibility({
+      geoVerifiedAt: params.geoVerifiedAt,
+      now: params.now ? new Date(params.now()) : undefined
+    });
+    if (!geo.eligible) {
+      throw new UnrecoverableError(`Polymarket Protection: [${geo.code}] ${geo.reason}`);
+    }
   }
 
   try {
@@ -855,8 +870,14 @@ export async function triggerPolymarket(params: {
       throw new UnrecoverableError('Polymarket signed order omitted the configured builder code');
     }
 
+    const relayerBudget = globalPolymarketRelayerBudget.checkBudget();
+    if (!relayerBudget.allowed) {
+      throw new UnrecoverableError(relayerBudget.reason!);
+    }
+
     const startTime = Date.now();
     const response = await client.postOrder(order);
+    globalPolymarketRelayerBudget.recordExecution();
     const latencyMs = Date.now() - startTime;
     if (!response.ok) {
       throw new UnrecoverableError(`Polymarket order rejected: ${response.code}: ${response.message}`);
@@ -1038,7 +1059,13 @@ export async function submitPolymarketExitRung(params: {
     throw new UnrecoverableError('Polymarket signed exit rung omitted the configured builder code');
   }
 
+  const relayerBudget = globalPolymarketRelayerBudget.checkBudget();
+  if (!relayerBudget.allowed) {
+    throw new UnrecoverableError(relayerBudget.reason!);
+  }
+
   const response = await client.postOrder(order);
+  globalPolymarketRelayerBudget.recordExecution();
   if (!response.ok) {
     throw new UnrecoverableError(
       `Polymarket exit rung rejected: ${response.code}: ${response.message}`

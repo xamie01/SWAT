@@ -39,6 +39,7 @@ import {
   resolveChainMode,
   transitionCopyExecution,
   accrueMasterCapacityFillNotional,
+  getCopyExecutionById,
   claimPolymarketPositionExit,
   confirmPolymarketPositionExit,
   releasePolymarketPositionExit,
@@ -1282,26 +1283,28 @@ async function persistCanonicalFill(input: {
   // inserts evidence `ON CONFLICT DO NOTHING`, so a replayed job leaves the
   // cumulative total unmoved, the delta is zero and no statement is issued. A
   // genuine partial-then-remainder moves the total and only the increment accrues.
-  const accrual = await accrueMasterCapacityFillNotional({
-    sourceTradeId: input.execution.sourceTradeId,
-    executionMode: input.execution.executionMode,
-    quoteCurrency: result.fillValuation.currency,
-    confirmedQuoteUsdBefore: input.execution.confirmedQuoteQuantity,
-    confirmedQuoteUsdAfter: result.execution.confirmedQuoteQuantity
-  }).catch((error: unknown) => ({
-    applied: false as const,
-    code: 'accrual-failed' as const,
-    reason: error instanceof Error ? error.message : String(error)
-  }));
+  if (input.execution.sourceTradeId) {
+    const accrual = await accrueMasterCapacityFillNotional({
+      sourceTradeId: input.execution.sourceTradeId,
+      executionMode: input.execution.executionMode,
+      quoteCurrency: result.fillValuation.currency,
+      confirmedQuoteUsdBefore: input.execution.confirmedQuoteQuantity,
+      confirmedQuoteUsdAfter: result.execution.confirmedQuoteQuantity
+    }).catch((error: unknown) => ({
+      applied: false as const,
+      code: 'accrual-failed' as const,
+      reason: error instanceof Error ? error.message : String(error)
+    }));
 
-  if (!accrual.applied) {
-    // Never thrown: this runs AFTER a confirmed fill, and throwing here would make
-    // the executor treat a filled order as failed. Both `ledger-row-missing` and
-    // `accrual-failed` UNDER-count, which fails open on the cap -- so these deserve
-    // an alert rather than a log line once alerting exists (S4-M6's follow-up).
-    console.warn(
-      `[trade-executor] capacity numerator not accrued (${accrual.code}): ${accrual.reason}`
-    );
+    if (!accrual.applied) {
+      // Never thrown: this runs AFTER a confirmed fill, and throwing here would make
+      // the executor treat a filled order as failed. Both `ledger-row-missing` and
+      // `accrual-failed` UNDER-count, which fails open on the cap -- so these deserve
+      // an alert rather than a log line once alerting exists (S4-M6's follow-up).
+      console.warn(
+        `[trade-executor] capacity numerator not accrued (${accrual.code}): ${accrual.reason}`
+      );
+    }
   }
 }
 
@@ -1383,7 +1386,15 @@ export async function handleJob(
     manual?: boolean;
     direction?: 'buy' | 'sell';
     stopLoss?: boolean;
+    closeAll?: boolean;
+    exitLotId?: string;
+    copyExecutionId?: string;
     sellTokenAmount?: number;
+    /**
+     * Optional user-configured max slippage in basis points (S4-P4).
+     * When present, overrides the chain default tolerance without clamping up.
+     */
+    maxSlippageBps?: number | null;
     /**
      * Whose trade this is. Absent on every job the current producers enqueue,
      * which resolves to the operator principal. Present under fan-out (`S4-7`),
@@ -1435,11 +1446,11 @@ export async function handleJob(
     console.warn(`[trade-executor] WARNING: ${clampReason} | requested: ${chain} live`);
   }
 
-  // Auto-execute gate. A stop-loss is exempt: it only ever reduces an existing
-  // position, and gating it behind the entry switch would leave every position
+  // Auto-execute gate. A stop-loss or close-all is exempt: it only ever reduces an existing
+  // position/lot, and gating it behind the entry switch would leave every position
   // opened while AUTO_EXECUTE was off permanently unprotected. The chain's
   // execution mode (including the 'off' kill switch) still applies above.
-  if (!payload.manual && !payload.stopLoss && (!AUTO_EXECUTE || score < AUTO_EXECUTE_MIN_SCORE)) {
+  if (!payload.manual && !payload.stopLoss && !payload.closeAll && (!AUTO_EXECUTE || score < AUTO_EXECUTE_MIN_SCORE)) {
     console.log(`[trade-executor] SKIPPED: auto-execute=${AUTO_EXECUTE}, score=${score}, threshold=${AUTO_EXECUTE_MIN_SCORE} | token: ${payload.tokenMint}`);
     return {
       status: 'skipped',
@@ -1457,17 +1468,17 @@ export async function handleJob(
   const exposureAccount = resolveExecutionPrincipal(payload);
   const jobUserId = exposureAccount.kind === 'user' ? exposureAccount.userId : null;
 
-  // A stop-loss closes the whole position, so the quantity is dictated by the
+  // A stop-loss or close-all closes the position/lot, so the quantity is dictated by the
   // ledger rather than by balance-aware sizing.
   let stopLossSellQuantity: number | null = null;
-  if (payload.stopLoss) {
+  if (payload.stopLoss || payload.closeAll) {
     if (direction !== 'sell') {
-      throw new UnrecoverableError(`Stop-loss job ${payload.signalId} must be a sell`);
+      throw new UnrecoverableError(`${payload.closeAll ? 'Close-all' : 'Stop-loss'} job ${payload.signalId} must be a sell`);
     }
     const quantity = Number(payload.sellTokenAmount);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new UnrecoverableError(
-        `Stop-loss job ${payload.signalId} needs a positive sellTokenAmount`
+        `${payload.closeAll ? 'Close-all' : 'Stop-loss'} job ${payload.signalId} needs a positive sellTokenAmount`
       );
     }
     stopLossSellQuantity = quantity;
@@ -1651,13 +1662,10 @@ export async function handleJob(
   // Slippage tolerance for every venue call below (`S4-P4`). Resolved once per
   // job rather than repeated as a literal at each call site, where it appeared as
   // 1500 on Solana and 300 on Robinhood in fourteen places.
-  //
-  // `null` means "no user preference", which resolves to the chain default and is
-  // byte-identical to the constants it replaces — this is a refactor, not a
-  // behaviour change. Migration `049` adds
-  // `user_chain_execution_settings.max_slippage_bps`, at which point this one line
-  // reads the user's value and every call site downstream is already correct.
-  const slippageBps = resolveSlippageBps(chain, null);
+  // User-configured slippage tolerance (S4-P4).
+  // `null` or undefined resolves to the chain default (e.g. 1500 for Solana, 300 for EVM).
+  // A tighter user preference (e.g. 50 bps) is preserved and never widened to the chain default.
+  const slippageBps = resolveSlippageBps(chain, payload.maxSlippageBps ?? null);
 
   try {
     let paperResult: ExecutorJobResult | null = null;
@@ -1853,6 +1861,12 @@ export async function handleJob(
             liveResult = { status: 'rejected', reason: outcome.reason };
           }
         } else {
+        if (principal.kind !== 'operator') {
+          return {
+            status: 'rejected',
+            reason: `Venue-managed Trojan submission is only available for operator execution; user ${principal.userId} requires a delegated transaction signer`
+          };
+        }
         const result = await triggerTrojan({
           signalId: canonicalExecution?.clientOrderId ?? payload.signalId,
           tokenMint: cleanMint,
@@ -2382,9 +2396,12 @@ export async function handleJob(
     }
     if (execMode === 'paper' || (execMode === 'live+shadow' && liveTradeId && liveWasConfirmed)) {
       const submittedAt = new Date();
-      const paperExecution = execMode === 'live+shadow'
+      let paperExecution = execMode === 'live+shadow'
         ? canonicalExecutions.shadow
         : canonicalExecutions.paper;
+      if (!paperExecution && payload.copyExecutionId) {
+        paperExecution = (await getCopyExecutionById(payload.copyExecutionId)) ?? undefined;
+      }
       try {
       if (paperExecution?.state === 'confirmed') {
         paperResult = { status: 'already-executed', signalId: payload.signalId };
@@ -2559,7 +2576,7 @@ export async function handleJob(
       await persistTrade({
         signalId: payload.signalId,
         sourceTradeId: payload.sourceTradeId,
-        copyExecutionId: paperExecution?.id,
+        copyExecutionId: paperExecution?.id ?? payload.copyExecutionId,
         tokenMint: payload.tokenMint,
         size,
         amountUsd: simAmountUsd ?? (chain === 'polygon' ? size : undefined),

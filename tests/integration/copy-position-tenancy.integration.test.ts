@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
 import { pool } from '../../packages/db/src/client.js';
 import { createUser } from '../../packages/db/src/users.js';
+import {
+  recordSourceTradeEvent,
+  requestCopyExecution,
+  recordCopyExecutionEvidence
+} from '../../packages/db/src/copy-trade-lifecycle.js';
 
 /**
  * Tenancy key on `copy_positions` (checklist S4-10, migration 050).
@@ -187,5 +192,108 @@ describe('copy_positions tenancy (S4-10)', () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0]!.n).toBe(1);
+  });
+
+  it('drives two paper users through execution and evidence with completely disjoint ledgers', async () => {
+    const [alice, bob] = [await makeUser(), await makeUser()];
+    const target = paperTarget('E');
+    const master = `solana:Master${runId}`;
+    const token = `solana:TOKEN${runId}E`;
+    const occurredAt = new Date('2026-10-01T00:00:00Z');
+
+    const sourceEventId = `source:${runId}:1`;
+    const source = await recordSourceTradeEvent({
+      chain: 'solana',
+      sourceEventType: 'transaction',
+      sourceEventId,
+      transactionHash: `tx:${runId}:1`,
+      walletAddress: master,
+      tokenMint: token,
+      side: 'buy',
+      quantity: '100',
+      amountUsd: 1000,
+      eventAt: occurredAt,
+      confirmationState: 'confirmed',
+      confirmationEvidenceId: randomUUID()
+    });
+
+    const aliceExec = await requestCopyExecution({
+      sourceTradeId: source.event.id,
+      targetAccount: target,
+      executionMode: 'paper',
+      userId: alice.id,
+      requestedBaseQuantity: '10'
+    });
+
+    const bobExec = await requestCopyExecution({
+      sourceTradeId: source.event.id,
+      targetAccount: target,
+      executionMode: 'paper',
+      userId: bob.id,
+      requestedBaseQuantity: '20'
+    });
+
+    expect(aliceExec.execution.id).not.toBe(bobExec.execution.id);
+    expect(aliceExec.execution.userId).toBe(alice.id);
+    expect(bobExec.execution.userId).toBe(bob.id);
+
+    await recordCopyExecutionEvidence({
+      executionId: aliceExec.execution.id,
+      evidenceType: 'paper_simulation',
+      evidenceId: aliceExec.execution.clientOrderId,
+      baseQuantity: '10',
+      quoteLeg: { currency: 'USD', amount: 100 },
+      confirmationState: 'confirmed',
+      completesExecution: true,
+      occurredAt
+    });
+
+    await recordCopyExecutionEvidence({
+      executionId: bobExec.execution.id,
+      evidenceType: 'paper_simulation',
+      evidenceId: bobExec.execution.clientOrderId,
+      baseQuantity: '20',
+      quoteLeg: { currency: 'USD', amount: 200 },
+      confirmationState: 'confirmed',
+      completesExecution: true,
+      occurredAt
+    });
+
+    const { rows: positions } = await pool.query<{
+      user_id: string;
+      confirmed_quantity: string;
+      cost_basis_usd: string;
+    }>(
+      `SELECT user_id, confirmed_quantity, cost_basis_usd
+         FROM copy_positions
+        WHERE target_account = $1 AND token_mint = $2
+        ORDER BY user_id`,
+      [target, token]
+    );
+
+    expect(positions).toHaveLength(2);
+    expect(positions.find(p => p.user_id === alice.id)).toMatchObject({
+      confirmed_quantity: '10',
+      cost_basis_usd: '100'
+    });
+    expect(positions.find(p => p.user_id === bob.id)).toMatchObject({
+      confirmed_quantity: '20',
+      cost_basis_usd: '200'
+    });
+
+    const { rows: lots } = await pool.query<{
+      user_id: string;
+      remaining_quantity: string;
+    }>(
+      `SELECT user_id, remaining_quantity
+         FROM copy_position_master_lots
+        WHERE token_mint = $1
+        ORDER BY user_id`,
+      [token]
+    );
+
+    expect(lots).toHaveLength(2);
+    expect(lots.find(l => l.user_id === alice.id)?.remaining_quantity).toBe('10');
+    expect(lots.find(l => l.user_id === bob.id)?.remaining_quantity).toBe('20');
   });
 });

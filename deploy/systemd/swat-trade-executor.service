@@ -1,0 +1,28 @@
+[Unit]
+Description=SWAT / WAKE Autonomous Trade Executor
+After=network.target redis.service pgbouncer.service swat-api.service
+Wants=redis.service pgbouncer.service
+
+[Service]
+Type=simple
+User=swat
+WorkingDirectory=/root/SWAT
+Environment=NODE_ENV=production
+EnvironmentFile=/root/SWAT/.env
+ExecStart=/usr/bin/node /root/SWAT/apps/trade-executor/dist/index.js
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+# Concurrency scaling configuration
+Environment=TRADE_CONCURRENCY_SOLANA=5
+Environment=TRADE_CONCURRENCY_POLYGON=3
+
+# Sandboxing and security hardening
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

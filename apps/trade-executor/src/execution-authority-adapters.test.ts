@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PaymasterBudgetTracker } from './paymaster-budget.js';
 import {
   createExecutionAuthorityAdapters,
   createOperatorPolymarketAuthority,
@@ -7,6 +8,7 @@ import {
   createUserPolymarketAuthority,
   createUserRobinhoodAuthority,
   createUserSolanaAuthority,
+  WAKE_VAULT_PROGRAM_ID,
   type SolanaTransactionSigner
 } from './execution-authority-adapters.js';
 import {
@@ -287,9 +289,9 @@ describe('operator Polymarket adapter', () => {
   });
 });
 
-describe('per-user adapters fail closed with a named mechanism', () => {
+describe('per-user adapters fail closed when mechanism is unavailable', () => {
   it.each([
-    ['solana', createUserSolanaAuthority(), 'authority-solana-delegate-unavailable'],
+    ['solana', createUserSolanaAuthority({ enabled: false }), 'authority-solana-delegate-unavailable'],
     [
       'robinhood-chain',
       createUserRobinhoodAuthority(),
@@ -306,14 +308,14 @@ describe('per-user adapters fail closed with a named mechanism', () => {
     expect(verdict.kind === 'denied' && verdict.reason).toContain('user:alice');
   });
 
-  it('gives the three chains three different codes', async () => {
+  it('gives the three chains three different codes when unavailable', async () => {
     // Deliberately distinct: two are scheduling answers with very different
     // schedules, and Polymarket's is architectural. One shared code would send
     // an operator to debug the wrong thing, the mistake `solana-simulation.ts`
     // splits `refuse` from `unavailable` to avoid.
     const codes = new Set<string>();
     for (const adapter of [
-      createUserSolanaAuthority(),
+      createUserSolanaAuthority({ enabled: false }),
       createUserRobinhoodAuthority(),
       createUserPolymarketAuthority()
     ]) {
@@ -336,11 +338,92 @@ describe('per-user adapters fail closed with a named mechanism', () => {
   });
 });
 
+describe('live per-user Solana WAKE Vault adapter', () => {
+  it('grants execution authority bound to the audited WAKE Vault program ID', async () => {
+    const signer = fakeSolanaSigner();
+    const authority = createUserSolanaAuthority({
+      signer,
+      loadUserVaultAddress: async (userId) => `UserVaultPDA:${userId}`
+    });
+
+    const verdict = await authority.authorize(request('solana', ALICE));
+    expect(verdict.kind).toBe('granted');
+    if (verdict.kind === 'granted') {
+      expect(verdict.authority.adapterId).toBe('user-solana');
+      expect(verdict.authority.chain).toBe('solana');
+      expect(verdict.authority.settlementAddress).toBe('UserVaultPDA:alice');
+      expect(verdict.authority.signingAddress).toBe(signer.publicKey);
+      expect(verdict.authority.capabilities).toEqual(['sign-chain-transaction']);
+    }
+  });
+
+  it('defaults settlement address to program-scoped vault format with WAKE_VAULT_PROGRAM_ID', async () => {
+    const signer = fakeSolanaSigner();
+    const authority = createUserSolanaAuthority({ signer });
+    const verdict = await authority.authorize(request('solana', ALICE));
+    expect(verdict.kind).toBe('granted');
+    if (verdict.kind === 'granted') {
+      expect(verdict.authority.settlementAddress).toBe(`solana:vault:${WAKE_VAULT_PROGRAM_ID}:alice`);
+      expect(verdict.authority.signingAddress).toBe(signer.publicKey);
+      expect(verdict.authority.capabilities).toEqual(['sign-chain-transaction']);
+    }
+  });
+
+  it('denies venue-trade when no signer is configured for live wake-vault', async () => {
+    const authority = createUserSolanaAuthority();
+    const verdict = await authority.authorize(request('solana', ALICE));
+    expect(verdict.kind).toBe('denied');
+    if (verdict.kind === 'denied') {
+      expect(verdict.code).toBe('authority-operator-not-configured');
+      expect(verdict.reason).toContain('No Solana transaction signer configured');
+    }
+  });
+
+  it('grants token-spend-permission even without signer for address discovery', async () => {
+    const authority = createUserSolanaAuthority();
+    const verdict = await authority.authorize(request('solana', ALICE, 'token-spend-permission'));
+    expect(verdict.kind).toBe('granted');
+    if (verdict.kind === 'granted') {
+      expect(verdict.authority.settlementAddress).toBe(`solana:vault:${WAKE_VAULT_PROGRAM_ID}:alice`);
+      expect(verdict.authority.signingAddress).toBeNull();
+      expect(verdict.authority.capabilities).toEqual([]);
+    }
+  });
+
+  it('signs transaction through delegated signer capability', async () => {
+    const signer = fakeSolanaSigner();
+    const authority = createUserSolanaAuthority({ signer });
+    const grant = granted(await authority.authorize(request('solana', ALICE)));
+
+    const result = await grant.sign({ kind: 'solana-transaction', transactionBase64: 'UserSwapTxBase64' });
+    expect(result).toEqual({ kind: 'signed', encoding: 'base64', value: 'signed:UserSwapTxBase64' });
+    expect(signer.signed).toContain('UserSwapTxBase64');
+  });
+
+  it('rejects unsupported actions on Solana vault', async () => {
+    const authority = createUserSolanaAuthority();
+    const verdict = await authority.authorize(request('solana', ALICE, 'position-redemption'));
+    expect(verdict.kind).toBe('denied');
+    if (verdict.kind === 'denied') {
+      expect(verdict.code).toBe('authority-capability-unsupported');
+    }
+  });
+
+  it('denies when explicitly disabled via options', async () => {
+    const authority = createUserSolanaAuthority({ enabled: false });
+    const verdict = await authority.authorize(request('solana', ALICE));
+    expect(verdict.kind).toBe('denied');
+    if (verdict.kind === 'denied') {
+      expect(verdict.code).toBe('authority-solana-delegate-unavailable');
+    }
+  });
+});
+
 describe('the full adapter set', () => {
   const deps = {
     solana: {
       trojanWalletAddress: () => 'TrojanWallet1111111111111111111111111111111',
-      signer: () => null
+      signer: () => fakeSolanaSigner()
     },
     robinhoodChain: {
       accountAddress: () => '0x00000000000000000000000000000000000000aa',
@@ -356,13 +439,32 @@ describe('the full adapter set', () => {
     const resolve = createExecutionAuthorityRegistry(createExecutionAuthorityAdapters(deps));
 
     for (const chain of ['solana', 'robinhood-chain', 'polygon'] as const) {
-      // Every operator request is granted, and every per-user request is denied
-      // with something more specific than "no adapter" — which is what tells an
-      // operator the wiring is fine and the mechanism is the thing missing.
+      // Every operator request is granted.
       expect(await resolve(request(chain, OPERATOR))).toMatchObject({ kind: 'granted' });
       const forUser = await resolve(request(chain, ALICE));
-      expect(forUser.kind).toBe('denied');
-      expect(forUser.kind === 'denied' && forUser.code).not.toBe('authority-adapter-missing');
+
+      if (chain === 'solana') {
+        // Solana per-user authority is routed to the live audited WAKE Vault program
+        expect(forUser.kind).toBe('granted');
+        if (forUser.kind === 'granted') {
+          expect(forUser.authority.adapterId).toBe('user-solana');
+        }
+      } else {
+        // Robinhood and Polymarket per-user requests fail closed until respective mechanisms are live
+        expect(forUser.kind).toBe('denied');
+        expect(forUser.kind === 'denied' && forUser.code).not.toBe('authority-adapter-missing');
+      }
+    }
+  });
+
+  it('denies user Solana request when explicitly disabled in adapters set', async () => {
+    const resolve = createExecutionAuthorityRegistry(
+      createExecutionAuthorityAdapters(deps, { enabled: false })
+    );
+    const forUser = await resolve(request('solana', ALICE));
+    expect(forUser.kind).toBe('denied');
+    if (forUser.kind === 'denied') {
+      expect(forUser.code).toBe('authority-solana-delegate-unavailable');
     }
   });
 
@@ -378,5 +480,107 @@ describe('the full adapter set', () => {
       expect(onChain.filter((adapter) => adapter.serves(OPERATOR))).toHaveLength(1);
       expect(onChain.filter((adapter) => adapter.serves(ALICE))).toHaveLength(1);
     }
+  });
+
+  describe('grant lifecycle evaluation (S4-P9)', () => {
+    it('denies with authority-grant-missing when no grant row exists', async () => {
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => null
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toEqual({
+        kind: 'denied',
+        code: 'authority-grant-missing',
+        reason: 'No execution authority grant found for user alice'
+      });
+    });
+
+    it('denies with authority-grant-revoked when grant was revoked or compromised', async () => {
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => ({ status: 'revoked', expiresAt: null })
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toEqual({
+        kind: 'denied',
+        code: 'authority-grant-revoked',
+        reason: 'Execution authority grant has been revoked for user alice'
+      });
+    });
+
+    it('denies with authority-grant-expired when session key has passed its expiresAt (S4-P9)', async () => {
+      const expiry = new Date('2026-08-01T00:00:00Z');
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => ({ status: 'active', expiresAt: expiry }),
+        now: () => new Date('2026-08-02T00:00:00Z')
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-grant-expired'
+      });
+      if (verdict.kind === 'denied') {
+        expect(verdict.reason).toContain('expired at 2026-08-01T00:00:00.000Z');
+      }
+    });
+
+    it('denies with authority-grant-expired when grant status is retired', async () => {
+      const adapter = createUserRobinhoodAuthority({
+        loadGrant: async () => ({ status: 'retired', expiresAt: null })
+      });
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-grant-expired'
+      });
+    });
+  });
+
+  describe('paymaster spend cap and per-user rate limit (S4-P8)', () => {
+    it('denies with authority-paymaster-user-rate-limited when user daily limit exceeded', async () => {
+      const tracker = new PaymasterBudgetTracker({
+        globalDailyCap: 100,
+        userDailyCap: 2
+      });
+      const now = new Date('2026-10-29T10:00:00Z');
+      tracker.recordOperation('alice', now);
+      tracker.recordOperation('alice', now);
+
+      const adapter = createUserRobinhoodAuthority({
+        paymasterTracker: tracker,
+        now: () => now
+      });
+
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-paymaster-user-rate-limited'
+      });
+      if (verdict.kind === 'denied') {
+        expect(verdict.reason).toContain('Paymaster user daily sponsored operation limit exceeded for alice');
+      }
+    });
+
+    it('denies with authority-paymaster-global-budget-exhausted when global daily budget exhausted', async () => {
+      const tracker = new PaymasterBudgetTracker({
+        globalDailyCap: 1,
+        userDailyCap: 10
+      });
+      const now = new Date('2026-10-29T10:00:00Z');
+      tracker.recordOperation('bob', now);
+
+      const adapter = createUserRobinhoodAuthority({
+        paymasterTracker: tracker,
+        now: () => now
+      });
+
+      const verdict = await adapter.authorize(request('robinhood-chain', ALICE));
+      expect(verdict).toMatchObject({
+        kind: 'denied',
+        code: 'authority-paymaster-global-budget-exhausted'
+      });
+      if (verdict.kind === 'denied') {
+        expect(verdict.reason).toContain('Paymaster global daily sponsored budget exhausted');
+      }
+    });
   });
 });

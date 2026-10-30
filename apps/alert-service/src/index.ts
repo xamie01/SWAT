@@ -12,6 +12,7 @@ import { createRedisAlertBridge } from './alert-bridge.js';
 import { deliverQueuedAlert } from './alert-delivery.js';
 import type { SignalAlertPayload } from './alert-payload.js';
 import { checkIngestionHealth } from './ingestion-health.js';
+import { checkPusdLiquidity } from './pusd-monitor.js';
 
 initLogger('alert-service');
 
@@ -111,6 +112,45 @@ const ingestionHealthTimer = setInterval(
   ingestionHealthPollMs
 );
 ingestionHealthTimer.unref();
+
+// ─── pUSD Liquidity & Offramp Health (S4-M42) ──────────────────────────────────
+
+const pusdLiquidityPollMs = clampInteger(
+  process.env.PUSD_LIQUIDITY_POLL_MS,
+  60_000,
+  10_000,
+  15 * 60_000
+);
+let pusdLiquidityCheckRunning = false;
+
+async function pollPusdLiquidity() {
+  if (pusdLiquidityCheckRunning) return;
+  pusdLiquidityCheckRunning = true;
+  try {
+    await checkPusdLiquidity({
+      loadInputs: async () => ({
+        depth: { nativeUsdcAvailable: null },
+        aggregateFloatUsd: null,
+        collateralPaused: null,
+        simulatedUnwrap: null,
+        swapOutputDifferenceBps: null
+      }),
+      sendAlert: sendOperationalTelegram,
+      logError: (message, error) => console.error(message, error)
+    });
+  } catch (error) {
+    console.error('[alert-service] pUSD liquidity poll failed', error);
+  } finally {
+    pusdLiquidityCheckRunning = false;
+  }
+}
+
+void pollPusdLiquidity();
+const pusdLiquidityTimer = setInterval(
+  () => void pollPusdLiquidity(),
+  pusdLiquidityPollMs
+);
+pusdLiquidityTimer.unref();
 
 // ─── Token metadata helper ────────────────────────────────────────────────────
 

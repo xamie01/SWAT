@@ -1,0 +1,4 @@
+; Userlist template for PgBouncer
+; Format: "username" "password_or_hash"
+; For production, generate SCRAM-SHA-256 verifiers or md5 hashes
+"swat" "swat"
