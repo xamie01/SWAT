@@ -53,8 +53,8 @@ export default function AdminRevenuePage() {
   const lifetimeCount = users.filter((u) => u.tier === 'lifetime').length;
 
   const totalPaidSubscribers = operatorCount + ultraCount + lifetimeCount;
-  const mrrUsd = operatorCount * 99 + ultraCount * 499;
-  const cumulativeRevenueUsd = mrrUsd + lifetimeCount * 4999;
+  const mrrUsd = operatorCount * 35 + ultraCount * 150;
+  const cumulativeRevenueUsd = mrrUsd + lifetimeCount * 1999;
 
   const plans = [
     {
@@ -69,28 +69,28 @@ export default function AdminRevenuePage() {
     {
       id: 'operator',
       name: 'Operator Tier',
-      price: '$99 / mo',
+      price: '$35 / mo',
       count: operatorCount,
-      features: '5 active copy slots, 50 sponsored ops/day, priority execution',
-      mrr: `$${(operatorCount * 99).toLocaleString()}`,
+      features: 'Autonomous live copy trading, 25 tracked wallets across Solana, Robinhood, and Polymarket, instant signals',
+      mrr: `$${(operatorCount * 35).toLocaleString()}`,
       badgeColor: 'border-[#14F195]/30 text-[#0E9F6E] dark:text-[#14F195] bg-[#14F195]/10',
     },
     {
       id: 'ultra',
       name: 'Ultra Tier',
-      price: '$499 / mo',
+      price: '$150 / mo',
       count: ultraCount,
-      features: '50 copy slots, unlimited sponsored gas, private Jito MEV lanes',
-      mrr: `$${(ultraCount * 499).toLocaleString()}`,
+      features: 'Unlimited tracked wallets, dynamic custom EVM chains, maximum contract backfill depth, priority execution',
+      mrr: `$${(ultraCount * 150).toLocaleString()}`,
       badgeColor: 'border-[#8B5CF6]/30 text-[#8B5CF6] bg-[#8B5CF6]/10',
     },
     {
       id: 'lifetime',
-      name: 'Institutional Lifetime',
-      price: '$4,999 once',
+      name: 'Lifetime Pass',
+      price: '$1,999 once',
       count: lifetimeCount,
-      features: 'Permanent Ultra access, bespoke cluster scoring API, VIP routing',
-      mrr: `$${(lifetimeCount * 4999).toLocaleString()} (Fixed)`,
+      features: 'Permanent Ultra tier access, bespoke cluster scoring API, VIP routing (Zero monthly renewals)',
+      mrr: `$${(lifetimeCount * 1999).toLocaleString()} (Fixed)`,
       badgeColor: 'border-[#FFB800]/30 text-[#B45309] dark:text-[#FFB800] bg-[#FFB800]/10',
     },
   ];
@@ -278,14 +278,14 @@ export default function AdminRevenuePage() {
                 <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Address</span>
                 <button
                   type="button"
-                  onClick={() => handleCopy('0x7739000000000000000000000000000000007739', 'poly-treasury')}
+                  onClick={() => handleCopy('0xWAKETreasuryPolygon00000000000000000000000', 'poly-treasury')}
                   className="text-[10px] text-primary underline font-bold"
                 >
                   {copiedKey === 'poly-treasury' ? <span className="text-status-success">✓ Copied!</span> : 'Copy'}
                 </button>
               </div>
               <div className="font-bold text-primary truncate select-all">
-                0x7739000000000000000000000000000000007739
+                0xWAKETreasuryPolygon00000000000000000000000
               </div>
             </div>
           </div>
