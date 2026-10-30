@@ -93,6 +93,8 @@ export function buildDatabaseRuntimeConfig(
     60_000
   );
 
+  const isPgBouncer = env.DB_PGBOUNCER === 'true' || databaseUrl.includes(':6432');
+
   return {
     pool: {
       connectionString: databaseUrl,
@@ -100,9 +102,11 @@ export function buildDatabaseRuntimeConfig(
       connectionTimeoutMillis: connectionTimeoutMs,
       idleTimeoutMillis: idleTimeoutMs,
       query_timeout: queryTimeoutMs,
-      statement_timeout: queryTimeoutMs,
-      idle_in_transaction_session_timeout: idleTransactionTimeoutMs,
-      allowExitOnIdle: true
+      statement_timeout: isPgBouncer ? undefined : queryTimeoutMs,
+      idle_in_transaction_session_timeout: isPgBouncer ? undefined : idleTransactionTimeoutMs,
+      allowExitOnIdle: true,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000
     },
     shutdownTimeoutMs
   };

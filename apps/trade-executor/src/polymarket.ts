@@ -28,6 +28,7 @@ import {
 } from '@polymarket/client/actions';
 import { builderApiKey, type BuilderApiKeyCreds } from '@polymarket/client/node';
 import { signerFrom } from '@polymarket/client/ethers-v5';
+import { getActiveRpcUrl } from '@swat/shared';
 import { ethers } from 'ethers';
 import { UnrecoverableError } from 'bullmq';
 import {
@@ -93,7 +94,7 @@ export const POLYMARKET_SHARE_DECIMALS = 2;
 const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY;
 
 export const polygonProvider = new ethers.providers.JsonRpcProvider(
-  process.env.POLYGON_RPC_URL ?? 'https://polygon-bor-rpc.publicnode.com'
+  getActiveRpcUrl('polygon')
 );
 
 export const polymarketSigner = EVM_PRIVATE_KEY

@@ -40,7 +40,9 @@ describe('database runtime configuration', () => {
         query_timeout: 60_000,
         statement_timeout: 60_000,
         idle_in_transaction_session_timeout: 60_000,
-        allowExitOnIdle: true
+        allowExitOnIdle: true,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10_000
       },
       shutdownTimeoutMs: 10_000
     });
@@ -71,6 +73,18 @@ describe('database runtime configuration', () => {
     expect(() => buildDatabaseRuntimeConfig('postgresql://db', {
       DB_QUERY_TIMEOUT_MS: 'not-a-number'
     })).toThrow(/DB_QUERY_TIMEOUT_MS/);
+  });
+
+  it('adjusts session timeouts when connecting through PgBouncer', () => {
+    const configViaEnv = buildDatabaseRuntimeConfig('postgresql://db', {
+      DB_PGBOUNCER: 'true'
+    });
+    expect(configViaEnv.pool.statement_timeout).toBeUndefined();
+    expect(configViaEnv.pool.idle_in_transaction_session_timeout).toBeUndefined();
+
+    const configViaPort = buildDatabaseRuntimeConfig('postgresql://db:6432/swat', {});
+    expect(configViaPort.pool.statement_timeout).toBeUndefined();
+    expect(configViaPort.pool.idle_in_transaction_session_timeout).toBeUndefined();
   });
 });
 

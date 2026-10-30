@@ -7,6 +7,7 @@ import {
   VersionedTransaction
 } from '@solana/web3.js';
 import bs58 from 'bs58';
+import { getActiveRpcUrl } from '@swat/shared';
 
 /**
  * Concrete Solana signer for the Jupiter + Jito runtime (checklist S3-1, S3-2).
@@ -110,11 +111,11 @@ export function createSolanaSigner(options: SolanaSignerOptions): SolanaSigner {
  */
 export function createSolanaSignerFromEnvironment(): SolanaSigner | null {
   const privateKeyBase58 = process.env.SOLANA_PRIVATE_KEY;
+  if (!privateKeyBase58) return null;
   const rpcUrl = process.env.SOLANA_RPC_URL
     ?? (process.env.HELIUS_API_KEY
       ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
-      : undefined);
+      : getActiveRpcUrl('solana'));
 
-  if (!privateKeyBase58 || !rpcUrl) return null;
   return createSolanaSigner({ privateKeyBase58, rpcUrl });
 }

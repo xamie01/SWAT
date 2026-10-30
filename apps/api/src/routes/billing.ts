@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   BILLING_PLANS,
   USDC_MINTS,
+  executeWithRpcFailover,
   resolveBillingPlan,
   type BillingChain,
   type BillingPlanId,
@@ -65,50 +66,54 @@ export async function verifyPolygonUsdcTransferOnChain(input: {
   treasuryAddress: string;
 }): Promise<{ verified: boolean; payerAddress: string | null; amountUsdc: number }> {
   try {
-    const { createPublicClient, http, parseAbiItem } = await import('viem');
-    const { polygon } = await import('viem/chains');
+    return await executeWithRpcFailover({
+      chain: 'polygon',
+      action: async (rpcUrl) => {
+        const { createPublicClient, http, parseAbiItem } = await import('viem');
+        const { polygon } = await import('viem/chains');
 
-    const rpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-bor-rpc.publicnode.com';
-    const client = createPublicClient({
-      chain: polygon,
-      transport: http(rpcUrl)
-    });
+        const client = createPublicClient({
+          chain: polygon,
+          transport: http(rpcUrl)
+        });
 
-    const receipt = await client.getTransactionReceipt({ hash: input.txHash as `0x${string}` });
-    if (receipt.status !== 'success') {
-      return { verified: false, payerAddress: null, amountUsdc: 0 };
-    }
+        const receipt = await client.getTransactionReceipt({ hash: input.txHash as `0x${string}` });
+        if (receipt.status !== 'success') {
+          return { verified: false, payerAddress: null, amountUsdc: 0 };
+        }
 
-    const transferEventAbi = parseAbiItem(
-      'event Transfer(address indexed from, address indexed to, uint256 value)'
-    );
+        const transferEventAbi = parseAbiItem(
+          'event Transfer(address indexed from, address indexed to, uint256 value)'
+        );
 
-    const usdcContract = USDC_MINTS.polygon.toLowerCase();
-    const treasuryLower = input.treasuryAddress.toLowerCase();
+        const usdcContract = USDC_MINTS.polygon.toLowerCase();
+        const treasuryLower = input.treasuryAddress.toLowerCase();
 
-    // Scan logs for ERC-20 Transfer to treasury
-    for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== usdcContract) continue;
-      try {
-        // Topics: [0] = signature, [1] = from, [2] = to
-        if (log.topics[2]) {
-          const toAddress = `0x${log.topics[2].slice(26)}`.toLowerCase();
-          if (toAddress === treasuryLower) {
-            const rawAmount = BigInt(log.data);
-            const amountUsdc = Number(rawAmount) / 1e6;
-            const fromAddress = log.topics[1] ? `0x${log.topics[1].slice(26)}` : null;
+        // Scan logs for ERC-20 Transfer to treasury
+        for (const log of receipt.logs) {
+          if (log.address.toLowerCase() !== usdcContract) continue;
+          try {
+            // Topics: [0] = signature, [1] = from, [2] = to
+            if (log.topics[2]) {
+              const toAddress = `0x${log.topics[2].slice(26)}`.toLowerCase();
+              if (toAddress === treasuryLower) {
+                const rawAmount = BigInt(log.data);
+                const amountUsdc = Number(rawAmount) / 1e6;
+                const fromAddress = log.topics[1] ? `0x${log.topics[1].slice(26)}` : null;
 
-            if (amountUsdc >= input.expectedUsdc) {
-              return { verified: true, payerAddress: fromAddress, amountUsdc };
+                if (amountUsdc >= input.expectedUsdc) {
+                  return { verified: true, payerAddress: fromAddress, amountUsdc };
+                }
+              }
             }
+          } catch {
+            // Ignore unparseable log
           }
         }
-      } catch {
-        // Ignore unparseable log
-      }
-    }
 
-    return { verified: false, payerAddress: null, amountUsdc: 0 };
+        return { verified: false, payerAddress: null, amountUsdc: 0 };
+      }
+    });
   } catch (error) {
     console.error('[billing] Polygon USDC verification failed:', error);
     return { verified: false, payerAddress: null, amountUsdc: 0 };
@@ -152,62 +157,72 @@ export async function verifySolanaUsdcTransferOnChain(input: {
   memo?: string | null;
 }): Promise<{ verified: boolean; payerAddress: string | null; amountUsdc: number }> {
   try {
-    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'billing-verify',
-        method: 'getTransaction',
-        params: [
-          input.txHash,
-          { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
-        ]
-      })
-    });
+    return await executeWithRpcFailover({
+      chain: 'solana',
+      action: async (rpcUrl) => {
+        const response = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'billing-verify',
+            method: 'getTransaction',
+            params: [
+              input.txHash,
+              { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
+            ]
+          })
+        });
 
-    if (!response.ok) {
-      return { verified: false, payerAddress: null, amountUsdc: 0 };
-    }
-
-    const payload = (await response.json()) as { result?: SolanaRpcTransactionResult };
-    const tx = payload.result;
-
-    if (!tx || tx.meta?.err) {
-      return { verified: false, payerAddress: null, amountUsdc: 0 };
-    }
-
-    const targetMint = USDC_MINTS.solana;
-    let foundAmountUsdc = 0;
-    let payer: string | null = null;
-
-    const preBalances = tx.meta?.preTokenBalances || [];
-    const postBalances = tx.meta?.postTokenBalances || [];
-
-    for (const post of postBalances) {
-      if (post.mint === targetMint && post.owner === input.treasuryAddress) {
-        const pre = preBalances.find((p: SolanaParsedTokenBalance) => p.accountIndex === post.accountIndex);
-        const preAmount = pre?.uiTokenAmount.uiAmount || 0;
-        const postAmount = post.uiTokenAmount.uiAmount || 0;
-        const diff = postAmount - preAmount;
-        if (diff > 0) {
-          foundAmountUsdc += diff;
+        if (!response.ok) {
+          throw new Error(`Solana RPC HTTP ${response.status}: ${response.statusText}`);
         }
+
+        const payload = (await response.json()) as {
+          result?: SolanaRpcTransactionResult;
+          error?: { message: string };
+        };
+        if (payload.error) {
+          throw new Error(`Solana RPC error: ${payload.error.message}`);
+        }
+        const tx = payload.result;
+
+        if (!tx || tx.meta?.err) {
+          return { verified: false, payerAddress: null, amountUsdc: 0 };
+        }
+
+        const targetMint = USDC_MINTS.solana;
+        let foundAmountUsdc = 0;
+        let payer: string | null = null;
+
+        const preBalances = tx.meta?.preTokenBalances || [];
+        const postBalances = tx.meta?.postTokenBalances || [];
+
+        for (const post of postBalances) {
+          if (post.mint === targetMint && post.owner === input.treasuryAddress) {
+            const pre = preBalances.find((p: SolanaParsedTokenBalance) => p.accountIndex === post.accountIndex);
+            const preAmount = pre?.uiTokenAmount.uiAmount || 0;
+            const postAmount = post.uiTokenAmount.uiAmount || 0;
+            const diff = postAmount - preAmount;
+            if (diff > 0) {
+              foundAmountUsdc += diff;
+            }
+          }
+        }
+
+        const accountKeys = tx.transaction?.message?.accountKeys || [];
+        const signerAccount = accountKeys.find((k: SolanaAccountKey) => k.signer);
+        if (signerAccount) {
+          payer = signerAccount.pubkey;
+        }
+
+        if (foundAmountUsdc >= input.expectedUsdc) {
+          return { verified: true, payerAddress: payer, amountUsdc: foundAmountUsdc };
+        }
+
+        return { verified: false, payerAddress: null, amountUsdc: foundAmountUsdc };
       }
-    }
-
-    const accountKeys = tx.transaction?.message?.accountKeys || [];
-    const signerAccount = accountKeys.find((k: SolanaAccountKey) => k.signer);
-    if (signerAccount) {
-      payer = signerAccount.pubkey;
-    }
-
-    if (foundAmountUsdc >= input.expectedUsdc) {
-      return { verified: true, payerAddress: payer, amountUsdc: foundAmountUsdc };
-    }
-
-    return { verified: false, payerAddress: null, amountUsdc: foundAmountUsdc };
+    });
   } catch (error) {
     console.error('[billing] Solana USDC verification failed:', error);
     return { verified: false, payerAddress: null, amountUsdc: 0 };

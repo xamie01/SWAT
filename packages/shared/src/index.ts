@@ -52,3 +52,4 @@ export * from './polymarket-book-depth.js';
 export * from './polymarket-book-transport.js';
 export * from './sol-reserve.js';
 export * from './billing.js';
+export * from './rpc-failover.js';

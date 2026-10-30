@@ -33,6 +33,8 @@ import {
   walletInputSchema
 } from '@swat/shared';
 import type { Chain } from '@swat/shared';
+import { getActiveRpcUrl, probeRpcPool } from '@swat/shared';
+import { executeBillingSweepJob } from './cron/billing-sweep.js';
 import {
   emergencyOff,
   executionModeUpdateSchema,
@@ -235,13 +237,96 @@ function parseOptionalNumber(raw: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-// ─── Health ───────────────────────────────────────────────────────────────────
+// ─── Health & Ops Telemetry ───────────────────────────────────────────────────
 
-app.get('/v1/health', async () => ({
-  status: 'ok',
-  service: 'api',
-  ts: new Date().toISOString()
-}));
+async function checkSystemHealth(reply: any) {
+  const ts = new Date().toISOString();
+  let dbHealthy = false;
+  let dbLatencyMs = -1;
+  let redisHealthy = false;
+  let redisLatencyMs = -1;
+
+  // 1. Check PostgreSQL
+  const dbStart = Date.now();
+  try {
+    await query('SELECT 1');
+    dbHealthy = true;
+    dbLatencyMs = Date.now() - dbStart;
+  } catch (err) {
+    app.log.error(err, '[health] Database health check failed');
+  }
+
+  // 2. Check Redis
+  const redisStart = Date.now();
+  try {
+    const pingRes = await redis.ping();
+    if (pingRes === 'PONG') {
+      redisHealthy = true;
+      redisLatencyMs = Date.now() - redisStart;
+    }
+  } catch (err) {
+    app.log.error(err, '[health] Redis health check failed');
+  }
+
+  // 3. Current active RPC endpoints
+  const activeSolanaRpc = getActiveRpcUrl('solana');
+  const activePolygonRpc = getActiveRpcUrl('polygon');
+
+  const allHealthy = dbHealthy && redisHealthy;
+  const statusCode = allHealthy ? 200 : 503;
+
+  return reply.status(statusCode).send({
+    status: allHealthy ? 'ok' : 'degraded',
+    service: 'api',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: ts,
+    dependencies: {
+      database: {
+        healthy: dbHealthy,
+        latencyMs: dbLatencyMs
+      },
+      redis: {
+        healthy: redisHealthy,
+        latencyMs: redisLatencyMs
+      },
+      rpc: {
+        solana: { activeUrl: activeSolanaRpc },
+        polygon: { activeUrl: activePolygonRpc }
+      }
+    }
+  });
+}
+
+app.get('/health', async (req, reply) => checkSystemHealth(reply));
+app.get('/v1/health', async (req, reply) => checkSystemHealth(reply));
+
+app.get('/v1/health/rpc', async () => {
+  const [solanaPool, polygonPool] = await Promise.all([
+    probeRpcPool('solana'),
+    probeRpcPool('polygon')
+  ]);
+  return {
+    timestamp: new Date().toISOString(),
+    pools: {
+      solana: solanaPool,
+      polygon: polygonPool
+    }
+  };
+});
+
+// Built-in recurring billing downgrade sweep
+// Runs once every hour (or customizable via BILLING_SWEEP_INTERVAL_MS).
+// Can be disabled via DISABLE_BILLING_SWEEPER_DAEMON=true if running external cron.
+const disableSweeper = process.env.DISABLE_BILLING_SWEEPER_DAEMON === 'true';
+if (!disableSweeper && process.env.NODE_ENV !== 'test') {
+  const sweepIntervalMs = Number(process.env.BILLING_SWEEP_INTERVAL_MS ?? 3600_000);
+  const timer = setInterval(() => {
+    executeBillingSweepJob().catch((err) => {
+      app.log.error(err, '[cron] background billing sweep failed');
+    });
+  }, sweepIntervalMs);
+  timer.unref?.();
+}
 
 app.get('/v1/health/ingestion', async () => {
   const generatedAt = new Date();
