@@ -36,7 +36,9 @@ Alerts are passive. What DeFi actually needs is immediate, non-custodial executi
 
 Enter Wake Protocol. 🧵👇
 ```
-- **Media Suggestion:** Clean graphic of the Wake Protocol emblem with the copy: *"Intelligence that acts, not just alerts."*
+- **Attached Media Asset:**
+![Wake Protocol Manifesto & Slogan](../apps/web/public/campaign/post01_wake_manifesto.png)
+
 - **Follow-up Thread Tweet:**
 ```text
 We spent the last few weeks engineering Wake Protocol from the bare metal up:
@@ -67,7 +69,8 @@ The result:
 
 Build for scale before you need it.
 ```
-- **Media Suggestion:** Screenshot of `036_transactions_brin.sql` and the execution plan showing index scan benchmark.
+- **Attached Media Asset:**
+![PostgreSQL BRIN Query Benchmark & Line Speed Architecture](../apps/web/public/campaign/post02_postgres_brin_scale.png)
 
 ---
 
@@ -86,7 +89,8 @@ Most tools force you to run 3 separate dashboards.
 
 Wake Protocol unifies all three into a single multi-chain execution engine with unified telemetry.
 ```
-- **Media Suggestion:** Diagram showing Solana (Helius/RPC), Robinhood Chain (EVM RPC), and Polymarket (Polygon) feeding into the unified ingestion pipeline.
+- **Attached Media Asset:**
+![Multi-Chain Unified Architecture](../apps/web/public/campaign/post03_multichain_ingestion.png)
 
 ---
 
@@ -106,7 +110,8 @@ Wake Protocol doesn't track addresses. It clusters behaviors.
 
 Our clustering engine maps temporal correlation, shared funding trees, and simultaneous routing. You track the syndicate, not the sockpuppet.
 ```
-- **Media Suggestion:** Network cluster graph visual showing 1 funder node splitting into 15 sub-wallets buying the same token mint.
+- **Attached Media Asset:**
+![Sybil Defense & Cluster Intelligence Console](../apps/web/public/campaign/post04_cluster_intelligence.png)
 
 ---
 
@@ -124,7 +129,8 @@ Wake Protocol bypasses the public mempool entirely:
 
 No front-running. No back-running. No toxic slippage.
 ```
-- **Media Suggestion:** Graphic showing Public Mempool (sandwiched) vs Jito Private Bundle lane (clean execution).
+- **Attached Media Asset:**
+![Jito MEV Bundles & Slippage Protection Settings](../apps/web/public/campaign/post05_jito_bundles_execution.png)
 
 ---
 
@@ -144,7 +150,8 @@ When a fresh pool deploys:
 
 The engine continually seeds itself with newly discovered elite traders.
 ```
-- **Media Suggestion:** Terminal output log showing `apps/discovery` detecting early buyers on a newly created token liquidity pool.
+- **Attached Media Asset:**
+![Early Buyer Discovery Stream & Live Signals](../apps/web/public/campaign/post06_early_buyer_discovery.png)
 
 ---
 
@@ -167,7 +174,8 @@ Wallets are dynamically tiered:
 
 Follow only verifiable performance.
 ```
-- **Media Suggestion:** UI screenshot of the Scorer & Clusters overview table in the Wake Protocol console.
+- **Attached Media Asset:**
+![Daily Scored Wallets & Tier Ranking](../apps/web/public/campaign/post07_daily_scorer_tiers.png)
 
 ---
 
@@ -192,7 +200,8 @@ Wake Protocol uses 100% keyless, non-custodial custody rails:
 
 Your capital never leaves your cryptographic control.
 ```
-- **Media Suggestion:** Bold security typography card: *"Zero Server Custody. Zero Exported Private Keys."*
+- **Attached Media Asset:**
+![Zero-Custody Multi-Chain Vault Overview](../apps/web/public/campaign/post08_zero_custody_vault.png)
 
 ---
 
@@ -214,7 +223,8 @@ Properties:
 
 Mathematical security > Promises.
 ```
-- **Media Suggestion:** Code snippet from `execution-authority-adapters.ts` showing Anchor PDA derivation and rent lamport handling.
+- **Attached Media Asset:**
+![Solana Keyless Anchor Program Derived Address (PDA)](../apps/web/public/campaign/post09_solana_anchor_pda.png)
 
 ---
 
@@ -233,7 +243,8 @@ Instead of deploying heavy smart contract wallets, your existing EOA temporarily
 
 No wallet migrations. Pure native Web3 UX.
 ```
-- **Media Suggestion:** Flow diagram showing User EOA &rarr; EIP-7702 Delegation &rarr; Paymaster Gas Sponsorship &rarr; Execution.
+- **Attached Media Asset:**
+![Robinhood Chain EIP-7702 Session & Gas Sponsorship](../apps/web/public/campaign/post10_robinhood_eip7702.png)
 
 ---
 
@@ -252,7 +263,8 @@ Our solution: Isolated ERC-7739 Safe Deposit Proxies on Polygon.
 
 Venue-isolated liquidity with zero risk of cross-account contamination.
 ```
-- **Media Suggestion:** Screenshot of the Polymarket Deposit Proxy card in `/vault` showing live Polygon balance verification.
+- **Attached Media Asset:**
+![Polymarket Safe Deposit Proxy Card](../apps/web/public/campaign/post11_polymarket_safe_proxy.png)
 
 ---
 
@@ -273,7 +285,8 @@ Wake Protocol enforces a hard cap: MAX 50 COPIERS per master wallet.
 
 We protect follower liquidity against pool depletion and slippage degradation.
 ```
-- **Media Suggestion:** Graph showing liquidity impact comparing 50 followers (safe execution corridor) vs 2,000 followers (toxic curve).
+- **Attached Media Asset:**
+![Capacity Cap & Master Fleet Telemetry](../apps/web/public/campaign/post12_capacity_caps_50.png)
 
 ---
 
@@ -293,7 +306,8 @@ When the master sells 35%, the engine computes your specific entry lots and prop
 
 No stranded dust tokens. Exact mathematical attribution.
 ```
-- **Media Suggestion:** Visual breakdown showing Master Wallet (100 SOL &rarr; 65 SOL) and Follower Wallet ($1,000 &rarr; $650) executing in lockstep.
+- **Attached Media Asset:**
+![Lot-by-Lot Proportional Attribution & Positions View](../apps/web/public/campaign/post13_lot_proportional_exits.png)
 
 ---
 
@@ -313,7 +327,8 @@ Wake Protocol features an off-chain Autonomous Stop-Loss Engine:
 
 Protecting your downside is rule #1.
 ```
-- **Media Suggestion:** UI screenshot of the Risk Controls & Stop-Loss configuration panel in `/settings`.
+- **Attached Media Asset:**
+![Autonomous Stop-Loss & Circuit Breaker Settings](../apps/web/public/campaign/post14_autonomous_stop_loss.png)
 
 ---
 
@@ -334,7 +349,8 @@ If an operator or trader triggers EMERGENCY OFF in Wake Protocol:
 
 Zero hesitation. Safety first.
 ```
-- **Media Suggestion:** UI GIF or image of the red "EMERGENCY OFF" trigger in the operator console.
+- **Attached Media Asset:**
+![Emergency Kill-Switch & Real-Time Microservice Logs](../apps/web/public/campaign/post15_emergency_killswitch.png)
 
 ---
 
@@ -353,7 +369,8 @@ We completely redesigned the Wake Protocol custody vault:
 
 Connect, sign once, and your execution vault is live.
 ```
-- **Media Suggestion:** Clean video recording or GIF of connecting Phantom and MetaMask in `/vault` with 1 click.
+- **Attached Media Asset:**
+![1-Click Multi-Chain Wallet Connection Bar](../apps/web/public/campaign/post16_oneclick_wallet_connect.png)
 
 ---
 
@@ -374,7 +391,8 @@ We engineered dynamic SIWE/SIWS binding:
 
 Security without breaking user trust.
 ```
-- **Media Suggestion:** Side-by-side screenshot showing the clean, verified SIWE signature prompt in MetaMask.
+- **Attached Media Asset:**
+![Dynamic SIWE / SIWS Challenge Dialog](../apps/web/public/campaign/post17_dynamic_siwe_security.png)
 
 ---
 
@@ -399,7 +417,9 @@ Wake Protocol is built with role-adaptive command centers:
 
 Purpose-built interfaces for both operators and followers.
 ```
-- **Media Suggestion:** Carousel showing the Trading Matrix (`/admin/portfolio`) alongside the Trader Dashboard (`/dashboard`).
+- **Attached Media Assets:**
+![Operator Trading Matrix & Fleet AUM](../apps/web/public/campaign/post18_operator_matrix.png)
+![Trader Non-Custodial Console & Dashboard](../apps/web/public/campaign/post18_trader_dashboard.png)
 
 ---
 
@@ -418,7 +438,8 @@ Wake Protocol runs on native on-chain USDC subscriptions:
 
 Instant on-chain verification. Zero chargebacks.
 ```
-- **Media Suggestion:** Graphic showing the 4 pricing tiers with feature breakdown and USDC payment options.
+- **Attached Media Asset:**
+![USDC Subscription Pricing Tiers](../apps/web/public/campaign/post19_usdc_pricing_tiers.png)
 
 ---
 
@@ -438,4 +459,5 @@ We built the bridge between detecting alpha and capturing it.
 
 Stop watching alerts. Start executing. 🌊⚡
 ```
-- **Media Suggestion:** High-production video teaser or branded launch card featuring the Wake Protocol vector fin logo and live metrics dashboard.
+- **Attached Media Asset:**
+![Wake Protocol Official Launch Hero](../apps/web/public/campaign/post20_official_launch.png)
