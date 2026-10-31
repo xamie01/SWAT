@@ -1,21 +1,26 @@
+import type { PoolClient, QueryResultRow } from 'pg';
+import { withTransaction, type TransactionOptions } from './transaction.js';
+
 /**
- * Tenant scoping (D12).
+ * Tenant scoping (D12 & Migration 064).
  *
- * The rule this file exists to enforce: **`user_id` comes from the session,
- * never from a request payload.** Every per-user query takes a `UserScope` as
- * its first parameter, and the only way to obtain one is `forUser()`, which the
- * API calls with `request.user.id` set by the auth plugin.
+ * Dual-layer defense-in-depth security model:
  *
- * This is deliberately a nominal type rather than a bare string. A function
- * signature of `(userId: string, ...)` accepts `request.body.userId` just as
- * happily as the session's id, and that mistake is invisible in review; a
- * signature of `(scope: UserScope, ...)` does not compile against a raw string.
- * The type is the control — not the convention.
+ * 1. Application Layer (TypeScript Nominal Typing):
+ *    `user_id` comes from the verified session, never from an untrusted request payload.
+ *    Per-user query functions take a `UserScope` as their first parameter. The only
+ *    constructor is `forUser(userId)`, which ensures raw string bodies cannot be passed.
  *
- * RLS was considered and rejected for now (D12): a single database role with
- * pooled connections makes `SET LOCAL` fragile, and the cross-tenant background
- * jobs (scorer, discovery, signal-engine) would each need a documented bypass.
- * It may return later as a backstop on custody and balance tables only.
+ * 2. Database Layer (PostgreSQL Row-Level Security):
+ *    PostgreSQL RLS is enabled and forced (`FORCE ROW LEVEL SECURITY`) across all 17
+ *    user-scoped tables (`users`, `user_sessions`, `user_auth_wallets`, `user_api_keys`,
+ *    `user_balances`, `user_wallet_subscriptions`, `user_token_watches`,
+ *    `user_execution_grants`, `user_execution_settings`, `user_chain_execution_settings`,
+ *    `user_payment_intents`, `crypto_payments`, `copy_positions`, `copy_executions`,
+ *    `copy_position_master_lots`, `copy_position_applications`, `copy_position_close_all_claims`).
+ *    When executing queries within `withTenantTransaction(scope, ...)` or `scopedQuery(scope, ...)`,
+ *    Postgres sets `app.bypass_rls = 'off'` and `app.current_user_id = scope.userId`,
+ *    enforcing kernel-level database isolation.
  */
 
 declare const scopeBrand: unique symbol;
@@ -36,7 +41,7 @@ export function forUser(userId: string): UserScope {
   if (!userId) {
     // An empty scope would silently widen every query built from it.
     throw new Error('forUser() requires a user id');
-    }
+  }
   return { userId } as UserScope;
 }
 
@@ -55,4 +60,52 @@ export function crossTenantScope(reason: string): UserScope {
 
 export function isCrossTenant(scope: UserScope): boolean {
   return scope.userId === '*';
+}
+
+/**
+ * Sets the PostgreSQL session variables for Row-Level Security on a checked-out client.
+ *
+ * Scopes queries to `scope.userId`, enabling Postgres RLS enforcement on all 17 user tables.
+ * Setting `is_rls_bypassed = 'off'` activates kernel RLS filtering for specific users.
+ * When `scope.userId === '*'`, sets `app.bypass_rls = 'on'` for cross-tenant administration.
+ */
+export async function setTenantScope(client: PoolClient, scope: UserScope): Promise<void> {
+  if (isCrossTenant(scope)) {
+    await client.query("SET LOCAL app.bypass_rls = 'on'");
+    await client.query("SET LOCAL app.current_user_id = '*'");
+  } else {
+    await client.query("SET LOCAL app.bypass_rls = 'off'");
+    await client.query("SELECT set_config('app.current_user_id', $1, true)", [scope.userId]);
+  }
+}
+
+/**
+ * Executes an operation inside a PostgreSQL transaction with active Row-Level Security (RLS).
+ *
+ * Enforces database-level isolation so that queries cannot read or mutate another tenant's rows,
+ * even in the event of an application-level SQL logic error.
+ */
+export async function withTenantTransaction<T>(
+  scope: UserScope,
+  operation: (client: PoolClient) => Promise<T>,
+  options: TransactionOptions = {}
+): Promise<T> {
+  return withTransaction(async (client) => {
+    await setTenantScope(client, scope);
+    return operation(client);
+  }, options);
+}
+
+/**
+ * Runs a single query under tenant Row-Level Security within an isolated transaction.
+ */
+export async function scopedQuery<T extends QueryResultRow = QueryResultRow>(
+  scope: UserScope,
+  text: string,
+  values?: unknown[]
+): Promise<T[]> {
+  return withTenantTransaction(scope, async (client) => {
+    const result = await client.query<T>(text, values);
+    return result.rows;
+  });
 }
