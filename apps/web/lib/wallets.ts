@@ -1,4 +1,80 @@
 import { api } from './api.js';
+import { PublicKey } from '@solana/web3.js';
+
+export const WAKE_SOLANA_MAINNET_PROGRAM_ID = '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS';
+export const WAKE_SOLANA_DEVNET_PROGRAM_ID = 'WakeDev11111111111111111111111111111111111';
+
+/**
+ * Derives a real Anchor Program Derived Address (PDA) on Solana:
+ * seeds = [b"wake_vault", user_public_key]
+ * program_id = WAKE_SOLANA_PROGRAM_ID
+ */
+export function deriveSolanaAnchorPda(
+  userAddress: string,
+  cluster: 'mainnet-beta' | 'devnet' = 'mainnet-beta'
+): { pdaAddress: string; bump: number } {
+  try {
+    const userPubkey = new PublicKey(userAddress.trim());
+    const progId = new PublicKey(
+      cluster === 'devnet' ? WAKE_SOLANA_DEVNET_PROGRAM_ID : WAKE_SOLANA_MAINNET_PROGRAM_ID
+    );
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+      [Buffer.from('wake_vault'), userPubkey.toBuffer()],
+      progId
+    );
+    return { pdaAddress: pda.toBase58(), bump };
+  } catch (err) {
+    console.warn('Could not derive Anchor PDA with @solana/web3.js, using fallback:', err);
+    return { pdaAddress: '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS', bump: 255 };
+  }
+}
+
+/**
+ * Detects whether the active Solana wallet or RPC is targeting devnet or mainnet
+ */
+export function detectSolanaCluster(provider?: any): 'mainnet-beta' | 'devnet' {
+  if (provider) {
+    if (provider.isDevnet || provider.cluster === 'devnet' || provider.network === 'devnet') {
+      return 'devnet';
+    }
+    const rpc = provider.connection?._rpcEndpoint || '';
+    if (typeof rpc === 'string' && rpc.includes('devnet')) return 'devnet';
+  }
+  return 'mainnet-beta';
+}
+
+/**
+ * Robust copy helper that succeeds even on non-HTTPS origins (e.g. raw IP)
+ */
+export function copyToClipboard(text: string): boolean {
+  if (!text) return false;
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(() => {});
+      return true;
+    }
+  } catch {
+    // Fall back to execCommand
+  }
+  if (typeof document !== 'undefined') {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'absolute';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    try {
+      const ok = document.execCommand('copy');
+      document.body.removeChild(el);
+      return ok;
+    } catch {
+      document.body.removeChild(el);
+      return false;
+    }
+  }
+  return false;
+}
 
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 

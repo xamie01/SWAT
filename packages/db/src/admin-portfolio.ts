@@ -117,8 +117,8 @@ export interface AdminPortfolioTokenSummary {
 }
 
 function runQuery(poolOrClient: Pool | PoolClient | undefined, sql: string, params: unknown[] = []) {
-  if (poolOrClient) {
-    return poolOrClient.query(sql, params);
+  if (poolOrClient && typeof (poolOrClient as any).query === 'function') {
+    return (poolOrClient as any).query(sql, params);
   }
   return query(sql, params).then((rows) => ({ rows }));
 }
@@ -128,7 +128,7 @@ export async function getAdminPortfolioOverview(
 ): Promise<AdminPortfolioOverview> {
   const q = `
     SELECT
-      COALESCE((SELECT SUM(balance_usd) FROM user_balances WHERE balance_usd > 0), 0)::numeric AS cash_float,
+      COALESCE((SELECT SUM(usd) FROM user_balances WHERE usd > 0), 0)::numeric AS cash_float,
       COALESCE((SELECT SUM(cost_basis_usd) FROM copy_positions WHERE confirmed_quantity > 0), 0)::numeric AS positions_value,
       COALESCE((SELECT SUM(amount_usd) FROM trades WHERE user_id IS NOT NULL AND direction = 'sell'), 0)::numeric -
       COALESCE((SELECT SUM(amount_usd) FROM trades WHERE user_id IS NOT NULL AND direction = 'buy'), 0)::numeric AS net_realized_pnl,
@@ -175,9 +175,21 @@ export async function getAdminPortfolioOverview(
 }
 
 export async function getAdminPortfolioUsers(
-  poolOrClient?: Pool | PoolClient,
-  options: { page?: number; limit?: number; search?: string; tier?: string } = {}
+  poolOrOptions?: Pool | PoolClient | { page?: number; limit?: number; search?: string; tier?: string },
+  maybeOptions?: { page?: number; limit?: number; search?: string; tier?: string }
 ): Promise<{ users: AdminPortfolioUserSummary[]; total: number }> {
+  let poolOrClient: Pool | PoolClient | undefined;
+  let options: { page?: number; limit?: number; search?: string; tier?: string } = {};
+
+  if (poolOrOptions && typeof (poolOrOptions as any).query === 'function') {
+    poolOrClient = poolOrOptions as Pool | PoolClient;
+    options = maybeOptions ?? {};
+  } else if (poolOrOptions && typeof poolOrOptions === 'object') {
+    options = poolOrOptions as { page?: number; limit?: number; search?: string; tier?: string };
+  } else {
+    options = maybeOptions ?? {};
+  }
+
   const page = Math.max(1, options.page ?? 1);
   const limit = Math.min(100, Math.max(1, options.limit ?? 25));
   const offset = (page - 1) * limit;
@@ -214,8 +226,8 @@ export async function getAdminPortfolioUsers(
       u.tier,
       u.created_at,
       u.tier_expires_at,
-      u.grace_period_ends_at,
-      COALESCE(es.kill_switch_active, false) AS kill_switch_active,
+      CASE WHEN u.tier_expires_at IS NOT NULL THEN u.tier_expires_at + INTERVAL '3 days' ELSE NULL END AS grace_period_ends_at,
+      COALESCE(es.killed, false) AS kill_switch_active,
       COALESCE(bal.total_cash, 0)::numeric AS total_cash,
       COALESCE(pos.open_positions_count, 0)::bigint AS open_positions_count,
       COALESCE(pos.open_positions_value, 0)::numeric AS open_positions_value,
@@ -224,7 +236,7 @@ export async function getAdminPortfolioUsers(
     FROM users u
     LEFT JOIN user_execution_settings es ON es.user_id = u.id
     LEFT JOIN (
-      SELECT user_id, SUM(balance_usd) AS total_cash
+      SELECT user_id, SUM(usd) AS total_cash
       FROM user_balances
       GROUP BY user_id
     ) bal ON bal.user_id = u.id
@@ -258,7 +270,7 @@ export async function getAdminPortfolioUsers(
   if (userIds.length > 0) {
     const grantsRes = await runQuery(
       poolOrClient,
-      `SELECT user_id, chain, grant_type
+      `SELECT user_id, chain, grant_kind AS grant_type
        FROM user_execution_grants
        WHERE user_id = ANY($1) AND revoked_at IS NULL`,
       [userIds]
@@ -312,14 +324,26 @@ export async function getAdminPortfolioUsers(
 }
 
 export async function getAdminPortfolioUserDetail(
-  poolOrClient: Pool | PoolClient | undefined,
-  userId: string
+  userIdOrPool: string | Pool | PoolClient | undefined,
+  maybeUserId?: string
 ): Promise<AdminPortfolioUserDetail | null> {
+  let poolOrClient: Pool | PoolClient | undefined;
+  let userId: string;
+
+  if (typeof userIdOrPool === 'string') {
+    userId = userIdOrPool;
+  } else if (userIdOrPool && typeof (userIdOrPool as any).query === 'function') {
+    poolOrClient = userIdOrPool as Pool | PoolClient;
+    userId = maybeUserId || '';
+  } else {
+    userId = maybeUserId || '';
+  }
   const userRes = await runQuery(
     poolOrClient,
-    `SELECT u.id, u.email, u.role, u.tier, u.created_at, u.tier_expires_at, u.grace_period_ends_at,
-            COALESCE(es.kill_switch_active, false) AS kill_switch_active,
-            COALESCE(es.max_slippage_bps, 100) AS max_slippage_bps
+    `SELECT u.id, u.email, u.role, u.tier, u.created_at, u.tier_expires_at,
+            CASE WHEN u.tier_expires_at IS NOT NULL THEN u.tier_expires_at + INTERVAL '3 days' ELSE NULL END AS grace_period_ends_at,
+            COALESCE(es.killed, false) AS kill_switch_active,
+            COALESCE((SELECT max_slippage_bps FROM user_chain_execution_settings WHERE user_id = u.id LIMIT 1), 100) AS max_slippage_bps
      FROM users u
      LEFT JOIN user_execution_settings es ON es.user_id = u.id
      WHERE u.id = $1`,
@@ -331,7 +355,7 @@ export async function getAdminPortfolioUserDetail(
 
   const balancesRes = await runQuery(
     poolOrClient,
-    `SELECT chain, asset, balance_usd, balance_native, updated_at
+    `SELECT chain, asset, usd AS balance_usd, amount AS balance_native, COALESCE(fetched_at, NOW()) AS updated_at
      FROM user_balances
      WHERE user_id = $1
      ORDER BY chain, asset`,
@@ -452,7 +476,7 @@ export async function getAdminPortfolioMasters(
     SELECT
       w.address AS master_wallet_address,
       w.chain,
-      COALESCE((SELECT label FROM user_wallet_subscriptions WHERE wallet_address = w.address AND label IS NOT NULL LIMIT 1), w.label) AS label,
+      COALESCE((SELECT label FROM user_wallet_subscriptions WHERE wallet_address = w.address AND label IS NOT NULL LIMIT 1), w.nickname) AS label,
       COUNT(DISTINCT uws.user_id) FILTER (WHERE uws.state = 'active') AS follower_count,
       COALESCE(SUM(pos.cost_basis_usd), 0)::numeric AS follower_capital_usd,
       COALESCE(SUM(CASE WHEN tr.direction = 'sell' THEN tr.amount_usd ELSE -tr.amount_usd END), 0)::numeric AS copier_realized_pnl,
@@ -463,7 +487,7 @@ export async function getAdminPortfolioMasters(
     LEFT JOIN copy_position_master_lots cpml ON cpml.master_wallet_address = w.address AND cpml.remaining_quantity > 0
     LEFT JOIN copy_positions pos ON pos.id = cpml.position_id
     LEFT JOIN trades tr ON tr.wallet_address = w.address AND tr.user_id IS NOT NULL
-    GROUP BY w.address, w.chain, w.label
+    GROUP BY w.address, w.chain, w.nickname
     HAVING COUNT(uws.user_id) > 0 OR COUNT(cpml.id) > 0
     ORDER BY follower_count DESC, follower_capital_usd DESC
   `;
@@ -522,9 +546,20 @@ export async function getAdminPortfolioTokens(
 }
 
 export async function getAdminPortfolioExportData(
-  poolOrClient: Pool | PoolClient | undefined,
-  type: 'users' | 'positions' | 'executions' | 'masters'
+  typeOrPool: 'users' | 'positions' | 'executions' | 'masters' | Pool | PoolClient | undefined,
+  maybeType?: 'users' | 'positions' | 'executions' | 'masters'
 ): Promise<Array<Record<string, unknown>>> {
+  let poolOrClient: Pool | PoolClient | undefined;
+  let type: 'users' | 'positions' | 'executions' | 'masters';
+
+  if (typeof typeOrPool === 'string') {
+    type = typeOrPool;
+  } else if (typeOrPool && typeof (typeOrPool as any).query === 'function') {
+    poolOrClient = typeOrPool as Pool | PoolClient;
+    type = maybeType!;
+  } else {
+    type = maybeType!;
+  }
   switch (type) {
     case 'users': {
       const res = await getAdminPortfolioUsers(poolOrClient, { page: 1, limit: 1000 });

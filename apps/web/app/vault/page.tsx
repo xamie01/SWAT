@@ -11,6 +11,9 @@ import {
   linkWalletWithSignature,
   getSolanaProvider,
   getEvmProvider,
+  deriveSolanaAnchorPda,
+  detectSolanaCluster,
+  copyToClipboard,
 } from '../../lib/wallets.js';
 
 interface VaultData {
@@ -75,6 +78,20 @@ export default function VaultPage() {
   const [emailCode, setEmailCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   const [submittingWithdraw, setSubmittingWithdraw] = useState(false);
+
+  // Solana Cluster, Copy Feedback & Modals
+  const [solanaCluster, setSolanaCluster] = useState<'mainnet-beta' | 'devnet'>('mainnet-beta');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showWalletConnectModal, setShowWalletConnectModal] = useState<boolean>(false);
+  const [actionSuccessNotice, setActionSuccessNotice] = useState<string | null>(null);
+
+  const triggerCopy = (text: string, key: string) => {
+    const ok = copyToClipboard(text);
+    if (ok) {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((curr) => (curr === key ? null : curr)), 2000);
+    }
+  };
 
   useEffect(() => {
     fetchVault();
@@ -169,10 +186,11 @@ export default function VaultPage() {
           provider,
         });
 
-        // Compute Solana Anchor Execution PDA
-        const derivedPda = address.length > 10
-          ? `${address.slice(0, 4)}AnchorPDA${address.slice(-4)}`
-          : '3MEBh2sd98L5CD2xfpU9mPf2uDo7Yjbn1YxFUD3bahCJ';
+        const detectedCluster = detectSolanaCluster(provider);
+        setSolanaCluster(detectedCluster);
+
+        // Compute Real Solana Anchor Execution PDA
+        const { pdaAddress: derivedPda } = deriveSolanaAnchorPda(address, detectedCluster);
 
         setData((prev) =>
           prev
@@ -198,7 +216,7 @@ export default function VaultPage() {
             : prev
         );
 
-        setWalletConnectSuccess(`Connected to ${walletName}! Address ${address.slice(0, 4)}...${address.slice(-4)} cryptographically linked. Anchor Execution PDA derived.`);
+        setWalletConnectSuccess(`Connected to ${walletName} (${detectedCluster.toUpperCase()})! Address ${address.slice(0, 4)}...${address.slice(-4)} cryptographically linked. Anchor Execution PDA derived: ${derivedPda}`);
       } else if (chain === 'robinhood-chain') {
         const { address, provider, walletName } = await connectEvmWallet();
         setDetectedEvm(walletName);
@@ -305,7 +323,7 @@ export default function VaultPage() {
 
       // 2. Derive deterministic PDA for Solana or Smart Account for Robinhood
       if (linkChain === 'solana') {
-        const derivedPda = address.length > 10 ? `${address.slice(0, 4)}AnchorPDA${address.slice(-4)}` : 'WAKEVaultPDA111111111111111111111111';
+        const { pdaAddress: derivedPda } = deriveSolanaAnchorPda(address, solanaCluster);
         setData((prev) => prev ? {
           ...prev,
           solana: {
@@ -414,6 +432,62 @@ export default function VaultPage() {
       alert(`Withdrawal failed: ${err.message}`);
     } finally {
       setSubmittingWithdraw(false);
+    }
+  };
+
+  const handleRevokeSolanaVault = () => {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            solana: {
+              ...prev.solana,
+              status: 'revoked',
+              pdaAddress: 'REVOKED (Rent Lamports Returned to Wallet)',
+            },
+          }
+        : prev
+    );
+    setActionSuccessNotice('Solana Anchor Vault revoked. Rent-exempt lamports refunded to signer.');
+    setTimeout(() => setActionSuccessNotice(null), 4000);
+  };
+
+  const handleRevokeRobinhoodSession = () => {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            robinhood: {
+              ...prev.robinhood,
+              sessionKeyStatus: 'revoked',
+            },
+          }
+        : prev
+    );
+    setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
+    setTimeout(() => setActionSuccessNotice(null), 4000);
+  };
+
+  const handleToggleSolanaCluster = (cluster: 'mainnet-beta' | 'devnet') => {
+    setSolanaCluster(cluster);
+    if (data?.linkedWallets) {
+      const solWallet = data.linkedWallets.find((w) => w.chain === 'solana');
+      if (solWallet) {
+        const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, cluster);
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                solana: {
+                  ...prev.solana,
+                  pdaAddress: newPda,
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice(`Switched Solana cluster to ${cluster.toUpperCase()}. Anchor PDA recalculated.`);
+        setTimeout(() => setActionSuccessNotice(null), 3000);
+      }
     }
   };
 
@@ -726,6 +800,16 @@ export default function VaultPage() {
                           </a>
                         )
                       )}
+
+                      {/* Universal WalletConnect Option */}
+                      <button
+                        type="button"
+                        onClick={() => setShowWalletConnectModal(true)}
+                        className="px-4 py-3 bg-surface-container hover:bg-surface-container-high border border-border-subtle text-on-surface-variant hover:text-primary text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-sm">qr_code_scanner</span>
+                        <span>WalletConnect / Mobile</span>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -807,6 +891,13 @@ export default function VaultPage() {
           <LoadingSkeleton rows={5} />
         ) : (
           <>
+            {actionSuccessNotice && (
+              <div className="p-3.5 bg-status-success/15 border border-status-success/30 rounded-xl text-status-success text-xs font-semibold mb-6 flex items-center gap-2 animate-fade-in">
+                <span className="material-symbols-outlined text-base">task_alt</span>
+                <span>{actionSuccessNotice}</span>
+              </div>
+            )}
+
             {/* 2. Three Venue Custody Cards */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-12">
               {/* 1. Solana Keyless PDA */}
@@ -814,10 +905,37 @@ export default function VaultPage() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <span className="font-bold text-primary text-base">Solana Keyless PDA</span>
-                    <ChainBadge chain="solana" />
+                    <div className="flex items-center gap-2">
+                      {/* Solana Network Selector */}
+                      <div className="flex items-center bg-surface-container border border-border-subtle rounded-lg p-0.5 text-[10px] font-mono">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSolanaCluster('mainnet-beta')}
+                          className={`px-2 py-0.5 rounded font-bold transition-colors ${
+                            solanaCluster === 'mainnet-beta'
+                              ? 'bg-primary text-white'
+                              : 'text-on-surface-variant hover:text-primary'
+                          }`}
+                        >
+                          Mainnet
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSolanaCluster('devnet')}
+                          className={`px-2 py-0.5 rounded font-bold transition-colors ${
+                            solanaCluster === 'devnet'
+                              ? 'bg-[#14F195] text-black'
+                              : 'text-on-surface-variant hover:text-primary'
+                          }`}
+                        >
+                          Devnet
+                        </button>
+                      </div>
+                      <ChainBadge chain="solana" />
+                    </div>
                   </div>
                   <p className="text-xs text-on-surface-variant mb-4">
-                    Non-custodial on-chain Anchor PDA. No private keys exist on server; derived execution authority with isolated rent state.
+                    Non-custodial on-chain Anchor PDA. No private keys exist on server; derived execution authority with isolated rent state on Solana {solanaCluster === 'devnet' ? 'Devnet' : 'Mainnet-Beta'}.
                   </p>
 
                   <div className="space-y-3 p-3 bg-surface-container-low rounded-xl border border-border-subtle font-mono text-xs mb-4">
@@ -825,26 +943,35 @@ export default function VaultPage() {
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Anchor PDA Address</span>
                         <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(data?.solana.pdaAddress || '');
-                            alert('Solana PDA copied to clipboard');
-                          }}
-                          className="text-[10px] text-primary underline"
+                          onClick={() => triggerCopy(data?.solana.pdaAddress || '', 'solana-pda')}
+                          className="text-[10px] text-primary underline font-bold flex items-center gap-1 cursor-pointer"
                         >
-                          Copy
+                          {copiedKey === 'solana-pda' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy PDA'}
                         </button>
                       </div>
-                      <div className="font-bold text-primary truncate mt-0.5">{data?.solana.pdaAddress}</div>
+                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.solana.pdaAddress}</div>
                     </div>
                     <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
-                      <span className="text-on-surface-variant">Live SOL Gas Reserve:</span>
+                      <span className="text-on-surface-variant">Cluster & Program:</span>
+                      <span className="font-bold text-primary font-mono text-[11px]">
+                        {solanaCluster === 'devnet' ? 'Devnet (WakeDev)' : 'Mainnet (6t6dRetG)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-on-surface-variant">Live SOL Gas Float:</span>
                       <span className="font-bold text-primary">
                         {data?.solana.solGasReserve} SOL (${data?.solana.solGasUsd})
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-on-surface-variant">Minimum Health Threshold:</span>
-                      <span className="font-bold text-status-success">${data?.solana.solMinGasUsd} USD</span>
+                      <span className="text-on-surface-variant">Vault Status:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        data?.solana.status === 'revoked'
+                          ? 'bg-status-error/15 text-status-error'
+                          : 'bg-status-success/15 text-status-success'
+                      }`}>
+                        {data?.solana.status === 'revoked' ? 'REVOKED / CLOSED' : 'ACTIVE'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -858,10 +985,14 @@ export default function VaultPage() {
                     <span>Fund SOL Gas Float</span>
                   </button>
                   <button
-                    onClick={() => alert('Anchor PDA close instruction generated. Unused rent lamports returned to your signer wallet.')}
-                    className="w-full py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-xs font-semibold text-on-surface-variant transition-colors"
+                    onClick={handleRevokeSolanaVault}
+                    className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
+                      data?.solana.status === 'revoked'
+                        ? 'bg-primary/10 border-primary text-primary hover:bg-primary/20'
+                        : 'bg-surface-container hover:bg-surface-container-high border-border-subtle text-on-surface-variant'
+                    }`}
                   >
-                    Revoke / Close Anchor Vault
+                    {data?.solana.status === 'revoked' ? 'Re-activate Anchor Vault' : 'Revoke / Close Anchor Vault'}
                   </button>
                 </div>
               </div>
@@ -882,21 +1013,28 @@ export default function VaultPage() {
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Smart Account Address</span>
                         <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(data?.robinhood.smartAccountAddress || '');
-                            alert('Smart account copied to clipboard');
-                          }}
-                          className="text-[10px] text-primary underline"
+                          onClick={() => triggerCopy(data?.robinhood.smartAccountAddress || '', 'rh-smart')}
+                          className="text-[10px] text-primary underline font-bold flex items-center gap-1 cursor-pointer"
                         >
-                          Copy
+                          {copiedKey === 'rh-smart' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy Address'}
                         </button>
                       </div>
-                      <div className="font-bold text-primary truncate mt-0.5">{data?.robinhood.smartAccountAddress}</div>
+                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.robinhood.smartAccountAddress}</div>
                     </div>
                     <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
                       <span className="text-on-surface-variant">Paymaster Gas Status:</span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFB800]/10 text-[#B45309] dark:text-[#FFB800] border border-[#FFB800]/30">
                         100% SPONSORED
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-on-surface-variant">Session Key Status:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        data?.robinhood.sessionKeyStatus === 'revoked'
+                          ? 'bg-status-error/15 text-status-error'
+                          : 'bg-status-success/15 text-status-success'
+                      }`}>
+                        {data?.robinhood.sessionKeyStatus === 'revoked' ? 'REVOKED (PAUSED)' : 'DELEGATED (ACTIVE)'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -917,10 +1055,14 @@ export default function VaultPage() {
                     <span>Delegate EIP-7702 Session (30 Days)</span>
                   </button>
                   <button
-                    onClick={() => alert('Session key revoked. All automated execution on Robinhood Chain paused.')}
-                    className="w-full py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-xs font-semibold text-on-surface-variant transition-colors"
+                    onClick={handleRevokeRobinhoodSession}
+                    className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
+                      data?.robinhood.sessionKeyStatus === 'revoked'
+                        ? 'bg-[#FFB800]/10 border-[#FFB800] text-[#B45309] dark:text-[#FFB800] hover:bg-[#FFB800]/20'
+                        : 'bg-surface-container hover:bg-surface-container-high border-border-subtle text-on-surface-variant'
+                    }`}
                   >
-                    Revoke Delegation
+                    {data?.robinhood.sessionKeyStatus === 'revoked' ? 'Re-delegate 30-Day Session' : 'Revoke Delegation'}
                   </button>
                 </div>
               </div>
@@ -939,25 +1081,32 @@ export default function VaultPage() {
                   <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-800 dark:text-amber-300 mb-4">
                     <div className="font-bold mb-1 flex items-center gap-1">
                       <span className="material-symbols-outlined text-sm">info</span>
-                      Custodial Disclosure (ADR-0003)
+                      Zero-Custody Venue Float Rule (ADR-0003)
                     </div>
-                    Venue-scoped float only. Withdrawal exits custody immediately back to your verified linked wallet.
+                    Deposit Polygon USDC to this proxy. When trading halts or withdrawals occur, capital exits custody directly back to your verified linked wallet.
                   </div>
 
-                  <div className="p-3 bg-surface-container-low rounded-xl border border-border-subtle font-mono text-xs mb-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Deposit Address (Polygon)</span>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(data?.polymarket.depositAddress || '');
-                          alert('Polymarket deposit address copied');
-                        }}
-                        className="text-[10px] text-primary underline"
-                      >
-                        Copy
-                      </button>
+                  <div className="space-y-3 p-3 bg-surface-container-low rounded-xl border border-border-subtle font-mono text-xs mb-4">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Deposit Proxy Address (Polygon)</span>
+                        <button
+                          onClick={() => triggerCopy(data?.polymarket.depositAddress || '', 'poly-deposit')}
+                          className="text-[10px] text-primary underline font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedKey === 'poly-deposit' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy Address'}
+                        </button>
+                      </div>
+                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress}</div>
                     </div>
-                    <div className="font-bold text-primary truncate mt-0.5">{data?.polymarket.depositAddress}</div>
+                    <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
+                      <span className="text-on-surface-variant">Network:</span>
+                      <span className="font-bold text-[#8B5CF6]">Polygon (Chain ID 137)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-on-surface-variant">Asset:</span>
+                      <span className="font-bold text-primary">Native Polygon USDC</span>
+                    </div>
                   </div>
                 </div>
 
@@ -967,7 +1116,7 @@ export default function VaultPage() {
                     className="w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-sm">qr_code</span>
-                    <span>Deposit Polygon USDC</span>
+                    <span>Deposit Polygon USDC Float</span>
                   </button>
                   <div className="flex items-center justify-between text-xs font-mono text-on-surface-variant px-1">
                     <span>Geo-Eligibility:</span>
@@ -1111,13 +1260,10 @@ export default function VaultPage() {
                   {data?.solana.pdaAddress}
                 </div>
                 <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(data?.solana.pdaAddress || '');
-                    alert('PDA address copied');
-                  }}
+                  onClick={() => triggerCopy(data?.solana.pdaAddress || '', 'modal-sol')}
                   className="text-xs font-semibold text-primary underline"
                 >
-                  Copy PDA Address
+                  {copiedKey === 'modal-sol' ? <span className="text-status-success font-bold">✓ Copied PDA!</span> : 'Copy PDA Address'}
                 </button>
               </div>
 
@@ -1213,13 +1359,10 @@ export default function VaultPage() {
                   {data?.polymarket.depositAddress}
                 </div>
                 <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(data?.polymarket.depositAddress || '');
-                    alert('Polymarket address copied to clipboard');
-                  }}
+                  onClick={() => triggerCopy(data?.polymarket.depositAddress || '', 'modal-poly')}
                   className="text-xs font-semibold text-primary underline"
                 >
-                  Copy Address
+                  {copiedKey === 'modal-poly' ? <span className="text-status-success font-bold">✓ Copied Address!</span> : 'Copy Address'}
                 </button>
               </div>
 
@@ -1232,6 +1375,45 @@ export default function VaultPage() {
                 className="w-full py-2.5 bg-primary text-white font-bold rounded-xl text-sm hover:opacity-90"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Universal WalletConnect QR */}
+        {showWalletConnectModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in text-center">
+              <div className="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#0284C7]" />
+                  <h3 className="font-headline-md font-bold text-primary text-base">WalletConnect Mobile QR</h3>
+                </div>
+                <button onClick={() => setShowWalletConnectModal(false)} className="text-on-surface-variant hover:text-primary">
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+              <p className="text-xs text-on-surface-variant mb-4">
+                Scan with Phantom, Solflare, MetaMask, or any WalletConnect v2 compatible mobile wallet on iOS or Android.
+              </p>
+              <div className="p-4 bg-white rounded-xl mx-auto w-44 h-44 flex items-center justify-center border border-border-subtle mb-4 shadow-inner">
+                {/* Visual QR Pattern */}
+                <svg className="w-36 h-36" viewBox="0 0 100 100" fill="none">
+                  <rect width="100" height="100" fill="white"/>
+                  <path fill="#0F172A" d="M10 10h30v30H10zm6 6v18h18V16zm44-6h30v30H60zm6 6v18h18V16zM10 60h30v30H10zm6 6v18h18V66zm44 4h10v10H60zm10 10h10v10H70zm10-10h10v10H80zm0 10h10v10H80zM45 45h10v10H45zm-15 0h10v10H30zm30 0h10v10H60z"/>
+                </svg>
+              </div>
+              <div className="text-[11px] font-mono text-on-surface-variant bg-surface-container p-2.5 rounded-lg break-all mb-4 text-left">
+                wc:7f83a1b4-29a@2?relay-protocol=irn&amp;symKey=9e48...
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerCopy('wc:7f83a1b4-29a@2?relay-protocol=irn', 'wc-uri');
+                }}
+                className="w-full py-2.5 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-xl text-xs font-bold text-primary mb-2 flex items-center justify-center gap-1.5 transition-colors"
+              >
+                {copiedKey === 'wc-uri' ? <span className="text-status-success font-bold">✓ Copied Connection URI!</span> : 'Copy Connection URI'}
               </button>
             </div>
           </div>

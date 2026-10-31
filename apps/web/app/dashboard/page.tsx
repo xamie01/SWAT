@@ -45,8 +45,23 @@ interface AccountData {
   };
 }
 
+interface MasterSuggestion {
+  masterWalletAddress: string;
+  chain: string;
+  label: string | null;
+  compositeScore: number | null;
+  tier: string;
+  winRate: number;
+  realizedRoi: number;
+  followerCount: number;
+  followerCap: number;
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<AccountData | null>(null);
+  const [suggestedMasters, setSuggestedMasters] = useState<MasterSuggestion[]>([]);
+  const [subscribingAddress, setSubscribingAddress] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,11 +72,16 @@ export default function DashboardPage() {
   const fetchDashboard = async () => {
     setLoading(true);
     try {
-      // In multi-tenant backend, /v1/me/account and /v1/me/positions supply user state
-      const [acc, pos] = await Promise.all([
+      // In multi-tenant backend, /v1/me/account, /v1/me/positions, and /v1/me/masters supply user state
+      const [acc, pos, mastersRes] = await Promise.all([
         api.get<any>('/v1/me/account').catch(() => null),
         api.get<any>('/v1/me/positions').catch(() => ({ positions: [] })),
+        api.get<any>('/v1/me/masters').catch(() => ({ masters: [] })),
       ]);
+
+      if (mastersRes?.masters) {
+        setSuggestedMasters(mastersRes.masters);
+      }
 
       setData({
         user: acc?.user || {
@@ -75,15 +95,7 @@ export default function DashboardPage() {
           { chain: 'solana', asset: 'USDC', balanceUsd: 1250.0, balanceNative: 1250, updatedAt: new Date().toISOString() },
           { chain: 'robinhood-chain', asset: 'USDC', balanceUsd: 500.0, balanceNative: 500, updatedAt: new Date().toISOString() },
         ],
-        subscriptions: acc?.subscriptions || [
-          {
-            walletAddress: 'solana:7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
-            chain: 'solana',
-            label: 'Solana Alpha Whale',
-            state: 'active',
-            membershipSlot: 3,
-          },
-        ],
+        subscriptions: acc?.subscriptions || [],
         positions: pos?.positions || [],
         executionSettings: acc?.executionSettings || {
           killSwitchActive: false,
@@ -95,6 +107,44 @@ export default function DashboardPage() {
       setError(err.message || 'Failed to load dashboard data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCopyMaster = async (master: MasterSuggestion) => {
+    setSubscribingAddress(master.masterWalletAddress);
+    setActionMessage(null);
+    try {
+      const rawAddress = master.masterWalletAddress.includes(':')
+        ? master.masterWalletAddress.split(':')[1]
+        : master.masterWalletAddress;
+
+      await api.post('/v1/me/wallets', {
+        address: rawAddress,
+        chain: master.chain,
+        label: master.label ?? undefined,
+      });
+
+      setActionMessage(`Successfully mirrored ${master.label || rawAddress.slice(0, 8)}! Automated execution is active.`);
+      await fetchDashboard();
+    } catch (err: any) {
+      setActionMessage(`Failed to copy master: ${err.message || 'Error subscribing'}`);
+    } finally {
+      setSubscribingAddress(null);
+    }
+  };
+
+  const handleUnsubscribe = async (walletAddress: string) => {
+    if (!window.confirm('Do you want to stop copying this master wallet?')) return;
+    setSubscribingAddress(walletAddress);
+    setActionMessage(null);
+    try {
+      await api.delete(`/v1/me/wallets/${encodeURIComponent(walletAddress)}`);
+      setActionMessage('Subscription wound down. Existing lots will be exited proportionally.');
+      await fetchDashboard();
+    } catch (err: any) {
+      setActionMessage(`Failed to remove subscription: ${err.message}`);
+    } finally {
+      setSubscribingAddress(null);
     }
   };
 
@@ -140,6 +190,17 @@ export default function DashboardPage() {
         </div>
 
         {error && <div className="mb-6"><ErrorBanner message={error} onRetry={fetchDashboard} /></div>}
+        {actionMessage && (
+          <div className="mb-6 p-4 rounded-xl bg-status-success/10 border border-status-success/30 flex items-center justify-between text-sm text-status-success">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-base">check_circle</span>
+              <span>{actionMessage}</span>
+            </div>
+            <button onClick={() => setActionMessage(null)} className="text-xs underline hover:opacity-80">
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Portfolio KPI Banner */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -231,7 +292,9 @@ export default function DashboardPage() {
                 title="No Open Positions"
                 description="Your automated copy-trading engine is active and waiting for your subscribed masters to execute an entry signal."
                 actionLabel="Explore Masters"
-                onAction={() => {}}
+                onAction={() => {
+                  document.getElementById('alpha-masters-section')?.scrollIntoView({ behavior: 'smooth' });
+                }}
               />
             )}
           </div>
@@ -305,10 +368,97 @@ export default function DashboardPage() {
                     <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
                     Mirroring Buys & Sells
                   </span>
-                  <span className="text-on-surface-variant font-mono">10% Sizing</span>
+                  <button
+                    onClick={() => handleUnsubscribe(s.walletAddress)}
+                    disabled={subscribingAddress === s.walletAddress}
+                    className="text-[11px] text-on-surface-variant hover:text-status-error underline transition-colors"
+                  >
+                    {subscribingAddress === s.walletAddress ? 'Updating...' : 'Stop Copying'}
+                  </button>
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* Suggested Alpha Masters Section */}
+        <section id="alpha-masters-section" className="bg-surface-container-lowest border border-border-subtle rounded-xl p-6 mt-8 scroll-mt-20">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-headline-md text-lg font-bold text-primary">Explore & Copy Alpha Masters</h2>
+              <p className="text-xs text-on-surface-variant">
+                Top high-conviction traders discovered by the Wake Protocol intelligence daemon. 1-Click to mirror non-custodially.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {suggestedMasters.map((m) => {
+              const isSubscribed = data?.subscriptions.some(
+                (s) => s.walletAddress.toLowerCase() === m.masterWalletAddress.toLowerCase() && s.state === 'active'
+              );
+
+              return (
+                <div
+                  key={m.masterWalletAddress}
+                  className="p-4 bg-surface-container-low border border-border-subtle rounded-xl flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-sm text-primary truncate max-w-[160px]">
+                        {m.label || m.masterWalletAddress.slice(0, 10)}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/10 text-primary border border-primary/30 uppercase">
+                        {m.tier}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-2">
+                      <ChainBadge chain={m.chain} />
+                      <span className="text-[11px] font-mono text-on-surface-variant">
+                        Score: <strong>{m.compositeScore}</strong>
+                      </span>
+                    </div>
+
+                    <div className="text-xs font-mono text-on-surface-variant truncate mb-3">
+                      {m.masterWalletAddress}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 p-2 bg-surface-container rounded-lg text-xs mb-3">
+                      <div>
+                        <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Win Rate</span>
+                        <span className="font-bold font-mono text-status-success">{m.winRate}%</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-on-surface-variant block uppercase font-mono">Realized ROI</span>
+                        <span className="font-bold font-mono text-primary">+{m.realizedRoi}%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-border-subtle flex items-center justify-between text-xs">
+                    <span className="text-[11px] font-mono text-on-surface-variant">
+                      Cap: {m.followerCount}/{m.followerCap}
+                    </span>
+
+                    {isSubscribed ? (
+                      <span className="text-status-success font-semibold flex items-center gap-1 text-xs">
+                        <span className="material-symbols-outlined text-sm">check</span>
+                        <span>Active</span>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleCopyMaster(m)}
+                        disabled={subscribingAddress === m.masterWalletAddress}
+                        className="px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+                      >
+                        {subscribingAddress === m.masterWalletAddress ? 'Copying...' : '+ Copy Master'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       </main>

@@ -51,7 +51,7 @@ export function AdminNav() {
     { label: 'Clusters', href: '/clusters', icon: 'dataset' },
     { label: 'Logs', href: '/logs', icon: 'terminal' },
     { label: 'Performance', href: '/performance', icon: 'monitoring' },
-    { label: 'Billing', href: '/billing', icon: 'credit_card' },
+    { label: 'SaaS Revenue', href: '/admin/revenue', icon: 'payments' },
     { label: 'Setup', href: '/setup', icon: 'settings' },
   ];
 
@@ -87,7 +87,7 @@ export function AdminNav() {
         </div>
 
         {/* Desktop Actions */}
-        <div className="hidden sm:flex items-center gap-3">
+        <div className="hidden sm:flex items-center gap-3 ml-auto pl-6 sm:pl-8 border-l border-border-subtle shrink-0">
           <button
             onClick={handleEmergencyOff}
             disabled={submitting}

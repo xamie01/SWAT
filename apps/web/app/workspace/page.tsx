@@ -150,17 +150,10 @@ export default function WorkspaceShell() {
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
             href="/admin/portfolio"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-primary border border-border-subtle transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-container hover:bg-surface-container-high text-primary border border-border-subtle transition-colors"
           >
             <span className="material-symbols-outlined text-sm">hub</span>
             <span className="hidden sm:inline">Fleet Matrix</span>
-          </Link>
-          <Link
-            href="/setup"
-            className="p-1.5 text-on-surface-variant hover:text-primary transition-colors rounded-lg hover:bg-surface-container"
-            title="Setup"
-          >
-            <span className="material-symbols-outlined text-xl">settings</span>
           </Link>
         </div>
       </header>
