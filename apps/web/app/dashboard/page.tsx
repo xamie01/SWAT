@@ -293,7 +293,14 @@ export default function DashboardPage() {
                 description="Your automated copy-trading engine is active and waiting for your subscribed masters to execute an entry signal."
                 actionLabel="Explore Masters"
                 onAction={() => {
-                  document.getElementById('alpha-masters-section')?.scrollIntoView({ behavior: 'smooth' });
+                  const el = document.getElementById('alpha-masters-section');
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth' });
+                    el.classList.add('ring-2', 'ring-primary', 'transition-all');
+                    setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'transition-all'), 2500);
+                  } else {
+                    window.location.href = '/wallets';
+                  }
                 }}
               />
             )}
@@ -394,9 +401,19 @@ export default function DashboardPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {suggestedMasters.map((m) => {
-              const isSubscribed = data?.subscriptions.some(
-                (s) => s.walletAddress.toLowerCase() === m.masterWalletAddress.toLowerCase() && s.state === 'active'
-              );
+              const isSubscribed = data?.subscriptions.some((s) => {
+                if (s.state !== 'active') return false;
+                const isSolana = m.chain === 'solana' || s.chain === 'solana';
+                if (isSolana) {
+                  // M-04: Base58 case-sensitive matching for Solana
+                  const sAddr = s.walletAddress.replace(/^solana:/, '');
+                  const mAddr = m.masterWalletAddress.replace(/^solana:/, '');
+                  return sAddr === mAddr;
+                }
+                const sAddr = s.walletAddress.replace(/^[a-z0-9-]+:/, '').toLowerCase();
+                const mAddr = m.masterWalletAddress.replace(/^[a-z0-9-]+:/, '').toLowerCase();
+                return sAddr === mAddr;
+              });
 
               return (
                 <div

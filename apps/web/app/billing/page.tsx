@@ -203,6 +203,7 @@ function BillingView() {
         planId: selectedPlanId,
         chain,
         txHash: txHash.trim(),
+        memo: referenceMemo || undefined,
         referenceMemo: referenceMemo || undefined,
       });
       setVerificationSuccess(true);

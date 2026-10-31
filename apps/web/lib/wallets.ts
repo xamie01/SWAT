@@ -6,8 +6,8 @@ export const WAKE_SOLANA_DEVNET_PROGRAM_ID = 'WakeDev111111111111111111111111111
 
 /**
  * Derives a real Anchor Program Derived Address (PDA) on Solana:
- * seeds = [b"wake_vault", user_public_key]
- * program_id = WAKE_SOLANA_PROGRAM_ID
+ * seeds = [b"vault", user_public_key]
+ * program_id = WAKE_SOLANA_MAINNET_PROGRAM_ID (or devnet)
  */
 export function deriveSolanaAnchorPda(
   userAddress: string,
@@ -19,13 +19,13 @@ export function deriveSolanaAnchorPda(
       cluster === 'devnet' ? WAKE_SOLANA_DEVNET_PROGRAM_ID : WAKE_SOLANA_MAINNET_PROGRAM_ID
     );
     const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from('wake_vault'), userPubkey.toBuffer()],
+      [new TextEncoder().encode('vault'), userPubkey.toBytes()],
       progId
     );
     return { pdaAddress: pda.toBase58(), bump };
   } catch (err) {
-    console.warn('Could not derive Anchor PDA with @solana/web3.js, using fallback:', err);
-    return { pdaAddress: '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS', bump: 255 };
+    console.warn('Could not derive Anchor PDA with @solana/web3.js:', err);
+    return { pdaAddress: WAKE_SOLANA_MAINNET_PROGRAM_ID, bump: 255 };
   }
 }
 
@@ -49,7 +49,7 @@ export function detectSolanaCluster(provider?: any): 'mainnet-beta' | 'devnet' {
 export function copyToClipboard(text: string): boolean {
   if (!text) return false;
   try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text).catch(() => {});
       return true;
     }
@@ -60,7 +60,8 @@ export function copyToClipboard(text: string): boolean {
     const el = document.createElement('textarea');
     el.value = text;
     el.setAttribute('readonly', '');
-    el.style.position = 'absolute';
+    el.style.position = 'fixed';
+    el.style.top = '-9999px';
     el.style.left = '-9999px';
     document.body.appendChild(el);
     el.select();

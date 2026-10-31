@@ -23,8 +23,8 @@ export const metadata: Metadata = {
     icon: '/logo.svg',
   },
   robots: {
-    index: true,
-    follow: true,
+    index: false,
+    follow: false,
   },
   openGraph: {
     title: 'Wake Protocol | Operational Cross-Chain Intelligence',

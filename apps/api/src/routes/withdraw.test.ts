@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.DATABASE_URL ??= 'postgres://swat:swat@127.0.0.1:5432/swat_route_tests';
 });
 
-import { registerMeRoutes } from './me.js';
+import { registerMeRoutes, type StoredWithdrawalOtp } from './me.js';
 import * as dbModule from '@swat/db';
 
 const USER_ALICE = '11111111-1111-4111-8111-111111111111';
@@ -15,7 +15,7 @@ function buildApp(options: {
   email?: string;
   now?: Date;
   coolingOffMs?: number;
-  otpStore?: Map<string, { code: string; expiresAt: Date; destinationAddress: string }>;
+  otpStore?: Map<string, StoredWithdrawalOtp>;
   sendWithdrawalOtpEmail?: (email: string, code: string) => Promise<boolean>;
 }): FastifyInstance {
   const app = Fastify();
@@ -120,7 +120,7 @@ describe('Trading Withdrawal Routes (S4-12)', () => {
     ]);
 
     const sendEmailMock = vi.fn().mockResolvedValue(true);
-    const otpStore = new Map<string, { code: string; expiresAt: Date; destinationAddress: string }>();
+    const otpStore = new Map<string, StoredWithdrawalOtp>();
 
     const app = buildApp({
       userId: USER_ALICE,
@@ -154,13 +154,15 @@ describe('Trading Withdrawal Routes (S4-12)', () => {
       }
     ]);
 
-    const otpStore = new Map([
+    const otpStore = new Map<string, StoredWithdrawalOtp>([
       [
         USER_ALICE,
         {
           code: '123456',
           expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
-          destinationAddress
+          destinationAddress,
+          chainKind: 'evm',
+          attempts: 0
         }
       ]
     ]);

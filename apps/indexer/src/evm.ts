@@ -51,13 +51,18 @@ const BASE_TOKENS: Record<string, Set<string>> = {
   'robinhood-chain': new Set()
 };
 
-const BASE_SYMBOLS = new Set(['weth', 'usdc', 'usdt', 'wmatic', 'wpol', 'eth', 'pol']);
+function getBaseTokens(chain: WalletChain): Set<string> {
+  const set = new Set(BASE_TOKENS[chain] ?? []);
+  if (chain === 'robinhood-chain' && process.env.ROBINHOOD_BASE_ASSET) {
+    set.add(process.env.ROBINHOOD_BASE_ASSET.toLowerCase());
+  }
+  return set;
+}
 
-function isBaseToken(address: string, symbol: string, chain: WalletChain): boolean {
+function isBaseToken(address: string, _symbol: string, chain: WalletChain): boolean {
   const addr = address.toLowerCase();
-  if (BASE_TOKENS[chain]?.has(addr)) return true;
-  if (BASE_SYMBOLS.has(symbol.toLowerCase())) return true;
-  return false;
+  // H-18: Verify base-asset identity strictly by contract address, never spoofable symbol
+  return getBaseTokens(chain).has(addr);
 }
 
 // Instantiate clients
@@ -109,7 +114,8 @@ const tokenMetadataCache = new Map<string, { decimals: number; symbol: string; n
 
 async function getEvmTokenMetadata(client: any, tokenAddress: `0x${string}`, chain: WalletChain) {
   const addr = tokenAddress.toLowerCase();
-  if (tokenMetadataCache.has(addr)) return tokenMetadataCache.get(addr)!;
+  const cacheKey = `${chain}:${addr}`;
+  if (tokenMetadataCache.has(cacheKey)) return tokenMetadataCache.get(cacheKey)!;
 
   // Try DB first
   const dbRows = await query<{ decimals: number | null; symbol: string | null; name: string | null }>(
@@ -122,7 +128,7 @@ async function getEvmTokenMetadata(client: any, tokenAddress: `0x${string}`, cha
       symbol: dbRows[0].symbol ?? 'UNKNOWN',
       name: dbRows[0].name ?? 'Unknown'
     };
-    tokenMetadataCache.set(addr, meta);
+    tokenMetadataCache.set(cacheKey, meta);
     return meta;
   }
 
@@ -138,7 +144,7 @@ async function getEvmTokenMetadata(client: any, tokenAddress: `0x${string}`, cha
     name: meta.name
   });
 
-  tokenMetadataCache.set(addr, meta);
+  tokenMetadataCache.set(cacheKey, meta);
   return meta;
 }
 

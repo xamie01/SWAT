@@ -329,21 +329,21 @@ export default function VaultPage() {
           solana: {
             ...prev.solana,
             pdaAddress: derivedPda,
-            status: 'active',
+            status: 'preview',
           },
           linkedWallets: [
             ...prev.linkedWallets.filter((w) => w.address !== address),
             {
               address,
               chain: 'solana',
-              verified: true,
+              verified: false,
               linkedAt: new Date().toISOString(),
               spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
               isCoolingOff: true,
             },
           ],
         } : prev);
-        setLinkSuccess(`Solana wallet linked successfully! Anchor Execution PDA derived: ${derivedPda}`);
+        setLinkSuccess(`Solana wallet preview loaded. Connect with Phantom/Solflare extension to sign SIWS verification.`);
       } else if (linkChain === 'robinhood-chain') {
         const derivedSmartAccount = address.startsWith('0x') ? `0x4337${address.slice(6)}` : `0x4337${address}`;
         setData((prev) => prev ? {
@@ -351,7 +351,7 @@ export default function VaultPage() {
           robinhood: {
             ...prev.robinhood,
             smartAccountAddress: derivedSmartAccount,
-            sessionKeyStatus: 'delegated',
+            sessionKeyStatus: 'unverified_preview',
             expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
           },
           linkedWallets: [
@@ -359,14 +359,14 @@ export default function VaultPage() {
             {
               address,
               chain: 'robinhood-chain',
-              verified: true,
+              verified: false,
               linkedAt: new Date().toISOString(),
               spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
               isCoolingOff: true,
             },
           ],
         } : prev);
-        setLinkSuccess(`Robinhood wallet linked! ERC-4337 Smart Account active: ${derivedSmartAccount}`);
+        setLinkSuccess(`Robinhood wallet preview loaded. Connect with MetaMask/Rabby to cryptographically sign session.`);
       } else {
         const derivedPolyDeposit = address.startsWith('0x') ? `0x7739${address.slice(6)}` : `0x7739${address}`;
         setData((prev) => prev ? {
@@ -381,14 +381,14 @@ export default function VaultPage() {
             {
               address,
               chain: 'polygon',
-              verified: true,
+              verified: false,
               linkedAt: new Date().toISOString(),
               spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
               isCoolingOff: true,
             },
           ],
         } : prev);
-        setLinkSuccess(`Polymarket wallet linked! Dedicated Deposit Proxy: ${derivedPolyDeposit}`);
+        setLinkSuccess(`Polymarket wallet preview loaded. Connect with extension to sign.`);
       }
 
       setWalletInput('');
@@ -400,12 +400,19 @@ export default function VaultPage() {
   };
 
   const handleSendEmailCode = async () => {
+    if (!withdrawDest) {
+      alert('Please specify a verified destination address first.');
+      return;
+    }
     try {
-      await api.post('/v1/me/withdraw/send-code', {}).catch(() => null);
+      await api.post('/v1/me/trading/withdraw/request-otp', {
+        destinationAddress: withdrawDest,
+        chainKind: withdrawChain === 'solana' ? 'solana' : 'evm'
+      });
       setCodeSent(true);
       alert('Security verification code sent to your registered email address.');
     } catch (err: any) {
-      alert(`Could not send code: ${err.message}`);
+      alert(`Could not send code: ${err.message || 'Error requesting code'}`);
     }
   };
 
@@ -417,63 +424,127 @@ export default function VaultPage() {
     }
     setSubmittingWithdraw(true);
     try {
-      await api.post('/v1/me/withdraw', {
-        chain: withdrawChain,
-        amount: Number(withdrawAmount),
+      const res = await api.post<{ status: string; message: string }>('/v1/me/trading/withdraw', {
         destinationAddress: withdrawDest,
-        emailCode,
-      }).catch(() => null);
+        chainKind: withdrawChain === 'solana' ? 'solana' : 'evm',
+        amountUsd: Number(withdrawAmount),
+        otpCode: emailCode.trim(),
+      });
 
-      alert(`Withdrawal of ${withdrawAmount} USDC broadcast successfully to ${withdrawDest}.`);
+      alert(res?.message || `Withdrawal authorization verified and queued.`);
       setWithdrawAmount('');
       setEmailCode('');
+      setCodeSent(false);
       fetchVault();
     } catch (err: any) {
-      alert(`Withdrawal failed: ${err.message}`);
+      alert(`Withdrawal failed: ${err.message || 'Transaction could not be submitted'}`);
     } finally {
       setSubmittingWithdraw(false);
     }
   };
 
-  const handleRevokeSolanaVault = () => {
-    setData((prev) =>
-      prev
-        ? {
-            ...prev,
-            solana: {
-              ...prev.solana,
-              status: 'revoked',
-              pdaAddress: 'REVOKED (Rent Lamports Returned to Wallet)',
-            },
-          }
-        : prev
-    );
-    setActionSuccessNotice('Solana Anchor Vault revoked. Rent-exempt lamports refunded to signer.');
-    setTimeout(() => setActionSuccessNotice(null), 4000);
+  const handleRevokeSolanaVault = async () => {
+    try {
+      if (data?.solana.status === 'revoked') {
+        const solWallet = data?.linkedWallets?.find((w) => w.chain === 'solana');
+        if (solWallet) {
+          const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, solanaCluster);
+          await api.post('/v1/me/vault/grant', {
+            chain: 'solana',
+            grantKind: 'solana_vault',
+            accountAddress: newPda
+          });
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  solana: {
+                    ...prev.solana,
+                    status: 'active',
+                    pdaAddress: newPda,
+                  },
+                }
+              : prev
+          );
+          setActionSuccessNotice('Solana Anchor Vault re-activated and registered on-chain.');
+        }
+      } else {
+        await api.post('/v1/me/vault/revoke', { chain: 'solana' });
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                solana: {
+                  ...prev.solana,
+                  status: 'revoked',
+                  pdaAddress: 'REVOKED (Rent Lamports Returned to Wallet)',
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice('Solana Anchor Vault revoked. Rent-exempt lamports refunded to signer.');
+      }
+      setTimeout(() => setActionSuccessNotice(null), 4000);
+    } catch (err: any) {
+      alert(`Action failed: ${err.message || 'Could not update vault state'}`);
+    }
   };
 
-  const handleRevokeRobinhoodSession = () => {
-    setData((prev) =>
-      prev
-        ? {
-            ...prev,
-            robinhood: {
-              ...prev.robinhood,
-              sessionKeyStatus: 'revoked',
-            },
-          }
-        : prev
-    );
-    setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
-    setTimeout(() => setActionSuccessNotice(null), 4000);
+  const handleRevokeRobinhoodSession = async () => {
+    try {
+      if (data?.robinhood.sessionKeyStatus === 'revoked') {
+        const rhWallet = data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain');
+        const smartAddr = rhWallet ? `0x4337${rhWallet.address.slice(2)}` : (data?.robinhood.smartAccountAddress || '0x4337000000000000000000000000000000000000');
+        await api.post('/v1/me/vault/grant', {
+          chain: 'robinhood-chain',
+          grantKind: 'eip7702',
+          accountAddress: smartAddr
+        });
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                robinhood: {
+                  ...prev.robinhood,
+                  sessionKeyStatus: 'delegated',
+                  smartAccountAddress: smartAddr,
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation restored. Automated trading resumed.');
+      } else {
+        await api.post('/v1/me/vault/revoke', { chain: 'robinhood-chain' });
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                robinhood: {
+                  ...prev.robinhood,
+                  sessionKeyStatus: 'revoked',
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
+      }
+      setTimeout(() => setActionSuccessNotice(null), 4000);
+    } catch (err: any) {
+      alert(`Action failed: ${err.message || 'Could not update delegation state'}`);
+    }
   };
 
-  const handleToggleSolanaCluster = (cluster: 'mainnet-beta' | 'devnet') => {
+  const handleToggleSolanaCluster = async (cluster: 'mainnet-beta' | 'devnet') => {
     setSolanaCluster(cluster);
     if (data?.linkedWallets) {
       const solWallet = data.linkedWallets.find((w) => w.chain === 'solana');
       if (solWallet) {
         const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, cluster);
+        await api.post('/v1/me/vault/grant', {
+          chain: 'solana',
+          grantKind: 'solana_vault',
+          accountAddress: newPda
+        }).catch(() => null);
         setData((prev) =>
           prev
             ? {
@@ -485,7 +556,7 @@ export default function VaultPage() {
               }
             : prev
         );
-        setActionSuccessNotice(`Switched Solana cluster to ${cluster.toUpperCase()}. Anchor PDA recalculated.`);
+        setActionSuccessNotice(`Switched Solana cluster to ${cluster.toUpperCase()}. Anchor PDA recalculated: ${newPda.slice(0, 4)}...${newPda.slice(-4)}.`);
         setTimeout(() => setActionSuccessNotice(null), 3000);
       }
     }

@@ -169,7 +169,10 @@ await app.register(async (scope) => {
     redis,
     isProduction: process.env.NODE_ENV === 'production',
     domain: process.env.AUTH_DOMAIN ?? 'localhost:3000',
-    uri: process.env.AUTH_URI ?? 'http://localhost:3000'
+    uri: process.env.AUTH_URI ?? 'http://localhost:3000',
+    allowedOrigins: corsOrigin
+      ? corsOrigin.split(',').map((o) => o.trim())
+      : [process.env.AUTH_URI ?? 'http://localhost:3000']
   });
 });
 
@@ -272,7 +275,7 @@ async function checkSystemHealth(reply: any) {
     app.log.error(err, '[health] Redis health check failed');
   }
 
-  // 3. Current active RPC endpoints
+  // 3. Current active RPC endpoints (H-05: Redact raw provider URLs to prevent credential leakage)
   const activeSolanaRpc = getActiveRpcUrl('solana');
   const activePolygonRpc = getActiveRpcUrl('polygon');
   const activeRobinhoodRpc = getActiveRpcUrl('robinhood');
@@ -295,9 +298,9 @@ async function checkSystemHealth(reply: any) {
         latencyMs: redisLatencyMs
       },
       rpc: {
-        solana: { activeUrl: activeSolanaRpc },
-        polygon: { activeUrl: activePolygonRpc },
-        robinhood: { activeUrl: activeRobinhoodRpc }
+        solana: { healthy: Boolean(activeSolanaRpc), network: 'solana' },
+        polygon: { healthy: Boolean(activePolygonRpc), network: 'polygon' },
+        robinhood: { healthy: Boolean(activeRobinhoodRpc), network: 'robinhood-chain' }
       }
     }
   });
@@ -413,10 +416,13 @@ app.get('/v1/wallets/:address', async (req, reply) => {
 
 app.post('/v1/wallets', async (req, reply) => {
   const payload = (req.body ?? {}) as { wallets?: unknown[] };
-  const items = Array.isArray(payload.wallets) ? payload.wallets : [];
+  if (!Array.isArray(payload.wallets) || payload.wallets.length === 0) {
+    return reply.code(400).send({ error: 'Body must contain a non-empty "wallets" array' });
+  }
+  const items = payload.wallets;
   const parsed = items.map((item) => walletInputSchema.safeParse(item));
   const invalid = parsed.filter((r) => !r.success);
-  if (invalid.length > 0) return reply.code(400).send({ error: 'Invalid wallet payload' });
+  if (invalid.length > 0) return reply.code(400).send({ error: 'Invalid wallet payload', issues: invalid.map(i => i.error?.issues) });
   const inserted = await Promise.all(parsed.map((r) => upsertWallet((r as any).data)));
   // Kick off indexing so wallets added via the UI actually get their history.
   await Promise.all(inserted.map((w: any) => enqueueBackfill(w.address, w.chain ?? 'solana')));
@@ -657,8 +663,14 @@ app.get('/v1/signals/:id/tracking-difference', async (req) => {
 
 app.post('/v1/signals/:id/ignore', async (req, reply) => {
   const { id } = req.params as { id: string };
-  await query(`UPDATE signals SET status = 'rejected' WHERE id = $1`, [id]);
-  return { ignored: true };
+  const updated = await query<{ id: string }>(
+    `UPDATE signals SET status = 'rejected' WHERE id = $1 AND status NOT IN ('executed', 'rejected', 'failed') RETURNING id`,
+    [id]
+  );
+  if (updated.length === 0) {
+    return reply.code(409).send({ error: 'Signal not found or already processed' });
+  }
+  return { ignored: true, signalId: id };
 });
 
 app.post('/v1/signals/:id/execute', async (req, reply) => {
@@ -888,12 +900,23 @@ sharedLogsSubscriber.on('message', (channel, message) => {
 });
 
 app.get('/v1/logs/stream', async (req, reply) => {
-  reply.raw.writeHead(200, {
+  const reqOrigin = req.headers.origin;
+  const configuredOrigins = corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : [];
+  const allowedOrigin = (reqOrigin && configuredOrigins.includes(reqOrigin))
+    ? reqOrigin
+    : (configuredOrigins[0] || (reqOrigin ?? ''));
+
+  const sseHeaders: Record<string, string> = {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
+  };
+  if (allowedOrigin) {
+    sseHeaders['Access-Control-Allow-Origin'] = allowedOrigin;
+    sseHeaders['Access-Control-Allow-Credentials'] = 'true';
+  }
+
+  reply.raw.writeHead(200, sseHeaders);
   reply.hijack();
 
   const listener = (message: string) => {
