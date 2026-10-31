@@ -9,6 +9,7 @@ import {
   connectSolanaWallet,
   connectEvmWallet,
   linkWalletWithSignature,
+  signPolymarketClobAuth,
   getSolanaProvider,
   getEvmProvider,
   deriveSolanaAnchorPda,
@@ -35,6 +36,9 @@ interface VaultData {
   };
   polymarket: {
     depositAddress: string;
+    signerAddress?: string | null;
+    status?: string | null;
+    apiKey?: string | null;
     geoEligible: boolean;
     geoExpiresAt: string | null;
   };
@@ -67,6 +71,7 @@ export default function VaultPage() {
   const [walletConnectError, setWalletConnectError] = useState<string | null>(null);
   const [walletConnectSuccess, setWalletConnectSuccess] = useState<string | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
+  const [authorizingPoly, setAuthorizingPoly] = useState(false);
 
   // Interactive Modals
   const [activeModal, setActiveModal] = useState<'solana-gas' | 'robinhood-delegate' | 'polymarket-deposit' | null>(null);
@@ -261,14 +266,42 @@ export default function VaultPage() {
         const { address, provider, walletName } = await connectEvmWallet('0x89');
         setDetectedEvm(walletName);
 
-        // Sign challenge and link in backend
+        // 1. Link wallet with SIWE challenge
         await linkWalletWithSignature({
           chainKind: 'evm',
           address,
           provider,
         });
 
-        const derivedPolyDeposit = address.startsWith('0x') ? `0x7739${address.slice(6)}` : `0x7739${address}`;
+        // 2. Derive Polymarket CLOB L2 credentials via EIP-712 ClobAuth
+        let polyApiKey: string | null = null;
+        try {
+          const challenge = await api.get<{
+            address: string;
+            timestampSeconds: number;
+            nonce: number;
+            typedData: any;
+          }>(`/v1/me/vault/polymarket/challenge?address=${address}`);
+
+          const signature = await signPolymarketClobAuth(provider, address, challenge.typedData);
+
+          const credsRes = await api.post<{
+            success: boolean;
+            apiKey: string;
+            address: string;
+          }>('/v1/me/vault/polymarket/credentials', {
+            address,
+            signature,
+            timestampSeconds: challenge.timestampSeconds,
+            nonce: challenge.nonce,
+          });
+
+          polyApiKey = credsRes.apiKey;
+        } catch (authErr: any) {
+          console.warn('Polymarket L2 credential derivation deferred:', authErr);
+        }
+
+        const derivedPolyDeposit = address;
 
         setData((prev) =>
           prev
@@ -277,6 +310,9 @@ export default function VaultPage() {
                 polymarket: {
                   ...prev.polymarket,
                   depositAddress: derivedPolyDeposit,
+                  signerAddress: address,
+                  status: polyApiKey ? 'active' : prev.polymarket?.status ?? 'uninitialized',
+                  apiKey: polyApiKey ?? prev.polymarket?.apiKey ?? null,
                   geoEligible: true,
                 },
                 linkedWallets: [
@@ -294,12 +330,66 @@ export default function VaultPage() {
             : prev
         );
 
-        setWalletConnectSuccess(`Connected to ${walletName} on Polygon! Address ${address.slice(0, 6)}...${address.slice(-4)} verified. Polymarket deposit proxy active: ${derivedPolyDeposit}`);
+        if (polyApiKey) {
+          setWalletConnectSuccess(
+            `Connected to ${walletName} on Polygon! Polymarket CLOB L2 credentials derived & active (API Key: ${polyApiKey.slice(0, 8)}...).`
+          );
+        } else {
+          setWalletConnectSuccess(
+            `Connected to ${walletName} on Polygon! Address ${address.slice(0, 6)}...${address.slice(-4)} verified. You can authorize Polymarket L2 signing below.`
+          );
+        }
       }
     } catch (err: any) {
       setWalletConnectError(err.message || 'Failed to connect wallet.');
     } finally {
       setConnectingWallet(false);
+    }
+  };
+
+  const handleAuthorizePolymarketL2 = async () => {
+    setAuthorizingPoly(true);
+    setError(null);
+    setWalletConnectError(null);
+    setWalletConnectSuccess(null);
+    try {
+      const { address, provider, walletName } = await connectEvmWallet('0x89');
+      setDetectedEvm(walletName);
+
+      // 1. Fetch challenge from API
+      const challenge = await api.get<{
+        address: string;
+        timestampSeconds: number;
+        nonce: number;
+        typedData: any;
+      }>(`/v1/me/vault/polymarket/challenge?address=${address}`);
+
+      // 2. Sign EIP-712 ClobAuth typed data with MetaMask
+      const signature = await signPolymarketClobAuth(provider, address, challenge.typedData);
+
+      // 3. Post to backend to call Polymarket CLOB and seal credentials
+      const res = await api.post<{
+        success: boolean;
+        apiKey: string;
+        address: string;
+        message: string;
+      }>('/v1/me/vault/polymarket/credentials', {
+        address,
+        signature,
+        timestampSeconds: challenge.timestampSeconds,
+        nonce: challenge.nonce,
+      });
+
+      setWalletConnectSuccess(
+        `Polymarket CLOB L2 Authenticated! Signer ${address.slice(0, 6)}...${address.slice(-4)} active with API key ${res.apiKey.slice(0, 8)}...`
+      );
+
+      // Refresh vault data
+      await fetchVault();
+    } catch (err: any) {
+      setWalletConnectError(err.message || 'Failed to authenticate with Polymarket CLOB.');
+    } finally {
+      setAuthorizingPoly(false);
     }
   };
 
@@ -1168,9 +1258,27 @@ export default function VaultPage() {
                           {copiedKey === 'poly-deposit' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy Address'}
                         </button>
                       </div>
-                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress}</div>
+                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress || 'Not linked yet'}</div>
                     </div>
                     <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
+                      <span className="text-on-surface-variant">L2 CLOB Signer:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        data?.polymarket.status === 'active'
+                          ? 'bg-status-success/15 text-status-success'
+                          : 'bg-surface-container-high text-on-surface-variant'
+                      }`}>
+                        {data?.polymarket.status === 'active' ? 'AUTHENTICATED (READY)' : 'UNINITIALIZED'}
+                      </span>
+                    </div>
+                    {data?.polymarket.apiKey && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-on-surface-variant">CLOB API Key:</span>
+                        <span className="font-bold text-primary truncate max-w-[160px]">
+                          {data.polymarket.apiKey.slice(0, 8)}...{data.polymarket.apiKey.slice(-4)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
                       <span className="text-on-surface-variant">Network:</span>
                       <span className="font-bold text-[#8B5CF6]">Polygon (Chain ID 137)</span>
                     </div>
@@ -1183,13 +1291,35 @@ export default function VaultPage() {
 
                 <div className="space-y-2">
                   <button
+                    type="button"
+                    onClick={handleAuthorizePolymarketL2}
+                    disabled={authorizingPoly}
+                    className="w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+                  >
+                    {authorizingPoly ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Authenticating with Polymarket...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-sm">verified_user</span>
+                        <span>
+                          {data?.polymarket.status === 'active'
+                            ? 'Re-authorize Polymarket L2 Signer'
+                            : 'Authorize Polymarket L2 Signer (1-Click)'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                  <button
                     onClick={() => setActiveModal('polymarket-deposit')}
-                    className="w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                    className="w-full py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle text-primary font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-sm">qr_code</span>
                     <span>Deposit Polygon USDC Float</span>
                   </button>
-                  <div className="flex items-center justify-between text-xs font-mono text-on-surface-variant px-1">
+                  <div className="flex items-center justify-between text-xs font-mono text-on-surface-variant px-1 pt-1">
                     <span>Geo-Eligibility:</span>
                     <span className="text-status-success font-bold">ACTIVE (PASSED)</span>
                   </div>

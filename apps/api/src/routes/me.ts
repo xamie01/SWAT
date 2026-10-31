@@ -18,15 +18,20 @@ import {
   type UserScope
 } from '@swat/db';
 import {
+  buildClobAuthTypedData,
   capabilitiesFor,
   chainSchema,
   createWalletBackfillJob,
+  EnvMasterKeyWrapper,
+  fetchClobCredentialsFromSignature,
   isValidAddressForChain,
   loadEmailConfigFromEnv,
   resolveChainAddress,
+  sealSecret,
   sendEmail,
   tierAllowsChain,
-  type Chain
+  type Chain,
+  type WrapContext
 } from '@swat/shared';
 import { requireUser } from '../auth/plugin.js';
 
@@ -321,8 +326,9 @@ export async function registerMeRoutes(
       account_address: string;
       status: string;
       expires_at: Date | null;
+      scope_policy: any;
     }>(
-      `SELECT chain, grant_kind, account_address, status, expires_at
+      `SELECT chain, grant_kind, account_address, status, expires_at, scope_policy
          FROM user_execution_grants
         WHERE user_id = $1 AND status = 'active'`,
       [scope.userId]
@@ -351,6 +357,11 @@ export async function registerMeRoutes(
       },
       polymarket: {
         depositAddress: polyGrant?.account_address ?? null,
+        signerAddress: polyGrant?.account_address ?? null,
+        status: polyGrant ? 'active' : 'uninitialized',
+        apiKey: typeof polyGrant?.scope_policy === 'string'
+          ? (JSON.parse(polyGrant.scope_policy)?.apiKey ?? null)
+          : (polyGrant?.scope_policy?.apiKey ?? null),
         geoEligible: true,
         geoExpiresAt: new Date(now.getTime() + 7 * 86400000).toISOString()
       },
@@ -454,6 +465,123 @@ export async function registerMeRoutes(
       expiresAt: expiresAt?.toISOString() ?? null,
       message: `${grantKind} registered and activated successfully`
     });
+  });
+
+  // ─── Polymarket CLOB L2 Authentication ──────────────────────────────────────
+  app.get('/v1/me/vault/polymarket/challenge', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+
+    const q = request.query as { address?: string };
+    const address = q.address?.trim();
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return reply.code(400).send({
+        error: 'Bad Request',
+        message: 'Valid EVM address query param required (0x followed by 40 hex characters)'
+      });
+    }
+
+    const timestampSeconds = Math.floor(Date.now() / 1000);
+    const nonce = 0;
+    const typedData = buildClobAuthTypedData({
+      signerAddress: address,
+      timestampSeconds,
+      nonce
+    });
+
+    return reply.send({
+      address,
+      timestampSeconds,
+      nonce,
+      typedData
+    });
+  });
+
+  const polymarketCredentialsSchema = z.object({
+    address: z.string().trim().regex(/^0x[0-9a-fA-F]{40}$/),
+    signature: z.string().trim().regex(/^0x[0-9a-fA-F]+$/),
+    timestampSeconds: z.number().int().positive(),
+    nonce: z.number().int().nonnegative().default(0)
+  });
+
+  app.post('/v1/me/vault/polymarket/credentials', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+
+    const parsed = polymarketCredentialsSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Bad Request', issues: parsed.error.issues });
+    }
+
+    const { address, signature, timestampSeconds, nonce } = parsed.data;
+
+    try {
+      // 1. Call Polymarket CLOB to create or derive L2 credentials using the user's signature
+      const creds = await fetchClobCredentialsFromSignature({
+        address,
+        signature,
+        timestampSeconds,
+        nonce
+      });
+
+      // 2. Envelope-seal the credentials
+      const wrapper = new EnvMasterKeyWrapper();
+      const wrapContext: WrapContext = {
+        userId: scope.userId,
+        chainKind: 'evm',
+        keyVersion: 1
+      };
+      const secretPayload = JSON.stringify({
+        apiKey: creds.apiKey,
+        secret: creds.secret,
+        passphrase: creds.passphrase,
+        signerAddress: address.toLowerCase()
+      });
+      const sealedSecret = await sealSecret(secretPayload, wrapContext, wrapper);
+
+      // 3. Revoke any prior active grant for polygon polymarket_signer
+      await query(
+        `UPDATE user_execution_grants
+            SET status = 'revoked', revoked_at = NOW()
+          WHERE user_id = $1 AND chain = 'polygon' AND grant_kind = 'polymarket_signer' AND status = 'active'`,
+        [scope.userId]
+      );
+
+      const policy = {
+        apiKey: creds.apiKey,
+        derivedAt: new Date().toISOString(),
+        nonce
+      };
+
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO user_execution_grants
+           (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, status, created_at)
+         VALUES ($1, 'polygon', 'polymarket_signer', $2, $3, 1, $4, 'active', NOW())
+         ON CONFLICT (chain, account_address) DO UPDATE
+            SET user_id = EXCLUDED.user_id,
+                sealed_secret = EXCLUDED.sealed_secret,
+                key_version = EXCLUDED.key_version,
+                scope_policy = EXCLUDED.scope_policy,
+                status = 'active',
+                revoked_at = NULL
+         RETURNING id`,
+        [scope.userId, address.toLowerCase(), sealedSecret, JSON.stringify(policy)]
+      );
+
+      return reply.send({
+        success: true,
+        grantId: inserted[0]?.id,
+        address,
+        apiKey: creds.apiKey,
+        message: 'Polymarket L2 credentials derived and activated successfully'
+      });
+    } catch (err: any) {
+      request.log.error(err, '[polymarket-clob] Failed to derive credentials');
+      return reply.code(400).send({
+        error: 'Polymarket L2 authentication failed',
+        message: err.message || 'Failed to authenticate with Polymarket CLOB'
+      });
+    }
   });
 
   // ─── Suggested Alpha Masters Discovery ───────────────────────────────────────

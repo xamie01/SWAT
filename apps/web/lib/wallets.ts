@@ -278,3 +278,25 @@ export async function linkWalletWithSignature(params: {
 
   return verifyRes.wallet;
 }
+
+/**
+ * Prompts the connected EVM wallet (MetaMask / Rabby) to sign the Polymarket
+ * ClobAuth EIP-712 typed data via eth_signTypedData_v4.
+ */
+export async function signPolymarketClobAuth(
+  provider: any,
+  address: string,
+  typedData: any
+): Promise<string> {
+  try {
+    return await provider.request({
+      method: 'eth_signTypedData_v4',
+      params: [address, JSON.stringify(typedData)],
+    });
+  } catch (err: any) {
+    if (err?.code === 4001) {
+      throw new Error('Polymarket authentication signature rejected by user.');
+    }
+    throw err;
+  }
+}

@@ -725,3 +725,58 @@ export function createClobCredentialStore(
     }
   };
 }
+
+export interface FetchClobCredentialsInput {
+  readonly address: string;
+  readonly signature: string;
+  readonly timestampSeconds: number;
+  readonly nonce?: number;
+  readonly baseUrl?: string;
+  readonly fetchImpl?: typeof fetch;
+}
+
+/**
+ * Calls Polymarket CLOB auth endpoints using an existing L1 EIP-712 signature
+ * (e.g. produced by a browser wallet via eth_signTypedData_v4).
+ *
+ * Tries POST /auth/api-key first, and on HTTP 400 falls back to GET /auth/derive-api-key.
+ */
+export async function fetchClobCredentialsFromSignature(
+  input: FetchClobCredentialsInput
+): Promise<ClobCredentials> {
+  const fetchImpl = input.fetchImpl ?? globalThis.fetch;
+  const origin = normalizeClobOrigin(input.baseUrl ?? CLOB_BASE_URL);
+  normalizeClobSignerAddress(input.address);
+  const nonce = normalizeClobNonce(input.nonce);
+  assertL1Signature(input.signature);
+
+  const headers: Record<string, string> = {
+    POLY_ADDRESS: input.address,
+    POLY_NONCE: String(nonce),
+    POLY_SIGNATURE: input.signature,
+    POLY_TIMESTAMP: String(input.timestampSeconds)
+  };
+
+  const transport = {
+    fetchImpl,
+    origin,
+    headers,
+    timeoutMs: DEFAULT_TIMEOUT_MS
+  };
+
+  const created = await requestCredentials({
+    ...transport,
+    method: 'POST',
+    route: CREATE_ROUTE,
+    tolerateAlreadyExists: true
+  });
+  if (created) return created;
+
+  return requireCredentials(
+    await requestCredentials({
+      ...transport,
+      method: 'GET',
+      route: DERIVE_ROUTE
+    })
+  );
+}
