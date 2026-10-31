@@ -8,9 +8,9 @@ import type { Chain } from './types.js';
  * has to touch quota logic and a quota change never has to touch a payment path.
  */
 
-export type UserTier = 'free' | 'operator' | 'ultra';
+export type UserTier = 'free' | 'operator' | 'ultra' | 'unlimited';
 
-export const USER_TIERS: readonly UserTier[] = ['free', 'operator', 'ultra'] as const;
+export const USER_TIERS: readonly UserTier[] = ['free', 'operator', 'ultra', 'unlimited'] as const;
 
 /**
  * `null` means unlimited — deliberately not `Infinity`.
@@ -47,9 +47,9 @@ export interface TierCapabilities {
 const FREE: TierCapabilities = {
   tier: 'free',
   trackedWallets: 3,
-  tokenBackfillsPerDay: 1,
+  tokenBackfillsPerDay: 5,
   backfillDepthDays: 30,
-  chains: ['solana'],
+  chains: ['solana', 'polygon', 'robinhood-chain'],
   signalDelaySeconds: 900,
   liveExecution: false,
   apiKeys: 0,
@@ -59,7 +59,7 @@ const FREE: TierCapabilities = {
 const OPERATOR: TierCapabilities = {
   tier: 'operator',
   trackedWallets: 25,
-  tokenBackfillsPerDay: 20,
+  tokenBackfillsPerDay: 25,
   backfillDepthDays: 180,
   chains: ['solana', 'polygon', 'robinhood-chain'],
   signalDelaySeconds: 0,
@@ -81,14 +81,25 @@ const ULTRA: TierCapabilities = {
   backfillPriority: 1
 };
 
+const UNLIMITED: TierCapabilities = {
+  ...ULTRA,
+  tier: 'unlimited'
+};
+
 export const TIER_CAPABILITIES: Readonly<Record<UserTier, TierCapabilities>> = {
   free: FREE,
   operator: OPERATOR,
-  ultra: ULTRA
+  ultra: ULTRA,
+  unlimited: UNLIMITED
 };
 
 /** Ordering for "at least this tier" comparisons. */
-const TIER_RANK: Readonly<Record<UserTier, number>> = { free: 0, operator: 1, ultra: 2 };
+const TIER_RANK: Readonly<Record<UserTier, number>> = {
+  free: 0,
+  operator: 1,
+  ultra: 2,
+  unlimited: 2
+};
 
 /**
  * Resolves the tier a user is *actually* entitled to right now.
@@ -97,13 +108,19 @@ const TIER_RANK: Readonly<Record<UserTier, number>> = { free: 0, operator: 1, ul
  * (the USDC lifetime tier) and must never be read as expired — inverting that
  * check would silently downgrade every lifetime customer.
  */
-export function effectiveTier(tier: UserTier, expiresAt: Date | null, now = new Date()): UserTier {
-  if (expiresAt === null) return tier;
-  return expiresAt.getTime() < now.getTime() ? 'free' : tier;
+export function effectiveTier(tier: UserTier | string, expiresAt: Date | null, now = new Date()): UserTier {
+  const normalized: UserTier =
+    tier === 'unlimited' || tier === 'lifetime' ? 'unlimited' :
+    tier === 'operator' ? 'operator' :
+    tier === 'ultra' ? 'ultra' :
+    tier === 'free' ? 'free' : 'free';
+
+  if (expiresAt === null) return normalized;
+  return expiresAt.getTime() < now.getTime() ? 'free' : normalized;
 }
 
-export function capabilitiesFor(tier: UserTier, expiresAt: Date | null = null, now = new Date()): TierCapabilities {
-  return TIER_CAPABILITIES[effectiveTier(tier, expiresAt, now)];
+export function capabilitiesFor(tier: UserTier | string, expiresAt: Date | null = null, now = new Date()): TierCapabilities {
+  return TIER_CAPABILITIES[effectiveTier(tier, expiresAt, now)] ?? TIER_CAPABILITIES.free;
 }
 
 export function tierAtLeast(tier: UserTier, minimum: UserTier): boolean {
