@@ -214,19 +214,23 @@ export async function connectEvmWallet(targetChainId?: '0x89'): Promise<EvmWalle
               chainId: '0x89',
               chainName: 'Polygon Mainnet',
               nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-              rpcUrls: ['https://polygon-rpc.com'],
+              rpcUrls: ['https://polygon-bor-rpc.publicnode.com'],
               blockExplorerUrls: ['https://polygonscan.com'],
             },
           ],
         });
+      } else {
+        throw new Error('Please approve switching your wallet to Polygon Mainnet (Chain ID 137) in MetaMask/Rabby.');
       }
     }
   }
 
+  const updatedChainId: string = await provider.request({ method: 'eth_chainId' }).catch(() => currentChainId);
+
   return {
     address: accounts[0].toLowerCase(),
     provider,
-    chainId: currentChainId,
+    chainId: updatedChainId,
     walletName: name,
   };
 }
@@ -288,6 +292,34 @@ export async function signPolymarketClobAuth(
   address: string,
   typedData: any
 ): Promise<string> {
+  // Ensure wallet is strictly on Polygon (0x89 / 137) before signing
+  const currentHex: string = await provider.request({ method: 'eth_chainId' }).catch(() => '0x1');
+  if (currentHex.toLowerCase() !== '0x89') {
+    try {
+      await provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x89' }],
+      });
+    } catch (switchErr: any) {
+      if (switchErr?.code === 4902) {
+        await provider.request({
+          method: 'wallet_addEthereumChain',
+          params: [
+            {
+              chainId: '0x89',
+              chainName: 'Polygon Mainnet',
+              nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+              rpcUrls: ['https://polygon-bor-rpc.publicnode.com'],
+              blockExplorerUrls: ['https://polygonscan.com'],
+            },
+          ],
+        });
+      } else {
+        throw new Error('Please switch your wallet to Polygon Mainnet (Chain ID 137) before signing Polymarket credentials.');
+      }
+    }
+  }
+
   try {
     return await provider.request({
       method: 'eth_signTypedData_v4',
@@ -297,6 +329,14 @@ export async function signPolymarketClobAuth(
     if (err?.code === 4001) {
       throw new Error('Polymarket authentication signature rejected by user.');
     }
-    throw err;
+    // Fallback: some providers expect parsed object instead of serialized JSON string
+    try {
+      return await provider.request({
+        method: 'eth_signTypedData_v4',
+        params: [address, typedData],
+      });
+    } catch {
+      throw err;
+    }
   }
 }

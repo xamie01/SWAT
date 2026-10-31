@@ -153,10 +153,10 @@ await app.register(async (scope) => {
   await scope.register(rateLimit, {
     max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
     timeWindow: '15 minutes',
-    // Exclude read-only session verification from the credential-stuffing bucket.
-    // `/v1/auth/me` is called by middleware on protected route navigations and
-    // is already governed by the global rate limit (300/min).
-    allowList: (request) => request.url === '/v1/auth/me',
+    // Exclude read-only session verification and wallet link nonce/verify
+    // from the credential-stuffing bucket. `/v1/auth/me` and wallet challenge routes
+    // are already governed by the global rate limit (300/min).
+    allowList: (request) => request.url === '/v1/auth/me' || request.url.startsWith('/v1/auth/wallet/'),
     // Keyed on IP + email so one attacker cannot lock out an entire NAT, and a
     // single account cannot be sprayed from one address.
     keyGenerator: (request) => {
