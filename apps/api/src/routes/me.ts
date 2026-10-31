@@ -515,6 +515,71 @@ export async function registerMeRoutes(
 
     const { address, signature, timestampSeconds, nonce } = parsed.data;
 
+    request.log.info(
+      { address, signature, timestampSeconds, nonce },
+      '[polymarket-clob] Received credentials derivation request'
+    );
+
+    try {
+      const { recoverTypedDataAddress } = await import('viem');
+      const recovered137 = await recoverTypedDataAddress({
+        domain: { name: 'ClobAuthDomain', version: '1', chainId: 137 },
+        types: {
+          EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' }
+          ],
+          ClobAuth: [
+            { name: 'address', type: 'address' },
+            { name: 'timestamp', type: 'string' },
+            { name: 'nonce', type: 'uint256' },
+            { name: 'message', type: 'string' }
+          ]
+        },
+        primaryType: 'ClobAuth',
+        message: {
+          address,
+          timestamp: String(timestampSeconds),
+          nonce: BigInt(nonce),
+          message: 'This message attests that I control the given wallet'
+        },
+        signature: signature as `0x${string}`
+      }).catch((e: any) => `recovery_failed: ${e?.message}`);
+
+      const recovered1 = await recoverTypedDataAddress({
+        domain: { name: 'ClobAuthDomain', version: '1', chainId: 1 },
+        types: {
+          EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' }
+          ],
+          ClobAuth: [
+            { name: 'address', type: 'address' },
+            { name: 'timestamp', type: 'string' },
+            { name: 'nonce', type: 'uint256' },
+            { name: 'message', type: 'string' }
+          ]
+        },
+        primaryType: 'ClobAuth',
+        message: {
+          address,
+          timestamp: String(timestampSeconds),
+          nonce: BigInt(nonce),
+          message: 'This message attests that I control the given wallet'
+        },
+        signature: signature as `0x${string}`
+      }).catch((e: any) => `recovery_failed: ${e?.message}`);
+
+      request.log.info(
+        { address, recovered137, recovered1, match137: recovered137?.toLowerCase() === address.toLowerCase(), match1: recovered1?.toLowerCase() === address.toLowerCase() },
+        '[polymarket-clob] Signature recovery diagnostic'
+      );
+    } catch (recErr) {
+      request.log.warn({ err: recErr }, '[polymarket-clob] Diagnostic recovery threw');
+    }
+
     try {
       // 1. Call Polymarket CLOB to create or derive L2 credentials using the user's signature
       const creds = await fetchClobCredentialsFromSignature({

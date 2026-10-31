@@ -470,10 +470,9 @@ async function requestCredentials(request: CredentialRequest): Promise<ClobCrede
 
   if (request.tolerateAlreadyExists && response.status === 400) return null;
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => '');
     throw new ClobCredentialError(
       'clob-credential-rejected',
-      `${label} returned HTTP ${response.status}${errorBody ? `: ${errorBody}` : ''}`,
+      `${label} returned HTTP ${response.status}`,
       { status: response.status }
     );
   }

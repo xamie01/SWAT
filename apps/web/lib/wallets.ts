@@ -320,10 +320,23 @@ export async function signPolymarketClobAuth(
     }
   }
 
+  // Ensure EIP712Domain is explicitly in types for MetaMask eth_signTypedData_v4
+  const payload = {
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+      ],
+      ...typedData.types,
+    },
+  };
+
   try {
     return await provider.request({
       method: 'eth_signTypedData_v4',
-      params: [address, JSON.stringify(typedData)],
+      params: [address, JSON.stringify(payload)],
     });
   } catch (err: any) {
     if (err?.code === 4001) {
@@ -333,7 +346,7 @@ export async function signPolymarketClobAuth(
     try {
       return await provider.request({
         method: 'eth_signTypedData_v4',
-        params: [address, typedData],
+        params: [address, payload],
       });
     } catch {
       throw err;
