@@ -20,7 +20,13 @@ export const metadata: Metadata = {
   description: 'Wake Protocol: Cross-chain copy-trading intelligence across Solana, Robinhood, and Polymarket',
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://wake.trade'),
   icons: {
-    icon: '/logo.svg',
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/icon.png', type: 'image/png' },
+      { url: '/logo.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: '/favicon.ico',
+    apple: '/apple-icon.png',
   },
   robots: {
     index: false,

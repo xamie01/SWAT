@@ -510,25 +510,32 @@ app.get('/v1/wallets/:address/holdings', async (req, reply) => {
 
 app.post('/v1/discovery/from-token', async (req, reply) => {
   const { tokenMint, chain = 'solana' } = (req.body ?? {}) as { tokenMint?: string; chain?: WalletChain };
-  if (chain !== 'solana') return reply.code(400).send({ error: 'Discovery from token currently supports only solana' });
-  // A token mint is a Solana address; reuse the address schema to reject garbage
-  // before it pollutes discovery_log / Redis.
-  const parsedMint = walletAddressSchema.safeParse(tokenMint);
-  if (!parsedMint.success) return reply.code(400).send({ error: 'Valid tokenMint required' });
+  if (!['solana', 'polygon', 'robinhood-chain'].includes(chain)) {
+    return reply.code(400).send({ error: 'chain must be one of solana, polygon, or robinhood-chain' });
+  }
+  if (!tokenMint || typeof tokenMint !== 'string') {
+    return reply.code(400).send({ error: 'Valid tokenMint or contract address required' });
+  }
+  const cleanMint = tokenMint.trim();
+  if (!isValidAddressForChain(cleanMint, chain)) {
+    return reply.code(400).send({
+      error: `Invalid ${chain === 'solana' ? 'Solana token mint' : 'EVM contract'} address`
+    });
+  }
 
   // The indexer owns token-seeded discovery. Queue exactly one canonical scan;
   // its deterministic job ID deduplicates concurrent requests for the same mint.
   await tokenDiscoveryQueue.add(
     'token-discovery',
-    { tokenMint: parsedMint.data, chain },
+    { tokenMint: cleanMint, chain },
     {
-      jobId: `token-discovery-${chain}-${parsedMint.data}`,
+      jobId: `token-discovery-${chain}-${cleanMint.toLowerCase()}`,
       removeOnComplete: true,
       removeOnFail: 1000
     }
   );
 
-  return { queued: true, tokenMint: parsedMint.data, chain };
+  return { queued: true, tokenMint: cleanMint, chain };
 });
 
 app.post('/v1/discovery/run', async () => {

@@ -7,16 +7,21 @@ import {
 } from 'viem';
 import { polygon } from 'viem/chains';
 import { Redis } from 'ioredis';
+import { Queue } from 'bullmq';
 import {
   query,
   upsertToken,
+  upsertWallet,
   insertParsedTransaction,
   updateTokenLaunchTimestamp,
-  refreshWalletActivity
+  refreshWalletActivity,
+  logDiscoveryRun
 } from '@swat/db';
 import {
   prefixChainValue,
   REDIS_CHANNELS,
+  QUEUES,
+  createWalletBackfillJob,
   resolveChainValue,
   fetchTokenPriceUsd
 } from '@swat/shared';
@@ -546,4 +551,97 @@ export async function backfillEvmWallet(
     );
   }
   return result;
+}
+
+/**
+ * Discover and seed early & big buyers of an EVM ERC-20 token on Robinhood Chain or Polygon.
+ */
+export async function discoverFromEvmToken(
+  tokenAddress: string,
+  chain: 'polygon' | 'robinhood-chain',
+  dependencies: EvmBackfillDependencies & { backfillQueue?: Queue } = {}
+): Promise<{ earlyBuyers: number; bigBuyers: number; scanned: number }> {
+  const normalizedAddress = resolveChainValue(tokenAddress, chain).raw.toLowerCase() as `0x${string}`;
+  const client = dependencies.client ?? getPublicClient(chain);
+  const currentBlock = await client.getBlockNumber();
+  const blockWindow = BigInt(process.env.EVM_BACKFILL_BLOCKS ?? '100000');
+  const logChunkSize = BigInt(process.env.EVM_LOG_CHUNK_SIZE ?? '2000');
+  const fromBlock = currentBlock - blockWindow > 0n ? currentBlock - blockWindow : 0n;
+
+  // Metadata retrieval & caching
+  try {
+    await getEvmTokenMetadata(client, normalizedAddress, chain);
+  } catch (err) {
+    console.warn(`[indexer] Failed to fetch EVM token metadata for ${normalizedAddress} on ${chain}:`, err);
+  }
+
+  console.log(`[indexer] EVM token discovery querying Transfer logs for ${normalizedAddress} on ${chain} from block ${fromBlock}`);
+
+  const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
+  const collectedLogs: any[] = [];
+  for (let chunkStart = fromBlock; chunkStart <= currentBlock; chunkStart += logChunkSize) {
+    const chunkEnd = chunkStart + logChunkSize - 1n > currentBlock
+      ? currentBlock
+      : chunkStart + logChunkSize - 1n;
+    try {
+      const logs = await client.getLogs({
+        address: normalizedAddress,
+        event: transferEvent,
+        fromBlock: chunkStart,
+        toBlock: chunkEnd
+      });
+      collectedLogs.push(...logs);
+    } catch (err) {
+      console.warn(`[indexer] EVM token discovery chunk failed (${chunkStart}-${chunkEnd}):`, err);
+    }
+  }
+
+  // Aggregate per buyer: earliest blockNumber + total base units acquired
+  type Agg = { earliestBlock: bigint; amount: bigint };
+  const buyers = new Map<string, Agg>();
+
+  for (const log of collectedLogs) {
+    const to = (log.args?.to as string | undefined)?.toLowerCase();
+    const value = log.args?.value as bigint | undefined;
+    if (!to || !value || to === NATIVE_TOKEN || to === normalizedAddress) continue;
+    if (to === '0x0000000000000000000000000000000000000000') continue;
+
+    const blockNum = log.blockNumber ?? currentBlock;
+    const cur = buyers.get(to);
+    if (cur) {
+      cur.amount += value;
+      if (blockNum < cur.earliestBlock) cur.earliestBlock = blockNum;
+    } else {
+      buyers.set(to, { earliestBlock: blockNum, amount: value });
+    }
+  }
+
+  const entries = Array.from(buyers.entries());
+  const byEarliest = [...entries].sort((a, b) => (a[1].earliestBlock < b[1].earliestBlock ? -1 : a[1].earliestBlock > b[1].earliestBlock ? 1 : 0));
+  const early = byEarliest.slice(0, 40).map(([owner]) => owner);
+  const earlySet = new Set(early);
+
+  const byAmount = [...entries]
+    .filter(([owner]) => !earlySet.has(owner))
+    .sort((a, b) => (b[1].amount > a[1].amount ? -1 : b[1].amount < a[1].amount ? 1 : 0));
+  const big = byAmount.slice(0, 10).map(([owner]) => owner);
+
+  const targetQueue = dependencies.backfillQueue ?? new Queue(QUEUES.walletBackfill, { connection: redis });
+
+  for (const owner of early) {
+    await upsertWallet({ address: owner, chain, source: 'discovered', discoveryMethod: 'token-early' });
+    const job = createWalletBackfillJob(owner, chain);
+    await targetQueue.add(job.name, job.data, job.options);
+  }
+  for (const owner of big) {
+    await upsertWallet({ address: owner, chain, source: 'discovered', discoveryMethod: 'token-big' });
+    const job = createWalletBackfillJob(owner, chain);
+    await targetQueue.add(job.name, job.data, job.options);
+  }
+
+  await logDiscoveryRun('token', normalizedAddress, early.length + big.length);
+  await redis.publish(REDIS_CHANNELS.clusterRefresh, JSON.stringify({ reason: 'token-discovery', mint: normalizedAddress, chain }));
+
+  console.log(`[indexer] EVM token ${normalizedAddress} on ${chain}: seeded ${early.length} early + ${big.length} big buyers from ${buyers.size} candidates`);
+  return { earlyBuyers: early.length, bigBuyers: big.length, scanned: collectedLogs.length };
 }

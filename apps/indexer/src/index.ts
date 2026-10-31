@@ -31,7 +31,7 @@ import {
   SOL_MINT,
   type HeliusParsedTransaction
 } from './parse.js';
-import { backfillEvmWallet, WalletChain } from './evm.js';
+import { backfillEvmWallet, discoverFromEvmToken, WalletChain } from './evm.js';
 import { createPolymarketBookRuntimeOnRedis } from './polymarket-book-runtime.js';
 import { backfillPolymarketWallet, pollPolymarketResolutions } from './polymarket.js';
 import {
@@ -635,11 +635,13 @@ new Worker(
 new Worker(
   QUEUES.tokenDiscovery,
   async (job) => {
-    const mint = (job.data as { tokenMint: string }).tokenMint;
-    console.log(`[indexer] token discovery started for ${mint}`);
-    const result = await discoverFromToken(mint);
-    console.log(`[indexer] token discovery complete for ${mint}:`, result);
-    return { mint, ...result };
+    const { tokenMint, chain = 'solana' } = job.data as { tokenMint: string; chain?: WalletChain };
+    console.log(`[indexer] token discovery started for ${tokenMint} on ${chain}`);
+    const result = chain === 'solana'
+      ? await discoverFromToken(tokenMint)
+      : await discoverFromEvmToken(tokenMint, chain as 'polygon' | 'robinhood-chain', { backfillQueue });
+    console.log(`[indexer] token discovery complete for ${tokenMint} on ${chain}:`, result);
+    return { mint: tokenMint, chain, ...result };
   },
   // Concurrency 1: a single discovery already pages thousands of Helius requests;
   // running several in parallel would trip the rate limiter.
