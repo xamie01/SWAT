@@ -163,7 +163,14 @@ async function fetchGammaMarket(
             m !== null &&
             (m.conditionId?.toLowerCase() === normTarget || m.condition_id?.toLowerCase() === normTarget)
         );
-        if (match) return match as Record<string, unknown>;
+        if (match) {
+          return {
+            ...match,
+            negRisk: typeof (match as any).negRisk === 'boolean'
+              ? (match as any).negRisk
+              : Boolean((match as any).neg_risk)
+          };
+        }
       }
     }
   } catch {
@@ -184,7 +191,14 @@ async function fetchGammaMarket(
             m !== null &&
             (m.conditionId?.toLowerCase() === normTarget || m.condition_id?.toLowerCase() === normTarget)
         );
-        if (match) return match as Record<string, unknown>;
+        if (match) {
+          return {
+            ...match,
+            negRisk: typeof (match as any).negRisk === 'boolean'
+              ? (match as any).negRisk
+              : Boolean((match as any).neg_risk)
+          };
+        }
       }
     }
   } catch {

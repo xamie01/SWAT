@@ -171,12 +171,18 @@ export async function registerMeRoutes(
       label: string | null;
       state: string;
       membership_slot: number | null;
+      composite_score: number | null;
+      tier: string | null;
+      win_rate: number | null;
+      realized_roi: number | null;
+      total_trades: number | null;
     }>(
       `SELECT uws.wallet_address, COALESCE(w.chain, 'solana') AS chain,
-              uws.label, uws.state, uws.membership_slot
+              uws.label, uws.state, uws.membership_slot,
+              w.composite_score, w.tier, w.win_rate, w.realized_roi, w.total_trades
          FROM user_wallet_subscriptions uws
          LEFT JOIN wallets w ON w.address = uws.wallet_address
-        WHERE uws.user_id = $1
+        WHERE uws.user_id = $1 AND uws.state = 'active'
         ORDER BY uws.created_at DESC`,
       [scope.userId]
     );
@@ -201,7 +207,12 @@ export async function registerMeRoutes(
         chain: s.chain || 'solana',
         label: s.label,
         state: s.state,
-        membershipSlot: s.membership_slot
+        membershipSlot: s.membership_slot,
+        compositeScore: s.composite_score != null ? Number(s.composite_score) : null,
+        tier: s.tier || 'speculative',
+        winRate: s.win_rate != null ? Number((Number(s.win_rate) * 100).toFixed(1)) : null,
+        realizedRoi: s.realized_roi != null ? Number((Number(s.realized_roi) * 100).toFixed(1)) : null,
+        totalTrades: s.total_trades != null ? Number(s.total_trades) : 0
       })),
       executionSettings: {
         killSwitchActive: settingsRow?.killed ?? false,
@@ -523,7 +534,7 @@ export async function registerMeRoutes(
     try {
       const { recoverTypedDataAddress } = await import('viem');
       const recovered137 = await recoverTypedDataAddress({
-        domain: { name: 'ClobAuthDomain', version: '1', chainId: 137 },
+        domain: { name: 'ClobAuthDomain', version: '1', chainId: BigInt(137) },
         types: {
           EIP712Domain: [
             { name: 'name', type: 'string' },
@@ -539,7 +550,7 @@ export async function registerMeRoutes(
         },
         primaryType: 'ClobAuth',
         message: {
-          address,
+          address: address as `0x${string}`,
           timestamp: String(timestampSeconds),
           nonce: BigInt(nonce),
           message: 'This message attests that I control the given wallet'
@@ -548,7 +559,7 @@ export async function registerMeRoutes(
       }).catch((e: any) => `recovery_failed: ${e?.message}`);
 
       const recovered1 = await recoverTypedDataAddress({
-        domain: { name: 'ClobAuthDomain', version: '1', chainId: 1 },
+        domain: { name: 'ClobAuthDomain', version: '1', chainId: BigInt(1) },
         types: {
           EIP712Domain: [
             { name: 'name', type: 'string' },
@@ -564,7 +575,7 @@ export async function registerMeRoutes(
         },
         primaryType: 'ClobAuth',
         message: {
-          address,
+          address: address as `0x${string}`,
           timestamp: String(timestampSeconds),
           nonce: BigInt(nonce),
           message: 'This message attests that I control the given wallet'
@@ -707,10 +718,12 @@ export async function registerMeRoutes(
       status: string;
       composite_score: number | null;
       tier: string | null;
+      win_rate: number | null;
+      realized_roi: number | null;
       total_trades: number | null;
       last_active: Date | null;
     }>(
-      `SELECT address, chain, status, composite_score, tier, total_trades, last_active
+      `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
          FROM wallets WHERE address = ANY($1)`,
       [subscriptions.map((s) => s.walletAddress)]
     );
@@ -726,12 +739,57 @@ export async function registerMeRoutes(
           subscribedAt: subscription.createdAt,
           chain: wallet?.chain ?? null,
           status: wallet?.status ?? null,
-          compositeScore: wallet?.composite_score ?? null,
+          compositeScore: wallet?.composite_score != null ? Number(wallet.composite_score) : null,
           tier: wallet?.tier ?? null,
-          totalTrades: wallet?.total_trades ?? null,
+          winRate: wallet?.win_rate != null ? Number((Number(wallet.win_rate) * 100).toFixed(1)) : null,
+          realizedRoi: wallet?.realized_roi != null ? Number((Number(wallet.realized_roi) * 100).toFixed(1)) : null,
+          totalTrades: wallet?.total_trades != null ? Number(wallet.total_trades) : null,
           lastActive: wallet?.last_active ?? null
         };
       })
+    });
+  });
+
+  app.get('/v1/me/wallets/inspect', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const q = request.query as { address?: string; chain?: string };
+    if (!q.address) {
+      return reply.code(400).send({ error: 'Missing address parameter' });
+    }
+    const resolved = resolveChainAddress(q.address, (q.chain as Chain) || 'solana');
+    const rows = await query<{
+      address: string;
+      chain: Chain;
+      status: string;
+      composite_score: number | null;
+      tier: string | null;
+      win_rate: number | null;
+      realized_roi: number | null;
+      total_trades: number | null;
+      last_active: Date | null;
+    }>(
+      `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
+         FROM wallets WHERE address = $1`,
+      [resolved.prefixed]
+    );
+    if (rows.length === 0) {
+      return reply.send({ status: 'not_found', metrics: null });
+    }
+    const w = rows[0];
+    const isReady = w.composite_score != null || (w.total_trades != null && w.total_trades > 0);
+    return reply.send({
+      status: isReady ? 'ready' : 'indexing',
+      metrics: {
+        address: w.address,
+        chain: w.chain,
+        compositeScore: w.composite_score != null ? Number(w.composite_score) : null,
+        tier: w.tier || 'speculative',
+        winRate: w.win_rate != null ? Number((Number(w.win_rate) * 100).toFixed(1)) : null,
+        realizedRoi: w.realized_roi != null ? Number((Number(w.realized_roi) * 100).toFixed(1)) : null,
+        totalTrades: w.total_trades != null ? Number(w.total_trades) : 0,
+        lastActive: w.last_active
+      }
     });
   });
 

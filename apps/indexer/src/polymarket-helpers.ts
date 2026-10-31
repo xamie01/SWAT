@@ -186,7 +186,7 @@ export function parsePolymarketMarketContext(
     active,
     closed,
     acceptingOrders,
-    negRisk: raw.negRisk,
+    negRisk: raw.negRisk as boolean,
     tickSize,
     resolutionStatus,
     status: closed ? 'closed' : active ? 'active' : 'inactive',

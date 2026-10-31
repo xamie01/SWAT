@@ -92,3 +92,4 @@ export * from './fanout-candidates.js';
 export * from './polymarket-book-subscriptions.js';
 export * from './billing.js';
 export * from './admin-portfolio.js';
+export * from './scoring-queries.js';
