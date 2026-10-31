@@ -47,6 +47,7 @@ export function SaaSNav() {
 
   const navLinks = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
+    { label: 'Whale Discovery', href: '/wallets', icon: 'travel_explore' },
     { label: 'Positions', href: '/positions', icon: 'trending_up' },
     { label: 'Funding & Vault', href: '/vault', icon: 'account_balance_wallet' },
     { label: 'Billing', href: '/billing', icon: 'credit_card' },

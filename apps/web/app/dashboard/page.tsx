@@ -65,6 +65,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Custom Master Tracking Modal State
+  const [showTrackModal, setShowTrackModal] = useState(false);
+  const [customChain, setCustomChain] = useState<'polygon' | 'solana' | 'robinhood-chain'>('polygon');
+  const [customAddress, setCustomAddress] = useState('');
+  const [customLabel, setCustomLabel] = useState('');
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [trackingCustom, setTrackingCustom] = useState(false);
+
   useEffect(() => {
     fetchDashboard();
   }, []);
@@ -145,6 +153,46 @@ export default function DashboardPage() {
       setActionMessage(`Failed to remove subscription: ${err.message}`);
     } finally {
       setSubscribingAddress(null);
+    }
+  };
+
+  const handleTrackCustom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const addr = customAddress.trim();
+    if (!addr) {
+      setCustomError('Please enter a wallet address');
+      return;
+    }
+    if (customChain === 'solana') {
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) {
+        setCustomError('Invalid Solana public key (expected Base58 32-44 characters)');
+        return;
+      }
+    } else {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+        setCustomError(`Invalid EVM address for ${customChain === 'polygon' ? 'Polymarket' : 'Robinhood'} (expected 0x followed by 40 hex digits)`);
+        return;
+      }
+    }
+
+    setTrackingCustom(true);
+    setCustomError(null);
+    try {
+      await api.post('/v1/me/wallets', {
+        address: addr,
+        chain: customChain,
+        label: customLabel.trim() || undefined,
+      });
+
+      setActionMessage(`Now tracking ${customLabel.trim() || addr.slice(0, 10)}! Background trade history backfill queued.`);
+      setShowTrackModal(false);
+      setCustomAddress('');
+      setCustomLabel('');
+      await fetchDashboard();
+    } catch (err: any) {
+      setCustomError(err.message || 'Failed to track wallet');
+    } finally {
+      setTrackingCustom(false);
     }
   };
 
@@ -342,50 +390,91 @@ export default function DashboardPage() {
 
         {/* Subscribed Masters Section */}
         <section className="bg-surface-container-lowest border border-border-subtle rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
             <div>
-              <h2 className="font-headline-md text-lg font-bold text-primary">Subscribed Alpha Masters</h2>
-              <p className="text-xs text-on-surface-variant">
+              <div className="flex items-center gap-2">
+                <h2 className="font-headline-md text-lg font-bold text-primary">Subscribed Alpha Masters</h2>
+                {data && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-primary/10 text-primary border border-primary/20">
+                    {data.subscriptions.filter((s) => s.state === 'active').length} Active
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-on-surface-variant mt-0.5">
                 Signals from these wallets are automatically sized against your risk policy and executed on-chain.
               </p>
             </div>
+            <button
+              onClick={() => setShowTrackModal(true)}
+              className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold shadow-md shadow-primary/20 hover:opacity-90 transition-all cursor-pointer self-start sm:self-auto"
+            >
+              <span className="material-symbols-outlined text-base">person_add</span>
+              <span>+ Track Custom Whale</span>
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {data?.subscriptions.map((s) => (
-              <div
-                key={s.walletAddress}
-                className="p-4 bg-surface-container-low border border-border-subtle rounded-xl flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-primary">{s.label || s.walletAddress.slice(0, 10)}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#14F195]/10 text-[#0E9F6E] dark:text-[#14F195] border border-[#14F195]/30">
-                      SLOT #{s.membershipSlot ?? 1}/50
-                    </span>
-                  </div>
-                  <ChainBadge chain={s.chain} />
-                  <div className="text-xs font-mono text-on-surface-variant truncate mt-2">
-                    {s.walletAddress}
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-border-subtle flex items-center justify-between text-xs">
-                  <span className="text-status-success font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
-                    Mirroring Buys & Sells
-                  </span>
-                  <button
-                    onClick={() => handleUnsubscribe(s.walletAddress)}
-                    disabled={subscribingAddress === s.walletAddress}
-                    className="text-[11px] text-on-surface-variant hover:text-status-error underline transition-colors"
-                  >
-                    {subscribingAddress === s.walletAddress ? 'Updating...' : 'Stop Copying'}
-                  </button>
-                </div>
+          {data && data.subscriptions.length === 0 ? (
+            <div className="text-center py-10 px-4 border border-dashed border-border-subtle rounded-xl bg-surface-container-low/40">
+              <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-3">
+                <span className="material-symbols-outlined text-2xl">radar</span>
               </div>
-            ))}
-          </div>
+              <h3 className="text-sm font-bold text-primary mb-1">No Active Master Subscriptions</h3>
+              <p className="text-xs text-on-surface-variant max-w-md mx-auto mb-4">
+                Track any high-conviction Polymarket, Solana, or Robinhood wallet to automatically backfill their history and mirror their trades forward.
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => setShowTrackModal(true)}
+                  className="px-4 py-2 bg-primary text-white text-xs font-bold rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <span className="material-symbols-outlined text-sm">add_circle</span>
+                  <span>Enter Custom Wallet Address</span>
+                </button>
+                <a
+                  href="#alpha-masters-section"
+                  className="px-4 py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle text-xs font-semibold rounded-lg transition-colors"
+                >
+                  Browse Suggested Whales ↓
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {data?.subscriptions.map((s) => (
+                <div
+                  key={s.walletAddress}
+                  className="p-4 bg-surface-container-low border border-border-subtle rounded-xl flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-primary">{s.label || s.walletAddress.slice(0, 10)}</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#14F195]/10 text-[#0E9F6E] dark:text-[#14F195] border border-[#14F195]/30">
+                        SLOT #{s.membershipSlot ?? 1}/50
+                      </span>
+                    </div>
+                    <ChainBadge chain={s.chain} />
+                    <div className="text-xs font-mono text-on-surface-variant truncate mt-2 select-all">
+                      {s.walletAddress}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-border-subtle flex items-center justify-between text-xs">
+                    <span className="text-status-success font-semibold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
+                      Mirroring Buys & Sells
+                    </span>
+                    <button
+                      onClick={() => handleUnsubscribe(s.walletAddress)}
+                      disabled={subscribingAddress === s.walletAddress}
+                      className="text-[11px] text-on-surface-variant hover:text-status-error underline transition-colors"
+                    >
+                      {subscribingAddress === s.walletAddress ? 'Updating...' : 'Stop Copying'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Suggested Alpha Masters Section */}
@@ -478,6 +567,134 @@ export default function DashboardPage() {
             })}
           </div>
         </section>
+
+        {/* Track Custom Master Modal */}
+        {showTrackModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl w-full max-w-lg p-6 shadow-2xl relative">
+              <div className="flex items-center justify-between pb-4 border-b border-border-subtle mb-5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-primary" />
+                  <h3 className="font-headline-md text-lg font-bold text-primary">Track & Backfill Custom Master</h3>
+                </div>
+                <button
+                  onClick={() => { setShowTrackModal(false); setCustomError(null); }}
+                  className="text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-xl">close</span>
+                </button>
+              </div>
+
+              <form onSubmit={handleTrackCustom} className="space-y-4">
+                {customError && (
+                  <div className="p-3 bg-status-error/10 border border-status-error/30 rounded-xl text-xs text-status-error flex items-start gap-2">
+                    <span className="material-symbols-outlined text-sm mt-0.5">error</span>
+                    <span>{customError}</span>
+                  </div>
+                )}
+
+                {/* Chain Selector */}
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant block mb-2">
+                    Target Trading Chain
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'polygon', name: 'Polymarket', badge: 'Polygon (137)' },
+                      { id: 'solana', name: 'Solana', badge: 'Mainnet-Beta' },
+                      { id: 'robinhood-chain', name: 'Robinhood', badge: 'Arbitrum (4663)' },
+                    ].map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => { setCustomChain(c.id as any); setCustomError(null); }}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          customChain === c.id
+                            ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm'
+                            : 'border-border-subtle bg-surface-container-low text-on-surface-variant hover:border-primary/50'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{c.name}</div>
+                        <div className="text-[10px] text-on-surface-variant font-mono">{c.badge}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Wallet Address Input */}
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant block mb-1">
+                    Master Wallet Address
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={customAddress}
+                    onChange={(e) => setCustomAddress(e.target.value)}
+                    placeholder={
+                      customChain === 'solana'
+                        ? 'Base58 Solana Address (e.g. 7xKXtg...)'
+                        : 'Polygon 0x... Address (Safe Proxy or EOA)'
+                    }
+                    className="w-full bg-surface-container-low border border-border-subtle rounded-xl px-3.5 py-2.5 text-xs font-mono text-primary placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                {/* Label / Nickname Input */}
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant block mb-1">
+                    Custom Label (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={customLabel}
+                    onChange={(e) => setCustomLabel(e.target.value)}
+                    placeholder="e.g. Polymarket Whale Alpha"
+                    className="w-full bg-surface-container-low border border-border-subtle rounded-xl px-3.5 py-2.5 text-xs text-primary placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary"
+                  />
+                </div>
+
+                {/* Ingestion notice */}
+                <div className="p-3 bg-surface-container-low border border-border-subtle rounded-xl text-[11px] text-on-surface-variant space-y-1">
+                  <div className="font-semibold text-primary flex items-center gap-1">
+                    <span className="material-symbols-outlined text-sm text-status-success">sync</span>
+                    <span>Immediate BullMQ History Backfill</span>
+                  </div>
+                  <p>
+                    Subscribing immediately enqueues full trade history ingestion from {customChain === 'polygon' ? 'Polymarket Data API' : 'on-chain RPC'}. New trades after subscription start will be mirrored forward.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-border-subtle">
+                  <button
+                    type="button"
+                    onClick={() => { setShowTrackModal(false); setCustomError(null); }}
+                    className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={trackingCustom || !customAddress.trim()}
+                    className="px-5 py-2.5 bg-primary text-white rounded-xl text-xs font-bold shadow hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {trackingCustom ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Enqueuing Backfill...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-sm">rocket_launch</span>
+                        <span>Track & Backfill Master</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
