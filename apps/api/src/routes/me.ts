@@ -15,6 +15,13 @@ import {
   checkWalletClusterIndependence,
   checkWalletHubStatus,
   listAuthWallets,
+  getPerpsInstruments,
+  getPerpsAccount,
+  getUserPerpsPositions,
+  upsertPerpsAccount,
+  upsertPerpsPosition,
+  recordPerpsOrder,
+  closePerpsPosition,
   type UserScope
 } from '@swat/db';
 import {
@@ -1289,4 +1296,46 @@ export async function registerMeRoutes(
       }
     });
   });
+
+  // --- Polymarket Perpetual Futures (Perps) Endpoints ---
+
+  app.get('/v1/me/perps/instruments', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const instruments = await getPerpsInstruments(true);
+    return reply.send({ instruments });
+  });
+
+  app.get('/v1/me/perps/portfolio', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const [account, positions] = await Promise.all([
+      getPerpsAccount(scope.userId),
+      getUserPerpsPositions(scope.userId, 'open')
+    ]);
+    return reply.send({
+      account: account ?? {
+        user_id: scope.userId,
+        total_account_value: '0',
+        available_order_margin: '0',
+        total_initial_margin: '0',
+        total_maintenance_margin: '0',
+        withdrawable: '0',
+        in_liquidation: false
+      },
+      positions
+    });
+  });
+
+  app.post('/v1/me/perps/positions/:id/close', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { id } = request.params as { id: string };
+    const success = await closePerpsPosition(id, scope.userId);
+    if (!success) {
+      return reply.code(404).send({ error: 'Position not found or already closed' });
+    }
+    return reply.send({ success: true, positionId: id, status: 'closed' });
+  });
 }
+
