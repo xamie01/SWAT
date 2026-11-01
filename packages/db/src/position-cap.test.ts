@@ -198,6 +198,6 @@ describe('assessPositionCap (S4-M4 derived warning)', () => {
     // this pins the runtime shape too, since a silent undefined reads as
     // "no minimum" and quietly stops warning.
     expect(Object.keys(VENUE_MINIMUM_ORDER_NOTIONAL_USD).sort())
-      .toEqual(['polygon', 'robinhood-chain', 'solana']);
+      .toEqual(['base', 'bsc', 'ethereum', 'polygon', 'robinhood-chain', 'solana']);
   });
 });

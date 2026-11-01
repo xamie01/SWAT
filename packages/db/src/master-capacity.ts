@@ -293,7 +293,10 @@ export const PLATFORM_MAX_AGGREGATE_IMPACT_BPS: Readonly<Record<Chain, number>> 
   polygon: Math.floor(DEFAULT_SLIPPAGE_BPS.polygon * AGGREGATE_IMPACT_SHARE_OF_SLIPPAGE),
   'robinhood-chain': Math.floor(
     DEFAULT_SLIPPAGE_BPS['robinhood-chain'] * AGGREGATE_IMPACT_SHARE_OF_SLIPPAGE
-  )
+  ),
+  base: Math.floor(DEFAULT_SLIPPAGE_BPS.base * AGGREGATE_IMPACT_SHARE_OF_SLIPPAGE),
+  ethereum: Math.floor(DEFAULT_SLIPPAGE_BPS.ethereum * AGGREGATE_IMPACT_SHARE_OF_SLIPPAGE),
+  bsc: Math.floor(DEFAULT_SLIPPAGE_BPS.bsc * AGGREGATE_IMPACT_SHARE_OF_SLIPPAGE)
 });
 
 /**

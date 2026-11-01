@@ -1,7 +1,7 @@
 import type { Chain } from './types.js';
 import { isValidAddressForChain } from './validation.js';
 
-const CHAINS: readonly Chain[] = ['solana', 'polygon', 'robinhood-chain'];
+const CHAINS: readonly Chain[] = ['solana', 'polygon', 'robinhood-chain', 'base', 'ethereum', 'bsc'];
 const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 
 export type ResolvedChainValue = {

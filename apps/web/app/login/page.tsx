@@ -55,9 +55,6 @@ function LoginForm() {
 
       router.push(destination);
     } catch (caught) {
-      // The API returns an identical body for unknown-email and wrong-password,
-      // and burns a matching argon2 verify so the timing matches too. Echoing its
-      // message rather than elaborating keeps that property intact.
       setError(
         caught instanceof ApiError
           ? caught.status === 401

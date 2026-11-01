@@ -1,5 +1,27 @@
 export type WalletTier = 'elite' | 'pro' | 'promising' | 'speculative';
-export type Chain = 'solana' | 'polygon' | 'robinhood-chain';
+export type Chain = 'solana' | 'polygon' | 'robinhood-chain' | 'base' | 'ethereum' | 'bsc';
+
+/**
+ * Chains the LP microservice operates on: Solana (Meteora DLMM & Raydium CLMM)
+ * and EVM Concentrated Liquidity (Uniswap v3 / PancakeSwap v3 on Robinhood,
+ * Base, Ethereum, and BSC).
+ */
+export type LpChain = 'solana' | 'robinhood-chain' | 'base' | 'ethereum' | 'bsc';
+
+/**
+ * Supported Liquidity Provision protocols.
+ * - 'meteora-dlmm': Discrete bin dynamic volatility fee AMM on Solana.
+ * - 'raydium-clmm': Tick-based concentrated liquidity on Solana.
+ * - 'uniswap-v3': Standard tick-based CLMM on Ethereum, Base, Robinhood.
+ * - 'uniswap-v4': Singleton hook-enabled CLMM on EVM.
+ * - 'pancakeswap-v3': PancakeSwap v3 (Uniswap v3 bytecode) on BSC.
+ */
+export type LpProtocol =
+  | 'meteora-dlmm'
+  | 'raydium-clmm'
+  | 'uniswap-v3'
+  | 'uniswap-v4'
+  | 'pancakeswap-v3';
 
 export interface WalletScoreInput {
   chain: Chain;
@@ -44,5 +66,8 @@ export interface ExecutionConfig {
   solana?: ExecutionMode;
   polygon?: ExecutionMode;
   'robinhood-chain'?: ExecutionMode;
+  base?: ExecutionMode;
+  ethereum?: ExecutionMode;
+  bsc?: ExecutionMode;
   '*'?: ExecutionMode;
 }

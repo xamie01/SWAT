@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import type { Chain } from '@swat/shared';
 import {
   claimCopyExecutionsForReconciliation,
   closePool,
@@ -33,7 +34,7 @@ afterAll(async () => {
 });
 
 async function stageAmbiguousExecution(fixture: {
-  chain: 'solana' | 'polygon' | 'robinhood-chain';
+  chain: Chain;
   sourceEventPrefix: string;
   sourceWallet: string;
   targetAccount: string;

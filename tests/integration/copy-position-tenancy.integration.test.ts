@@ -126,7 +126,7 @@ describe('copy_positions tenancy (S4-10)', () => {
     );
 
     const read = async (userId: string) => {
-      const { rows } = await pool.query<{ confirmed_quantity: string; cost_basis_usd: string }>(
+      const { rows } = await pool.query<{ confirmed_quantity: number; cost_basis_usd: number }>(
         `SELECT confirmed_quantity, cost_basis_usd FROM copy_positions
           WHERE target_account = $1 AND chain = 'solana' AND token_mint = $2 AND user_id = $3`,
         [target, token, userId]
@@ -134,9 +134,9 @@ describe('copy_positions tenancy (S4-10)', () => {
       return rows[0]!;
     };
 
-    expect(await read(alice.id)).toMatchObject({ confirmed_quantity: '500', cost_basis_usd: '1000' });
+    expect(await read(alice.id)).toMatchObject({ confirmed_quantity: 500, cost_basis_usd: 1000 });
     // Bob's exit would otherwise compute P&L against Alice's basis.
-    expect(await read(bob.id)).toMatchObject({ confirmed_quantity: '0', cost_basis_usd: '0' });
+    expect(await read(bob.id)).toMatchObject({ confirmed_quantity: 0, cost_basis_usd: 0 });
   });
 
   it('still collapses legacy operator rows, because NULLS NOT DISTINCT is load-bearing', async () => {

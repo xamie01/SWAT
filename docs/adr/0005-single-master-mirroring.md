@@ -131,6 +131,14 @@ open position came from which subscription.
 at the user's holding and record the remainder in the existing
 `unmatched_reduction_quantity`. Never sell what is not there.
 
+**3.9 Inventory attribution under multiple masters** is specified by
+[ADR-0007](./0007-master-attributed-inventory.md). The aggregate venue position
+and the master-attributed accounting lots are intentionally separate: a master
+sell reduces only that master's copied lot, while manual aggregate exits and
+Polymarket redemption operate on the actual user position. No implementation may
+apply a source sell fraction to the user's aggregate token quantity without first
+resolving the source master's lot.
+
 ## §4 Capacity
 
 **4.1 The cap is denominated in price impact, not headcount.** Aggregate copy

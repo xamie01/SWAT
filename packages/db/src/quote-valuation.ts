@@ -45,9 +45,9 @@ import type { Chain } from '@swat/shared';
  */
 
 /** Currencies a venue can settle a copy fill's quote leg in. */
-export type QuoteCurrency = 'USD' | 'SOL' | 'ETH';
+export type QuoteCurrency = 'USD' | 'SOL' | 'ETH' | 'BNB';
 
-export const QUOTE_CURRENCIES: readonly QuoteCurrency[] = ['USD', 'SOL', 'ETH'];
+export const QUOTE_CURRENCIES: readonly QuoteCurrency[] = ['USD', 'SOL', 'ETH', 'BNB'];
 
 export function isQuoteCurrency(value: unknown): value is QuoteCurrency {
   return typeof value === 'string' && (QUOTE_CURRENCIES as readonly string[]).includes(value);
@@ -66,7 +66,11 @@ export function nativeQuoteCurrencyForChain(chain: Chain): QuoteCurrency {
     case 'solana':
       return 'SOL';
     case 'robinhood-chain':
+    case 'base':
+    case 'ethereum':
       return 'ETH';
+    case 'bsc':
+      return 'BNB';
     case 'polygon':
       // Polymarket sizes and settles in USDC, which the whole codebase treats as
       // USD 1:1 (see `persistTrade`: polygon needs no conversion).

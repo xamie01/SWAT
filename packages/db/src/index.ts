@@ -49,6 +49,19 @@ export * from './lot-allocation.js';
 export * from './close-all.js';
 
 /**
+ * LP Dashboard (migration `059`, `apps/lp`). Pool discovery cache, per-user
+ * guardrail config, the position state machine (code half in `@swat/shared`
+ * `lp-lifecycle.js`, SQL half in the `059` trigger), and tracked-wallet
+ * storage. Per-user functions take a `UserScope`; the pool cache and tracked
+ * wallets have no tenant column and take none.
+ */
+export * from './lp-pools.js';
+export * from './lp-guardrails.js';
+export * from './lp-positions.js';
+export * from './lp-tracked-wallets.js';
+export * from './lp-copy-trading.js';
+
+/**
  * Quote-leg valuation (S4-M35).
  *
  * `copy_execution_evidence.quote_quantity` was a mixed-unit column -- USD on

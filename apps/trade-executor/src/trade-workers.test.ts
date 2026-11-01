@@ -24,6 +24,9 @@ describe('tradeWorkerSpecs (D6 / S3-25)', () => {
   it('runs exactly one worker per chain', () => {
     const specs = tradeWorkerSpecs({ drainLegacyQueue: false });
     expect(specs.map((spec) => spec.chain).sort()).toEqual([
+      'base',
+      'bsc',
+      'ethereum',
       'polygon',
       'robinhood-chain',
       'solana'

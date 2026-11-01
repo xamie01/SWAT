@@ -263,6 +263,34 @@ async function getCachedEthPrice(): Promise<number | null> {
   }
 }
 
+async function getCachedBnbPrice(): Promise<number | null> {
+  const client = getRedis();
+  const cached = await client.get('bnb:price');
+  if (cached) {
+    const p = parseFloat(cached);
+    if (Number.isFinite(p)) return p;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd',
+      { signal: controller.signal }
+    );
+    if (!response.ok) return null;
+    const data = await response.json() as { binancecoin?: { usd?: number } };
+    const price = data.binancecoin?.usd;
+    if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) return null;
+    await client.setex('bnb:price', 30, price.toString());
+    return price;
+  } catch (error) {
+    console.error('[trade-executor] BNB price lookup failed', error);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * USD price of one unit of a chain's native quote currency.
  *
@@ -276,8 +304,12 @@ async function nativeUsdPriceForChain(chain: Chain): Promise<number | null> {
       return getCachedSolPrice();
     case 'ETH':
       return getCachedEthPrice();
+    case 'BNB':
+      return getCachedBnbPrice();
     case 'USD':
       return 1;
+    default:
+      return null;
   }
 }
 

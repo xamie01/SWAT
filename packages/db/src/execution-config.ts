@@ -4,13 +4,16 @@ import { query } from './client.js';
 import { getActiveCertifiedChains } from './chain-certifications.js';
 
 const EXECUTION_CONFIG_CACHE_TTL_MS = 30_000;
-const executionChains = new Set<Chain>(['solana', 'polygon', 'robinhood-chain']);
-const executionConfigKeys = new Set(['solana', 'polygon', 'robinhood-chain', '*']);
+const executionChains = new Set<Chain>(['solana', 'polygon', 'robinhood-chain', 'base', 'ethereum', 'bsc']);
+const executionConfigKeys = new Set(['solana', 'polygon', 'robinhood-chain', 'base', 'ethereum', 'bsc', '*']);
 const executionModes = new Set<ExecutionMode>(['off', 'paper', 'live', 'live+shadow']);
 const failClosedConfig: ExecutionConfig = Object.freeze({
   solana: 'paper',
   polygon: 'paper',
-  'robinhood-chain': 'paper'
+  'robinhood-chain': 'paper',
+  base: 'paper',
+  ethereum: 'paper',
+  bsc: 'paper'
 });
 
 interface ExecutionConfigSnapshot {

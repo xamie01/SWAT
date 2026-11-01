@@ -23,7 +23,8 @@ import {
   QUEUES,
   createWalletBackfillJob,
   resolveChainValue,
-  fetchTokenPriceUsd
+  fetchTokenPriceUsd,
+  type Chain
 } from '@swat/shared';
 import {
   IngestionBatchError,
@@ -39,7 +40,7 @@ import {
   SourceTradePersistenceError
 } from './source-trade-lifecycle.js';
 
-export type WalletChain = 'solana' | 'polygon' | 'robinhood-chain';
+export type WalletChain = Chain;
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });

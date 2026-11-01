@@ -7,7 +7,7 @@ import {
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { z } from 'zod';
 
-export const tradingChains = ['solana', 'polygon', 'robinhood-chain'] as const satisfies readonly Chain[];
+export const tradingChains = ['solana', 'polygon', 'robinhood-chain', 'base', 'ethereum', 'bsc'] as const satisfies readonly Chain[];
 
 const tradingChainSchema = z.enum(tradingChains);
 const executionModeSchema = z.enum(['off', 'paper', 'live', 'live+shadow']);

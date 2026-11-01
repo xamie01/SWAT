@@ -1,5 +1,5 @@
 import { isChain } from './address.js';
-import type { Chain } from './types.js';
+import type { Chain, LpChain } from './types.js';
 
 export const REDIS_CHANNELS = {
   walletSwap: 'swat:wallet:swap',
@@ -48,7 +48,10 @@ export const QUEUES = {
 export const TRADE_QUEUES_BY_CHAIN = {
   solana: 'swat-trades-solana',
   polygon: 'swat-trades-polygon',
-  'robinhood-chain': 'swat-trades-robinhood'
+  'robinhood-chain': 'swat-trades-robinhood',
+  base: 'swat-trades-base',
+  ethereum: 'swat-trades-ethereum',
+  bsc: 'swat-trades-bsc'
 } as const;
 
 /** Resolves the trade queue for a chain. */
@@ -83,6 +86,68 @@ export function chainFromTokenMint(tokenMint: string): Chain {
 /** Resolves the trade queue for a job, from its chain-prefixed token mint. */
 export function tradeQueueForTokenMint(tokenMint: string): string {
   return tradeQueueForChain(chainFromTokenMint(tokenMint));
+}
+
+/**
+ * Per-chain LP execution queues (LP Dashboard Track E/F). **Live** — producers
+ * route `build-position` and `rebalance` jobs here, and `apps/lp` runs one
+ * concurrency-1 worker per queue.
+ *
+ * Same isolation rationale as `TRADE_QUEUES_BY_CHAIN`, and for the same reason
+ * the concurrency is 1 per chain: an LP build or rebalance signs transactions
+ * sequentially against one venue, so nonce safety and per-chain breakers are
+ * chain-keyed. Scan and monitor passes are scheduled cron work inside `apps/lp`
+ * (scorer pattern) and deliberately do not use queues; only jobs that sign and
+ * submit, or decide to, are durable work.
+ */
+export const LP_CHAINS: readonly LpChain[] = [
+  'solana',
+  'robinhood-chain',
+  'base',
+  'ethereum',
+  'bsc'
+] as const;
+
+export function isLpChain(chain: unknown): chain is LpChain {
+  return typeof chain === 'string' && (LP_CHAINS as readonly string[]).includes(chain);
+}
+
+/**
+ * Per-chain LP execution queues (LP Dashboard Tracks E/F). **Live** — producers
+ * route `build-position` and `rebalance` jobs here, and `apps/lp` runs one
+ * concurrency-1 worker per queue.
+ */
+export const LP_EXECUTION_QUEUES_BY_CHAIN: Record<LpChain, string> = {
+  solana: 'swat-lp-exec-solana',
+  'robinhood-chain': 'swat-lp-exec-robinhood',
+  base: 'swat-lp-exec-base',
+  ethereum: 'swat-lp-exec-ethereum',
+  bsc: 'swat-lp-exec-bsc'
+};
+
+/** Resolves the LP execution queue for an LP-supported chain. */
+export function lpExecutionQueueForChain(chain: LpChain): string {
+  return LP_EXECUTION_QUEUES_BY_CHAIN[chain];
+}
+
+/**
+ * The chain an LP job belongs to, derived from its chain-prefixed pool address.
+ * Same contract as `chainFromTokenMint`: a disagreement between producer queue
+ * routing and worker venue handling would send funds to the wrong venue, so it
+ * throws on an unsupported prefix rather than defaulting.
+ */
+export function chainFromPoolAddress(poolAddress: string): LpChain {
+  const separator = poolAddress.indexOf(':');
+  const chain = separator >= 0 ? poolAddress.slice(0, separator) : 'solana';
+  if (!isLpChain(chain)) {
+    throw new Error(`Unsupported LP chain: ${chain}`);
+  }
+  return chain;
+}
+
+/** Resolves the LP execution queue for a job, from its chain-prefixed pool address. */
+export function lpExecutionQueueForPool(poolAddress: string): string {
+  return lpExecutionQueueForChain(chainFromPoolAddress(poolAddress));
 }
 
 export const DEFAULT_RISK_CONFIG = {

@@ -578,7 +578,7 @@ describe('PATCH /v1/me/execution-settings/chains/:chain', () => {
 
     const response = await app.inject({
       method: 'PATCH',
-      url: '/v1/me/execution-settings/chains/ethereum',
+      url: '/v1/me/execution-settings/chains/fantom',
       headers: { 'x-test-user': USER_A },
       payload: { mode: 'paper' }
     });

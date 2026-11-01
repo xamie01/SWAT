@@ -150,6 +150,11 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
       sourceValues
     ],
     [
+      'copy position lots',
+      'DELETE FROM copy_position_lots WHERE target_account = $1 AND chain = $2 AND token_mint = $3',
+      [targetAccount, fixture.chain, tokenMint]
+    ],
+    [
       'copy positions',
       'DELETE FROM copy_positions WHERE target_account = $1 AND chain = $2 AND token_mint = $3',
       [targetAccount, fixture.chain, tokenMint]

@@ -36,7 +36,7 @@ WAKE used to trade on *cluster consensus* — group correlated wallets, wait for
 | [`docs/PRD.md`](./docs/PRD.md) | What we are building and for whom, with a status marker on every requirement |
 | [`docs/adr/`](./docs/adr/) | Why the big decisions were made, and what was rejected |
 | [`AUDIT-FIX-CHECKLIST.md`](./AUDIT-FIX-CHECKLIST.md) | The item-by-item work list. The project's memory — every fix and finding is recorded here |
-| [`docs/agents/continue-build.md`](./docs/agents/continue-build.md) | Handoff brief: constraints, decisions already made, and the build loop every contributor follows |
+| [`AUDIT-FIX-CHECKLIST.md`](./AUDIT-FIX-CHECKLIST.md) | **The single working file.** What to build in order, where the build stands, the environment constraints, the decisions already made, and the build loop |
 | [`CLAUDE.md`](./CLAUDE.md) | Repo conventions and the invariants that bite |
 
 ---
@@ -408,7 +408,7 @@ Execution mode precedence is database `execution_config`, then `TRADING_MODE_SOL
 2. Run `pnpm typecheck` + `pnpm test` before committing
 3. Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
 4. Co-author with Claude: `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
-5. **Follow the build loop** in [`docs/agents/continue-build.md`](./docs/agents/continue-build.md) §10: one checklist item at a time, a test where a test is meaningful, `tsc --noEmit` plus the relevant suite, then tick the box with the commit hash. Never batch items, and never tick one on a typecheck alone.
+5. **Follow the build loop** in [`AUDIT-FIX-CHECKLIST.md`](./AUDIT-FIX-CHECKLIST.md) §0.5: one checklist item at a time, a test where a test is meaningful, `tsc --noEmit` plus the relevant suite, then tick the box with the commit hash. Never batch items, and never tick one on a typecheck alone.
 
 ---
 
