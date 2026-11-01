@@ -4,6 +4,6 @@
     "noEmit": true
   },
   "include": [
-    "discover-starter-pack.ts"
+    "scripts/discover-starter-pack.ts"
   ]
 }
