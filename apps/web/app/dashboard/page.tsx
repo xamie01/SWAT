@@ -390,6 +390,44 @@ export default function DashboardPage() {
           </div>
         </section>
 
+        {/* LP Protocol Launch Card */}
+        <section className="mb-8 p-6 rounded-2xl bg-gradient-to-r from-primary/10 via-surface-container-low to-surface-container-lowest border border-primary/20 shadow-sm relative overflow-hidden">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-primary text-2xl">water_drop</span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-primary font-headline-md">WAKE Liquidity Protocol (CLMM & DLMM)</h2>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/30">
+                    Live
+                  </span>
+                </div>
+                <p className="text-body-sm text-on-surface-variant mt-1 max-w-2xl">
+                  Deploy concentrated liquidity across Solana (Meteora DLMM, Raydium CLMM, Orca Whirlpools) and EVM (Uniswap v3, Aerodrome Slipstream). Non-custodial, automated rebalancing, and whale LP tracking.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <Link
+                href="/lp/discover"
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-base">explore</span>
+                <span>Discover Pools</span>
+              </Link>
+              <Link
+                href="/lp/builder"
+                className="px-4 py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-base">build</span>
+                <span>Position Builder</span>
+              </Link>
+            </div>
+          </div>
+        </section>
+
         {/* Grid: Open Positions & Balances */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-8">
           {/* Open Positions Snapshot */}

@@ -40,11 +40,11 @@ export default function LpLayout({ children }: { children: React.ReactNode }) {
         {/* Action Links */}
         <div className="flex items-center gap-4">
           <Link
-            href="/workspace"
+            href="/dashboard"
             className="text-xs font-bold text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1.5"
           >
-            <span className="material-symbols-outlined text-[16px]">grid_view</span>
-            <span>Workspace</span>
+            <span className="material-symbols-outlined text-[16px]">dashboard</span>
+            <span>Dashboard</span>
           </Link>
           <div className="h-4 w-px bg-outline-variant"></div>
           <div className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">

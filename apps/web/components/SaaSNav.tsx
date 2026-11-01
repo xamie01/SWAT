@@ -48,6 +48,7 @@ export function SaaSNav() {
   const navLinks = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
     { label: 'Positions', href: '/positions', icon: 'trending_up' },
+    { label: 'LP Protocol', href: '/lp/discover', icon: 'water_drop' },
     { label: 'Funding & Vault', href: '/vault', icon: 'account_balance_wallet' },
     { label: 'Billing', href: '/billing', icon: 'credit_card' },
     { label: 'Risk Settings', href: '/settings', icon: 'tune' },
@@ -65,7 +66,10 @@ export function SaaSNav() {
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => {
-              const isActive = pathname === link.href || pathname.startsWith(`${link.href}/`);
+              const isActive =
+                pathname === link.href ||
+                (link.href !== '/' && pathname.startsWith(`${link.href}/`)) ||
+                (link.href === '/lp/discover' && pathname.startsWith('/lp'));
               return (
                 <Link
                   key={link.href}
@@ -134,7 +138,10 @@ export function SaaSNav() {
 
           <nav className="flex flex-col gap-1">
             {navLinks.map((link) => {
-              const isActive = pathname === link.href || pathname.startsWith(`${link.href}/`);
+              const isActive =
+                pathname === link.href ||
+                (link.href !== '/' && pathname.startsWith(`${link.href}/`)) ||
+                (link.href === '/lp/discover' && pathname.startsWith('/lp'));
               return (
                 <Link
                   key={link.href}

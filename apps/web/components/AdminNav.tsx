@@ -46,6 +46,7 @@ export function AdminNav() {
   const navLinks = [
     { label: 'Trading Matrix', href: '/admin/portfolio', icon: 'hub' },
     { label: 'Workspace', href: '/workspace', icon: 'dashboard' },
+    { label: 'LP Protocol', href: '/lp/discover', icon: 'water_drop' },
     { label: 'Signals', href: '/signals', icon: 'sensors' },
     { label: 'Wallets', href: '/wallets', icon: 'account_balance_wallet' },
     { label: 'Clusters', href: '/clusters', icon: 'dataset' },
@@ -67,7 +68,10 @@ export function AdminNav() {
           {/* Desktop Nav */}
           <nav className="hidden lg:flex items-center gap-1">
             {navLinks.map((link) => {
-              const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(`${link.href}/`));
+              const isActive =
+                pathname === link.href ||
+                (link.href !== '/' && pathname.startsWith(`${link.href}/`)) ||
+                (link.href === '/lp/discover' && pathname.startsWith('/lp'));
               return (
                 <Link
                   key={link.href}
@@ -144,7 +148,10 @@ export function AdminNav() {
           </div>
           <nav className="flex flex-col gap-1">
             {navLinks.map((link) => {
-              const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(`${link.href}/`));
+              const isActive =
+                pathname === link.href ||
+                (link.href !== '/' && pathname.startsWith(`${link.href}/`)) ||
+                (link.href === '/lp/discover' && pathname.startsWith('/lp'));
               return (
                 <Link
                   key={link.href}

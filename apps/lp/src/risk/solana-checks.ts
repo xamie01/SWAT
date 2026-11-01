@@ -60,9 +60,13 @@ export function holderConcentrationFinding(
 
 export function holderConcentrationCheck(port: SolanaRpcPort): TokenRiskCheck {
   return async (context) => {
-    const snapshot = await fetchHolderConcentration(port, context.baseTokenMint);
-    const finding = holderConcentrationFinding(snapshot);
-    return finding ? [finding] : [];
+    try {
+      const snapshot = await fetchHolderConcentration(port, context.baseTokenMint);
+      const finding = holderConcentrationFinding(snapshot);
+      return finding ? [finding] : [];
+    } catch {
+      return [];
+    }
   };
 }
 
@@ -118,7 +122,13 @@ export function mintAuthorityFindings(authorities: SplMintAuthorities) {
 }
 
 export function mintAuthorityCheck(port: SolanaRpcPort): TokenRiskCheck {
-  return async (context) => mintAuthorityFindings(await fetchSplMintAuthorities(port, context.baseTokenMint));
+  return async (context) => {
+    try {
+      return mintAuthorityFindings(await fetchSplMintAuthorities(port, context.baseTokenMint));
+    } catch {
+      return [];
+    }
+  };
 }
 
 export interface LiquidityLockSnapshot {

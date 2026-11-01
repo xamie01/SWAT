@@ -70,8 +70,9 @@ const riskPassCron = process.env.LP_RISK_PASS_CRON ?? '*/10 * * * *';
 
 // --- Chain boundary wiring -------------------------------------------------
 
-const solanaRpcUrl = process.env.SOLANA_RPC_URL
-  ?? (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : undefined);
+const solanaRpcUrl = (process.env.SOLANA_RPC_URL && process.env.SOLANA_RPC_URL.trim().length > 0)
+  ? process.env.SOLANA_RPC_URL.trim()
+  : (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : 'https://api.mainnet-beta.solana.com');
 
 const meteoraFetcher = createMeteoraPoolFetcher({
   apiBase: process.env.METEORA_API_URL ?? 'https://dlmm.datapi.meteora.ag',
@@ -184,11 +185,7 @@ async function runRiskGuarded(): Promise<void> {
   try {
     const { holderConcentrationCheck, liquidityLockCheck, mintAuthorityCheck } = await import('./risk/solana-checks.js');
     const { createJsonRpcSolanaPort } = await import('./risk/solana-rpc.js');
-    const port = createJsonRpcSolanaPort(
-      process.env.HELIUS_API_KEY
-        ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
-        : process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com'
-    );
+    const port = createJsonRpcSolanaPort(solanaRpcUrl);
     const summary = await runRiskPass({
       checksByChain: {
         solana: [
@@ -277,13 +274,26 @@ async function buildApp(): Promise<FastifyInstance> {
   // console (e.g. the Next.js app on its own port) names itself in
   // LP_CORS_ORIGIN; with nothing configured, no cross-origin browser client
   // is allowed (service-key callers are unaffected — they are not browsers).
-  const corsOrigins = (process.env.LP_CORS_ORIGIN ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  if (corsOrigins.length > 0) {
-    await (app.register as any)(cors, { origin: corsOrigins, credentials: true });
-  }
+  const rawCors = process.env.LP_CORS_ORIGIN ?? process.env.CORS_ORIGIN;
+  const corsOrigins = rawCors
+    ? rawCors.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : [
+        process.env.AUTH_URI ?? 'http://localhost:3000',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+      ];
+  await (app.register as any)(cors, {
+    origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+      if (!origin) return cb(null, true);
+      if (corsOrigins.includes(origin) || origin.endsWith(':3000')) {
+        return cb(null, true);
+      }
+      return cb(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-Api-Key', 'x-csrf-token'],
+    credentials: true
+  });
   await (app.register as any)(cookie);
   if (apiKey) {
     await registerLpAuth(app, { legacyKeyHash: legacyKeyHash(apiKey) });
@@ -415,6 +425,7 @@ cron.schedule(walletIndexCron, () => void runWalletIndexGuarded(), { timezone: '
 
 if (process.env.RUN_ON_STARTUP === 'true') {
   void runScanGuarded();
+  void runRiskGuarded();
 }
 
 let shuttingDown = false;
