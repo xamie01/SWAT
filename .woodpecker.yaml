@@ -1,0 +1,53 @@
+when:
+  - event: [push, pull_request]
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: swat_integration
+      POSTGRES_USER: swat
+      POSTGRES_PASSWORD: swat
+    ports:
+      - 5432
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - 6379
+
+steps:
+  - name: prepare
+    image: node:22-slim
+    commands:
+      - corepack enable
+      - corepack prepare pnpm@10.2.0 --activate
+      - pnpm install --frozen-lockfile
+      - cp .env.example .env
+      - pnpm check:secrets
+      - pnpm check:env
+
+  - name: verify
+    image: node:22-slim
+    environment:
+      DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
+      REDIS_URL: redis://redis:6379
+    commands:
+      - corepack enable
+      - corepack prepare pnpm@10.2.0 --activate
+      - pnpm db:migrate
+      - pnpm typecheck
+
+  - name: test
+    image: node:22-slim
+    environment:
+      DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
+      REDIS_URL: redis://redis:6379
+      TRADING_MODE: paper
+      AUTO_EXECUTE: "false"
+    commands:
+      - corepack enable
+      - corepack prepare pnpm@10.2.0 --activate
+      - pnpm test
+      - pnpm build
+      - pnpm test:integration
