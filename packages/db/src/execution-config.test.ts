@@ -102,7 +102,7 @@ describe('execution configuration', () => {
     'paper',
     { solana: 'LIVE' },
     { solana: 'unknown' },
-    { ethereum: 'off' },
+    { dogecoin: 'off' },
     { '*': 'live' }
   ])('fails malformed DB configuration closed to paper: %j', async (value) => {
     vi.mocked(query).mockResolvedValue([{ value }]);

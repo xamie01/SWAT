@@ -1,5 +1,16 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "DATABASE_READ_URL",
+    "INTEGRATION_DATABASE_URL",
+    "REDIS_URL",
+    "TRADING_MODE",
+    "AUTO_EXECUTE",
+    "API_KEY",
+    "NEXT_PUBLIC_API_KEY",
+    "NODE_ENV"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
