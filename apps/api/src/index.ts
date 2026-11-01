@@ -72,7 +72,7 @@ const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new R
 // Enqueue a backfill so the indexer fetches a wallet's transaction history.
 // jobId is keyed by address; `backfillQueue.add` is a no-op if an identical
 // job is already pending, so callers can fire this freely.
-type WalletChain = 'solana' | 'polygon' | 'robinhood-chain';
+type WalletChain = Chain;
 
 async function enqueueBackfill(address: string, chain: WalletChain = 'solana') {
   const job = createWalletBackfillJob(address, chain);

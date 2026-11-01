@@ -4,7 +4,10 @@ import type { Chain, CopyExecutionMode } from '@swat/shared';
 const PAPER_TARGETS: Record<Chain, string> = {
   solana: '11111111111111111111111111111111',
   polygon: '0x0000000000000000000000000000000000000001',
-  'robinhood-chain': '0x0000000000000000000000000000000000000001'
+  'robinhood-chain': '0x0000000000000000000000000000000000000001',
+  base: '0x0000000000000000000000000000000000000001',
+  ethereum: '0x0000000000000000000000000000000000000001',
+  bsc: '0x0000000000000000000000000000000000000001'
 };
 
 /**
@@ -35,7 +38,10 @@ const PAPER_TARGETS: Record<Chain, string> = {
 const PAPER_TARGET_ENV: Record<Chain, string> = {
   solana: 'PAPER_COPY_ACCOUNT_SOLANA',
   polygon: 'PAPER_COPY_ACCOUNT_POLYGON',
-  'robinhood-chain': 'PAPER_COPY_ACCOUNT_ROBINHOOD_CHAIN'
+  'robinhood-chain': 'PAPER_COPY_ACCOUNT_ROBINHOOD_CHAIN',
+  base: 'PAPER_COPY_ACCOUNT_BASE',
+  ethereum: 'PAPER_COPY_ACCOUNT_ETHEREUM',
+  bsc: 'PAPER_COPY_ACCOUNT_BSC'
 };
 
 export function resolvePaperCopyTargetAccount(
