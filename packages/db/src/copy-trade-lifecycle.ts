@@ -22,6 +22,11 @@ import {
   type QuoteLegValuation
 } from './quote-valuation.js';
 import { withTransaction } from './transaction.js';
+import {
+  allocateLotsForMasterSell,
+  assertLotAllocationComplete,
+  type PositionLot
+} from './lot-allocation.js';
 
 export type DecimalInput = string | number;
 export type SourceEventType = 'transaction' | 'order' | 'venue_trade';
@@ -43,6 +48,7 @@ export interface SourceTradeEventInput {
   quantity: DecimalInput;
   amountUsd?: DecimalInput | null;
   priceUsd?: DecimalInput | null;
+  feeUsd?: DecimalInput | null;
   eventAt: Date;
   observedAt?: Date;
   confirmationState: SourceConfirmationState;
@@ -62,6 +68,7 @@ export interface CanonicalSourceTrade {
   quantity: string;
   amountUsd: string | null;
   priceUsd: string | null;
+  feeUsd?: string | null;
   eventAt: Date;
   observedAt: Date;
   confirmationState: SourceConfirmationState;
@@ -82,7 +89,9 @@ export interface PositionRecord {
 export interface CopyExecutionRecord {
   id: string;
   signalId: string | null;
-  sourceTradeId: string;
+  sourceTradeId: string | null;
+  exitLotId?: string | null;
+  exitTrigger?: 'close-all' | 'stop-loss' | 'manual' | 'redemption' | null;
   chain: Chain;
   targetAccount: string;
   /**
@@ -134,6 +143,7 @@ export interface SourceTradeSignalCandidate {
   quantity: string;
   amountUsd: string | null;
   priceUsd: string | null;
+  feeUsd?: string | null;
   eventAt: Date;
   walletScore: number;
   walletTier: string | null;
@@ -203,6 +213,7 @@ type SourceTradeDbRow = QueryResultRow & {
   quantity: string;
   amount_usd: string | null;
   price_usd: string | null;
+  fee_usd?: string | null;
   event_at: Date;
   observed_at: Date;
   confirmation_state: SourceConfirmationState;
@@ -212,7 +223,9 @@ type SourceTradeDbRow = QueryResultRow & {
 type CopyExecutionDbRow = QueryResultRow & {
   id: string;
   signal_id: string | null;
-  source_trade_id: string;
+  source_trade_id: string | null;
+  exit_lot_id: string | null;
+  exit_trigger: 'close-all' | 'stop-loss' | 'manual' | 'redemption' | null;
   chain: Chain;
   target_account: string;
   user_id: string | null;
@@ -307,6 +320,7 @@ const SOURCE_TRADE_COLUMNS = `
   token_amount::text AS quantity,
   amount_usd::text AS amount_usd,
   price_usd::text AS price_usd,
+  fee_usd::text AS fee_usd,
   event_at,
   observed_at,
   confirmation_state`;
@@ -315,6 +329,8 @@ const COPY_EXECUTION_COLUMNS = `
   id,
   signal_id,
   source_trade_id,
+  exit_lot_id,
+  exit_trigger,
   chain,
   target_account,
   user_id,
@@ -428,6 +444,7 @@ function mapSourceTrade(row: SourceTradeDbRow): CanonicalSourceTrade {
     quantity: row.quantity,
     amountUsd: row.amount_usd,
     priceUsd: row.price_usd,
+    feeUsd: row.fee_usd ?? null,
     eventAt: row.event_at,
     observedAt: row.observed_at,
     confirmationState: row.confirmation_state
@@ -439,6 +456,8 @@ function mapCopyExecution(row: CopyExecutionDbRow): CopyExecutionRecord {
     id: row.id,
     signalId: row.signal_id,
     sourceTradeId: row.source_trade_id,
+    exitLotId: row.exit_lot_id ?? null,
+    exitTrigger: row.exit_trigger ?? null,
     chain: row.chain,
     targetAccount: row.target_account,
     userId: row.user_id ?? null,
@@ -680,6 +699,7 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
   const quantity = decimal('quantity', input.quantity);
   const amountUsd = optionalDecimal('amountUsd', input.amountUsd);
   const priceUsd = optionalDecimal('priceUsd', input.priceUsd);
+  const feeUsd = optionalDecimal('feeUsd', input.feeUsd);
   const eventAt = assertDate('eventAt', input.eventAt);
   const observedAt = assertDate('observedAt', input.observedAt ?? new Date());
   const confirmationEvidenceId = assertIdentifier(
@@ -691,12 +711,12 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO source_trades (
          chain, transaction_hash, wallet_address, token_mint, direction,
-         amount_usd, token_amount, price_usd, status, source_event_type,
+         amount_usd, token_amount, price_usd, fee_usd, status, source_event_type,
          source_event_id, source_event_index, event_at, observed_at,
          confirmation_state, confirmation_updated_at
        ) VALUES (
-         $1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9::text, $10,
-         $11, $12, $13, $14, $9::text, $14
+         $1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::text, $11,
+         $12, $13, $14, $15, $10::text, $15
        )
        ON CONFLICT (chain, source_event_type, source_event_id, source_event_index) DO NOTHING
        RETURNING id`,
@@ -709,6 +729,7 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
         amountUsd,
         quantity,
         priceUsd,
+        feeUsd,
         input.confirmationState,
         input.sourceEventType,
         sourceEventId,
@@ -947,6 +968,7 @@ export async function listSourceTradeSignalCandidates(input: {
     quantity: row.quantity,
     amountUsd: row.amount_usd,
     priceUsd: row.price_usd,
+    feeUsd: row.fee_usd ?? null,
     eventAt: row.event_at,
     walletScore: Number(row.wallet_score),
     walletTier: row.wallet_tier,
@@ -1909,6 +1931,115 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
   });
 }
 
+export interface LotExitExecutionInput {
+  lotId: string;
+  userId: string | null;
+  requestId: string;
+  trigger: 'close-all' | 'stop-loss' | 'manual' | 'redemption';
+  requestedBaseQuantity?: DecimalInput;
+}
+
+export async function claimLotExitExecution(input: LotExitExecutionInput): Promise<{
+  execution: CopyExecutionRecord;
+  created: boolean;
+}> {
+  return inTransaction((client) => claimLotExitExecutionWithClient(client, input));
+}
+
+export async function claimLotExitExecutionWithClient(
+  client: PoolClient,
+  input: LotExitExecutionInput
+): Promise<{ execution: CopyExecutionRecord; created: boolean }> {
+  const lotId = assertIdentifier('lotId', input.lotId, 128);
+  const userId = normalizeTenantId(input.userId);
+  const requestId = assertIdentifier('requestId', input.requestId);
+  if (!['close-all', 'stop-loss', 'manual', 'redemption'].includes(input.trigger)) {
+    throw new Error('Unknown lot exit trigger');
+  }
+  const requested = input.requestedBaseQuantity === undefined
+    ? null
+    : decimal('requestedBaseQuantity', input.requestedBaseQuantity);
+  const identity = ['lot-exit', lotId, userId ?? '', input.trigger, requestId]
+    .join(COPY_IDENTITY_SEPARATOR);
+  const clientOrderId = `swat-${createHash('sha256').update(identity).digest('hex')}`;
+  const ownership = await client.query<{
+    position_id: string;
+    target_account: string;
+    chain: Chain;
+    token_mint: string;
+    signal_id: string | null;
+    execution_mode: CopyExecutionMode;
+  }>(
+    `SELECT lot.position_id, position.target_account, lot.chain, lot.token_mint,
+            lot.signal_id, acquisition.execution_mode
+       FROM copy_position_master_lots lot
+       JOIN copy_positions position ON position.id = lot.position_id
+       JOIN copy_executions acquisition ON acquisition.id = lot.acquisition_execution_id
+      WHERE lot.id = $1 AND lot.user_id IS NOT DISTINCT FROM $2
+        AND position.user_id IS NOT DISTINCT FROM $2`,
+    [lotId, userId]
+  );
+  const owner = ownership.rows[0];
+  if (!owner) throw new Error('Lot exit does not match the owning tenant');
+  await client.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+    [JSON.stringify([owner.target_account, owner.chain, owner.token_mint, userId])]
+  );
+  await ensureCopyPosition(client, owner.target_account, owner.chain, owner.token_mint, userId);
+  const existing = await client.query<CopyExecutionDbRow>(
+    `SELECT ${COPY_EXECUTION_COLUMNS} FROM copy_executions
+      WHERE chain = $1 AND target_account = $2 AND client_order_id = $3`,
+    [owner.chain, owner.target_account, clientOrderId]
+  );
+  if (existing.rows[0]) {
+    const execution = existing.rows[0];
+    if (execution.exit_lot_id !== lotId || execution.exit_trigger !== input.trigger
+      || execution.user_id !== userId
+      || (requested !== null && Number(execution.requested_base_quantity) !== Number(requested))) {
+      throw new Error('Lot exit identity collision with different requested quantities');
+    }
+    return { execution: mapCopyExecution(execution), created: false };
+  }
+  const lot = await client.query<{ quantity: string; available: boolean }>(
+    `SELECT COALESCE($3::numeric, lot.remaining_quantity)::text AS quantity,
+            lot.remaining_quantity > 0
+              AND COALESCE($3::numeric, lot.remaining_quantity) <= lot.remaining_quantity
+              AND COALESCE($3::numeric, lot.remaining_quantity)
+                <= position.confirmed_quantity - position.reserved_sell_quantity AS available
+       FROM copy_position_master_lots lot
+       JOIN copy_positions position ON position.id = lot.position_id
+      WHERE lot.id = $1 AND lot.user_id IS NOT DISTINCT FROM $2
+      FOR UPDATE OF lot`,
+    [lotId, userId, requested]
+  );
+  if (!lot.rows[0]?.available) throw new Error('No unreserved confirmed lot inventory is available to sell');
+  const active = await client.query<{ id: string }>(
+    `SELECT id FROM copy_executions WHERE exit_lot_id = $1
+        AND state NOT IN ('failed', 'cancelled', 'confirmed')`,
+    [lotId]
+  );
+  if (active.rows.length > 0) throw new Error('Lot already has an active exit execution');
+  const inserted = await client.query<CopyExecutionDbRow>(
+    `INSERT INTO copy_executions (
+       signal_id, source_trade_id, exit_lot_id, exit_trigger, chain, target_account,
+       user_id, token_mint, direction, execution_mode, client_order_id,
+       requested_base_quantity, reserved_base_quantity
+     ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 'sell', $8, $9, $10::numeric, $10::numeric)
+     RETURNING ${COPY_EXECUTION_COLUMNS}`,
+    [owner.signal_id, lotId, input.trigger, owner.chain, owner.target_account,
+      userId, owner.token_mint, owner.execution_mode, clientOrderId, lot.rows[0].quantity]
+  );
+  const execution = inserted.rows[0];
+  if (!execution) throw new Error('Lot exit insert did not return a row');
+  await client.query(
+    `INSERT INTO copy_execution_state_history (execution_id, from_state, to_state, reason)
+     VALUES ($1, NULL, 'requested', $2)`,
+    [execution.id, `${input.trigger} lot exit accepted`]
+  );
+  await rebuildCopyPosition(client, execution);
+  return { execution: mapCopyExecution(execution), created: true };
+}
+
 type SourceSignalDbRow = QueryResultRow & {
   id: string;
   status: string;
@@ -2357,7 +2488,7 @@ export async function transitionCopyExecution(input: {
       );
       await rebuildCopyPosition(client, execution);
     }
-    if (terminal && execution.signal_id && execution.execution_mode !== 'shadow') {
+    if (terminal && execution.signal_id && !execution.exit_lot_id && execution.execution_mode !== 'shadow') {
       await client.query(
         `UPDATE signals
          SET status = CASE WHEN $2 = 'cancelled' THEN 'rejected' ELSE 'failed' END
@@ -2439,7 +2570,190 @@ export interface RecordCopyExecutionEvidenceResult {
   confirmedQuoteTotal: ConfirmedQuoteTotal;
 }
 
+async function synchronizePositionLots(
+  client: PoolClient,
+  input: {
+    execution: CopyExecutionDbRow;
+    evidence: ExecutionEvidenceDbRow;
+    positionId: string;
+  }
+): Promise<void> {
+  if (!isAppliedSourceConfirmation(input.evidence.confirmation_state)) return;
+
+  if (input.execution.direction === 'sell') {
+    const applied = await client.query<{ id: string }>(
+      `SELECT id FROM copy_position_master_lot_reductions WHERE sell_evidence_id = $1`,
+      [input.evidence.id]
+    );
+    if (applied.rows.length > 0) return;
+  }
+
+  if (input.execution.exit_lot_id) {
+    const reduced = await client.query<{ id: string }>(
+      `INSERT INTO copy_position_master_lot_reductions (
+         lot_id, sell_execution_id, sell_evidence_id, quantity, proceeds_usd, reduced_at
+       )
+       SELECT lot.id, $2, $3, $4::numeric, $5::numeric, $6
+         FROM copy_position_master_lots lot
+        WHERE lot.id = $1 AND lot.position_id = $7
+          AND lot.user_id IS NOT DISTINCT FROM $8
+          AND lot.remaining_quantity >= $4::numeric
+          AND $4::numeric <= $9::numeric - (
+            SELECT COALESCE(SUM(quantity), 0) FROM copy_position_master_lot_reductions
+             WHERE sell_execution_id = $2 AND sell_evidence_id = $3
+          )
+       ON CONFLICT (lot_id, sell_evidence_id) DO NOTHING
+       RETURNING id`,
+      [input.execution.exit_lot_id, input.execution.id, input.evidence.id,
+        input.evidence.base_quantity, input.evidence.quote_quantity, input.evidence.occurred_at,
+        input.positionId, input.execution.user_id, input.execution.requested_base_quantity]
+    );
+    if (reduced.rows.length === 0) throw new Error('Lot exit fill exceeds its reserved lot inventory');
+    await applyLotReduction(client, input.execution.exit_lot_id, input.evidence.id, input.execution.id);
+    return;
+  }
+
+  const sourceResult = await client.query<{
+    wallet_address: string;
+    direction: 'buy' | 'sell';
+    signal_id: string | null;
+  }>(
+    `SELECT source.wallet_address, source.direction, execution.signal_id
+       FROM source_trades source
+       JOIN copy_executions execution ON execution.source_trade_id = source.id
+      WHERE execution.id = $1`,
+    [input.execution.id]
+  );
+  const source = sourceResult.rows[0];
+  if (!source) throw new Error(`Source trade for execution ${input.execution.id} does not exist`);
+
+  if (source.direction === 'buy') {
+    const costBasisUsd = input.evidence.quote_quantity === null
+      ? input.evidence.price_usd === null
+        ? null
+        : Number(input.evidence.base_quantity) * Number(input.evidence.price_usd)
+      : Number(input.evidence.quote_quantity);
+    await client.query(
+      `INSERT INTO copy_position_master_lots (
+         position_id, user_id, master_wallet_address, chain, token_mint, signal_id,
+         source_trade_id, acquisition_execution_id, acquisition_evidence_id,
+         acquired_quantity, remaining_quantity, acquired_cost_basis_usd,
+         remaining_cost_basis_usd, acquired_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6,
+         $7, $8, $9, $10::numeric, $10::numeric, $11::numeric, $11::numeric, $12
+       )
+       ON CONFLICT (acquisition_evidence_id) DO NOTHING`,
+      [
+        input.positionId,
+        input.execution.user_id,
+        source.wallet_address,
+        input.execution.chain,
+        input.execution.token_mint,
+        source.signal_id,
+        input.execution.source_trade_id,
+        input.execution.id,
+        input.evidence.id,
+        input.evidence.base_quantity,
+        costBasisUsd,
+        input.evidence.occurred_at
+      ]
+    );
+    return;
+  }
+
+  const lotRows = await client.query<PositionLot & {
+    remaining_quantity: string;
+    remaining_cost_basis_usd: string | null;
+    acquired_at: Date;
+    master_wallet_address: string;
+  }>(
+    `SELECT id,
+            master_wallet_address AS "masterWalletAddress",
+            remaining_quantity::text,
+            remaining_cost_basis_usd::text,
+            acquired_at
+       FROM copy_position_master_lots
+      WHERE position_id = $1
+        AND master_wallet_address = $2
+        AND remaining_quantity > 0
+      ORDER BY acquired_at, id
+      FOR UPDATE`,
+    [input.positionId, source.wallet_address]
+  );
+  const lots = lotRows.rows.map((row) => ({
+    id: row.id,
+    masterWalletAddress: row.masterWalletAddress,
+    remainingQuantity: Number(row.remaining_quantity),
+    remainingCostBasisUsd: row.remaining_cost_basis_usd === null
+      ? null
+      : Number(row.remaining_cost_basis_usd),
+    acquiredAt: row.acquired_at
+  }));
+  const allocation = allocateLotsForMasterSell({
+    masterWalletAddress: source.wallet_address,
+    quantity: Number(input.evidence.base_quantity),
+    lots
+  });
+  assertLotAllocationComplete(allocation);
+
+  for (const reduction of allocation.reductions) {
+    const insertedReduction = await client.query<{ id: string }>(
+      `INSERT INTO copy_position_master_lot_reductions (
+         lot_id, sell_execution_id, sell_evidence_id, quantity, proceeds_usd, reduced_at
+       ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6)
+       ON CONFLICT (lot_id, sell_evidence_id) DO NOTHING
+       RETURNING id`,
+      [
+        reduction.lotId,
+        input.execution.id,
+        input.evidence.id,
+        reduction.quantity,
+        input.evidence.quote_quantity === null
+          ? null
+          : Number(input.evidence.quote_quantity) * reduction.quantity / Number(input.evidence.base_quantity),
+        input.evidence.occurred_at
+      ]
+    );
+    if (insertedReduction.rows.length === 0) continue;
+    await applyLotReduction(client, reduction.lotId, input.evidence.id, input.execution.id);
+  }
+}
+
+async function applyLotReduction(
+  client: PoolClient,
+  lotId: string,
+  evidenceId: string,
+  executionId: string
+): Promise<void> {
+  await client.query(
+    `UPDATE copy_position_master_lots lot
+        SET reduced_quantity = lot.reduced_quantity + reduction.quantity,
+            remaining_quantity = lot.remaining_quantity - reduction.quantity,
+            remaining_cost_basis_usd = CASE
+              WHEN lot.remaining_cost_basis_usd IS NULL THEN NULL
+              WHEN lot.remaining_quantity = reduction.quantity THEN 0
+              ELSE lot.remaining_cost_basis_usd
+                - (lot.remaining_cost_basis_usd / lot.remaining_quantity) * reduction.quantity
+            END,
+            updated_at = NOW()
+       FROM copy_position_master_lot_reductions reduction
+      WHERE lot.id = $1
+        AND reduction.lot_id = lot.id
+        AND reduction.sell_evidence_id = $2
+        AND reduction.sell_execution_id = $3`,
+    [lotId, evidenceId, executionId]
+  );
+}
+
 export async function recordCopyExecutionEvidence(
+  input: RecordCopyExecutionEvidenceInput
+): Promise<RecordCopyExecutionEvidenceResult> {
+  return inTransaction((client) => recordCopyExecutionEvidenceWithClient(client, input));
+}
+
+export async function recordCopyExecutionEvidenceWithClient(
+  client: PoolClient,
   input: RecordCopyExecutionEvidenceInput
 ): Promise<RecordCopyExecutionEvidenceResult> {
   const executionId = assertIdentifier('executionId', input.executionId, 128);
@@ -2460,7 +2774,7 @@ export async function recordCopyExecutionEvidence(
   const occurredAt = assertDate('occurredAt', input.occurredAt);
   const observedAt = assertDate('observedAt', input.observedAt ?? new Date());
 
-  return inTransaction(async (client) => {
+  const operation = async (): Promise<RecordCopyExecutionEvidenceResult> => {
     const executionResult = await client.query<CopyExecutionDbRow>(
       `SELECT ${COPY_EXECUTION_COLUMNS}
          FROM copy_executions
@@ -2636,6 +2950,12 @@ export async function recordCopyExecutionEvidence(
       ]
     );
 
+    await synchronizePositionLots(client, {
+      execution,
+      evidence,
+      positionId
+    });
+
     // `SUM` skips NULLs, so the old `COALESCE(SUM(quote_quantity), 0)` produced the
     // same confident-looking number whether every confirmed fill was valued in USD,
     // some were, or none were. The two counts alongside the sum are what let
@@ -2739,6 +3059,7 @@ export async function recordCopyExecutionEvidence(
     if (
       execution.state === 'confirmed'
       && execution.signal_id
+      && !execution.exit_lot_id
       && execution.execution_mode !== 'shadow'
     ) {
       await client.query(
@@ -2754,7 +3075,18 @@ export async function recordCopyExecutionEvidence(
       fillValuation,
       confirmedQuoteTotal
     };
-  });
+  };
+  return operation();
+}
+
+export async function getCopyExecutionById(id: string): Promise<CopyExecutionRecord | null> {
+  const rows = await query<CopyExecutionDbRow>(
+    `SELECT ${COPY_EXECUTION_COLUMNS}
+       FROM copy_executions
+      WHERE id = $1`,
+    [assertIdentifier('id', id, 128)]
+  );
+  return rows[0] ? mapCopyExecution(rows[0]) : null;
 }
 
 export async function getCopyExecutionByClientOrderId(input: {

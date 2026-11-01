@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AdminNav } from '../../components/AdminNav.js';
 import { serverApiGet } from '../../lib/api-server.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -56,11 +57,13 @@ export default async function PerformancePage() {
   const totalPnL = parseFloat(performance.total_pnl_usd || 0);
 
   return (
-    <main>
-      <h1>Trading Performance</h1>
-      <p style={{ color: 'var(--text-secondary)' }}>
-        Track paper and live execution outcomes, open positions, and transaction history.
-      </p>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">Trading Performance</h1>
+        <p className="text-body-sm text-on-surface-variant mb-6">
+          Track paper and live execution outcomes, open positions, and transaction history.
+        </p>
 
       {/* Zeros below could mean "nothing traded yet" or "we could not ask".
           Without this banner those are the same screen. */}
@@ -219,5 +222,6 @@ export default async function PerformancePage() {
         </div>
       </div>
     </main>
-  );
+  </div>
+);
 }

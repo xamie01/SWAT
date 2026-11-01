@@ -177,6 +177,46 @@ export interface ResolvedSession {
   readonly user: UserRecord;
 }
 
+export const SESSION_CACHE_TTL_MS = 60_000;
+export const SESSION_CACHE_MAX_ENTRIES = 10_000;
+
+interface CachedSession {
+  readonly session: ResolvedSession;
+  readonly timestamp: number;
+}
+
+const cachedSessions = new Map<string, CachedSession>();
+
+function pruneSessionCache(now: number): void {
+  for (const [key, entry] of cachedSessions) {
+    if (now - entry.timestamp >= SESSION_CACHE_TTL_MS) cachedSessions.delete(key);
+  }
+  if (cachedSessions.size <= SESSION_CACHE_MAX_ENTRIES) return;
+  const excess = cachedSessions.size - SESSION_CACHE_MAX_ENTRIES;
+  let removed = 0;
+  for (const key of cachedSessions.keys()) {
+    if (removed >= excess) break;
+    cachedSessions.delete(key);
+    removed += 1;
+  }
+}
+
+export function clearSessionCache(): void {
+  cachedSessions.clear();
+}
+
+export function sessionCacheSize(): number {
+  return cachedSessions.size;
+}
+
+export function invalidateUserSessionCache(userId: string): void {
+  for (const [key, entry] of cachedSessions) {
+    if (entry.session.user.id === userId) {
+      cachedSessions.delete(key);
+    }
+  }
+}
+
 /**
  * Resolves a presented token to its session and user, or null.
  *
@@ -184,11 +224,19 @@ export interface ResolvedSession {
  * resolved by a caller that forgets to check one of them, and `last_seen_at` is
  * advanced in the same statement so the idle window slides on use.
  *
- * The CTE is load-bearing: the UPDATE must be what filters, so that touching and
- * validating a session are a single atomic step. Selecting first and updating
- * after would leave a window where a concurrently revoked session still resolves.
+ * Reads are cached in an in-memory bounded LRU map for 60 seconds to prevent
+ * write-amplification (an UPDATE on every GET) from saturating Postgres under load.
+ * Revocations invalidate the cache immediately.
  */
 export async function resolveSession(token: string): Promise<ResolvedSession | null> {
+  const tokenHash = hashToken(token);
+  const cacheKey = tokenHash.toString('hex');
+  const now = Date.now();
+  const cached = cachedSessions.get(cacheKey);
+  if (cached && now - cached.timestamp < SESSION_CACHE_TTL_MS) {
+    return cached.session;
+  }
+
   const rows = await query<UserRow & { session_id: string }>(
     `WITH touched AS (
        UPDATE user_sessions
@@ -202,20 +250,32 @@ export async function resolveSession(token: string): Promise<ResolvedSession | n
      SELECT touched.session_id, ${USER_COLUMNS}
        FROM touched
        JOIN users ON users.id = touched.user_id`,
-    [hashToken(token), SESSION_IDLE_TTL_MS]
+    [tokenHash, SESSION_IDLE_TTL_MS]
   );
-  const row = rows[0];
-  return row ? { sessionId: row.session_id, user: toUser(row) } : null;
+  const row = rows?.[0];
+  if (!row) {
+    cachedSessions.delete(cacheKey);
+    return null;
+  }
+
+  const resolved: ResolvedSession = { sessionId: row.session_id, user: toUser(row) };
+  cachedSessions.set(cacheKey, { session: resolved, timestamp: now });
+  pruneSessionCache(now);
+  return resolved;
 }
 
 export async function revokeSession(token: string): Promise<void> {
+  const tokenHash = hashToken(token);
+  const cacheKey = tokenHash.toString('hex');
+  cachedSessions.delete(cacheKey);
   await query(
     'UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL',
-    [hashToken(token)]
+    [tokenHash]
   );
 }
 
 export async function revokeAllSessions(scope: UserScope): Promise<number> {
+  invalidateUserSessionCache(scope.userId);
   const rows = await query<{ id: string }>(
     `UPDATE user_sessions SET revoked_at = NOW()
       WHERE user_id = $1 AND revoked_at IS NULL

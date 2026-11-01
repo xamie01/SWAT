@@ -555,8 +555,8 @@ describe('canonical copy-trade lifecycle', () => {
       const replayedSell = await claimSourceSignalForCopyExecution(sellClaimInput);
       expect(sellExecution.execution).toMatchObject({
         direction: 'sell',
-        requestedBaseQuantity: '2.00000000000000000000',
-        reservedBaseQuantity: '2.00000000000000000000'
+        requestedBaseQuantity: '1.5000000000000000000000000000000000000000',
+        reservedBaseQuantity: '1.5000000000000000000000000000000000000000'
       });
       expect(replayedSell.execution?.id).toBe(sellExecution.execution?.id);
 

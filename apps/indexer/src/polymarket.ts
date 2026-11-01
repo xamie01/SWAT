@@ -147,17 +147,88 @@ async function fetchGammaMarket(
   conditionId: string,
   fetchImpl: FetchImplementation
 ): Promise<Record<string, unknown>> {
-  const response = await fetchImpl(
-    `https://gamma-api.polymarket.com/markets?condition_id=${encodeURIComponent(conditionId)}`
-  );
-  if (!response.ok) {
-    throw new Error(`Polymarket Gamma API returned status ${response.status}`);
+  const normTarget = conditionId.toLowerCase();
+
+  // Try 1: Open / active markets via condition_id and condition_ids
+  try {
+    const response = await fetchImpl(
+      `https://gamma-api.polymarket.com/markets?condition_id=${encodeURIComponent(conditionId)}&condition_ids=${encodeURIComponent(conditionId)}`
+    );
+    if (response.ok) {
+      const payload = (await response.json()) as unknown;
+      if (Array.isArray(payload)) {
+        const match = payload.find(
+          (m: any) =>
+            typeof m === 'object' &&
+            m !== null &&
+            (m.conditionId?.toLowerCase() === normTarget || m.condition_id?.toLowerCase() === normTarget)
+        );
+        if (match) {
+          return {
+            ...match,
+            negRisk: typeof (match as any).negRisk === 'boolean'
+              ? (match as any).negRisk
+              : Boolean((match as any).neg_risk)
+          };
+        }
+      }
+    }
+  } catch {
+    // Fall through to closed markets
   }
-  const payload = await response.json() as unknown;
-  if (!Array.isArray(payload) || !payload[0] || typeof payload[0] !== 'object') {
-    throw new Error(`Polymarket market context not found for ${conditionId}`);
+
+  // Try 2: Closed / resolved historical markets via condition_id, condition_ids, & closed=true
+  try {
+    const response = await fetchImpl(
+      `https://gamma-api.polymarket.com/markets?condition_id=${encodeURIComponent(conditionId)}&condition_ids=${encodeURIComponent(conditionId)}&closed=true`
+    );
+    if (response.ok) {
+      const payload = (await response.json()) as unknown;
+      if (Array.isArray(payload)) {
+        const match = payload.find(
+          (m: any) =>
+            typeof m === 'object' &&
+            m !== null &&
+            (m.conditionId?.toLowerCase() === normTarget || m.condition_id?.toLowerCase() === normTarget)
+        );
+        if (match) {
+          return {
+            ...match,
+            negRisk: typeof (match as any).negRisk === 'boolean'
+              ? (match as any).negRisk
+              : Boolean((match as any).neg_risk)
+          };
+        }
+      }
+    }
+  } catch {
+    // Fall through to CLOB fallback
   }
-  return payload[0] as Record<string, unknown>;
+
+  // Try 3: CLOB market endpoint directly as ultimate fallback
+  try {
+    const clobRes = await fetchImpl(
+      `https://clob.polymarket.com/markets/${encodeURIComponent(conditionId)}`
+    );
+    if (clobRes.ok) {
+      const clobData = (await clobRes.json()) as Record<string, unknown>;
+      if (clobData && Array.isArray(clobData.tokens)) {
+        return {
+          ...clobData,
+          conditionId: clobData.condition_id ?? conditionId,
+          outcomes: (clobData.tokens as any[]).map((t) => t.outcome),
+          clobTokenIds: (clobData.tokens as any[]).map((t) => t.token_id),
+          negRisk: clobData.neg_risk ?? false,
+          endDate: clobData.end_date_iso ?? clobData.end_date ?? new Date().toISOString(),
+          orderPriceMinTickSize: clobData.minimum_tick_size ?? 0.001
+        };
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  throw new Error(`Polymarket market context not found for ${conditionId}`);
 }
 
 async function fetchTickSize(asset: string, fetchImpl: FetchImplementation): Promise<unknown> {

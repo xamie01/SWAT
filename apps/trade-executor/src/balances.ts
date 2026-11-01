@@ -19,6 +19,28 @@ export function capBaseUnitSpend(
   return requested < spendable ? requested : spendable;
 }
 
+/** Standard Solana transfer network fee in lamports (0.000005 SOL). */
+export const DEFAULT_SOLANA_FEE_LAMPORTS = 5_000n;
+
+/**
+ * Calculates the safe maximum withdrawable native SOL in lamports, netting both the
+ * rent-exempt minimum required to preserve the vault account on-chain and a network fee buffer.
+ *
+ * Prevents transaction reverts caused by rent-exemption violations or gas starvation.
+ */
+export function calculateMaxWithdrawableSolLamports(opts: {
+  totalLamports: bigint;
+  rentExemptMinLamports: bigint;
+  feeBufferLamports?: bigint;
+}): bigint {
+  const { totalLamports, rentExemptMinLamports, feeBufferLamports = DEFAULT_SOLANA_FEE_LAMPORTS } = opts;
+  if (totalLamports < 0n || rentExemptMinLamports < 0n || feeBufferLamports < 0n) {
+    throw new Error('Lamport balance inputs must be non-negative');
+  }
+  const requiredReserve = rentExemptMinLamports + feeBufferLamports;
+  return totalLamports > requiredReserve ? totalLamports - requiredReserve : 0n;
+}
+
 export async function fetchSolanaBalanceSol(opts: {
   walletAddress: string;
   heliusApiKey: string;

@@ -169,6 +169,10 @@ function fakeClient(options: {
         return { rows: [{ id: lotRow().id }] };
       }
       if (sql.includes('INSERT INTO copy_position_applications')) return { rows: [] };
+      if (sql.includes('SELECT source.wallet_address') && sql.includes('FROM source_trades source')) {
+        return { rows: [{ wallet_address: 'master-wallet', direction: 'buy', signal_id: 'signal-id' }] };
+      }
+      if (sql.includes('INSERT INTO copy_position_master_lots')) return { rows: [] };
       if (sql.includes('valued_quote_usd_sum')) {
         return { rows: [options.totals] };
       }

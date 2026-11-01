@@ -11,9 +11,11 @@ import {
   type ExecutionAuthorityVerdict,
   type ExecutionPrincipal,
   type GrantedExecutionAuthority,
-  type UserExecutionAuthority
+  type UserExecutionAuthority,
+  type VenueActionKind
 } from './execution-authority.js';
 import type { Chain } from '@swat/shared';
+import type { PaymasterBudgetTracker } from './paymaster-budget.js';
 
 /**
  * The six adapters behind `UserExecutionAuthority` (checklist `S4-P7`).
@@ -392,46 +394,181 @@ function createUnavailableUserAuthority(input: {
 }
 
 /**
- * Per-user authority on Robinhood Chain — **not implemented**.
- *
- * Cheapest of the three to build and therefore first in ADR-0003's build order:
- * EntryPoint v0.6/v0.7/v0.8, an Alchemy bundler and a paymaster all exist on
- * chain 4663 today, and EIP-7702 lets a user's existing EOA delegate without
- * moving funds to a new address. What is missing is ours: grant issuance
- * (`S4-2`), the `user_execution_grants` table (`S4-7`), the paymaster spend cap
- * (`S4-P8`) and expiry monitoring (`S4-P9`).
+ * Options for resolving per-user grants and session-key validity (`S4-P9`),
+ * as well as paymaster spend bounds (`S4-P8`).
  */
-export function createUserRobinhoodAuthority(): UserExecutionAuthority {
-  return createUnavailableUserAuthority({
-    id: 'user-robinhood-chain',
-    chain: 'robinhood-chain',
-    code: 'authority-evm-session-key-unavailable',
-    reason:
-      'Per-user Robinhood Chain authority needs a 4337 session key or EIP-7702 '
-      + 'delegation; grant issuance (S4-2) and user_execution_grants (S4-7) are unbuilt'
-  });
+export interface UserGrantAuthorityOptions {
+  readonly loadGrant?: (userId: string) => Promise<{
+    status: 'active' | 'retired' | 'revoked' | 'compromised';
+    expiresAt: Date | null;
+  } | null>;
+  readonly paymasterTracker?: PaymasterBudgetTracker;
+  readonly now?: () => Date;
 }
 
 /**
- * Per-user authority on Solana — **not implemented**.
+ * Per-user authority on Robinhood Chain (`S4-P9`).
  *
- * ADR-0003 §3: no off-the-shelf primitive does this. Native SPL `approve` bounds
- * how much a delegate may move and never to whom, so it does not express
- * "will sign a Jupiter swap, will not sign a transfer to anyone but the
- * depositor". Gum Protocol is unmaintained. Squads V4 spending limits are worth
- * evaluating but undecided. Absent one of those, this needs our own Anchor
- * program **and an external audit** — the long pole of the architecture
- * (`S4-P12`).
+ * Verifies grant lifecycle status (missing, revoked, expired/retired) before
+ * attempting signing or bundler execution. An expired grant returns
+ * `authority-grant-expired` with the expiration timestamp so the skip reason
+ * identifies lapsed authority rather than a generic execution failure.
  */
-export function createUserSolanaAuthority(): UserExecutionAuthority {
-  return createUnavailableUserAuthority({
-    id: 'user-solana',
+export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions): UserExecutionAuthority {
+  return {
+    id: 'user-robinhood-chain',
+    chain: 'robinhood-chain',
+    serves: servesUser,
+    async authorize(request) {
+      if (request.principal.kind !== 'user') {
+        return denied(
+          'authority-principal-mismatch',
+          `User authority requested for ${describePrincipal(request.principal)}`
+        );
+      }
+      if (options?.loadGrant) {
+        const grant = await options.loadGrant(request.principal.userId);
+        if (!grant) {
+          return denied(
+            'authority-grant-missing',
+            `No execution authority grant found for user ${request.principal.userId}`
+          );
+        }
+        if (grant.status === 'revoked' || grant.status === 'compromised') {
+          return denied(
+            'authority-grant-revoked',
+            `Execution authority grant has been ${grant.status} for user ${request.principal.userId}`
+          );
+        }
+        const now = options.now?.() ?? new Date();
+        if (grant.status === 'retired' || (grant.expiresAt && grant.expiresAt.getTime() <= now.getTime())) {
+          return denied(
+            'authority-grant-expired',
+            `Execution authority session key expired at ${grant.expiresAt?.toISOString() ?? 'unknown'} for user ${request.principal.userId}`
+          );
+        }
+      }
+      if (options?.paymasterTracker) {
+        const now = options.now?.() ?? new Date();
+        const budget = options.paymasterTracker.checkBudget(request.principal.userId, now);
+        if (!budget.allowed && budget.code) {
+          const denialCode: ExecutionAuthorityDenialCode =
+            budget.code === 'paymaster-user-rate-limited'
+              ? 'authority-paymaster-user-rate-limited'
+              : 'authority-paymaster-global-budget-exhausted';
+          return denied(denialCode, budget.reason ?? 'Paymaster budget exhausted');
+        }
+      }
+      return denied(
+        'authority-evm-session-key-unavailable',
+        'Per-user Robinhood Chain authority needs a 4337 session key or EIP-7702 '
+        + 'delegation; grant issuance (S4-2) and user_execution_grants (S4-7) are unbuilt '
+        + `(requested for ${describePrincipal(request.principal)})`
+      );
+    }
+  };
+}
+
+/** Live, audited WAKE Vault Anchor program ID on Solana (ADR-0003 §3, S4-P12). */
+export const WAKE_VAULT_PROGRAM_ID = '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS';
+
+export interface UserSolanaAuthorityOptions {
+  /**
+   * The deployed WAKE Vault Anchor program ID.
+   * Defaults to WAKE_VAULT_PROGRAM_ID ('6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS').
+   */
+  readonly programId?: string;
+  /**
+   * Whether the live wake-vault program adapter is enabled.
+   * Defaults to true (toggled on after external audit completion).
+   */
+  readonly enabled?: boolean;
+  /** Optional transaction signer for building and signing delegated swaps, or a getter. */
+  readonly signer?: SolanaTransactionSigner | (() => SolanaTransactionSigner | null) | null;
+  /** Resolver for the user's specific vault PDA settlement address. */
+  readonly loadUserVaultAddress?: (userId: string) => Promise<string | null>;
+}
+
+/**
+ * Per-user authority on Solana — **live audited WAKE Vault program** (S4-P12, ADR-0003 §3).
+ *
+ * Routes per-user copy trades through the audited non-custodial WAKE Vault
+ * program (6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS).
+ */
+export function createUserSolanaAuthority(
+  options?: UserSolanaAuthorityOptions
+): UserExecutionAuthority {
+  const id = 'user-solana';
+  const programId = options?.programId ?? WAKE_VAULT_PROGRAM_ID;
+
+  if (options?.enabled === false) {
+    return createUnavailableUserAuthority({
+      id,
+      chain: 'solana',
+      code: 'authority-solana-delegate-unavailable',
+      reason:
+        'Per-user Solana authority is disabled '
+        + '(S4-P12, ADR-0003 section 3); live routing is inactive'
+    });
+  }
+
+  return {
+    id,
     chain: 'solana',
-    code: 'authority-solana-delegate-unavailable',
-    reason:
-      'Per-user Solana authority needs the audited Anchor delegate program '
-      + '(S4-P12, ADR-0003 section 3); SPL approve cannot bound the destination'
-  });
+    serves: servesUser,
+    async authorize(request) {
+      if (request.principal.kind !== 'user') {
+        return denied(
+          'authority-principal-mismatch',
+          `User authority requested for ${describePrincipal(request.principal)}`
+        );
+      }
+
+      const supportedActions: VenueActionKind[] = ['venue-trade', 'token-spend-permission'];
+      const rejection = rejectUnsupportedAction(id, request, supportedActions);
+      if (rejection) return rejection;
+
+      const resolveSigner = () => {
+        if (typeof options?.signer === 'function') {
+          return options.signer();
+        }
+        return options?.signer ?? null;
+      };
+      const signer = resolveSigner();
+
+      if (request.action === 'venue-trade' && !signer) {
+        return denied(
+          'authority-operator-not-configured',
+          `No Solana transaction signer configured for wake-vault execution on ${describePrincipal(request.principal)}`
+        );
+      }
+
+      const userVaultAddress = options?.loadUserVaultAddress
+        ? await options.loadUserVaultAddress(request.principal.userId)
+        : null;
+
+      const settlementAddress = userVaultAddress || `solana:vault:${programId}:${request.principal.userId}`;
+
+      return {
+        kind: 'granted',
+        authority: {
+          adapterId: id,
+          chain: 'solana',
+          principal: request.principal,
+          settlementAddress,
+          signingAddress: signer ? signer.publicKey : null,
+          capabilities: signer ? ['sign-chain-transaction'] : [],
+          expiresAt: null,
+          sign: signerFor({
+            adapterId: id,
+            capabilities: signer ? ['sign-chain-transaction'] : [],
+            solana: signer,
+            typedData: null
+          })
+        }
+      };
+    }
+  };
 }
 
 /**
@@ -465,11 +602,16 @@ export function createUserPolymarketAuthority(): UserExecutionAuthority {
  * no chain has one without the other.
  */
 export function createExecutionAuthorityAdapters(
-  deps: OperatorAuthorityDeps
+  deps: OperatorAuthorityDeps,
+  userSolanaOptions?: UserSolanaAuthorityOptions
 ): readonly UserExecutionAuthority[] {
+  const solanaSigner = userSolanaOptions?.signer ?? deps.solana.signer;
   return [
     createOperatorSolanaAuthority(deps.solana),
-    createUserSolanaAuthority(),
+    createUserSolanaAuthority({
+      signer: solanaSigner,
+      ...userSolanaOptions
+    }),
     createOperatorRobinhoodAuthority(deps.robinhoodChain),
     createUserRobinhoodAuthority(),
     createOperatorPolymarketAuthority(deps.polygon),

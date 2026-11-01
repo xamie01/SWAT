@@ -449,6 +449,38 @@ describe('runStopLossSweep per-user claims (S4-M46)', () => {
     );
   });
 
+  it('keeps two open lots on one user and signal independently claimable', async () => {
+    const dependencies = deps({
+      positions: [
+        position({ signalId: 'shared-signal', userId: 'user-a', positionKey: 'lot-a' }),
+        position({ signalId: 'shared-signal', userId: 'user-a', positionKey: 'lot-b' })
+      ]
+    });
+
+    await expect(runStopLossSweep(dependencies)).resolves.toMatchObject({
+      scanned: 2,
+      breached: 2,
+      queued: 2,
+      failed: 0
+    });
+
+    expect(dependencies.claim).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ account: 'user-a', signalId: 'shared-signal', positionKey: 'lot-a' })
+    );
+    expect(dependencies.claim).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ account: 'user-a', signalId: 'shared-signal', positionKey: 'lot-b' })
+    );
+    const jobIds = (dependencies.enqueueSell as ReturnType<typeof vi.fn>).mock.calls.map(
+      ([, jobId]) => jobId
+    );
+    expect(jobIds).toEqual([
+      'stop-loss-user-a-shared-signal-lot-a',
+      'stop-loss-user-a-shared-signal-lot-b'
+    ]);
+  });
+
   it('leaves the operator job free of a userId key, byte-identical to pre-fan-out', async () => {
     // The executor picks its acting principal from `typeof payload.userId === 'string'`,
     // so a `userId: null` on the operator job would be a new key on a payload that a

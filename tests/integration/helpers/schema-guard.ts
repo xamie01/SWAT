@@ -37,8 +37,8 @@ const REQUIRED_TABLES = [
   'user_execution_grants',       // 047
   'user_balances',               // 048
   'user_execution_settings',     // 049
-   'user_chain_execution_settings', // 049
-   'copy_position_lots',            // 058
+  'user_chain_execution_settings', // 049
+  'copy_position_master_lots',   // 058 core lot accounting
   'lp_pools',                    // 059
   'lp_positions',                // 059
   'lp_guardrail_configs',        // 059
@@ -66,9 +66,7 @@ const REQUIRED_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> 
   // "relation master_capacity_ledger does not exist".
   ['master_capacity_ledger', 'notional_basis'],
   ['user_wallet_subscriptions', 'active_since'],
-  ['copy_position_applications', 'master_wallet_address'],
-  ['copy_position_applications', 'lot_id'],
-  ['copy_position_lots', 'master_wallet_address'],
+  ['copy_position_master_lots', 'master_wallet_address'],
   ['lp_positions', 'auto_rebalance']
 ];
 

@@ -360,4 +360,67 @@ describe('markToMarketOpenPositions per-tenant grouping (S4-M46)', () => {
       positions: []
     });
   });
+
+  it('emits one keyed snapshot per open master lot while rolling up the signal once', async () => {
+    mocks.query
+      .mockResolvedValueOnce([
+        buy({ user_id: 'user-a', token_amount: '15', amount_usd: '150', price_usd: '10' })
+      ])
+      .mockResolvedValueOnce([
+        {
+          lot_id: 'lot-master-a',
+          signal_id: 'shared-signal',
+          user_id: 'user-a',
+          master_wallet_address: 'solana:master-a',
+          token_mint: 'solana:token-1',
+          chain: 'solana',
+          remaining_quantity: '10',
+          remaining_cost_basis_usd: '100'
+        },
+        {
+          lot_id: 'lot-master-b',
+          signal_id: 'shared-signal',
+          user_id: 'user-a',
+          master_wallet_address: 'solana:master-b',
+          token_mint: 'solana:token-1',
+          chain: 'solana',
+          remaining_quantity: '5',
+          remaining_cost_basis_usd: '50'
+        }
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.fetchTokenPriceUsd.mockResolvedValue(5);
+
+    const result = await markToMarketOpenPositions();
+
+    expect(result.positions).toEqual([
+      {
+        signalId: 'shared-signal',
+        userId: 'user-a',
+        positionKey: 'lot-master-a',
+        tokenMint: 'solana:token-1',
+        chain: 'solana',
+        openQuantity: 10,
+        openCostBasisUsd: 100,
+        unrealizedPnlUsd: -50,
+        currentPriceUsd: 5
+      },
+      {
+        signalId: 'shared-signal',
+        userId: 'user-a',
+        positionKey: 'lot-master-b',
+        tokenMint: 'solana:token-1',
+        chain: 'solana',
+        openQuantity: 5,
+        openCostBasisUsd: 50,
+        unrealizedPnlUsd: -25,
+        currentPriceUsd: 5
+      }
+    ]);
+    expect(result.updated).toBe(1);
+    expect(
+      mocks.query.mock.calls.filter(([sql]) => String(sql).includes('realized_pnl_usd = $2'))
+    ).toHaveLength(1);
+  });
 });

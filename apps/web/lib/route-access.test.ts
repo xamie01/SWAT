@@ -10,7 +10,7 @@ describe('classifyRoute', () => {
   });
 
   it("classifies today's operator pages as admin", () => {
-    for (const path of ['/workspace', '/signals', '/wallets', '/logs', '/clusters', '/setup', '/performance']) {
+    for (const path of ['/admin', '/admin/portfolio', '/workspace', '/signals', '/wallets', '/logs', '/clusters', '/setup', '/performance']) {
       expect(classifyRoute(path)).toBe('admin');
     }
   });

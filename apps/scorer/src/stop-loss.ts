@@ -92,6 +92,7 @@ export type StopLossSellJob = {
    * replayed BullMQ job cannot change principal across a deploy.
    */
   userId?: string;
+  positionKey?: string;
 };
 
 export type StopLossAlert = {
@@ -106,7 +107,7 @@ export type StopLossSweepDependencies = {
   positions: OpenPositionSnapshot[];
   resolvePolicy: (account: string, chain: Chain) => Promise<{ stopLossPct: number }>;
   claim: (input: StopLossClaimInput) => Promise<boolean>;
-  release: (account: string, signalId: string) => Promise<void>;
+  release: (account: string, signalId: string, positionKey?: string | null) => Promise<void>;
   /**
    * `chain` is passed explicitly rather than left for the caller to re-derive
    * from `job.tokenMint`: since S3-25 the queue is chosen per chain, and the
@@ -232,7 +233,8 @@ export async function runStopLossSweep(
         drawdownPct,
         openQuantity: position.openQuantity,
         openCostBasisUsd: position.openCostBasisUsd,
-        priceUsd: position.currentPriceUsd
+        priceUsd: position.currentPriceUsd,
+        positionKey: position.positionKey
       });
     } catch (error) {
       console.error(`[scorer] stop-loss claim failed for ${account} on ${position.signalId}`, error);
@@ -259,12 +261,17 @@ export async function runStopLossSweep(
           // byte-identical to what this sweep enqueued before fan-out.
           ...(position.userId === null ? {} : { userId: position.userId })
         },
-        `stop-loss-${account}-${position.signalId}`,
+        position.positionKey === undefined || position.positionKey === null
+          ? `stop-loss-${account}-${position.signalId}`
+          : `stop-loss-${account}-${position.signalId}-${position.positionKey}`,
         position.chain
       );
     } catch (error) {
       console.error(`[scorer] stop-loss sell enqueue failed for ${position.signalId}`, error);
-      await dependencies.release(account, position.signalId).catch((releaseError) => {
+      const release = position.positionKey === undefined || position.positionKey === null
+        ? dependencies.release(account, position.signalId)
+        : dependencies.release(account, position.signalId, position.positionKey);
+      await release.catch((releaseError) => {
         console.error(`[scorer] stop-loss claim release failed for ${position.signalId}`, releaseError);
       });
       result.failed++;

@@ -158,7 +158,7 @@ describe('classifyPolymarketBooksResponse', () => {
   });
 
   it('builds the documented request body', () => {
-    expect(JSON.parse(polymarketBooksRequestBody([TOKEN_ID]))).toEqual({ token_ids: [TOKEN_ID] });
+    expect(JSON.parse(polymarketBooksRequestBody([TOKEN_ID]))).toEqual([{ token_id: TOKEN_ID }]);
   });
 });
 
@@ -191,7 +191,7 @@ describe('createPolymarketBooksFetcher', () => {
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(POLYMARKET_BOOKS_REST_URL);
     expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({ token_ids: [TOKEN_ID] });
+    expect(JSON.parse(String(init.body))).toEqual([{ token_id: TOKEN_ID }]);
   });
 
   it('retries a 500 and returns the eventual rows', async () => {
@@ -278,9 +278,9 @@ describe('createPolymarketBooksFetcher', () => {
     const tokens = Array.from({ length: 1_100 }, (_, index) => `token-${index}`);
     const seen: number[] = [];
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
-      const body = JSON.parse(String(init.body)) as { token_ids: string[] };
-      seen.push(body.token_ids.length);
-      return okResponse(body.token_ids.map((id) => ({ asset_id: id })));
+      const body = JSON.parse(String(init.body)) as { token_id: string }[];
+      seen.push(body.length);
+      return okResponse(body.map(({ token_id }) => ({ asset_id: token_id })));
     });
 
     const rows = await createPolymarketBooksFetcher({
@@ -297,9 +297,9 @@ describe('createPolymarketBooksFetcher', () => {
     let batch = 0;
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
       batch += 1;
-      const body = JSON.parse(String(init.body)) as { token_ids: string[] };
+      const body = JSON.parse(String(init.body)) as { token_id: string }[];
       if (batch === 1) return statusResponse(400);
-      return okResponse(body.token_ids.map((id) => ({ asset_id: id })));
+      return okResponse(body.map(({ token_id }) => ({ asset_id: token_id })));
     });
 
     const rows = await createPolymarketBooksFetcher({

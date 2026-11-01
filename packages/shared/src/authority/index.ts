@@ -11,3 +11,7 @@
  */
 export * from './permission-policy.js';
 export * from './evm-calldata.js';
+export * from './entrypoint.js';
+export * from './key-wrapper.js';
+export * from './envelope.js';
+export * from './withdrawal-authorization.js';

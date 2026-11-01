@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -10,6 +11,7 @@ export default function SetupPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [tokenMint, setTokenMint] = useState('');
+  const [discoveryChain, setDiscoveryChain] = useState<'solana' | 'polygon' | 'robinhood-chain'>('solana');
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [newBlacklistMint, setNewBlacklistMint] = useState('');
 
@@ -113,12 +115,14 @@ export default function SetupPage() {
     setSuccess('');
 
     try {
-      const data = await api.post<{ tokenMint?: string }>('/v1/discovery/from-token', {
-        tokenMint: tokenMint.trim()
+      const data = await api.post<{ tokenMint?: string; chain?: string }>('/v1/discovery/from-token', {
+        tokenMint: tokenMint.trim(),
+        chain: discoveryChain
       });
 
+      const chainLabel = discoveryChain === 'solana' ? 'Solana' : discoveryChain === 'polygon' ? 'Polymarket' : 'Robinhood Chain';
       setSuccess(
-        `Token discovery queued for ${data?.tokenMint}. ` +
+        `Token discovery queued for ${data?.tokenMint ?? tokenMint} on ${chainLabel}. ` +
         `Early and biggest buyers will be backfilled, scored, and clustered automatically.`
       );
       setTokenMint('');
@@ -130,11 +134,13 @@ export default function SetupPage() {
   };
 
   return (
-    <main>
-      <h1>Setup & Administration</h1>
-      <p style={{ color: 'var(--text-secondary)' }}>
-        Bootstrap the intelligence layer and trigger batch jobs.
-      </p>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">Setup & Administration</h1>
+        <p className="text-body-sm text-on-surface-variant mb-6">
+          Bootstrap the intelligence layer and trigger batch jobs.
+        </p>
 
       {error && (
         <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', marginTop: '1rem' }}>
@@ -186,12 +192,48 @@ export default function SetupPage() {
             This expands your seed wallet set.
           </p>
           <form onSubmit={triggerDiscovery}>
+            <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.75rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="discoveryChain"
+                  value="solana"
+                  checked={discoveryChain === 'solana'}
+                  onChange={() => setDiscoveryChain('solana')}
+                />
+                Solana
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="discoveryChain"
+                  value="robinhood-chain"
+                  checked={discoveryChain === 'robinhood-chain'}
+                  onChange={() => setDiscoveryChain('robinhood-chain')}
+                />
+                Robinhood
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem' }}>
+                <input
+                  type="radio"
+                  name="discoveryChain"
+                  value="polygon"
+                  checked={discoveryChain === 'polygon'}
+                  onChange={() => setDiscoveryChain('polygon')}
+                />
+                Polymarket (Polygon)
+              </label>
+            </div>
             <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              Token Mint Address
+              {discoveryChain === 'solana' ? 'Token Mint Address' : 'ERC-20 Contract Address'}
             </label>
             <input
               type="text"
-              placeholder="TokenMintAddress111111111111111111111111111"
+              placeholder={
+                discoveryChain === 'solana'
+                  ? "TokenMintAddress111111111111111111111111111"
+                  : "0x1234567890123456789012345678901234567890"
+              }
               value={tokenMint}
               onChange={(e) => setTokenMint(e.target.value)}
               style={{
@@ -235,7 +277,7 @@ export default function SetupPage() {
             Add token mint contract addresses (e.g. stablecoins USDC/USDT, or specific spam/honeypots) that you want to ignore. Coordinated buys/sells on these tokens will not generate intelligence signals.
           </p>
           <form onSubmit={addToBlacklist}>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 placeholder="Token Mint Address to blacklist..."
@@ -429,5 +471,6 @@ export default function SetupPage() {
         </div>
       </div>
     </main>
-  );
+  </div>
+);
 }

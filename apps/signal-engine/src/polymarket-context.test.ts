@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { requirePolymarketSignalContext } from './polymarket-context.js';
+import {
+  isPlaceholderOrUnstableOutcome,
+  requirePolymarketSignalContext
+} from './polymarket-context.js';
 
 const TOKEN_ID = `polygon:${'1'.repeat(40)}`;
 const context = {
@@ -47,5 +50,56 @@ describe('Polymarket signal context', () => {
       ...context,
       question: ''
     }, TOKEN_ID)).toThrow(/Incomplete/);
+  });
+});
+
+describe('Polymarket augmented neg-risk placeholder evaluation (S4-M30)', () => {
+  it('allows all outcomes in standard binary or non-augmented markets', () => {
+    const standardEvent = { enableNegRisk: true, negRiskAugmented: false };
+    expect(isPlaceholderOrUnstableOutcome(standardEvent, { outcome: 'Other' })).toEqual({
+      isPlaceholder: false
+    });
+    expect(isPlaceholderOrUnstableOutcome(standardEvent, { outcome: 'Person A' })).toEqual({
+      isPlaceholder: false
+    });
+    expect(isPlaceholderOrUnstableOutcome(standardEvent, { outcome: 'Alice Smith' })).toEqual({
+      isPlaceholder: false
+    });
+  });
+
+  it('identifies and rejects explicit dynamic "Other" on augmented neg-risk events', () => {
+    const augmentedEvent = { enableNegRisk: true, negRiskAugmented: true };
+    const result = isPlaceholderOrUnstableOutcome(augmentedEvent, { outcome: 'Other' });
+    expect(result.isPlaceholder).toBe(true);
+    expect(result.code).toBe('polymarket-augmented-placeholder-unstable');
+    expect(result.reason).toContain('legally changes definition');
+  });
+
+  it('identifies and rejects unclarified placeholder slots on augmented neg-risk events', () => {
+    const augmentedEvent = { enableNegRisk: true, negRiskAugmented: true };
+
+    const personA = isPlaceholderOrUnstableOutcome(augmentedEvent, { outcome: 'Person A' });
+    expect(personA.isPlaceholder).toBe(true);
+    expect(personA.code).toBe('polymarket-placeholder-unnamed');
+
+    const candidateX = isPlaceholderOrUnstableOutcome(augmentedEvent, { outcome: 'Candidate 2' });
+    expect(candidateX.isPlaceholder).toBe(true);
+    expect(candidateX.code).toBe('polymarket-placeholder-unnamed');
+
+    const genericPlaceholder = isPlaceholderOrUnstableOutcome(augmentedEvent, { outcome: 'TBD Placeholder' });
+    expect(genericPlaceholder.isPlaceholder).toBe(true);
+    expect(genericPlaceholder.code).toBe('polymarket-placeholder-unnamed');
+  });
+
+  it('allows established named candidates in augmented neg-risk events', () => {
+    const augmentedEvent = { enableNegRisk: true, negRiskAugmented: true };
+    const alice = isPlaceholderOrUnstableOutcome(augmentedEvent, { outcome: 'Alice Smith' });
+    expect(alice.isPlaceholder).toBe(false);
+
+    const bob = isPlaceholderOrUnstableOutcome(augmentedEvent, {
+      outcome: 'Yes',
+      groupItemTitle: 'Bob Jones'
+    });
+    expect(bob.isPlaceholder).toBe(false);
   });
 });

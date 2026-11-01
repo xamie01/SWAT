@@ -56,6 +56,11 @@ export function buildClobAuthTypedData(input: {
       chainId: CLOB_CHAIN_ID
     },
     types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' }
+      ],
       ClobAuth: [
         { name: 'address', type: 'address' },
         { name: 'timestamp', type: 'string' },

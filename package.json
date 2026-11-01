@@ -10,6 +10,7 @@
     "typecheck": "turbo run typecheck && pnpm typecheck:tools && tsc --noEmit -p tsconfig.integration.json",
     "typecheck:tools": "tsc -p tsconfig.tools.json",
     "db:migrate": "pnpm --filter @swat/db migrate",
+    "db:migrate:lp": "pnpm --filter @swat/db migrate:lp",
     "acceptance:g0-d11": "pnpm --filter @swat/indexer acceptance:g0-d11",
     "acceptance:polymarket-context": "pnpm --filter @swat/indexer acceptance:polymarket-context",
     "dev:api": "pnpm --filter @swat/api dev",

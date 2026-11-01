@@ -29,6 +29,8 @@ export interface OpenPositionSnapshot {
    * -- while the sweep reported success.
    */
   userId: string | null;
+  /** Stable master-lot identity; absent for legacy aggregate rows. */
+  positionKey?: string | null;
   tokenMint: string;
   chain: Chain;
   openQuantity: number;
@@ -71,6 +73,8 @@ export interface StopLossClaimInput {
   openQuantity: number;
   openCostBasisUsd: number;
   priceUsd: number | null;
+  /** Master-lot identity; empty preserves the legacy aggregate/operator claim. */
+  positionKey?: string | null;
 }
 
 /**
@@ -82,9 +86,10 @@ export async function claimStopLossTrigger(input: StopLossClaimInput): Promise<b
   const rows = await query<{ signal_id: string }>(
     `INSERT INTO signal_stop_losses (
        account, signal_id, chain, token_mint,
-       threshold_pct, drawdown_pct, open_quantity, open_cost_basis_usd, price_usd
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (account, signal_id) DO NOTHING
+       threshold_pct, drawdown_pct, open_quantity, open_cost_basis_usd, price_usd,
+       position_key
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (account, signal_id, position_key) DO NOTHING
      RETURNING signal_id`,
     [
       input.account,
@@ -95,7 +100,8 @@ export async function claimStopLossTrigger(input: StopLossClaimInput): Promise<b
       input.drawdownPct,
       input.openQuantity,
       input.openCostBasisUsd,
-      input.priceUsd
+      input.priceUsd,
+      input.positionKey ?? ''
     ]
   );
   return rows.length > 0;
@@ -105,9 +111,14 @@ export async function claimStopLossTrigger(input: StopLossClaimInput): Promise<b
  * Release a claim so the next sweep can retry. Only called when the exit could
  * not be queued at all — never after a sell has been handed to the executor.
  */
-export async function releaseStopLossTrigger(account: string, signalId: string): Promise<void> {
+export async function releaseStopLossTrigger(
+  account: string,
+  signalId: string,
+  positionKey?: string | null
+): Promise<void> {
   await query(
-    `DELETE FROM signal_stop_losses WHERE account = $1 AND signal_id = $2`,
-    [account, signalId]
+    `DELETE FROM signal_stop_losses
+      WHERE account = $1 AND signal_id = $2 AND position_key = $3`,
+    [account, signalId, positionKey ?? '']
   );
 }

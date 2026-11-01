@@ -5,6 +5,7 @@ import {
   clobL1SignerFrom,
   createClobCredentialStore,
   deriveClobCredentials,
+  fetchClobCredentialsFromSignature,
   normalizeClobSignerAddress,
   parseClobCredentials,
   resolveClobCredentials,
@@ -691,5 +692,52 @@ describe('resolveClobCredentials: the operator is a caller, not a branch', () =>
     expect(first.credentials).toEqual(CREDENTIALS_A);
     expect(second.credentials).toEqual(CREDENTIALS_A);
     expect(derive).toHaveBeenCalledTimes(1);
+  });
+
+  describe('fetchClobCredentialsFromSignature', () => {
+    it('creates or derives credentials using an existing L1 signature', async () => {
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+        const u = String(url);
+        if (u.includes('/auth/api-key')) {
+          return new Response(JSON.stringify(CREDENTIALS_A), { status: 200 });
+        }
+        return new Response('Not found', { status: 404 });
+      });
+
+      const creds = await fetchClobCredentialsFromSignature({
+        address: ADDRESS_A,
+        signature: SIGNATURE,
+        timestampSeconds: 1730000000,
+        baseUrl: ORIGIN,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      });
+
+      expect(creds).toEqual(CREDENTIALS_A);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to derive-api-key if create returns 400', async () => {
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+        const u = String(url);
+        if (u.includes('/auth/api-key')) {
+          return new Response('User exists', { status: 400 });
+        }
+        if (u.includes('/auth/derive-api-key')) {
+          return new Response(JSON.stringify(CREDENTIALS_B), { status: 200 });
+        }
+        return new Response('Not found', { status: 404 });
+      });
+
+      const creds = await fetchClobCredentialsFromSignature({
+        address: ADDRESS_B,
+        signature: SIGNATURE,
+        timestampSeconds: 1730000000,
+        baseUrl: ORIGIN,
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      });
+
+      expect(creds).toEqual(CREDENTIALS_B);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
   });
 });

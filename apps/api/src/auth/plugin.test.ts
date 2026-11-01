@@ -91,9 +91,11 @@ describe('requireRole', () => {
 });
 
 describe('isUserReachable', () => {
-  it('admits the auth and me prefixes and health', () => {
+  it('admits the auth, me, and billing prefixes and health', () => {
     expect(isUserReachable('/v1/auth/login')).toBe(true);
     expect(isUserReachable('/v1/me/subscriptions')).toBe(true);
+    expect(isUserReachable('/v1/billing/plans')).toBe(true);
+    expect(isUserReachable('/v1/billing/status')).toBe(true);
     expect(isUserReachable('/v1/health')).toBe(true);
   });
 

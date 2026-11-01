@@ -3,8 +3,21 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { WakeLogo } from '../../components/WakeLogo.js';
 import { api, ApiError } from '../../lib/api.js';
 
+/**
+ * Real login against POST /v1/auth/login (checklist S6-3 / S6-5 partial).
+ *
+ * Replaces the previous behaviour, which was that `/` simply pushed the visitor
+ * to `/workspace` with no credential of any kind -- the console was open to
+ * anyone who could reach the port, and every request it made carried a shared
+ * key baked into the JavaScript bundle.
+ *
+ * The session is established entirely by cookies the API sets on the response.
+ * This component never sees, stores or forwards a token, which is the point:
+ * there is nowhere for a secret to leak from because the client holds none.
+ */
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -20,8 +33,26 @@ function LoginForm() {
     setError('');
     setSubmitting(true);
     try {
-      await api.post('/v1/auth/login', { email, password });
-      const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/workspace';
+      const res = await api.post<{ user: { id: string; email: string; role: string; tier: string } }>('/v1/auth/login', { email, password });
+      
+      const role = res?.user?.role;
+      const isAdminPrefix = (path: string) => [
+        '/admin', '/workspace', '/signals', '/wallets', '/logs', '/clusters', '/setup', '/performance'
+      ].some(prefix => path === prefix || path.startsWith(`${prefix}/`));
+
+      let destination = '/dashboard';
+      if (next && next.startsWith('/') && !next.startsWith('//')) {
+        if (role !== 'admin' && isAdminPrefix(next)) {
+          destination = '/dashboard';
+        } else {
+          destination = next;
+        }
+      } else if (role === 'admin') {
+        destination = '/admin/portfolio';
+      } else {
+        destination = '/dashboard';
+      }
+
       router.push(destination);
     } catch (caught) {
       setError(
@@ -41,8 +72,8 @@ function LoginForm() {
   return (
     <div className="bg-background text-on-background min-h-screen antialiased font-sans flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <Link href="/" className="flex items-center gap-3 mb-10 hover:opacity-80 transition-opacity">
-          <span className="font-headline-md text-xl font-black tracking-tighter text-primary">WAKE</span>
+        <Link href="/" className="inline-block mb-8 hover:opacity-85 transition-opacity">
+          <WakeLogo size="md" />
         </Link>
 
         <h1 className="font-headline-md text-2xl font-bold tracking-tight mb-2">Sign in</h1>
@@ -88,11 +119,20 @@ function LoginForm() {
           <button
             type="submit"
             disabled={submitting || !email || !password}
-            className="mt-2 bg-primary text-on-primary rounded px-4 py-2 text-body-md font-medium disabled:opacity-50"
+            className="mt-2 bg-primary text-on-primary rounded px-4 py-2 text-body-md font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+
+        <div className="mt-6 pt-6 border-t border-border-subtle text-center">
+          <p className="text-body-sm text-on-surface-variant">
+            Don't have an account?{' '}
+            <Link href="/signup" className="text-primary font-semibold hover:underline">
+              Create account
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -100,7 +140,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center font-mono text-xs">Loading sign-in...</div>}>
+    <Suspense fallback={<div className="bg-background min-h-screen" />}>
       <LoginForm />
     </Suspense>
   );

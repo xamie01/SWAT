@@ -52,6 +52,20 @@ export function createWalletBackfillProcessor(
     }, dependencies.recordBatch);
 
     console.log(`[indexer] backfill complete for ${address} (${chain}):`, result);
+
+    // Immediate post-backfill scoring so trader metrics are created instantly
+    try {
+      const { getWalletMetrics, updateWalletScore } = await import('@swat/db');
+      const { calculateCompositeScore, scoreToTier } = await import('@swat/shared');
+      const metrics = await getWalletMetrics(resolved.prefixed, chain);
+      const score = calculateCompositeScore(metrics);
+      const tier = scoreToTier(score);
+      await updateWalletScore(resolved.prefixed, score, tier, metrics);
+      console.log(`[indexer] immediate post-backfill scoring complete for ${resolved.prefixed}: score=${score}, tier=${tier}`);
+    } catch (scoreErr) {
+      console.warn(`[indexer] post-backfill scoring deferred for ${resolved.prefixed}:`, scoreErr);
+    }
+
     return { address, chain, ...result };
   };
 }

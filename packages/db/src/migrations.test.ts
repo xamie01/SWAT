@@ -1,14 +1,38 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { discoverMigrations, migrationProfileFromEnv } from './migration-discovery.js';
 
 const sqlDir = resolve(import.meta.dirname, '../sql');
+const lpSqlDir = resolve(import.meta.dirname, '../sql-lp');
+
+describe('migration profiles', () => {
+  it('defaults to core and rejects unknown profiles', () => {
+    expect(migrationProfileFromEnv(undefined)).toBe('core');
+    expect(migrationProfileFromEnv('')).toBe('core');
+    expect(migrationProfileFromEnv('lp')).toBe('lp');
+    expect(() => migrationProfileFromEnv('all')).toThrow(/core.*lp/);
+  });
+
+  it('keeps LP SQL out of core discovery and includes it only for lp', async () => {
+    const core = await discoverMigrations(sqlDir, lpSqlDir, 'core');
+    const lp = await discoverMigrations(sqlDir, lpSqlDir, 'lp');
+    expect(core.every((migration) => migration.profile === 'core')).toBe(true);
+    expect(core.some((migration) => migration.file.includes('lp_'))).toBe(false);
+    expect(lp.some((migration) => migration.profile === 'lp' && migration.file === '059_lp_dashboard.sql')).toBe(true);
+    expect(lp.some((migration) => migration.profile === 'lp' && migration.file === '060_lp_auto_rebalance.sql')).toBe(true);
+    expect(lp.findIndex((migration) => migration.file === '058_copy_position_lots.sql'))
+      .toBeLessThan(lp.findIndex((migration) => migration.file === '059_lp_dashboard.sql'));
+  });
+});
 
 describe('migration contracts', () => {
   it('leaves transaction ownership to the migration runner', async () => {
     const files = (await readdir(sqlDir)).filter((file) => file.endsWith('.sql'));
-    for (const file of files) {
-      const sql = await readFile(resolve(sqlDir, file), 'utf8');
+    const lpFiles = (await readdir(lpSqlDir)).filter((file) => file.endsWith('.sql'));
+    for (const file of [...files, ...lpFiles]) {
+      const root = lpFiles.includes(file) ? lpSqlDir : sqlDir;
+      const sql = await readFile(resolve(root, file), 'utf8');
       expect(sql, `${file} contains BEGIN`).not.toMatch(/^\s*BEGIN\s*;/im);
       expect(sql, `${file} contains COMMIT`).not.toMatch(/^\s*COMMIT\s*;/im);
       expect(sql, `${file} contains ROLLBACK`).not.toMatch(/^\s*ROLLBACK\s*;/im);
@@ -64,24 +88,8 @@ describe('migration contracts', () => {
     expect(sql).toContain('source_sell_fraction <= 1');
   });
 
-  it('backfills master-attributed copy lots from immutable source trades', async () => {
-    const sql = await readFile(resolve(sqlDir, '058_master_attributed_inventory.sql'), 'utf8');
-
-    expect(sql).toContain('CREATE TABLE IF NOT EXISTS copy_position_lots');
-    expect(sql).toContain('master_wallet_address VARCHAR(128) NOT NULL');
-    expect(sql).toContain('ADD COLUMN IF NOT EXISTS master_wallet_address VARCHAR(128)');
-    expect(sql).toContain('ADD COLUMN IF NOT EXISTS lot_id UUID');
-    expect(sql).toContain('JOIN source_trades source ON source.id = execution.source_trade_id');
-    expect(sql).toContain('REFERENCES copy_position_lots(id) ON DELETE RESTRICT');
-    expect(sql).toContain('ALTER COLUMN master_wallet_address SET NOT NULL');
-    expect(sql).toContain('ALTER COLUMN lot_id SET NOT NULL');
-    expect(sql).toContain('NULLS NOT DISTINCT');
-    expect(sql).not.toMatch(/DROP TABLE\s+copy_position_lots/i);
-    expect(sql).not.toMatch(/DELETE\s+FROM\s+copy_position/i);
-  });
-
   it('enforces the LP position state machine twice and caches pools safely', async () => {
-    const sql = await readFile(resolve(sqlDir, '059_lp_dashboard.sql'), 'utf8');
+    const sql = await readFile(resolve(lpSqlDir, '059_lp_dashboard.sql'), 'utf8');
 
     // Every statement replays: tables, indexes, and the trigger all IF NOT EXISTS.
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS lp_pools');
@@ -118,7 +126,7 @@ describe('migration contracts', () => {
   });
 
   it('adds the auto-rebalance opt-in and widens the LP state machine forward', async () => {
-    const sql = await readFile(resolve(sqlDir, '060_lp_auto_rebalance.sql'), 'utf8');
+    const sql = await readFile(resolve(lpSqlDir, '060_lp_auto_rebalance.sql'), 'utf8');
 
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS auto_rebalance BOOLEAN NOT NULL DEFAULT FALSE');
     // The trigger function is replaced (CREATE OR REPLACE), not dropped and

@@ -12,10 +12,6 @@ function logAndIgnore(what: string) {
 }
 
 export default function CommandCenterView() {
-  const [solanaMode, setSolanaMode] = useState('LIVE');
-  const [polygonMode, setPolygonMode] = useState('PAPER');
-  const [robinhoodMode, setRobinhoodMode] = useState('OFF');
-  
   const [stats, setStats] = useState({ signalsToday: 0, trades: 0, clusters: 0 });
   const [walletCount, setWalletCount] = useState(0);
   const [signals, setSignals] = useState<any[]>([]);
@@ -195,103 +191,6 @@ export default function CommandCenterView() {
                 </tbody>
 
               </table>
-            </div>
-          </section>
-
-          {/* Execution Control Plane */}
-          <section className="bg-surface border border-outline-variant rounded p-6">
-            <h4 className="text-sm font-bold mb-6 flex items-center gap-2 uppercase tracking-tight text-primary">
-              <span className="material-symbols-outlined">settings_input_component</span>
-              Execution Control Plane
-            </h4>
-            <div className="space-y-4">
-              {/* Solana Row */}
-              <div className="grid grid-cols-12 items-center gap-4 py-3 border-b border-outline-variant last:border-0">
-                <div className="col-span-3 flex items-center gap-3">
-                  <div className="w-2 h-8 bg-solana-teal"></div>
-                  <div>
-                    <p className="text-sm font-bold text-primary">SOLANA MAINNET</p>
-                    <p className="text-[10px] text-secondary">Low Latency RPC Active</p>
-                  </div>
-                </div>
-                <div className="col-span-6">
-                  <div className="inline-flex bg-surface-container p-1 rounded border border-outline-variant">
-                    {['OFF', 'PAPER', 'LIVE', 'LIVE + SHADOW'].map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => setSolanaMode(mode)}
-                        className={`px-4 py-1 text-[11px] font-bold rounded transition-colors ${
-                          solanaMode === mode 
-                            ? 'bg-primary text-on-primary shadow-sm' 
-                            : 'text-secondary hover:text-primary'
-                        }`}
-                      >
-                        {mode === 'LIVE + SHADOW' ? 'LIVE + S' : mode}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="col-span-3 text-right">
-                  <span className="text-status-success text-[11px] font-bold flex items-center justify-end gap-1">
-                    <span className="w-1.5 h-1.5 bg-status-success rounded-full animate-pulse"></span>
-                    Operational
-                  </span>
-                </div>
-              </div>
-              {/* Polygon Row */}
-              <div className="grid grid-cols-12 items-center gap-4 py-3 border-b border-outline-variant last:border-0">
-                <div className="col-span-3 flex items-center gap-3">
-                  <div className="w-2 h-8 bg-polymarket-violet"></div>
-                  <div>
-                    <p className="text-sm font-bold text-primary">POLYGON POS</p>
-                    <p className="text-[10px] text-secondary">Standard Priority</p>
-                  </div>
-                </div>
-                <div className="col-span-6">
-                  <div className="inline-flex bg-surface-container p-1 rounded border border-outline-variant">
-                    {['OFF', 'PAPER', 'LIVE', 'LIVE + SHADOW'].map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => setPolygonMode(mode)}
-                        className={`px-4 py-1 text-[11px] font-bold rounded transition-colors ${
-                          polygonMode === mode 
-                            ? 'bg-primary text-on-primary shadow-sm' 
-                            : 'text-secondary hover:text-primary'
-                        }`}
-                      >
-                        {mode === 'LIVE + SHADOW' ? 'LIVE + S' : mode}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="col-span-3 text-right">
-                  <span className="text-status-success text-[11px] font-bold flex items-center justify-end gap-1">
-                    <span className="w-1.5 h-1.5 bg-status-success rounded-full"></span>
-                    Operational
-                  </span>
-                </div>
-              </div>
-              {/* Robinhood Row */}
-              <div className="grid grid-cols-12 items-center gap-4 py-3 border-b border-outline-variant last:border-0">
-                <div className="col-span-3 flex items-center gap-3">
-                  <div className="w-2 h-8 bg-robinhood-amber"></div>
-                  <div>
-                    <p className="text-sm font-bold text-primary">ROBINHOOD CHAIN</p>
-                    <p className="text-[10px] text-secondary">Pending Integration</p>
-                  </div>
-                </div>
-                <div className="col-span-6">
-                  <div className="inline-flex bg-surface-container p-1 rounded border border-outline-variant opacity-60">
-                    <button className="px-4 py-1 text-[11px] font-bold rounded bg-primary text-white shadow-sm cursor-not-allowed">OFF</button>
-                    <button className="px-4 py-1 text-[11px] font-bold rounded text-secondary cursor-not-allowed" disabled>PAPER</button>
-                    <button className="px-4 py-1 text-[11px] font-bold rounded text-secondary cursor-not-allowed" disabled>LIVE</button>
-                    <button className="px-4 py-1 text-[11px] font-bold rounded text-secondary cursor-not-allowed" disabled>LIVE + S</button>
-                  </div>
-                </div>
-                <div className="col-span-3 text-right">
-                  <span className="text-status-warning text-[10px] font-bold">Paper Only (Certification Pending)</span>
-                </div>
-              </div>
             </div>
           </section>
         </div>

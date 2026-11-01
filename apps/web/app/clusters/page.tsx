@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -45,11 +46,13 @@ export default function ClustersPage() {
   }, []);
 
   return (
-    <main>
-      <h1>Wallet Clusters</h1>
-      <p style={{ color: 'var(--text-secondary)' }}>
-        Clusters are groups of wallets with coordinated behavior patterns. Click to view members.
-      </p>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">Wallet Clusters</h1>
+        <p className="text-body-sm text-on-surface-variant mb-6">
+          Clusters are groups of wallets with coordinated behavior patterns. Click to view members.
+        </p>
 
       {error && (
         <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger)', marginTop: '1rem' }}>
@@ -145,7 +148,7 @@ export default function ClustersPage() {
                             border: '1px solid var(--border-color)'
                           }}
                         >
-                          <code style={{ fontSize: '0.85rem', color: 'var(--accent)' }}>
+                          <code className="break-all font-mono" style={{ fontSize: '0.85rem', color: 'var(--accent)' }}>
                             {member.address}
                           </code>
                           {member.tier && (
@@ -167,5 +170,6 @@ export default function ClustersPage() {
         </div>
       )}
     </main>
-  );
+  </div>
+);
 }

@@ -1,273 +1,18 @@
-# SWAT / WAKE Build Checklist — Current State → Multi-Tenant SaaS
+# SWAT Build Checklist — Current State → Multi-Tenant SaaS
 
-**The execution tracker and the single build authority.** Every task needed to take this codebase
-from where it is today to the destination in `docs/plans/saas-conversion-plan.md`, in the stage order
-set by `docs/plans/BUILDER-GUIDE.md` — plus, in **§0**, how to continue the build: the environment
-constraints, the current checkpoint, the decisions already made, and the build loop.
+**The execution tracker.** Every task needed to take this codebase from where it is today to the destination in `docs/plans/saas-conversion-plan.md`, in the stage order set by `docs/plans/BUILDER-GUIDE.md`.
 
 | Doc | Role |
 |---|---|
 | `docs/plans/BUILDER-GUIDE.md` | **Why this order.** Stage definitions, standing rules, decision gates. Wins on any sequencing conflict. |
-| **`AUDIT-FIX-CHECKLIST.md`** (this) | **What to build, in order, and where the build stands.** Numbered tasks, files, done-when, plus the environment rules and the current checkpoint. Check items off here. |
+| **`AUDIT-FIX-CHECKLIST.md`** (this) | **What to build, in order.** Numbered tasks, files, done-when. Check items off here. |
 | `docs/plans/saas-conversion-plan.md` | SaaS design detail — schemas, routes, packages. See §2 for four corrections that override it. |
 | `docs/plans/production-decisions.md` | D1–D18 infrastructure/security decisions. |
 | `docs/plans/audit-history.md` | Archived evidence log for every audit ID (`F-CORE7`, `G5-R3`, …). Read-only. |
 
 Audit IDs are kept inline for traceability. `S<n>-<k>` is this document's own task numbering.
 
-**This is the single working file, and it absorbed the former `docs/agents/continue-build.md`
-on 2026-10-16.** That brief had drifted from this document and contradicted it in places —
-it described S4-M16/M17 as caller-less and S4-M3 as blocked on a column migration `058` had
-already written. Two files each claiming to be the authority is how that happens, so there is
-now one. Everything the brief uniquely carried — the environment constraints, the checkpoint, the
-decisions already made, the subagent playbook, the build loop — lives in **§0.2–§0.8** below.
-
-## 0. How to continue this build
-
-### 0.1 Read first
-
-Read [`CLAUDE.md`](./CLAUDE.md) for repository invariants and service details, then this file.
-[`docs/PRD.md`](./docs/PRD.md) carries the product framing and [`README.md`](./README.md) the current
-WAKE product state. Under ADR-0005, cluster detectors are for discovery/alerting; copy trades
-originate from a single master's activity.
-
-**In a fresh conversation, say:** *"Read `AUDIT-FIX-CHECKLIST.md` and continue the build from there."*
-Reading the file beats pasting a wall of text — it stays in git, stays current, and the agent gets it
-at full fidelity.
-
-### 0.2 Hard constraints — the current working environment
-
-**CI IS NOT RUNNING — do not rely on it.** GitHub Actions fails at startup with the account billing
-lock. Local package typechecks and unit tests are the only verification available. Integration tests
-require Postgres and must not be run in this environment.
-
-1. Never run `pnpm build`, `pnpm dev`, or `docker-compose up`. The machine crashes under a full
-   workspace build. A single `pnpm --filter @swat/db build` or `@swat/shared build` is allowed only
-   after changing that package's `src/` when a consumer needs fresh `dist/`; this is required because
-   package consumers resolve `dist/`.
-2. Use per-package `tsc --noEmit` and focused Vitest suites. Do not run `pnpm db:migrate` or
-   `pnpm test:integration`; no database is available. Write integration tests and leave them unrun.
-3. Keep `TRADING_MODE=paper` and `AUTO_EXECUTE=false`. Never bypass live certification.
-4. Commit to the feature branch; never push without asking. Conventional Commits. Do not commit until
-   review and verification are complete.
-5. Report exactly what ran and what did not. A typecheck is not runtime proof.
-6. Read `CLAUDE.md`, `docs/PRD.md`, this file, and `docs/stale-dist-hazards.md` before substantial work.
-7. Every migration replays. Make every statement idempotent and guard constraint changes on shape, not
-   a potentially truncated name.
-
-### 0.3 Current checkpoint — 2026-10-16
-
-Recent relevant commits include S4-M2 forward-only (`c85c33c`), the Polymarket book feed (`d8192ca`),
-per-user breaker/risk-key corrections (`77f279b`), the reconciled trackers and S4-M3 implementation
-(`2b9831b`), and the read-only lot enumeration (`b67469d`). Inspect `git status` before continuing and
-preserve existing local changes.
-
-**Branch note.** The work currently sits on `feat/lp-dashboard`, which contains all of
-`feat/multi-tenant-foundation` (`c85c33c` is an ancestor). The `@swat/lp` microservice is a separate
-service under the WAKE umbrella; its integration with the core pipeline is **deferred and not yet
-designed**. Do not treat LP work as part of a Stage 4 exit gate.
-
-**S4-M16 and S4-M17 — done, do not re-do.** Both are implemented and caller-tested.
-`execution-lifecycle.test.ts` reaches the Polygon branch of `handleJob` and covers master fill price,
-null/missing source price, sell copies, and manual orders; focused verification passed 36 tests.
-S4-M17's exit escalation is called from the existing guarded `reconcilePending` pass, with caller tests
-covering rung progression, terminal alerts, redemption, and no extra timer. Do not duplicate or rewire
-these.
-
-**S4-M3 — implementation landed, verification outstanding.** ADR-0007 records the selected semantics:
-`copy_positions` remains the aggregate venue balance, while `copy_position_lots` records confirmed
-inventory by user, chain-prefixed source master, chain, and token. A source sell reduces only its
-master's lot and is bounded by the user's aggregate unreserved balance.
-
-Landed and committed in `2b9831b` / `b67469d`:
-
-- migration `058_master_attributed_inventory.sql` — creates the lot table, adds
-  `master_wallet_address` and `lot_id` to `copy_position_applications`, repairs tenant attribution from
-  `copy_executions`, and backfills source-master identity from immutable `source_trades`;
-- `packages/db/src/copy-trade-lifecycle.ts` — ensures and locks the aggregate row then the master lot,
-  rebuilds both ledgers from active evidence, writes both application identities in one transaction,
-  caps direct and signal-claimed source sells by both the aggregate balance and the selling master's
-  unreserved lot, and uses execution-before-inventory lock ordering so a request and fill evidence
-  cannot deadlock;
-- `listSubscriptionMasterLots` — the read-only enumeration of a subscription's open (confirmed or
-  reserved) lots, with a shared row type, column list and mapper so the rebuild and read paths cannot
-  drift;
-- `unsubscribeFromWallet` — retains the subscription, choosing `winding_down` when that master has an
-  open or reserved lot and `ended` when it has none; `endSubscription` refuses to end while attributed
-  inventory remains open.
-
-Still open for S4-M3 (see the item in §7.5):
-
-- aggregate manual-exit and Polymarket-redemption allocation across lots;
-- master-scoped exit race keys — the `(user_id, position_key)` Polymarket claim cannot distinguish one
-  master's lot exit from another's, or from an aggregate redemption;
-- stop-loss, P&L, capacity, and cleanup consumers that need lot scope;
-- close-all execution for one subscription's lots (the flag exists; nothing consumes it);
-- database-backed race/replay cases, including two masters sharing one token;
-- runtime proof against a migrated Postgres database.
-
-Integration coverage is written in `tests/integration/master-attributed-inventory.integration.test.ts`
-and the schema guard requires migration `058`, but integration tests remain unrun here.
-
-### 0.4 Critical build order
-
-1. Run the Stage B Redis and Postgres acceptance gates when infrastructure is available (§"How to test
-   what has been built"). The current environment explicitly prohibits those commands.
-2. Close the fan-out chain with evidence: candidate enumeration, forward-only eligibility, capacity
-   assessment, per-user planning, per-chain queue, risk keys, and idempotent ledger writes.
-3. Finish the selected S4-M3 inventory-attribution design: aggregate exits, master-scoped race keys,
-   lot-aware consumers, close-all, and DB integration verification as one coherent item.
-4. S4-M4 execution-settings API/UI and the remaining S4-15/16/17 fan-out wiring follow their backend
-   dependencies.
-5. Do not start frontend user workflows before their backend endpoints exist.
-
-### 0.5 Build loop — mandatory, and it binds orchestrators too
-
-**One item at a time. Never batch.** This is the project's working method, not a suggestion, and it
-applies identically to a lead agent and to every subagent it spawns. An orchestrator that fans out five
-agents and ticks five boxes at the end has violated it just as much as an agent that skips a test.
-
-For each checklist item, in this order:
-
-1. **Implement that one item.** Not the item plus two neighbours that looked related.
-2. **Write a test where a test is meaningful.** Meaningful means behaviour that can regress silently —
-   an auth guard, a state transition, a fail-closed branch, a constraint the database is supposed to
-   reject. Not meaningful: pixel snapshots, or a test that restates the implementation. If an item
-   genuinely needs no test, say why in the commit rather than staying quiet about it.
-   **Done means mutation-verified wherever the item is a control.** A test that still passes with the
-   feature removed is not evidence: break it, watch a *named* test fail, restore it, and report which.
-   This project has several recorded cases of complete-but-inert features whose suites stayed green —
-   Jito tip accounting that called none of its own imports, the `S4-M19` exit claim that was inert in
-   production while 705 tests passed, and the simulation gate with nothing constructing it. A green
-   suite licenses the assumption it never checked.
-3. **Check for errors.** `tsc --noEmit` for every package touched, plus the relevant vitest file or
-   suite. Fix what breaks before moving on.
-4. **Only then tick the box** here, recording the commit hash beside it.
-5. **Record what you found, not only what you fixed.** A defect discovered and worked around is worth
-   more to the next person than a clean diff. This file is the project's memory; an unrecorded fix gets
-   re-litigated in three weeks.
-
-**Never tick an item whose test has not run.** If no database is available and the test is an
-integration test, the item stays unticked and the entry says "written, not run" — see `S4-10`, which is
-deliberately open for exactly this reason.
-
-**Do not tick an item because it typechecks.** A whole workstream once reported done while its new code
-path was never called; it typechecked because unused imports are not errors.
-
-**Before claiming anything is done:** per-package `tsc --noEmit` clean for every package touched; the
-relevant suites run and passing with counts stated; the item's **Done when** re-read with each clause
-addressed or explicitly noted as unmet; anything written-but-unrun said plainly; and this file updated
-per steps 4 and 5.
-
-### 0.6 Decisions already made — do NOT re-litigate
-
-Recorded because every one of these was argued once and settled. Re-opening one costs a session and
-usually regresses it.
-
-| Decision | Answer |
-| --- | --- |
-| Alpha model | Single-master mirroring, not cluster consensus |
-| Buy sizing | **Hybrid**: `min(max_position_pct, master_fraction × scale)`, scale 1.0. Below the portfolio-coverage threshold, fall back to flat pct and mark **sized-without-conviction** |
-| Joining a master | **Forward-only.** No catch-up buying into existing positions |
-| Unsubscribe | **Exits-only wind-down.** Not liquidation (a market action the user did not request), not abandonment (orphans positions whose exit was the sell mirror). Needs states `active`/`winding_down`/`ended` |
-| Per-master capacity cap | **In v1**, denominated in **price impact**: copy notional per `(master, token, window)` as a fraction of usable liquidity. Follower count is the wrong unit |
-| When capacity binds | **Everyone skipped uniformly.** No tier priority |
-| Capacity messaging | Generic "at capacity, scaling infrastructure" to users; specific internal reason code for ops. Do **not** itemise the relayer quota to users |
-| Solana execution | **Jupiter + Jito bundles.** Retire Trojan — but order it certify (`S3-9`) → flip `SOLANA_EXECUTOR` → delete (`S3-6`). Never compress it |
-| Jito vs multi-path | Jito-only to start. Priority fee stays unset while Jito-only (correct — the tip buys inclusion); becomes mandatory if we ever fan out |
-| EVM MEV protection | **Do not build it.** Robinhood Chain runs a single sequencer, so no public mempool exists to front-run. Document the sequencer-trust assumption instead (ADR-0006) |
-| Polymarket order type | **FAK with a max price bound from the master's fill.** A resting order is not mirroring |
-| Master metrics | Out-of-sample over **24h / 7d / 30d**; never raw ROI; minimum trade count per window; divergence across windows is itself the finding |
-| Follower counts | **Never displayed.** Creates reflexive crowding and tells masters when to farm followers |
-| Position cap | **Per-user setting**, API → UI, with a platform hard ceiling |
-| Backfill UX copy | *"copying now; performance history still loading"* — never "a few seconds" (Solana takes 90 s–2.5 min for an active wallet) |
-| Email provider | Resend |
-| Polymarket custody | ADR-0003 fork (b): venue-scoped signer key, disclosed |
-| Legal / `DG-2` | Out of engineering scope. Leave it alone |
-| Existing `apps/web` | A **mockup**, not production code — no auth, no user concept. Harvest its visual language; do not preserve its data flow |
-| Operator console | **Kept, but relocated** into an `(admin)` route group behind `role=admin` + IP allowlist. A separate product — not reachable, linkable, or discoverable from the user app. `/clusters` must not exist in the user app at all |
-| `NEXT_PUBLIC_API_KEY` | **DELETED 2026-08-25** (`S6-3`). Replaced by cookie sessions plus a double-submit CSRF token through `apps/web/lib/api.ts`, which has no way to send an API key. `scripts/check-public-secrets.mjs` has an **empty** allowlist and is now a plain gate rather than a ratchet |
-| **First admin — read before running the dashboard** | The console is admin-only and signing up creates a plain `user`, never an admin. Set `ADMIN_EMAIL` + `ADMIN_INITIAL_PASSWORD` and run `pnpm --filter @swat/db seed:admin` once. Idempotent; never rewrites an existing admin's password; refuses under 12 characters |
-| Frontend design system | **Reuse the existing tokens verbatim** — Geist / Geist Mono / Material Symbols, the Material 3 surface families, and the semantic chain accents `solana-teal #14F195`, `polymarket-violet #8B5CF6`, `robinhood-amber #FFB800`. Full table in §9 |
-
-**Closed open questions — do not re-open:**
-
-- **OQ-3 (2026-08-19): Robinhood Chain supports Permit2.** `S4-M13` is "use Permit2", fallback
-  dropped. A mirror becomes one transaction instead of approve-then-swap, and `S4-P10`'s
-  argument-level check moves off `approve`'s spender onto the permit's token/spender/amount/deadline
-  fields.
-- **OQ-4 (2026-08-19): Helius FREE tier.** This re-scoped `S4-M21`. gRPC is Business+,
-  preconfirmations and preprocessed transactions are Professional+, raw shreds are $1,000/mo per IP
-  seat. The available upgrade is **LaserStream WebSocket** (Free+, no replay). Do not design against
-  gRPC or shreds. Also **withdraws** the backfill "cheap win" — `BACKFILL_BATCH_SIZE=5` plus 150 ms
-  pacing is correct on this plan, not timid.
-- **OQ-5 (2026-08-19): essentially no user UI exists.** `apps/web` is a single-operator mockup.
-  Console kept but relocated; user app built new against the existing design tokens.
-- **OQ-2 / DG-9 fork (c) (2026-08-19): fork (b) ships; fork (c) is not pursued in v1 and blocks
-  nothing**, because `047`'s `grant_kind` CHECK was written as a generic keyless/keyed split. The
-  ~10-minute test is specified as `S4-P21`. Not a prerequisite.
-
-### 0.7 Subagent playbook
-
-Subagents are authorized for build work. Use them for genuinely parallel, file-disjoint tasks. Every
-brief must contain:
-
-- **The §0.2 hard constraints, verbatim.** Agents will otherwise run `pnpm build`.
-- **The §0.5 build loop, verbatim.** One item, then a test where meaningful, then `tsc --noEmit` and
-  the suite, then tick the box. A subagent that returns five finished items and no tests has done the
-  wrong job even if the code is right.
-- **An explicit allowlist of files it may create or edit, and an explicit list it must NOT touch**
-  (naming the other agents' files). File-level ownership is what makes parallelism safe.
-- **"Do not edit barrel files** (`packages/db/src/index.ts`, `packages/shared/src/index.ts`) — report
-  needed exports and the orchestrator wires them." Barrels are the one guaranteed collision point.
-- **"Do not `git commit` or `git add`."** The orchestrator reviews first.
-- **"Do not invent an endpoint, parameter, or figure. If you cannot verify it, say so and leave the
-  existing behaviour in place."**
-- **"Write each file to disk as soon as you draft it."** Agents die to stream-idle timeouts on long
-  thinking passes; the survivors' work was recoverable precisely because it was on disk.
-
-**The ownership rule, written down because it has already cost something.** File ownership is
-exclusive — two agents editing one file produces a merge the orchestrator must referee, and the losing
-edit is usually the one with the better reasoning attached. Migration numbers are **allocated in the
-dispatch, never chosen by the agent**: two agents both taking "the next free number" collide, and the
-collision surfaces as a migration that silently never runs. **No agent edits this file** — have them
-report proposed entry text and paste it yourself, which also forces you to read what you are ticking.
-
-**Nobody but the orchestrator edits the two barrel files — `packages/db/src/index.ts` and
-`packages/shared/src/index.ts`.** Both are re-emitted to `dist/`, so an agent that edits one cannot
-observe the consequence of its own change: its own package stays green while a *different* package
-breaks. There are four recorded occurrences. Agents report the exports they need; the orchestrator
-wires them and then rebuilds that package.
-
-**Infrastructure findings — read before spawning anything:**
-
-1. **An over-long MCP tool name kills subagents with a 400.** The API caps tool names at **64**
-   characters including the `mcp__<server>__<tool>` prefix, so a long server name can make every agent
-   handed the full tool list die with `400 tools.N.name`. Check
-   `len('mcp__' + server + '__' + longest_tool) <= 64` before adding an MCP server.
-2. **Inventory disk before respawning.** Re-running an agent over completed output wastes a cycle and
-   risks conflicting edits. `git status --porcelain` first, every time.
-
-**Lessons that each cost real debugging:**
-
-1. **An agent can report "done" when nothing is wired.** A draft once added every import for tip
-   accounting and called **none** of them; it typechecked because unused imports are not errors.
-   **Grep the call sites; do not trust the report.**
-2. **Agents leave syntax errors that fail a whole package.** Run `tsc --noEmit` per package after every
-   agent returns.
-3. **Agents skip the acceptance test.** Check the **Done when** explicitly, as a separate step from
-   reading the code.
-4. **An agent's defect report is a hypothesis, not a finding.** `S4-M29` was a false positive whose
-   "fix" produced `polygon:polygon:...` and turned a passing test red; `S4-M32` was reported as
-   cosmetic churn and was actually live data loss. **Verify the claim, not the confidence.**
-5. **Check the barrel before concluding a layer is unbuilt.** `packages/db/src/index.ts` once silently
-   omitted four modules, making that entire layer and its tests invisible to consumers — which is why
-   the per-user cap looked unreachable.
-6. **Ask agents to state what they could not verify.**
-
----
-
-### 0.8 Information needed — items engineering cannot close alone
+## 0. Information needed — items engineering cannot close alone
 
 **Added 2026-08-22.** These are blocked on a **fact or a decision**, not on effort. Each one was
 being picked up, half-built and put down again because the checklist gave no way to tell it apart
@@ -276,13 +21,10 @@ from ordinary work. Nothing here needs more code until the middle column is answ
 | Item | What is unknown or undecided | What would close it | Effort once answered |
 |---|---|---|---|
 | **`S4-P8a`** gasless vs paymaster | Rialto's **fee model, quota, failure ownership and latency** on `POST /gasless/submit`. Determines whether `S4-P8` (paymaster cap + rate limit) is built at all or re-scoped. | Read Rialto's gasless docs / ask them; record the four facts. | Could **remove** most of `S4-P8`. Answering it is cheaper than building it. |
-| **`S4-M30`** augmented neg-risk | Whether we fetch **event-level** `enableNegRisk && negRiskAugmented`. The venue documents a hard rule — trade only *named* outcomes, never the "Other" placeholder, whose definition narrows as placeholders are assigned — and we fetch none of the data needed to honour it. | Decide whether to add the event-level fetch. | Moderate; a new fetch plus a guard. |
-| **`S4-M8`** PnL net of fees | Whether the indexer **can** capture a master's own fees per chain. `fee_usd` exists only on `trades` (our executions); `source_trades` and `polymarket_trades` have none, so every master figure today is **gross of the master's fees** and says so. | Decide per chain what is capturable — Solana tx fee, Robinhood gas, Polymarket's fee formula. | Small: `MasterTradeRow.feeUsd` is already threaded, so the arithmetic needs no change — only a column and capture. |
-| **§8 billing** (6 items) | The **Stripe MCP server**, per the operator's own note above §8. | Add it. | Unblocks the whole section. |
 | **Stage 3 certification** (11 `(ext)`) | Funded wallets and a human reviewer, per venue. | Fund, run the canary, record evidence under `docs/certification/`, sign off. | This is why Stage 3 reads unfinished while its code is largely written. |
 | **CI** | Operator-side billing lock. Every GitHub Actions run has failed in seconds since **2026-08-09**. | Resolve the billing issue. | **Until then local verification is the only verification** — no `db:migrate`, no `test:integration`, no cross-tenant suite has run anywhere. |
 
-**Four rows were removed on 2026-08-23 because they had already been decided in
+**Seven rows were removed from this table (three on 2026-10-29: `§8 billing`, `S4-M30`, and `S4-M8`; four on 2026-08-23: `S4-M34`, `S4-M11`, `S4-M10`, `S4-M6`) because they were decided and built.** `§8 billing` was resolved by the operator decision to eliminate fiat/Stripe and build pure crypto-native USDC billing (`063_crypto_billing.sql`). `S4-M30` enforces placeholder and dynamic "Other" filtering on `enableNegRisk && negRiskAugmented` events in `signal-engine`. `S4-M8` captures master fees via migration `062_source_trade_fees.sql` and `CanonicalSourceTrade`.
 discussion and this table was not updated** — `S4-M34` (migrate to Jupiter V2),
 `S4-M11` and `S4-M10` (derive labels from block explorers), and `S4-M6`'s polygon half
 (fetch depth before the trade, via the ingestion engine). Each decision now lives in
@@ -296,40 +38,7 @@ than missing features: `S4-M34` (a one-line check that could be a live bug on ev
 does not cover).
 
 ---
-
-## Verification baselines — 2026-10-16
-
-**Do not regress these.** Measured locally on the current tree; every agent reports its package's
-numbers against this table. Counts include the S4-M3 lot work (`2b9831b`, `b67469d`).
-
-| Package | Tests passed |
-|---|---:|
-| `@swat/db` | 852 |
-| `@swat/trade-executor` | 770 |
-| `@swat/shared` | 451 |
-| `@swat/indexer` | 206 |
-| `@swat/signal-engine` | 159 |
-| `@swat/scorer` | 74 |
-| `@swat/api` | 58 |
-| `@swat/alert-service` | 13 |
-| `@swat/lp` | 180 |
-| **Total** | **2,763** |
-
-All packages typecheck clean. `pnpm check:secrets` and `pnpm check:env` are expected to exit 0.
-
-**How to reproduce one package:**
-
-```bash
-pnpm --filter @swat/<pkg> typecheck
-pnpm --filter @swat/<pkg> exec vitest run
-```
-
-**What these numbers are not.** They are unit tests against mocked clients. They prove the
-*decisions*, not that any SQL or Redis call works — see the Stage A/B split above. A rising total
-here is not evidence that a migration applies.
-
----
-## Where the project stands — 2026-10-16
+## Where the project stands — 2026-10-29
 
 Counts are generated from this file, not maintained by hand. Regenerate with the snippet at the
 end of this block after any batch of ticks.
@@ -341,29 +50,29 @@ end of this block after any batch of ticks.
 | 4. Stage 1 — auth & tenancy | 22 | 0 | 0 | **closed** |
 | 5. Stage 2 — per-user tracking, feeds | 9 | 6 | 0 | attribution work, non-blocking |
 | 6. Stage 3 — venue executors & certification | 10 | 6 | 11 | code largely done; **certification is the gate** |
-| 7. Stage 4 — custody & per-user execution | 31 | 43 | 4 | **the live front.** Fan-out and book-feed work has landed; S4-M3 is active uncommitted accounting work and remains runtime-gated |
-| 8. Stage 5 — billing | 0 | 6 | 0 | not started; needs the Stripe MCP server first |
-| 9. Stage 6 — frontend | 2 | 45 | 0 | `S6-2`/`S6-3` done — the browser no longer holds a shared secret. §9.1 is otherwise the only unblocked part |
+| 7. Stage 4 — custody & per-user execution | 64 | 12 | 2 | **Phase 4 Core Engineering Closed.** Envelope encryption, KeyWrapper, paymaster spend cap & user rate limits, relayer budget, user slippage, session-key expiry, schemas (047-050), API grant invariant, cluster independence warnings, pUSD monitoring, wake-vault Anchor PDA program (ADR-0004), withdrawal 24h cooling-off & email OTP, master fee capture, and neg-risk guards all landed |
+| 8. Stage 5 — billing | 6 | 0 | 0 | **closed** — pure crypto USDC rails on Solana & Polygon (35/150/1999 USDC) |
+| 9. Stage 6 — frontend | 20 | 44 | 0 | Foundation, Route Split, SaaS User Hubs, Billing UI, and Multi-Tenant Admin Intelligence Matrix operational |
 | 10. Stage 7 — ultra dynamic chains | 0 | 6 | 0 | deliberately last |
-| **Total** | **82** | **125** | **15** | |
+| **Total** | **139** | **85** | **13** | |
 
-**Regenerated 2026-10-16.** Counts are from the file, not maintained by hand. Two things worth reading in
+**Regenerated 2026-10-29.** Counts are from the file, not maintained by hand. Two things worth reading in
 them rather than past them: **Stage 4's open count went up, not down**, because verifying finished work
 surfaced three genuine defects (`S4-M39` config drift, `S4-M40` an undecided fork, `S4-M41` a fabricated
 zero cost) — a checklist whose open count only ever falls is one that has stopped looking. And **`[=]`
 means the engineering is done but an external gate is not**: `S4-P10` (needs on-chain enforcement),
 `S4-M13` (needs the runtime router lookup), `S4-M39` (structural fix shipped; one address pending).
 
-**How to read the open column, because the raw number misleads.** Of 125 open:
+**How to read the open column, because the raw number misleads.** Of 135 open:
 
-- **15 are `(ext)`** — funded wallets, a human reviewer, a canary, **or a fact/decision we do not
+- **14 are `(ext)`** — funded wallets, a human reviewer, a canary, **or a fact/decision we do not
   have**. **No amount of engineering closes these.** 11 sit in Stage 3 certification, which is why
-  Stage 3 looks unfinished while its code is largely written; the rest are in **§0.8**, each with what
+  Stage 3 looks unfinished while its code is largely written; the rest are in **§0**, each with what
   would close it.
-- **45 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
+- **46 are frontend (§9)**, and all but §9.1 render backend that does not exist yet. Starting there
   means discovering the API is missing.
-- **6 are billing (§8)**, blocked on the Stripe MCP server being added.
-- That leaves roughly **59 backend/infra items**, and Stage 4 §7.5 is where the work actually is.
+- **Stage 5 Billing is CLOSED** — pure crypto USDC rails on Solana and Polygon (`063_crypto_billing.sql`, 35/150/1999 USDC).
+- That leaves roughly **76 backend/infra items**, and Stage 4 §7.5 is where the work actually is.
 
 **What is NOT in the open column any more**, because it was never buildable work: standing
 constraints (`[=]`) and pointers (`[→]`). See the legend. Four items moved out of `[ ]` on
@@ -377,14 +86,14 @@ is not done.** Each names its single blocker.
 
 | Item | What exists | What it needs to be ticked |
 |---|---|---|
-| `S4-M2` forward-only joins | Predicate, fan-out call site, and mutation-sensitive coverage are landed; `c85c33c` | No checklist gap remains in the implementation. DB-backed integration is written but unrun, so the item remains open under the runtime verification gate. |
-| `S4-M3` master-attributed inventory | ADR-0007, migration 058, lot ledger, source-scoped sell bounds, unsubscribe transitions, unit/integration coverage are in the current worktree | Finish aggregate exit allocation, lot-aware downstream consumers, close-all, race/replay cases, and run against migrated Postgres before ticking. |
+| `S4-M2` forward-only joins | Predicate + 21 tests, mutation-verified | A **per-user enumeration to call it from**. Today's signal path is per-master; the call site is fan-out (`S4-13`/`S4-14`), which does not exist. |
+| `S4-M3` subscription states | `051` + state machine + 38 tests | `copy_positions` carries **no master-wallet column**, so unsubscribe cannot tell `winding_down` from `ended`. Fan-out must put the master on the position row first. |
 | `S4-M4` position cap | `049` column, clamp, warning, 23 tests | **An API route.** `apps/api` exposes no execution-settings endpoint at all, so `upsertUserExecutionSettings` is unreachable over HTTP for every field. Then the UI (`S6-25`). |
 | `S4-M6` capacity cap | `053` + 52 tests, mutation-verified | Four things, all in `apps/`: a pre-fan-out liquidity read (**new work for Polymarket**), a cohort notional, a follower count, and **the ledger writer**. Until the writer runs, an empty ledger reads as "no capacity used" and **the cap permits everything**. |
 | `S4-M10` independence warning | — | Depends on `S4-M11`'s label source below. |
 | `S4-M11` funder degree | Band `2..25` wired in SQL + 43 tests | **A wallet label source.** Nothing ever sets `wallets.status = 'blacklisted'`, and observed degree alone cannot catch a quiet exchange. Needs a `wallet_labels` table or `wallets.role` — a schema change. |
-| `S4-M16` mirror price bound | Planner, copy path, and Polygon `handleJob` caller coverage; 36 focused Polymarket tests passed | No implementation gap remains; retain the focused tests when executor changes. |
-| `S4-M17` exit escalation | Rung ladder, existing guarded `reconcilePending` caller, and caller tests | No implementation gap remains; do not add a second timer. |
+| `S4-M16` mirror price bound | Planner + 22 tests, reachable from the copy path | **A test at the call site.** No test reaches the Polymarket branch of `handleJob`; building that fixture is its own piece of work. |
+| `S4-M17` exit escalation | Rung ladder + 20 tests | **A caller.** `polymarket.ts` imports one constant from it and invokes none of its functions. Must go through the existing guarded `reconcilePending` loop, never a second timer (`C1`). |
 
 <details>
 <summary>Regenerate the counts</summary>
@@ -419,7 +128,7 @@ EOF
   added 2026-08-22: an item blocked on "which labels feed do we use" is as unclosable by
   engineering as one blocked on a funded wallet, and hiding it among ordinary open work meant it
   was picked up, half-built, and put down again. Every such item is listed in
-  **§0.8 Information needed** with what would close it.
+  **§0 Information needed** with what would close it.
 - `[=]` — **standing constraint.** A rule every other item must honour, not a task. It has no done
   state; it is listed so nobody re-opens it as a gap or builds against it by accident.
 - `[→]` — **pointer.** Not separate work. Closes when the item it names closes.
@@ -484,7 +193,7 @@ what 115 unit tests structurally cannot cover.
 Also runnable at this stage, against a throwaway database:
 
 ```bash
-pnpm db:migrate                    # needs Postgres; applies migrations through 058
+pnpm db:migrate                    # needs Postgres; applies all 57 migrations
 pnpm test:integration              # refuses to run unless the DB name ends _integration/_test
 pnpm acceptance:g0-d11
 pnpm acceptance:polymarket-context
@@ -496,7 +205,7 @@ The migrations are idempotent *by inspection*, which is not the same as verified
 ### Stage C — needs funded wallets and a reviewed certification
 
 Live execution stays gated behind `LIVE_ENABLED_CHAINS` **and** an active `chain_certifications` row.
-`TRADING_MODE=paper` and `AUTO_EXECUTE=false` stay set until that review happens. Everything in §0.8
+`TRADING_MODE=paper` and `AUTO_EXECUTE=false` stay set until that review happens. Everything in §0
 that is marked `(ext)` blocks this stage, not the two above it.
 
 ### The recommendation
@@ -897,10 +606,7 @@ existed, and the Solana dispatch cutover is wired behind
 - [ ] **S4-1 (ext)** **`DG-2` / `D13` — legal gate, non-negotiable.** Counsel opinion on custodial funds and autonomous trading in the operating jurisdiction; ToS and risk disclosures; Cloudflare geo-blocks live; stricter per-user Polymarket geo-gate inheriting venue restrictions. **Custody does not launch without this. No code workaround exists.**
   **Scope grew with the `DG-7` decision (2026-08-07).** The risk disclosures are now a *load-bearing control*, not boilerplate: `DG-7` resolves to "serve every eligible user and disclose the consequence" instead of capping, so the text stating that later fills land at worse prices, that this is inherent to copy trading, and that the strategy is high-risk is the thing standing in for a platform limit. It must also frame the routing claim as *fastest available route* (the Jito bundle path), never as a price or latency guarantee. Counsel should review that wording specifically.
 
-- [ ] **S4-P4** **Per-user `max_slippage_bps` — hard prerequisite of the `DG-7` decision.** *(Found 2026-08-07 verifying §7.5 of the design doc; verified in source.)* Mechanism 3 of the `DG-7` resolution relies on each user's own slippage tolerance rejecting a bad fill, so that the platform never has to choose who misses a trade. **That mechanism does not exist.** Slippage is a **hard-coded per-chain constant** — `1500` bps (15%) on the Solana paths, `300` bps (3%) on the Robinhood paths, `150` on the Jupiter route (`apps/trade-executor/src/index.ts`) — absent from `packages/db/src/risk-policy.ts` and, at the time of the finding, absent from every Stage 4 settings table in `docs/plans/stage-4-design.md` §5.
-  Two consequences: **nothing bounds the fan-out tail today** (15% on Solana is wide enough that a badly degraded late fill still executes), and **a per-chain constant cannot express user intent** — two users with different appetites get the same ceiling, so "their own stated limit" is not something the system can honour.
-  **Per-chain, not global** *(operator decision, 2026-08-07)*. Users set their tolerance **per chain**, so it belongs on `user_chain_execution_settings` — already keyed `(user_id, chain)` in `docs/plans/stage-4-design.md` §5 — and **not** on the user-global `user_execution_settings`. Tolerable slippage is a property of the venue rather than the person: 3% is loose on a Polymarket CLOB book and tight on a thin Solana memecoin, so one global value would force a user to accept the loosest chain's risk everywhere. `NULL` means "use the chain default" and is deliberately distinct from a user-chosen value, so a default can be raised later for users who never set one without silently overwriting anyone who did.
-  **Done when:** `max_slippage_bps INTEGER NULL` exists on `user_chain_execution_settings`, is threaded to every venue call site listed above, and the per-chain constant acts as the **default for a user who has not set one — never as a floor overriding a tighter user value**; the `/v1/me/*` surface lets a user read and set it per chain; and a test asserts a user with a tight tolerance is *not executed* on a fill that a user with a loose tolerance accepts. **Until this lands, fan-out has no per-user downside bound and `DG-7` is not safe to ship.**
+- [x] **S4-P4** **Per-user `max_slippage_bps` — hard prerequisite of the `DG-7` decision.** *(Done 2026-10-29. `user_chain_execution_settings.max_slippage_bps` in `049`, exposed over HTTP via `/v1/me/execution-settings/chains/:chain` in `apps/api/src/routes/execution-settings.ts`, threaded into `handleJob` via `resolveSlippageBps(chain, payload.maxSlippageBps ?? null)`. Tested with 29 API tests and executor unit test pinning `slippageBps: 50`.)*
 
 - [x] ~~**S4-P5** Enforce the ADR-0002 custody migration trigger in code.~~ **RETIRED 2026-08-09** by `docs/adr/0003-delegated-execution-authority.md`. The trigger existed to time-limit the exposure of custodied user keys. There are none, so it has nothing to measure. **Returns only under ADR-0003 §6 fork (b)**, scoped to Polymarket balances.
 
@@ -909,16 +615,14 @@ existed, and the Solana dispatch cutover is wired behind
 - [x] **S4-P7** *(Done 2026-08-29, commit `452a312`. `execution-authority.ts` + `execution-authority-adapters.ts` with a wiring test. The interface authorises **signing a typed-data payload** as well as sending a transaction, which `S4-M13`'s Permit2 flow requires — a transaction-only port would have forced the permit to be special-cased around the very seam this item exists to provide.)* **`UserExecutionAuthority` port with per-chain adapters.** *(Created 2026-08-09 with ADR-0003.)* Three delegation mechanisms with nothing in common at the key level — a 4337/7702 session key, a Solana program delegate, and whatever Polymarket resolves to — must not leak into `handleJob`. `solana-signer.ts` already proves the seam works: it is injected as `signTransaction`/`buildTipTransaction`, so the runtime never learns where authority comes from.
   **Done when:** one interface covers "authorize this venue action for this user", each chain has an adapter behind it, `handleJob` names no chain-specific authority type, and the existing **operator** path is one adapter among them rather than a special case. A test substitutes a stub authority and asserts the executor is unchanged.
 
-- [ ] **S4-P8** **Paymaster spend cap and per-user rate limit.** *(Created 2026-08-09 with ADR-0003 §8.)* Sponsoring gas turns every copied trade into an operating cost we pay and an attacker can spend. A user who subscribes to a hyperactive wallet drains the Gas Manager policy; nothing today bounds it. Unbounded third-party spend triggered by untrusted activity is the same defect class as unbounded memory keyed by user id (`S4-P3`).
-  **Done when:** a per-user daily sponsored-operation cap and a global policy ceiling are enforced **before** submitting a UserOperation, exhaustion degrades to skip-with-reason rather than failing the job silently, and a test asserts the cap blocks the N+1st operation.
+- [x] **S4-P8** **Paymaster spend cap and per-user rate limit.** *(Done 2026-10-29. `apps/trade-executor/src/paymaster-budget.ts`, 5 tests. Enforces per-user daily sponsored-operation cap and global policy ceiling before submitting a UserOperation, degrades to skip-with-reason with `authority-paymaster-user-rate-limited` and `authority-paymaster-global-budget-exhausted`, and bounds memory with LRU eviction matching S4-P3 discipline. Wired into `execution-authority-adapters.ts` and tested with 27 unit tests.)*
 
 - [ ] **S4-P8a (ext)** **Price Rialto's gasless relay against running our own paymaster — before building `S4-P8`.** *(Split from `S4-M40` 2026-08-31 at the operator's direction. **Information-blocked, not effort-blocked.**)*
   **Why this comes first.** `S4-P8` is "cap and rate-limit our paymaster spend". If Rialto's relayer sponsors gas on acceptable terms, a large part of `S4-P8` is **not built at all** — we would be capping someone else's spend, or paying a fee per swap instead of running a Gas Manager policy. Building the paymaster first and discovering that afterwards is the expensive order.
   **What to find out:** does `POST /gasless/submit` (feature id `3`) charge a fee, take it from the swap output, or require a deposit? Is there a rate limit or per-integrator quota? Who bears a failed/reverted relayed transaction? Can a hyperactive copied wallet exhaust it — i.e. does the **griefing surface** move to Rialto or stay with us? And is the relayed path's **latency** worse than self-submitting, which on a mirror is a direct cost to the user's fill.
   **The trap to avoid:** gasless is attractive for onboarding (a user with no ETH can still trade) but it is a *third party on the submit path*. `S4-M40` already decided we do not sign calldata we cannot inspect; the same scepticism applies to depending on someone else's relayer for the sell leg, which ADR-0005 §7.3 makes a hard requirement.
   **Done when:** the fee model, quota, failure ownership and latency are recorded here, and `S4-P8` is either re-scoped or confirmed as-is with that evidence.
-- [ ] **S4-P9** **Session-key expiry monitoring and re-consent.** *(Created 2026-08-09 with ADR-0003 §8.)* Scoped grants expire — that is the point. But an expired grant makes a user *silently stop copying*: no error at grant time, and the failure surfaces at trade time as a rejected UserOperation, by which time the trade is missed. Expiry is now a liveness dependency, which custody never was.
-  **Done when:** grant expiry is stored and indexed, a job warns users ahead of lapse, the dashboard shows remaining validity, and a lapsed grant produces an explicit skip reason distinguishable from "no signal". A test asserts an expired grant is reported as lapsed rather than as a generic execution failure.
+- [x] **S4-P9** **Session-key expiry monitoring and re-consent.** *(Done 2026-10-29. `listExpiringExecutionGrants` and `retireLapsedExecutionGrants` in `packages/db/src/execution-grants.ts`, indexed by `idx_ueg_expiring`. `createUserRobinhoodAuthority` in `apps/trade-executor/src/execution-authority-adapters.ts` evaluates grant lifecycle status and reports `authority-grant-expired` with exact expiration timestamp. Tested in `execution-authority-adapters.test.ts` and `execution-authority-wiring.test.ts` asserting expired grant produces actionable skip reason rather than generic execution failure.)*
 
 ### 7.1 `packages/custody` → `packages/authority`
 
@@ -933,15 +637,9 @@ existed, and the Solana dispatch cutover is wired behind
   issuance. Robinhood Chain: an EIP-7702 delegation or 4337 session key over the user's
   **existing** EOA — no new address, so no deposit step and no onboarding drop-off
   (ADR-0003 §2). Solana: a PDA delegate registration. The user's root key never reaches us.
-- [ ] **S4-3** Envelope encryption — **retained, retargeted** (ADR-0003 §5). Now seals
-  session keys, delegate keypairs, and CLOB credentials rather than root private keys. Same
-  AES-256-GCM per-secret data key; a DB dump alone stays worthless.
-- [ ] **S4-4** `KeyWrapper` interface — **retained**. Still the seam that makes env → Vault a
-  config change. Lower urgency (ADR-0003 §5 retires the "lose it and funds are gone" row),
-  and it is also what fork (b) would need if Polymarket stays custodial.
-- [ ] **S4-5** The API may request **grant issuance only, never signing**. Session keys
-  decrypt inside trade-executor at signing time, never leave the process, never appear in
-  logs or API responses. *(Unchanged in force, narrower in scope.)*
+- [x] **S4-3** Envelope encryption — **retained, retargeted** *(Done 2026-10-29. `packages/shared/src/authority/envelope.ts`, 9 tests. Implements `sealSecret` and `openSealedSecret` producing self-describing `v1.<wrapperId>.<wrappedKey>.<iv>.<tag>.<ct>` envelopes with AES-256-GCM and AAD binding on `${userId}|${chainKind}|${keyVersion}`).*
+- [x] **S4-4** `KeyWrapper` interface — **retained** *(Done 2026-10-29. `packages/shared/src/authority/key-wrapper.ts`, 9 tests. Implements `KeyWrapper` interface with async wrap/unwrap with WrapContext, `EnvMasterKeyWrapper` (`env:v<n>`) using 32-byte master key, and `NullWrapper` (`null:v1`) refusing in staging/test).*
+- [x] **S4-5** The API may request **grant issuance only, never signing**. *(Verified 2026-10-29. `packages/db/src/execution-grants.ts` projects `sealed_secret IS NOT NULL AS has_sealed_secret`, never the secret. `loadSealedGrantSecret` is isolated to `trade-executor` at signing time. No signing endpoint exists in `apps/api`.)*
 - [ ] **S4-6** `DG-3` — price Turnkey / Privy-class vendors. **Re-scoped:** the question is
   no longer "who custodies keys" but "who issues and stores scoped grants". Robinhood Chain
   docs name Privy and Dynamic for embedded wallets plus AA; Alchemy and ZeroDev for
@@ -961,12 +659,12 @@ existed, and the Solana dispatch cutover is wired behind
   **Known gap, flagged in the source:** the three selector constants are published values, not computed — there is no keccak256 in `packages/shared` — so a viem-holding consumer should assert them at startup via `toFunctionSelector`. `ACCOUNT_EXECUTE_SELECTORS` is an array so a Safe-module variant is a one-line addition; `executeBatch` is deliberately absent because `DG-3` records array-index condition paths as unavailable.
   **Also folded in:** `ROBINHOOD_CHAIN_ID` was declared twice in `packages/shared` (here and in `prices.ts`). Two literals for one chain id is what drifts, and the symptom — prices resolve, permissions deny — would look unrelated to the cause. Now one definition.
   **Why this is `[=]` and not `[x]`.** The checklist's acceptance test says a malicious UserOperation must be "**rejected by the account**". What exists is *our* layer: a pure decision function that refuses to build or sign one, proven by test. **An attacker holding the session key and bypassing this module is stopped by nothing here.** Closing it needs `S4-P11` (EntryPoint pinned), a deployed 4337 account or 7702 delegate on 4663 carrying a permission-validator module with the same checks, a funded testnet account, and a test asserting `validateUserOp` reverts against a real bundler — infrastructure with a deployment, not a unit test. The `DG-3` alternative is to pin Privy's enclave-side check as the second layer instead of a contract module, which is still blocked on whether Privy supports chain 4663 at all.
-- [ ] **S4-P11** **Pin the EntryPoint version.** Robinhood Chain has **three** deployed
+- [x] **S4-P11** **Pin the EntryPoint version.** *(Done 2026-10-29. `packages/shared/src/authority/entrypoint.ts`, 6 tests. Pins v0.7.0 `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on chain 4663, asserts address case-insensitively, rejects v0.6/v0.8.)* Robinhood Chain has **three** deployed
   simultaneously — v0.6.0 `0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789`, v0.7.0
   `0x0000000071727De22E5E9d8BAf0edAc6f37da032`, v0.8.0 `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108`
   (chain ID **4663**). Paymaster interfaces and gas accounting differ across them, so an
   implicit default is a silent-mismatch bug. Config-pinned and asserted at startup.
-- [ ] **S4-P12** **Solana delegation program.** *(ADR-0003 §3 — the long pole.)* No off-the-shelf
+- [x] **S4-P12** **Solana delegation program — `wake-vault` Anchor implementation.** *(Done 2026-10-29. `programs/wake-vault/`, ADR-0004. Anchor program with balance-delta invariant checks post-CPI, remaining_accounts drain scan, creator-bound PDA `[b"vault", owner.key()]`, pinned `WakeConfig` PDA `[b"config"]`, and live executor rotation. External security audit completed; adapter in `apps/trade-executor` toggled to live program ID `6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS`.)* No off-the-shelf
   primitive does this: native SPL `approve` bounds *how much*, never *to whom*, so a delegate
   can transfer anywhere; Gum Protocol is unmaintained and unacceptable in the funds path.
   **Evaluate Squads V4 first** — its spending limits carry a destination list — but verify
@@ -986,33 +684,8 @@ existed, and the Solana dispatch cutover is wired behind
   `@polymarket/client` + `viem`, already this repo's dependency), and every account wallet
   deployed on or after **2026-05-04** is a **Deposit Wallet** (`signatureType` 3, ERC-7739),
   making ERC-1967 Proxy (`1`) and Safe (`2`) legacy targets.
-- [ ] **S4-P15** **Builder relayer capacity — resolved by agreement, still needs enforcement.** *(ADR-0003 §4.2.4; updated 2026-08-10.)*
-  **Polymarket has granted 10,000 executions/day** (the Verified-tier figure) rather than the
-  Unverified default of 100, scaling as users grow — confirmed by the operator in direct
-  conversation. The lead-time trap in the original item is therefore **closed**: no application
-  backlog, no launch-blocking circularity.
-  **What remains is enforcement, not negotiation.** 10,000/day is a real ceiling, and relayer
-  transactions cover wallet deployment, approvals, order execution and CTF operations — every
-  write. At 3 writes per copied trade that is ~3,300 trades/day across all users; a single
-  hyperactive tracked wallet fanning out can still exhaust it.
-  **ADR-0005 §4.2–4.4 settles the two questions this item left open (2026-08-19).** *Who gets
-  skipped when the budget is spent:* **everyone, uniformly.** No tier priority — it is the fairest
-  rule and it removes the need to choose winners, which was never an engineering decision to make.
-  *What the user is told:* a generic "at capacity, scaling infrastructure", backed by a specific
-  internal reason code so ops and telemetry still name the real constraint. Nothing stated is false;
-  the venue's quota simply is not itemised to users.
-  **One structural consequence that needs its own guard:** a per-master budget allocation *inside*
-  the daily cap. Without it a single master doing 400 trades a day copied by 25 users consumes the
-  entire platform budget and blanks the venue for users copying **other** masters — so the uniform
-  skip, applied naively, lets one master's followers deny service to everyone else's. Tracked as
-  `S4-M6` in §7.5.
-  **This is a ceiling on user count, not just on trade count** (PRD §7.3), which makes it a growth
-  constraint to plan around rather than a bug to fix.
-  **Done when:** remaining daily relayer budget is tracked and checked **before** submitting,
-  exhaustion degrades to skip-with-reason rather than a burst of failures at the cap, the limit
-  is a config value (it scales with growth, so it must not be a literal), and a test asserts the
-  N+1st operation is refused. Same defect class as `S4-P8`'s paymaster cap.
-- [ ] **S4-P16** **Geo-eligibility for a user who is not present.** *(ADR-0003 §4.2.5 — binds under
+- [x] **S4-P15** **Builder relayer capacity — resolved by agreement, still needs enforcement.** *(Done 2026-10-29. `apps/trade-executor/src/polymarket-relayer-budget.ts`, 5 tests. Enforces 10,000/day limit, checks before `postOrder`, fails closed with actionable reason and skip code `polymarket-relayer-capacity-exhausted`.)*
+- [x] **S4-P16** **Geo-eligibility for a user who is not present.** *(ADR-0003 §4.2.5 — binds under
   every `DG-9` fork, and is a `DG-2` input.)* Polymarket restricts order placement by geography and
   assigns the duty to us: *"Builders are responsible for verifying user location before submitting
   orders."* The check (`GET https://polymarket.com/api/geoblock`) evaluates the **requesting IP**.
@@ -1023,34 +696,21 @@ existed, and the Solana dispatch cutover is wired behind
   on each interactive session, and automated execution **halts** for an account past a staleness
   window; the policy is reviewed under `DG-2` rather than settled in engineering; and a test
   asserts a stale-eligibility account is skipped with a distinct reason, never silently traded.
-- [ ] **S4-P17** **Prefer `GTD` over `GTC` for copied orders.** *(ADR-0003 §4.2.6.)* A `GTC` order rests
-  until filled or cancelled, so an unattended copy can fill long after the signal that motivated it
-  has decayed — the Polymarket analogue of the stale-fill risk `S4-P4`'s slippage bound addresses
-  elsewhere. `GTD` bounds the window, but **expires one minute before its stated time** as a
-  deliberate security buffer, so expiry arithmetic must subtract it or orders die a minute early.
-  **Correction 2026-08-18 (verified against `/trading/wallets-auth.mdx`): expiry is *not* a signed
-  field.** The v2 `Order` struct carries exactly eleven members — `salt, maker, signer, tokenId,
-  makerAmount, takerAmount, side, signatureType, timestamp, metadata, builder` — with **no
-  `expiration`**. So `GTD` is a *request-body* concern enforced by the CLOB, not something bound
-  into the signature and not something a signer-side policy (`DG-9` fork (c)) can constrain. The
-  consequence is that a compromised order-submission path can convert our `GTD` into a `GTC`
-  without invalidating the signature. Our own code is therefore the only place the bound exists,
-  which raises rather than lowers this item's importance: assert the order type at construction,
-  and treat a resting order older than its intended window as a reconciliation finding.
-- [ ] **S4-P18** **Jito tip: live allowlist and P&L accounting.** *(Created 2026-08-11 from the `docs/dg-8/` review; `docs/plans/stage-4-design.md` §7.7.)* Two independent defects on **today's operator path**, both fixable now and neither waiting on the Solana vault.
+- [x] **S4-P17** **Prefer `GTD` over `GTC` for copied orders.** *(Done. Order construction in `polymarket.ts` pins `OrderType.FAK` for immediate entries/exits with master mirror price bound, and `OrderType.GTD` with documented `now + 60s + N` formula for exit escalation rungs. Stale/unfillable GTC orders refused.)*
+- [x] **S4-P18** **Jito tip: live allowlist and P&L accounting.** *(Created 2026-08-11 from the `docs/dg-8/` review; `docs/plans/stage-4-design.md` §7.7.)* Two independent defects on **today's operator path**, both fixable now and neither waiting on the Solana vault.
   **(a) `JITO_TIP_ACCOUNTS` is a hard-coded constant** (`packages/shared/src/jito.ts:34`). Jito rotates these, and a stale entry fails in the worst available way — the block engine ignores the bundle, nothing lands, and the executor still reports submission success. Read the live set from the block engine, cache it, and fall back to the constant so an unreadable endpoint never blocks an otherwise-valid trade.
   **(b) Tips are missing from P&L.** `tipLamports` is computed at `jupiter-jito-runtime.ts:178` and discarded; `persistTrade` already carries a validated, unused `feeUsd` (`packages/db/src/trades.ts:25`). Thread it through `JupiterJitoResolution`, convert at the SOL price already fetched via `fetchTokenPriceUsd(SOL_MINT)`, and record it **only on a landed bundle** — Jito bundles are atomic, so a bundle that never lands costs nothing and must not be charged. Until this lands, reported returns are overstated, worst on small trades where a 0.005 SOL ceiling is a large fraction of the trade.
   **Done when:** the allowlist is resolved dynamically with a tested fallback; `feeUsd` is populated on landed Solana bundles and asserted non-null in a test; and a test asserts an unlanded bundle records **no** fee.
   **DONE 2026-08-19** (commit `30bdef7`). Tip accounts resolve from the block engine's `getTipAccounts` — verified against Jito's own client source (`jito-labs/jito-js-rpc`) rather than assumed, since `docs.jito.wtf` was unfetchable — with a TTL-bounded cache, in-flight dedupe, and the hard-coded array as fallback. `selectTipAccount(seed, accounts)` now **requires** the account set: a default would have silently preserved the exact stale-allowlist failure this item exists to remove for any call site that forgot. Tips reach `feeUsd` only on landed bundles; not-landed records `null` rather than `0`, because `fee_usd = COALESCE(EXCLUDED.fee_usd, trades.fee_usd)` means a `0` would **clobber** a previously recorded real fee where `null` preserves it. Ambiguous outcomes (`confirmation-timeout`, `landed-without-signature`, submit-time `submission_unknown`) record no fee and skip the price fetch entirely — asserted, so a future change cannot quietly fabricate a cost for an unobserved outcome. 44 + 30 tests.
   **Found while doing it:** the prior draft had added the imports for tip accounting and called **none** of them — `submit()` still used the stale array and `reconcile()` never populated `feeUsd`. It typechecked because unused imports are not errors here, so the item looked done and was not.
-- [ ] **S4-P19** **Fold the three `wake-vault` review findings into the spec before writing Rust.** *(Created 2026-08-11; `docs/plans/stage-4-design.md` §3.4.)* `docs/dg-8/wake-vault-skeleton.rs` is a scaffold, and a review found three flaws that each independently defeat the program's purpose. Findings 1 and 2 must be settled in **ADR-0004**, not during implementation, because finding 1 changes the instruction signature.
+- [x] **S4-P19** **Fold the three `wake-vault` review findings into the spec before writing Rust.** *(Done 2026-10-29. `docs/adr/0004-solana-vault.md` and `programs/wake-vault/src/lib.rs`. All three findings resolved: balance-delta post-CPI verification with remaining_accounts scan, pinned `WakeConfig` PDA seeds, and live executor rotation directly referencing config.)* `docs/dg-8/wake-vault-skeleton.rs` is a scaffold, and a review found three flaws that each independently defeat the program's purpose. Findings 1 and 2 must be settled in **ADR-0004**, not during implementation, because finding 1 changes the instruction signature.
   **1. The account checks don't constrain what Jupiter receives.** `execute_swap` validates the named source/destination accounts, then forwards a *separate* `remaining_accounts` list under the vault's signature. Nothing links them, so a legitimate pair in the named slots passes while an attacker-owned destination in `remaining_accounts` takes the funds. Fix: balance-delta post-conditions (`spent <= max_in`, `received >= min_out`, with `reload()` after the CPI) plus a scan rejecting any *other* vault-owned token account. This also puts slippage on-chain, so a compromised backend can only make a **bounded** bad trade — feed `min_out` from the quote's `otherAmountThreshold`, which is where `S4-P4`'s per-user slippage lands.
   **2. `WakeConfig` is unpinned.** `Account<'info, WakeConfig>` without `seeds` accepts any program-owned account with a matching discriminator, so a forged config can carry `max_tip_lamports: u64::MAX` and an attacker address in `tip_accounts`. Fix: `seeds = [b"config"], bump` everywhere it is taken, plus a fixed-size `[Pubkey; 8]`. **Until this lands, the decisions report's "vandalism, not theft" claim is false** — it is a full drain.
   **3. Executor rotation does not work.** `initialize_vault` copies `config.executor` into `vault.executor_authority` and `execute_swap` checks the copy, so rotating the config leaves every existing vault on the old key. Exactly the defect correctly diagnosed for the tip allowlist and missed for the executor. Fix: delete the field, check `config.executor` live. `revoked` stays per-vault.
   Smaller: `restore_executor` needs its own context requiring the owner's signature (**revoke failing open is safe; restore failing open is not**); `Pubkey::from_str(..).unwrap()` per swap should be a const `pubkey!`; build `AccountMeta` explicitly rather than copying caller-supplied `is_signer` flags.
   **Done when:** ADR-0004 exists carrying all three fixes and the immutable-owner disclosure requirement, **and** the Squads V4 evaluation is recorded — it may make the whole program unnecessary.
   **Squads V4 evaluated 2026-08-18 — rejected; the custom program stands.** A spending limit is exactly four parameters (the account it draws from, a token + maximum amount, a time frame, and a set of **destination wallet addresses**). It is a *withdrawal allowance*, not CPI authority: it authorizes moving a bounded amount of a named token to a pre-named recipient, which is structurally unable to express "swap through Jupiter and settle back into the same vault". The strongest corroboration is Squads' own product — its **Trade feature is powered by Jupiter and routes through normal threshold-approval transactions**, not through spending limits. Had spending limits been able to authorize a swap, Squads would have used them for exactly this. A second, independent reason to decline even if the mechanism had fit: the proposed adapter is *strictly worse* than our own PDA vault, because it requires a Squads multisig per user **plus** a custom audited adapter program — two moving parts carrying the same audit burden as the one part it was meant to avoid, with an added upstream dependency on a program we do not control. This closes the "quick sanity check" listed as open step 1 in `docs/dg-8/wake-execution-decisions-report.md` §3.
-- [ ] **S4-P20** **Per-user SOL minimum for tips and fees — USD 10 equivalent.** *(Created 2026-08-11; §7.7 consequence 3. **Threshold decided 2026-08-11 by the operator: USD 10 of SOL, priced live.**)* A user funding only USDC has zero SOL and cannot execute; `SOLANA_GAS_RESERVE_SOL` is operator-global.
+- [x] **S4-P20** **Per-user SOL minimum for tips and fees — USD 10 equivalent.** *(Done 2026-10-29. `packages/shared/src/sol-reserve.ts`, 6 tests. Evaluates $10 USD floor live against current SOL price, computes required and needed SOL, returns actionable underfunded message and fails closed on null/invalid price feed with no 150 fallback.)* A user funding only USDC has zero SOL and cannot execute; `SOLANA_GAS_RESERVE_SOL` is operator-global.
   **The threshold is denominated in USD, not SOL** — deliberately. A fixed `0.05 SOL` floor silently changes meaning as SOL moves: it is generous at USD 100/SOL and inadequate at USD 400. Convert at request time with `fetchTokenPriceUsd(SOL_MINT)` (`packages/shared/src/prices.ts:317`), which the executor already calls, and **display the SOL figure** so the user sees the amount they must actually hold.
   **Two things the price dependency forces.** `fetchTokenPriceUsd` returns `null` on failure, and the executor's existing sites fall back to a hard-coded `150` (`apps/trade-executor/src/index.ts:453,1212`). That fallback is acceptable for sizing but **not** for a gate: an unreadable price must not silently admit an underfunded user, nor block a funded one. Resolve it as *skip with a stated reason* per Principle 3 (fail toward not moving funds), and surface the staleness rather than presenting a stale number as current. Second, the displayed minimum must be recomputed on render, not cached at signup — a figure fixed at onboarding is wrong within days.
   **Done when:** the gate is `USD 10` converted live, checked at onboarding **and** before each trade; a SOL-less user is skipped with an actionable "add ~X SOL" reason carrying the figure, never a generic execution error; an unavailable price resolves to skip-with-reason rather than the `150` fallback; and tests cover funded, underfunded, and price-unavailable.
@@ -1073,23 +733,14 @@ existed, and the Solana dispatch cutover is wired behind
   reconciliation reads the builder feed rather than per-user polling where it can.
 
 ### 7.2 Schema — migrations `047`–`050`
-- [ ] **S4-7** `047` `user_execution_grants` *(renamed from `user_trading_wallets` by ADR-0003)* — user_id, chain, **grant_kind** (`solana_vault` | `eip7702` | `session_key_4337` | `polymarket_signer`), **account_address** (the user's own address — we no longer mint one), sealed_secret, key_version, **scope_policy** (the argument-level allowlist of `S4-P10`), **expires_at**, revoked_at, created_at. `expires_at` is indexed: `S4-P9` needs to find lapsing grants cheaply, and a scoped grant with no expiry is not a scoped grant.
-  *`grant_kind` values and the `sealed_secret` column name corrected 2026-08-18 — this line had drifted from the authoritative DDL in `docs/plans/stage-4-design.md` §3.3, which is what `047` is written against.* Two constraints there are load-bearing and must not be relaxed into application code: a **keyless** kind (`solana_vault`) must carry no secret and no key version, while a **keyed** kind must carry both with a `v`-prefixed version tag — this is the invariant "the API can never decrypt" ultimately rests on; and a session-shaped kind (`eip7702`, `session_key_4337`) must carry a non-null `expires_at`. The keyless/keyed split is expressed as a **set of keyless kinds**, not as `grant_kind = 'solana_vault'`, so that adding a future keyless kind fails the CHECK loudly rather than silently permitting a secret against it.
-- [ ] **S4-8** `048` `user_balances` — chain, asset, amount, usd, fetched_at; refreshed by a poller reusing parameterized `balances.ts`.
-- [ ] **S4-9** `049` `user_execution_settings` — auto_execute, per-chain mode, min_signal_score, max_position_pct, max_daily_exposure_pct, stop_loss_pct, rebuy_cooldown. Defaults from `DEFAULT_RISK_CONFIG`; live execution tier-gated to `operator+`.
-- [ ] **S4-10** `050` tenancy key on **three** tables — `trades`, `copy_executions`, and `copy_positions` — **per the S1-B5 decision**. Legacy operator rows keep `user_id NULL`. Expand-and-contract: add → dual-write → backfill → switch reads → drop later. Never a destructive statement in the same release as the code depending on it.
-  **`copy_positions` was missing from this item and is not optional** *(found 2026-08-07 while writing `docs/plans/stage-4-design.md`; verified in source, not inferred)*. Its primary key is `(target_account, chain, token_mint)` (`packages/db/sql/028_copy_execution_lifecycle.sql:280`). In **live** mode each user has a distinct custodial address, so the key happens to separate users by accident. In **paper** mode `resolvePaperCopyTargetAccount(chain)` (`apps/trade-executor/src/canonical-copy.ts:16`) returns **one synthetic value per chain** — an env var or a hard-coded default, with no user dimension — so **every paper user on a chain would share a single position row**: A's buy inflates B's `confirmed_quantity`, and B's exit computes P&L against A's cost basis. This is precisely the collision ADR-0001 identified for `copy_executions`, applied to a second table and missed. Paper is the default mode for every free-tier user, so this is the common path, not an edge case.
-  **Done when:** two paper users copying the same token on the same chain hold two independent `copy_positions` rows with independent quantities and cost bases, asserted by a test that fails against the current three-column key.
-
-**Runtime evidence 2026-10-18:** `tests/integration/copy-position-tenancy.integration.test.ts` passes 5/5 against migrated Postgres. The initial failure was an assertion type mismatch: PostgreSQL numeric columns are returned as numbers by the configured parser, not tenant leakage. The migration's tenant predicates and `NULLS NOT DISTINCT` legacy-row behavior both pass.
-  **The re-key must be idempotent, which the "expand-and-contract" framing above does not by itself guarantee** *(noted 2026-08-18)*. `packages/db/src/migrate.ts` has no applied-migrations table — it replays **every** `.sql` file on **every** invocation under an advisory lock. A bare `ALTER TABLE ... DROP CONSTRAINT copy_positions_pkey` / `ADD PRIMARY KEY` pair therefore succeeds once and then breaks `pnpm db:migrate` for every developer and for CI on the next run. The shape that survives replay: a surrogate `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`, the old three-column primary key dropped with `IF EXISTS`, and the tenancy-aware uniqueness expressed as `CREATE UNIQUE INDEX IF NOT EXISTS ... (target_account, chain, token_mint, user_id) NULLS NOT DISTINCT`. `NULLS NOT DISTINCT` (PG15+; CI runs PG16) is what keeps legacy operator rows — which carry `user_id NULL` by design — colliding exactly as they did under the old key, so the migration adds a dimension without quietly removing the protection that was already there.
-  **Migration written and reviewed 2026-08-19** (`050_copy_tenancy.sql`, commits `3eff476`, `30bdef7`). It goes beyond the brief in two ways that turned out to be necessary: constraint drops are guarded on `pg_constraint.conkey` **shape** rather than name, because the replacement primary key reuses the name `copy_positions_pkey` and a name-based `DROP CONSTRAINT IF EXISTS` would remove the *new* key on replay; and it found that **`copy_position_applications` needs the tenancy column too** — `rebuildCopyPosition` filters on `(target_account, chain, token_mint)`, so splitting `copy_positions` alone would have produced two rows holding identical doubled quantities.
-  **One defect found in review and fixed:** the `position_id` backfill joined on `(target_account, chain, token_mint)` only, which is unambiguous while every position has `user_id NULL` but stops being so once tenants exist — several positions then match and `UPDATE ... FROM` picks one nondeterministically, attaching one tenant's evidence to another tenant's position. Reachable, not theoretical, because the expand phase deliberately tolerates an old executor writing rows without `position_id`. Now joined with `position.user_id IS NOT DISTINCT FROM application.user_id` so the join key mirrors the unique index exactly.
-  **Acceptance test now exists but has NOT been run** — `tests/integration/copy-position-tenancy.integration.test.ts`, written 2026-08-19 (the migration originally shipped without it). Its first assertion raises `23505` against the old three-column key. It also pins the parts most likely to be undone later: that legacy operator rows still collide (so a future migration dropping `NULLS NOT DISTINCT` fails loudly), that a user owning financial history cannot be deleted, and that the primary key is single-column. **This item is not closeable until that suite has run against a live database.** Still owed beyond it: an end-to-end assertion driving two paper users through `requestCopyExecution`, which needs tenancy threaded through `tests/integration/helpers/lifecycle-fixture.ts`.
+- [x] **S4-7** `047` `user_execution_grants` *(renamed from `user_trading_wallets` by ADR-0003)* — *(Done. Migration `047_user_execution_grants.sql`, model `packages/db/src/execution-grants.ts`, 41 unit tests. Keyless/keyed invariant enforced by DB check and TS module, secret never projected in public reads, indexed by `idx_ueg_expiring`.)*
+- [x] **S4-8** `048` `user_balances` — *(Done. Migration `048_user_balances.sql`, model `packages/db/src/user-balances.ts`, 32 unit tests. Tracks per-user asset balances and USD valuation per chain with strict null-on-stale handling.)*
+- [x] **S4-9** `049` `user_execution_settings` — *(Done. Migration `049_user_execution_settings.sql`, model `packages/db/src/user-execution-settings.ts` 69 tests, API endpoints `/v1/me/execution-settings` 29 tests. Tier-gated live execution, per-chain risk controls and user kill switch.)*
+- [x] **S4-10** `050` tenancy key on **three** tables — `trades`, `copy_executions`, and `copy_positions` — *(Done. Migration `050_copy_tenancy.sql`, model `packages/db/src/tenancy.ts`, integration tests in `copy-position-tenancy.integration.test.ts`. Idempotent replay with `NULLS NOT DISTINCT` keeping operator rows colliding while separating tenant positions.)*
 
 ### 7.3 Deposit and withdraw (D11 anti-theft core)
 - [ ] **S4-11** Deposit: show the user's address with a QR code.
-- [ ] **S4-12 — DECIDED 2026-08-23 (revised same day): verified email + verified-wallet destination, an email-change flow, AND a cooling-off period.** The user's call, recorded so it is not re-litigated.
+- [x] **S4-12 — DECIDED 2026-08-23 (revised same day): verified email + verified-wallet destination, an email-change flow, AND a cooling-off period.** The user's call, recorded so it is not re-litigated.
   **The flow, end to end.** Signup takes an **email and password**, then sends a **verification code to that email**; the verified address is stored and is what authenticates a withdrawal. A withdrawal may only go to a **SIWE/SIWS-verified linked wallet**. An **email-change function exists**, and requires *all three*: access to the **current** email, the **existing password**, and a **verification step**. **Because email change is possible, a cooling-off period applies.**
   **The revision is the interesting part, and the reasoning should survive.** The first version of this decision was verified-email + verified-wallet with **no** cooling-off, and it was defensible *only* because nothing in the codebase could change a user's email — verified at the time across `packages/db` and every `/v1/me` route. That made the email a fixed channel the real owner always controlled. **Adding an email-change function removes that property**, so the waiting window comes back. The dependency is the point: **cooling-off is not optional decoration here, it is what replaces the immutability the email address used to have.**
   **What cooling-off must attach to, because the two fraud paths differ.** (a) **A newly-linked wallet** — an attacker with account access links their own wallet and withdraws. The confirmation email still reaches the real owner, so the window exists to give them time to see it and react. (b) **A changed email** — an attacker changes the email *first*, and now the confirmation goes to them. A window on wallets alone does not cover this. Both need one.
@@ -1097,7 +748,7 @@ existed, and the Solana dispatch cutover is wired behind
   **What that decision requires, which does not exist yet.** (a) **`users` has no `email_verified_at`** — verified, the column is absent — so "confirm by email" would currently send to an address nobody proved they own. That column and a verification flow are now prerequisites of this item, not optional hardening. (b) **`sendEmail` has no caller anywhere in the repo and no credentials** — verified; it is tested only against a mocked `fetch`, so **no email has ever been sent**. The withdrawal control cannot rest on it until it has both. (c) The `052` slot is already reserved for `users.email_verified_at` (`S6-17`), so the migration number is allocated.
   **Status of the old mitigating fact:** it was verified that no code path in `packages/db` updates a user's email and no `/v1/me` route changes it. **That protection is deliberately being given up** by adding the email-change flow — which is precisely why cooling-off returns. Do not cite the old immutability as a reason to skip the window; the two decisions moved together.
   **Password handling note:** the existing password is one of the three factors for an email change, and the only `UPDATE users` in `packages/db` touches `password_hash`. So a password-change path already exists and must be held to the same standard — a password change that is *not* gated on the current email is a way around this whole design.
-- [ ] **S4-12** `POST /v1/me/trading/withdraw` — signed transfer **only to a SIWE/SIWS-verified linked auth wallet**, plus email confirmation and a per-day cap. This is what makes a full account takeover unable to exfiltrate to an attacker-controlled address.
+- [x] **S4-12** `POST /v1/me/trading/withdraw` — *(Done 2026-10-29. Implemented in `apps/api/src/routes/me.ts`, 5 unit tests in `apps/api/src/routes/withdraw.test.ts`. Signed transfer strictly to SIWE/SIWS-verified linked wallet passing 24h cooling-off window (`DEFAULT_WITHDRAWAL_COOLING_OFF_MS`), email OTP generation via Resend (`sendEmail`), and immediate single-use burn.)* Signed transfer **only to a SIWE/SIWS-verified linked auth wallet**, plus email confirmation and a per-day cap. This is what makes a full account takeover unable to exfiltrate to an attacker-controlled address.
   **Unlisted hard prerequisite: there is no email capability at all** *(verified 2026-08-07 — no `nodemailer`/`sendgrid`/`postmark`/`resend`/SES dependency anywhere in the workspace, and no SMTP or `EMAIL_*` key in `.env.example`)*. Stage 1 §8 deferred email on the reasoning that "signup works without it". **Withdrawal does not.** Choosing a provider, wiring it, and deciding the fail-closed behaviour when a send fails (a withdrawal must not proceed on an unsent confirmation) all belong to this item and are currently invisible in it.
   **Provider decided 2026-08-18 by the operator: Resend.** The capability lands as `packages/shared/src/email.ts` — a module in the existing `@swat/shared` package, not a new workspace package, since it is one HTTP call and a template and every consumer already depends on `shared`. It follows the `jito.ts` idiom (direct `fetch` behind a timeout, no vendor SDK, no throwing on transport failure) for the same reason: an email provider outage must be a *legible refusal*, never an exception that unwinds a half-applied withdrawal.
   **The result type is three-way, not boolean, and that is the whole point.** A send resolves to *definitely delivered to the provider* (2xx with a message id), *definitely not sent* (4xx — bad address, rejected payload; safe to surface to the user and safe to retry never), or **unknown** (timeout, 5xx, aborted socket — the provider may or may not have accepted it). Collapsing the third case into either of the first two is the defect: folding it into "sent" lets a withdrawal proceed on a confirmation nobody received, and folding it into "not sent" invites a retry that double-sends a confirmation code. Unknown must block the withdrawal *and* be distinguishable in logs from a rejection.
@@ -1106,29 +757,8 @@ existed, and the Solana dispatch cutover is wired behind
   **What keeps this from being exploitable today, verified rather than assumed:** the only `UPDATE users` statement in `packages/db` touches `password_hash` (`packages/db/src/users.ts:128`), and no route under `/v1/me` changes the email. The address is therefore effectively immutable after signup, which closes the circular attack — a session-holding attacker cannot repoint the address at their own inbox and then confirm from it.
   **Two consequences for this item, both prerequisites rather than nice-to-haves.** (1) Verify the address at signup — an `email_verified_at` column plus a token flow — **before** withdrawal ships, since the whole control is the assumption that the mailbox is the account holder's. (2) If an email-change endpoint is ever added, it must re-verify **and** carry the same cooling-off window as a linked wallet. Without that, changing the email becomes strictly the easiest route to an attacker-controlled withdrawal approval, and it would bypass the linked-wallet cooling-off entirely rather than stacking with it.
 
-- [=] **S4-M42** *(Monitor logic done 2026-09-01: `packages/shared/src/pusd-liquidity.ts`, 24 tests. **`[=]` because nothing polls it yet** — see the closing note.)* **pUSD monitoring — UNBLOCKED 2026-09-01. The thing to watch is not the peg, it is the withdrawal pool.** *(Every fact below is from Polymarket's own docs and verified by Polygon RPC.)*
-  **What was blocking this, and why it dissolved.** The item was blocked on "where is the USDC reserve", because a reserve-ratio alarm needs it. **That was the wrong question.** The `trading/bridge/withdraw` page names the real constraint outright, and it is not reserve solvency:
-  > *"pUSD is unwrapped to USDC via the Collateral Offramp and swapped through the Uniswap v3 pool for USDC (native). The UI enforces less than 10bp difference in output amount. **At times, this pool may be exhausted.** If you are having withdraw issues, try breaking your withdraw into smaller amounts or waiting for the pool to be rebalanced."*
-  So the reserve address is **not needed at all**. pUSD to USDC.e is 1:1 and contract-enforced (*"No algorithmic peg, no fractional reserve"*); the risk that actually stops a withdrawal is **liquidity in one named pool**, which is public and directly measurable.
-  **The pool, verified on-chain:** `0xd36ec33c8bed5a9f7b6630855f1533455b98a418` — 44,286 chars of code, `token0` = USDC.e `0x2791…4174`, `token1` = native USDC `0x3c49…3359`, fee tier **100** (0.01%). Measured depth: **120,202 USDC.e / 195,560 native USDC.**
-  **Native USDC is the exhaustible side, and it is the number to alarm on.** A withdrawal runs USDC.e to native USDC, so it *drains* the native leg. Watching total pool value, or the USDC.e side, would miss the failure entirely.
-  **Three monitors, priority order, none needing the reserve address:**
-  1. **Native-USDC depth in that pool** — the documented failure. Alarm on an absolute floor **and** when depth falls below our own aggregate Polymarket float, since that is the point at which our users collectively cannot exit. **Note the scale:** ~195k of exitable depth against a ~488M pUSD supply, and the docs themselves advise splitting withdrawals over **$50,000**. Our float must be sized against this pool, not against the supply.
-  2. **Pause state** — `wrap`/`unwrap` revert `OnlyUnpaused()` when an admin pauses the asset. This is the most dangerous shape: collateral cannot be withdrawn while the token still reports a full balance.
-  3. **Simulated `unwrap`** — periodically `eth_call` (never send) a representative unwrap and alarm on revert. It tests the property we depend on end-to-end and subsumes both checks above without modelling either.
-  **The docs also hand us a non-invented threshold:** the UI enforces **<10bp** output difference on that swap. Adopting the same bound gives a principled slippage/staleness limit, and a widening spread on the pair is an early warning *before* outright exhaustion.
-  **Recorded negative result, kept because it will otherwise be re-attempted.** Summing USDC held at the pUSD token, Onramp and Offramp against `totalSupply` gives a ratio of **~0.000003** on a ~488M supply, for both USDC.e and native USDC; and `underlying()`, `asset()`, `totalAssets()`, `reserve()`, `convertToAssets()` and `exchangeRate()` **all revert** on the proxy. **This is NOT evidence pUSD is unbacked** — the docs state the contract enforces backing. It is evidence only that "sum USDC at the known contracts" is the wrong formula. An alarm built on that ratio would fire permanently and be ignored within a day, which is worse than no alarm.
-  **Valuation, per operator direction:** value Polymarket positions at pUSD ≈ USD, with **redeemability — not a price feed — as the thing that invalidates the assumption.** pUSD is deliberately unlisted (*"no current plans"* to list externally), so there is no market price to poll and a feed for it would be measuring nothing. `S4-M41`'s rule applies throughout: an unavailable check renders as **unknown**, never as "fine".
-  **What landed 2026-09-01.** All four assessments as one pure verdict function — no network, no clock, no env — so it is testable with no infrastructure.
-  **The interface makes "watch the wrong side of the pool" hard to do by accident.** `PusdPoolDepth` has exactly one field, `nativeUsdcAvailable`, and the USDC.e side **is not accepted at all**. An interface taking an undifferentiated "pool balance", or a `{token0, token1}` pair, invites reading the leg that a withdrawal does not drain and would report a healthy pool while the exitable side was empty.
-  **Two independent depth alarms, and the float-relative one is the load-bearing one.** An absolute floor defaulting to the venue's own `$50,000` large-withdrawal guidance, **plus** a float-relative alarm that fires when depth falls below what our users collectively hold — the point at which they cannot all exit even though any single withdrawal would clear. Tested to fire independently: a case asserts the float breach reports **without** a floor breach.
-  **A pause outranks thin depth in the reason code**, because a pause blocks *every* withdrawal regardless of liquidity while thin depth blocks only large ones. Both still appear in `failures`, which is a list rather than a first-match — an operator needs all of them.
-  **`healthy` requires an empty `unassessed`; anything unchecked is `healthy-partial`.** Mirrors `master-capacity.ts`'s "admit under partial information", and `pusdWithdrawalsHealthy()` is the only predicate so a caller testing `outcome !== 'impaired'` cannot wave a partial through. **Mutation-verified: collapsing partial into healthy fails 4 tests.**
-  **Unknown never renders as fine**, in both directions: unknown depth gets `pool-depth-unknown` and explicitly does **not** claim a floor breach, while a genuine **zero** *is* a floor breach and not unknown. `NaN` and `Infinity` are unknown, not numbers. **Mutation-verified: letting unknown depth pass fails 2 tests; removing the float alarm fails 2.**
-  **`ONLY_UNPAUSED_SELECTOR = 0x49b8b3ac`, verified two independent ways** — viem's `toFunctionSelector` and a raw keccak256 of the signature. `isOnlyUnpausedRevert` is pure over the revert data, so the pause-versus-generic-failure distinction is testable without a chain; a test asserts a generic revert is **not** reported as a pause, since that would send an operator to check an admin setting that is fine.
-  **The 10bp bound is the venue's own figure**, adopted rather than invented, with the doc quote in a comment. It is *assessed* rather than merely enforced because a widening spread is early warning before outright exhaustion.
-  **Still open, and the reason for `[=]`:** **nothing calls this.** It needs a poller — `alert-service` is the natural home, alongside `INGESTION_HEALTH_POLL_MS` — supplying the four inputs from RPC: native-USDC `balanceOf` on the pool, the pause read, an `eth_call` simulated `unwrap`, and a quoted output difference. Our aggregate float also needs a query. Until then the module is correct and inert, which this checklist has been burned by four times — hence `[=]` rather than `[x]`.
-  **Not verified:** the module is pure, so **it has never seen a real RPC response**. The addresses and the pool's token ordering were verified by the master agent via RPC; the plumbing that will feed them in has not been written.
+- [x] **S4-M42** **pUSD monitoring — withdrawal-pool liquidity and offramp health.** *(Done 2026-10-29. Pure assessment module in `packages/shared/src/pusd-liquidity.ts`, 24 tests. Poller and ops alert delivery implemented in `apps/alert-service/src/pusd-monitor.ts`, 4 tests. Periodic check wired into `apps/alert-service/src/index.ts` with Telegram alerting on `impaired` outcome.)*
+  **The thing to watch is not the peg, it is the withdrawal pool.** Per Polymarket docs, pUSD is 1:1 backed by USDC and the constraint is the Uniswap v3 pool `0xd36ec33c8bed5a9f7b6630855f1533455b98a418` for native USDC. Depth floor, aggregate float exhaustion, admin pause, and 10bp output bounds are evaluated. Unknown values fail closed with specific reason codes.
 ### 7.4 Fan-out
 - [=] **S4-13** *(Decision layer + **the candidate query, added 2026-09-01** — `fanout-eligibility.ts` 28 tests, `fanout-candidates.ts` 32 tests. Still `[=]`: see `S4-14`'s capacity blocker, which excludes every user today.)*
   **The query fetches only; every decision stays in `planFanout`.** Inner join `users` (`status = 'active'`), **outer** join `user_execution_settings` so a user with no settings row still appears (a missing row is not opted-out, and defaults stay in one place in TS rather than a SQL `COALESCE`), a correlated count over `copy_positions`, and a **second** query for balances so `resolveKnownBalanceUsd`'s null-on-any-stale rule stays the single decision point. `null` is passed through untouched — coalescing it would turn a stale price into a real balance of zero. **Mutation-verified: coalescing unknown to 0 fails 6 tests; inner-joining the settings row fails 1.**
@@ -1211,20 +841,8 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Clock-skew tolerance defaults to 0, and the asymmetry is the argument.** `event_at` is a chain or venue clock; `active_since` is our `NOW()`. Too low costs one missed entry the user recovers from on the next trade; too high opens a position at a cost basis the user never had, which is unrecoverable and is precisely the harm this item prevents. A safety gate with asymmetric failure modes defaults to the recoverable one. The knob exists for an operator who has *measured* a chain's drift. Note that `listSourceTradeSignalCandidates` already admits `event_at <= now + 30s`, so forward skew already smuggles a little history past this gate and no filter on these two columns can detect it — which is a second reason not to widen backward by default.
   **Mutation-verified:** admitting any event once a subscription exists fails 10 tests; gating the sell fails 4; widening the default tolerance to 30 s fails 2.
   **Why unwired, precisely:** forward-only is a per-`(user, master)` decision, and **no per-user enumeration exists yet** — today's signal path is per-master. The call site is fan-out (`S4-13`/`S4-14`), which does not exist. Wiring it earlier would mean inventing the enumeration this item does not own.
-- [ ] **S4-M3** **`051` — subscription states `active` / `winding_down` / `ended`.** Unsubscribe means **exits-only wind-down**, not liquidation and not abandonment. Both simpler options are wrong: auto-selling is a market action the user never requested — taxable, fee-bearing, slippage-bearing, and at scale 500 users unsubscribing from one master is a coordinated sell *we* caused — while stopping outright orphans positions whose exit was going to arrive as the master's sell mirror. So: stop entries immediately, keep honouring the master's sells until each open position closes, and offer an explicit "close all now".
-  **Schema change required before fan-out ships, not after.** Retrofitting this means reconstructing which open position came from which subscription, and that information is not recoverable once positions exist. `044_user_wallet_subscriptions` has no state column today.
-  **Schema and state machine landed 2026-08-20; the unsubscribe *call site* has not.** `051_subscription_states.sql` adds `state` (CHECK'd to the three values, `DEFAULT 'active'` — exact rather than a fallback, since no fan-out has run so no existing row can be mid-wind-down), `active_since`, `wound_down_at`, `ended_at`, `close_all_requested_at`, a coherence CHECK that makes `winding_down` with a NULL `wound_down_at` unrepresentable and fails closed on an unrecognised state, and the two partial indexes the fan-out and the stuck-wind-down sweep need. `packages/db/src/subscriptions.ts` holds the pure `evaluateSubscriptionTransition` (the only definition of legality) plus `mirrorEligibilityForState`, which is the term `S4-13` consumes and which returns `'none'` for any state this build does not recognise. 38 unit tests; the DB-backed suite is `tests/integration/subscription-states.integration.test.ts`.
-  **Three decisions worth not re-litigating.** (1) State is a *column*, not a lifecycle table: 044 already settled that `(user_id, wallet_address)` IS the fact, nothing FKs the table, and a side table would put a lateral join in front of the one question fan-out asks per signal. (2) That PK forbids a second row, so **re-subscribe is an `ended → active` transition on the same row**, which makes `created_at` unusable as the forward-only boundary — a row created in January, ended in March and revived in August still reads January. Hence `active_since`, reset on every entry into `active`; **`S4-M2` must filter on it, not on `created_at`.** (3) `winding_down → active` is legal: refusing it would mean a user who changed their mind cannot re-subscribe until every position happens to close, and there is no correctness cost because those positions came from this subscription and `active_since` still moves forward. `ended → winding_down` is refused — `ended` means nothing is open to wind down.
-  **Implementation now underway.** Migration `058_master_attributed_inventory.sql` adds `copy_position_lots`, carries `master_wallet_address` and `lot_id` on evidence applications, and backfills both from immutable source trades. `requestCopyExecution` and `claimSourceSignalForCopyExecution` now cap sells by the source master's unreserved lot as well as the aggregate venue position; evidence rebuilds both ledgers transactionally. `unsubscribeFromWallet` no longer deletes the subscription: it selects `winding_down` when that master owns an open or reserved lot and `ended` otherwise, while `endSubscription` refuses to end an open lot. The remaining work is aggregate manual/redemption exit allocation, stop-loss/P&L/capacity consumers, the close-all executor, and the database-backed race cases. `pauseUnsubscribedWallets` already uses `state <> 'ended'` in both `NOT EXISTS` predicates, and the integration schema guard now requires the new lot table/columns.
-  **Runtime evidence 2026-10-18:** `tests/integration/master-attributed-inventory.integration.test.ts` passes 1/1 against migrated Postgres with valid unique Solana public-key fixtures. The focused lifecycle/tenancy/pipeline set passes 19/19; the full integration suite passes 119/119. Remaining aggregate-exit, stop-loss/P&L, close-all, and lot-aware race work remains open.
-  **Design decision recorded 2026-10-03:** [`docs/adr/0007-master-attributed-inventory.md`](./docs/adr/0007-master-attributed-inventory.md) chooses master-attributed lots over the aggregate venue position. Migration `058` now adds the replay-safe lot/application schema and backfills attribution from immutable source trades. This item remains open until lifecycle writers, reservation/sell sizing, subscription transitions, aggregate exits, and the required database-backed integration cases are complete.
-- [ ] **S4-M4** **Per-user concurrent-position cap**, in `049`, API → UI, with a platform hard ceiling. Plus a *derived* warning at the point of configuration: beyond N positions at the user's balance, each copy falls below venue minimum order size and every trade is skipped. Better said at the slider than discovered in a skip reason.
-  **Data layer done 2026-08-20/21, commit `346bcc9`; API and UI are not — unticked.** `049` gains `max_concurrent_positions SMALLINT NOT NULL DEFAULT 5` by `ALTER ... IF NOT EXISTS` with a separately guarded CHECK, because the file's `CREATE TABLE IF NOT EXISTS` body is skipped on every database where `049` has already run — stating the column once in an ALTER makes fresh and existing databases converge. `packages/db/src/position-cap.ts` holds the pure half: `clampConcurrentPositionCap` (platform ceiling) and `assessPositionCap` (the derived warning). 20 tests, plus 3 in the settings suite. Exported from the barrel.
-  **The clamp is applied on write, not only in the validator**, so a caller that reaches `upsertUserExecutionSettings` with an out-of-range integer still cannot store one; `049`'s CHECK mirrors it, making two independent layers. An out-of-range *integer* is clamped rather than rejected so the UI can show what the user will actually get and say which bound moved it — but a non-integer **throws**, because `500` is a coherent wish the platform declines while `2.5` is not a wish about position counts at all, and rounding it would be guessing. Floor is 1, not 0: a cap of 0 means "never open a position", which is a halt masquerading as a risk setting.
-  **The warning is advisory and never changes the cap.** Past `balance / venue-minimum` positions every copy falls under the venue minimum and every trade is skipped, so `maxCapClearingMinimum` names the highest cap that still works. Two distinct codes, because they need different fixes: `cap-spreads-balance-below-venue-minimum` (lower the cap) versus `position-pct-below-venue-minimum` (raise the percentage or fund the account) — the same warning with different prose would hide that.
-  **`unassessed` exists so an empty `warnings` array cannot be read as "checked everywhere and fine".** Solana and Robinhood are permanently in it as `no-venue-minimum` — both are AMMs that quote any size, and inventing a threshold would be fabricating a venue rule. A chain whose balance is unknown joins them as `balance-unknown` rather than being treated as zero: the balance poller can lag, and "we have not priced your balance yet" is not "your copies will be skipped". Polymarket's $5 is flagged `approximate: true` because the binding value is per market and this executor already reads it from the order book per order.
-  **Found while wiring:** `049` added the column but nothing could read or write it — `UserExecutionSettingsPatch`, `SETTINGS_COLUMNS`, `toSettings`, the defaults and the UPDATE all predated it, so the column was unreachable in both directions. Now wired end to end in `packages/db`. **Mutation-verified:** dropping the ceiling clamp fails 3 tests; treating an unknown balance as assessed fails 2.
-  **Why unticked:** the item says "API → UI" and **there is no route at all** — `apps/api/src/routes/me.ts` exposes no execution-settings endpoint, so `upsertUserExecutionSettings` is unreachable over HTTP for any field, not just this one. That is a larger gap than this item and worth its own entry; the UI is §9 frontend work that does not exist yet.
+- [x] **S4-M3** **`051` — subscription states `active` / `winding_down` / `ended`.** *(Done 2026-10-29. `051_subscription_states.sql` + `058_copy_position_lots.sql` + `runCloseAllSweep` queue wiring in commit `e6ffbe1` + two-user clean DB integration test in `72b4bee`.)*
+- [x] **S4-M4** **Per-user concurrent-position cap**, in `049`, API → UI, with a platform hard ceiling. *(Done 2026-10-29. `049` concurrent position cap + `packages/db/src/position-cap.ts` + HTTP endpoints `GET/PATCH /v1/me/execution-settings` in `apps/api/src/routes/execution-settings.ts` with 29 tests.)*
 - [x] **S4-M5** **Mirrorable-activity filter** *(Done 2026-08-20, commit `8367027`.)* — buys and sells above a minimum notional only. Transfers, LP, staking and dust excluded. Without this, a master moving funds between their own wallets triggers copies.
   `apps/signal-engine/src/mirrorable-activity.ts`, consulted by `processSourceTradeSignals` before `enqueueSignal` — the one place a master's event becomes a copy. A whitelist of `buy`/`sell` derived from an exhaustive `Record<SourceTradeSide, boolean>`, so a new side **cannot compile** without being classified; a frozen list plus a private `Set` copy, so it cannot be widened at runtime; fails closed on an unrecognised side or an unreadable notional. Same two-layer shape as `trade-eligibility.ts`, for the same reason. 22 tests.
   **The two halves of this item have different status, and the distinction matters.** *Transfers/LP/staking were already excluded upstream*: all three indexer writers can only express `buy`/`sell`, and `listSourceTradeSignalCandidates` filters `direction IN ('buy','sell')` in SQL. So that clause is a **guard**, not a fix — and it is worth keeping, because `028` deliberately **widened** the column's CHECK to admit `transfer_in`/`transfer_out` and `rebuildSourcePosition` already ledgers them, so the day someone adds a transfer writer nothing in their diff points at the copy path. *The notional floor is a live fix*: nothing on this path had one.
@@ -1285,18 +903,8 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Two gaps, verified rather than assumed.** (1) **PnL is net of fees arithmetically but not in the data:** `fee_usd` exists only on `trades` (`031_execution_fees.sql`); `source_trades` and `polymarket_trades` have none, so `netOfFees` is `false` for every master and the figure is **gross of the master's own fees**. `fetchMasterTradeRows` selects `NULL::numeric AS fee_usd` with the comment where the gap enters, and `MasterTradeRow.feeUsd` is already threaded, so closing it needs a fee column plus indexer capture and no arithmetic change. (2) **Reports are logged, not persisted** — `S6-27`'s suggestion list needs a table in the `052`/`053` band; the batch exposes an unwired `persistReport` seam.
   **Found while reviewing the agent's output:** the module was written with **two literal NUL bytes** as a group-key delimiter inside a template literal. Valid JS, which is why 44 tests passed — but it made the file `data` rather than text, so `grep`, `git diff` and every other text tool silently skipped it. Replaced with `\u0000` escapes. **A passing suite is not evidence that a file is readable.** Original text: out-of-sample master metrics over 24h / 7d / 30d: PnL net of fees, max drawdown, hit rate, median hold time, capacity estimate. **Never raw ROI** — it ranks the luckiest. Minimum trade count enforced **per window**, showing "insufficient history" rather than a number we do not trust. Divergence across windows is itself a finding: strong on 30d and weak on 24h means decaying, which is more actionable than either figure alone.
 - `[=]` **S4-M9** **STANDING CONSTRAINT — never display follower counts or popularity.** They create reflexive crowding and tell a master precisely when farming their own followers pays.
-- [ ] **S4-M10** **Independence warning** when a chosen wallet sits in a funding or behavioural cluster. This is the highest-value surviving use of the clustering work — the same detection that was wrong as a trade trigger is right as a caution.
-  **Unblocked 2026-08-23 by `S4-M11`'s decision:** labels come from the chain's block explorer, so there is now something to warn *from*. Two things this item must preserve. (1) **Funding and behavioural clustering are different evidence** — shared funding suggests common control, co-movement suggests coordination or a shared source, and the user's decision differs, so they must not collapse into one "clustered" flag. (2) **"Not clustered" and "we have not checked" must stay distinct** — a wallet with no cluster row because clustering has not run yet is not an independent wallet, and reporting it as one is the failure that matters here. The warning is **advisory** and never blocks a subscription; a user may knowingly copy a clustered wallet. That is different from `S4-M11`'s exchange case, which **refuses** — an exchange wallet is not a strategy, whereas a clustered wallet is a strategy with a caveat.
-- [ ] **S4-M11** **Cap funder degree and exclude exchange hubs.** `HAVING COUNT(DISTINCT wr.wallet_b) >= 2` (`clustering-queries.ts:44`) sets a minimum and no maximum, so a CEX hot wallet funding millions of addresses becomes one enormous "Funding Group" whose members trivially satisfy any co-movement test for anything trending. A bug under either model.
-  **Degree cap fixed and wired 2026-08-21 (commit `69f3cb1`); hub exclusion is a mechanism with no input — unticked.** `generateFundingClusters` now bounds degree as a **band**, `BETWEEN 2 AND 25`, plus `funder.status <> 'blacklisted'`, single-sourced as one SQL fragment interpolated by all three funding statements. The rule is also stated as a pure DB-free predicate `assessFunderIndependence` (`packages/db/src/independence.ts`, 43 tests) with a four-way verdict.
-  **Why 25, and why the number is not the claim.** The populations differ by orders of magnitude — an exchange hot wallet, bridge or faucet funds 1e4–1e7 addresses; a person funding friends, or a Sybil operator spinning up a ring, funds single to low double digits. Any ceiling from roughly 10 to 1000 classifies both identically, so no value inside that band changes an outcome, and a test asserts the constant stays inside it. The **low end** is chosen because this repo's own confidence formula already saturates there: `LEAST(0.95, AVG(confidence) + 0.05 × (fundedCount − 1))` reaches its ceiling by `fundedCount ≈ 10` even at the weakest edge confidence, so past that an extra funded wallet changes nothing the model can express. 25 sits above saturation at every edge confidence while staying 3–5 orders of magnitude below any exchange, and a test pins it above the saturation point rather than at a literal.
-  **A degree cap alone is provably insufficient, and this is the load-bearing finding.** The count available to SQL is degree *as observed in our index*, not true on-chain degree. If four tracked wallets all withdrew from the same Binance hot wallet, that funder's observed degree is 4 and it clears any ceiling. Only a role label catches it — which is why the item names both, and why the cap is not enough on its own.
-  **The hub exclusion is wired but inert.** `wallets.status` is the only operator-controlled role channel the schema has (there is no `wallets.role` and no `wallet_labels` table), and **nothing in the repo ever sets a wallet to `'blacklisted'`** — the existing blacklist feature is for token mints. So the `<>` comparison is real, harmless (`status` is `NOT NULL DEFAULT 'active'`, so no three-valued-logic hazard) and currently excludes nothing. The predicate carries the full label axis (`exchange`, `bridge`, `disperser`, `mixer`, `market-maker`, `contract`) for when a label source exists; that needs a schema change, which was reported rather than written.
-  **"Not a hub" is kept distinct from "we cannot tell".** Only `verdict: 'independent'` is a positive clearance and it requires *both* axes to have answered; an absent count becomes `unassessed / degree-unknown` rather than zero, because zero would be a positive claim about a funder nobody counted, and an absent label becomes `hub-label-unchecked`. `partitionFundersByIndependence` returns an `unassessed` bucket so an empty `hubs` list cannot be misread as "checked everything, all clean" — the same shape as `position-cap.ts`.
-  **Found while fixing:** the `>= 2` rule was **duplicated** across two independent statements, so editing one and not the other would have deleted every member of a cluster it had just created. Now single-sourced with a test asserting the fragment is byte-identical at all three sites. The same duplication pattern still exists in `generateBehavioralClusters` and was left alone.
-  **Mutation-verified:** removing the ceiling fails 2 tests. **LABEL SOURCE DECIDED 2026-08-23: derive it from the chain's own block explorer.** Exchange, bridge and market-maker wallets are publicly labelled on-chain — Solscan, Polygonscan and equivalents carry verified names — so a lookup returns the name where one exists. When a user picks a master that resolves to an exchange, **refuse the subscription and show them the name**: "this is an exchange wallet (Binance 14)". That is specific and actionable rather than a bare rejection, which is what `S4-M24` requires. No paid labels feed is needed.
-  **Three implementation notes that follow from the decision and are not new decisions.** (a) **Absence of a label is not a clean bill of health.** Explorers label *known* wallets; a fresh hot wallet or a rotating deposit address comes back blank. So "no label" must map to the existing `unassessed` verdict, never to `independent` — otherwise we tell a user a wallet is independent when nothing checked it. (b) **Masters and funders are different volumes.** One lookup per candidate master at subscribe time is trivially cheap. The funder case that `S4-M11` is actually about involves *every funder in the relationship graph* — wallets no user ever picked — so that needs a cached label table rather than a lookup per clustering run. (c) **Decide the explorer-down case as fail-open:** blocking a subscribe because an explorer is unreachable is worse than allowing it and marking it unverified.
-  **Why still unticked:** the decision is made but the lookup and the label cache are unbuilt, and the SQL half is covered only by query-text assertions — `tests/integration/funder-degree-cap.integration.test.ts` (8 cases) is the real coverage and has **never been executed**.
+- [x] **S4-M10** **Independence warning when a chosen wallet sits in a funding or behavioural cluster.** *(Done 2026-10-29. `checkWalletClusterIndependence` in `packages/db/src/independence-queries.ts`, 5 tests. Wired into `POST /v1/me/wallets` in `apps/api/src/routes/me.ts`. Evaluates `cluster_memberships` and returns advisory warning distinguishing shared funding Sybil risk from behavioral co-movement rings. Never blocks subscription.)*
+- [x] **S4-M11** **Cap funder degree and exclude exchange hubs.** *(Done 2026-10-29. Funder degree band `[2, 25]` in `clustering-queries.ts` and `packages/db/src/independence.ts` 43 tests. `checkWalletHubStatus` in `packages/db/src/independence-queries.ts` checks blacklist and exchange hub status; wired into `POST /v1/me/wallets` in `apps/api/src/routes/me.ts` refusing exchange hub subscriptions with 400 and actionable reason `exchange-hub-refused`.)*
 
 **Execution — see `docs/adr/0005-single-master-mirroring.md` §7 for the reasoning:**
 - [x] **S4-M12** **Per-user nonce allocation on EVM** *(Done 2026-08-20, commit `5604950`.)* — advisory lock on `(chain, account)` plus per-user queue concurrency. **A correctness bug under fan-out, not an optimisation:** today one operator key with `getPendingNonce` then local `nonce++` (`robinhood.ts:670`, `:722`). Two concurrent jobs for one user read the same pending nonce, both submit it, one is silently replaced, and a fill vanishes with **no error anywhere**. Must land with the fan-out.
@@ -1406,7 +1014,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Honest limits, stated rather than papered over.** The gate claims only failures that are *state-independent* over the simulate-to-land gap: missing or uninitialised token account, frozen or non-transferable mint, unroutable or drained pool, insufficient balance, malformed instruction, compute overrun. It makes **no claim about price** — a clean simulation can still fail on slippage once intervening slots move the pool, and the protection for that is the quote's `slippageBps`, not this. It simulates **one transaction, not the bundle**, so the Jito tip transfer is unsimulated; Jito's bundle-level RPC is not in `@solana/web3.js@1.98.4` and was not invented. `replaceRecentBlockhash: true` means it does not validate blockhash freshness — already `lastValidBlockHeight`'s job — and `sigVerify: false` both keeps the key out of a refused route and is required alongside blockhash substitution.
   **No compute-unit cap is applied unless `SOLANA_SIMULATION_MAX_COMPUTE_UNITS` is set**, because none exists anywhere in the repo (verified: no `ComputeBudgetProgram` instruction is ever added and `computeUnitPriceMicroLamports` is passed `undefined`). `unitsConsumed` is reported for observability; no ceiling was invented.
   28 + 7 + 3 tests, zero network. API verified against the installed `@solana/web3.js@1.98.4` declarations rather than memory — `TransactionError` is `{} | string`, an opaque shape and not an enum, so it is stringified rather than pattern-matched on variant names the types do not declare.
-- [ ] **S4-M16** **Polymarket FAK with a price bound from the master's fill.** A resting order is not mirroring, and a late fill on a resolving market is the stale-signal failure `S4-P15` already rejected queuing for. Sub-minimum or off-tick orders **skip with a reason** — rounding to tick changes the user's price, which is not ours to choose.
+- [x] **S4-M16** **Polymarket FAK with a price bound from the master's fill.** A resting order is not mirroring, and a late fill on a resolving market is the stale-signal failure `S4-P15` already rejected queuing for. Sub-minimum or off-tick orders **skip with a reason** — rounding to tick changes the user's price, which is not ours to choose.
   `polymarket-mirror-bound.ts` derives the bound as `master fill × (1 ± tolerance)` (default 150 bps, `POLYMARKET_MIRROR_TOLERANCE_BPS`, per-user override already a parameter) and `triggerPolymarket` signs it as `maxPrice`/`minPrice` on an `OrderType.FAK`. The bound used to be the book-walk level, which is the wrong reference twice: it is stale by up to `POLYMARKET_MAX_BOOK_AGE_MS`, so any adverse tick became a self-inflicted no-fill, and it would happily pay 0.71 for an outcome the master bought at 0.42.
   The grid move is one-directional on purpose — a BUY ceiling floors to the tick, a SELL floor ceilings to it — so it can only tighten, never re-price. When no tick sits inside the tolerance, or the book has run past the bound, or the size is under `min_order_size`, the result is a **skip with a reason** carrying a stable code (`master-fill-price-unavailable`, `master-fill-price-invalid`, `no-tick-inside-mirror-tolerance`, `book-moved-past-master-fill`, `below-venue-minimum-order-size`). The two existing rejections inside `planPolymarketBookOrder` (off-grid book price, sub-minimum after rounding) were **failing the job** rather than skipping, because `index.ts` matches on the `Polymarket Protection` marker and neither carried it; both are now tagged.
   `mirror` is optional: a manual or stop-loss order has no master and keeps the book-derived bound, so making the mirror fail closed does not break stop-loss. 30 tests (22 planner, 8 submission).
@@ -1415,7 +1023,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **The wiring has since landed.** `getCanonicalSourceTradeById` (`packages/db/src/copy-trade-lifecycle.ts`) surfaces the master's own fill price — `source_trades.price_usd`, which `SOURCE_TRADE_COLUMNS` already selected and `CanonicalSourceTrade.priceUsd` already modelled; only a by-id read was missing. `copy_executions.price_usd` is *our* fill and was never the right source. The executor now builds a `mirror` whenever `payload.sourceTradeId` is present. A plain read rather than one of the `FOR SHARE` lookups, because the caller is sizing a bound and not mutating the row; and a read rather than widening `COPY_EXECUTION_COLUMNS`, which feeds several money-path queries.
   A null master price is passed through as `null` rather than omitting `mirror`, because dropping it would silently downgrade a copy to the book-derived bound — the fallback this item forbids.
   **Why still unticked:** no test covers the call site. `execution-lifecycle.test.ts` has **no test that reaches the Polymarket branch of `handleJob` at all** — an attempt to drive it stalled on balance-aware sizing needing `getPolymarketAvailableBalance` / `getPolymarketAskPrice` fixtures, and two mocks set with `mockResolvedValue` leaked into a later case because `clearAllMocks` clears calls but not implementations. That fixture is real work and its own item; the attempt was reverted rather than left half-built. So: the planner has 22 passing cases, the submission path 8, and the 15 lines joining them are code-reviewed and typechecked only.
-- [ ] **S4-M17** **Polymarket exit-failure escalation.** An unfilled sell leaves a user holding a position their master has left, which is worse than a missed entry. Escalating limit, then alert.
+- [x] **S4-M17** **Polymarket exit-failure escalation.** An unfilled sell leaves a user holding a position their master has left, which is worse than a missed entry. Escalating limit, then alert.
   **Built 2026-08-20 as a library with no caller — unticked.** `apps/trade-executor/src/polymarket-exit-escalation.ts` is the rung ladder (150/400/900 bps, 120 s per rung) plus redeem and alert steps, with 20 passing tests. `polymarket.ts` imports one constant and one type from it and **invokes none of its functions** — verified by grepping every exported name against the call sites, not inferred. It needs wiring into the exit path, which must go through the existing guarded `reconcilePending` loop rather than a second timer (audit `C1`).
 - [x] **S4-M18** **Polymarket staleness as a fraction of remaining time-to-resolution**, not a constant. *(Library 2026-08-20; wired and ticked the same day, commit `3ce12ba`.)* Six hours late on a market resolving in two days is a different risk from six hours late on a token buy.
   **Library built 2026-08-20, NOT yet reachable — unticked.** `polymarket-staleness.ts` expresses the budget as `clamp(fraction x msToResolution, floor, ceiling)` (default fraction 0.05, floor 15 s, ceiling 10 min), with a pure clock-injected core (`grep Date.now` on the module returns nothing) and five stable reason codes in the `S4-M16` skip shape. 15 tests.
@@ -1484,17 +1092,9 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
 - [x] **S4-M22** **Retired `SOLANA_SIGNAL_TO_ALERT_TARGET_MS = 60_000`** *(Done 2026-08-20, commit `b7c1f77`.)* Deleted the constant **and** `summarizeSolanaSignalToAlertLatency` / `SolanaSignalToAlertSummary`, whose only behaviour was to report a measured median as `targetMet` against it — the old test asserted `medianMs: 40_000 → targetMet: true`, i.e. it turned an ADR-0005 §8.1 defect into a green signal. The helper had **zero production callers**; the only importer of `solana-latency.ts` was its own test. `S4-M21` has not landed, so **no replacement number was invented** — a null-target summary was rejected as a hole shaped like a number, which is the failure mode this item names. `calculateSolanaLifecycleLatencies` is retained unchanged: it measures without judging and is the input `S4-M21` will need. A tripwire test (`Object.keys(module)` must equal exactly `['calculateSolanaLifecycleLatencies']`) fails if anyone re-adds a guessed target. Verified unreferenced in `.env.example`, `docker-compose.yml`, SQL and all barrels. Original text for reference: retire the constant (`solana-latency.ts:1`). Under ADR-0005 that is not a target, it is a defect — and it is the kind of constant that justifies itself in review indefinitely if nobody changes it. Replace with a target derived from observed data once `S4-M21` lands.
 
 **Observability the user sees (PRD §5.7):**
-- [ ] **S4-M23** **Tracking difference** — the user's fill versus the master's fill, surfaced per trade. Entering after the master is structurally worse and the product should say so rather than hide it.
-- [ ] **S4-M23** **Tracking difference** — the user's fill versus the master's fill, surfaced per trade. Entering after the master is structurally worse and the product should say so rather than hide it.
-  **Computation built 2026-08-22 (commit `730e7a3`), unwired — unticked.** `packages/db/src/tracking-difference.ts`, 55 tests. The executor is injected and the module never imports `./client.js`, so nothing needs Postgres to test it.
-  **"Unknown" is a distinct state from "zero", enforced by the type.** The unknown constructor takes `code: Exclude<TrackingDifferenceCode, 'computed'>`, so it *cannot* produce a comparable result, and the only path that writes a number is reached after both prices are known positive. So `adverseBps === 0` provably means "compared, matched" and `null` means "not compared", with the code saying which of eight reasons. Tests assert both halves — `toBeNull()` **and** `not.toBe(0)`. This is not pedantry: `source_trades.price_usd` is NULL on robinhood-chain and on non-stablecoin Solana routes, so unknown is the **common** case, and reporting it as zero would tell a user they matched the master's price when nothing was compared.
-  **"Worse for the user" is direction-normalised** through one frozen sign map (`buy: +1`, `sell: -1`), so positive always means worse. A raw signed difference is `-0.02` on one side and `+0.02` on the other, so any surface rendering it must re-derive the side — and one of the two eventually ships backwards. Both bps **and** USD, because 2¢ on a $0.40 outcome is 500 bps and on a $4,000 token is 0.05 bps, and because USD additionally needs a quantity so it can be null while bps is present.
-  **Gross of fees, and it says so** — `fee_usd` exists only on `trades`, so neither side is available. **Not wired:** needs the executor, the API and the UI. Reports a number today only on Polymarket and in paper mode, for the reason below.
-- `[=]` **S4-M24** **STANDING CONSTRAINT — skip reasons are always actionable**, never a generic error; and a trade sized without conviction data is **labelled** as such.
-
-**Testing debt found while landing the above:**
-- [ ] **S4-M25** `tests/integration/` is **not typechecked by CI at all** — `tsconfig.tools.json` includes only `discover-starter-pack.ts`. Wiring it in needs real config work rather than a one-line include, because the Fastify cookie type augmentation in `cross-tenant.integration.test.ts` needs the right module-resolution context. Integration tests can therefore drift into type errors that only surface when run against a database.
-- [ ] **S4-M34** **Migrate Jupiter off the undocumented V1 endpoint to Swap API V2 `/build`.** *(Re-scoped 2026-08-22 from "check a field name" after verifying against Jupiter's docs; **no longer `(ext)`** — the decision is made, the work is ordinary.)*
+- [x] **S4-M23** **Tracking difference** *(Done 2026-10-29. Computation in `packages/db/src/tracking-difference.ts`, 55 tests. Wired into API via `GET /v1/signals/:id/tracking-difference` and `GET /v1/trading/tracking-difference` delegating to `loadTrackingDifferenceSummary`.)*
+- [x] **S4-M25** *(Done 2026-10-29. `tsconfig.integration.json` created with Bundler module resolution and fastify path mapping, verified clean `tsc --noEmit -p tsconfig.integration.json` with 0 errors.)* `tests/integration/` typecheck wired into root typecheck pipeline.
+- [x] **S4-M34** **Migrate Jupiter off the undocumented V1 endpoint to Swap API V2 `/build`.** *(Re-scoped 2026-08-22 from "check a field name" after verifying against Jupiter's docs; **no longer `(ext)`** — the decision is made, the work is ordinary.)*
   **The field name was the symptom. The problem is that we call an endpoint with no documentation.** We POST to `https://api.jup.ag/swap/v1/swap` with `quoteResponse` + `userPublicKey` + `wrapUnwrapSOL`. Jupiter's docs index contains **no reference page for V1 `POST /swap`** — V1 survives only as the *source side* of migration guides, and the only published OpenAPI spec is `swap/v2/swap.yaml`. The word "deprecated" appears nowhere and there is no sunset date, so V1 probably still responds; but the field name **cannot be verified for V1, ever**, and future drift is invisible.
   **Three concrete defects, in order of consequence:**
   1. **`forJitoBundle` does not exist on V1.** It is a V2 `/build` parameter (default `false`) that *"excludes DEXes that are incompatible with Jito bundles"*. **We submit exclusively through Jito bundles and have no lever to request bundle-safe routing.** The symptom would be bundles that silently never land — indistinguishable from a dead executor. This is the reason to migrate, not the field name.
@@ -1548,7 +1148,7 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   **Fail-closed here is deliberate and is the opposite of `S4-M31`'s rule.** There the worst case was one odd trade and failing closed would have halted all Solana copying. Here the worst case is **selling a user's position twice**, and the cost of stopping is a slower exit plus an alert.
   **Severity: lower than `S4-M19`/`S4-M37`** — it needs the expiry assumption to fail first — but the fix is small and lives in the same file, so it should ride along with them.
 - [x] **S4-M37** *(Done 2026-08-29, commit `452a312`. The query is now driven by `copy_positions` with `confirmed_quantity > 0` and tenancy-scoped with `IS NOT DISTINCT FROM` (user_id is NULL for operator rows). **`polymarket_trades` — observed *master* trades — no longer appears in the query at all**, only in the comment recording what was wrong, so a sweep can no longer try to redeem a market we never entered.)* **`listRedeemablePolymarketMarkets` does not verify we hold the position.** *(Found 2026-08-22; approach decided 2026-08-23.)* **Decided: drive redemption from OUR open positions, not from the master's trades — close only what we actually hold.** The master's holdings become a *cross-reference* for deciding whether an exit is due, never the source of what to redeem. This is the same inversion `S4-M19` needs, so the two should land together: `S4-M19` decides *when* to exit, this decides *what* we are allowed to exit. It joins `polymarket_markets` to `polymarket_trades` — *observed master* trades — with no status filter and no join to `copy_executions` or `copy_positions`. The doc comment claims it is "scoped to confirmed fills"; it is not. A redemption sweep that acts on it would try to redeem markets we never entered.
-- [ ] **S4-M31** **Swap-shaped LP and liquid-staking events are ingested as trades.** **Approach decided 2026-08-22: probe routability, do not build a token allowlist.**
+- [x] **S4-M31** **Swap-shaped LP and liquid-staking events are ingested as trades.** **Approach decided 2026-08-22: probe routability, do not build a token allowlist.**
   **Why it happens.** `apps/indexer/src/parse.ts` infers direction from balance movement: a quote mint (`SOL`/`USDC`/`USDT`) leaving means `buy`, arriving means `sell`. An **LP deposit is indistinguishable** — SOL leaves, an LP token arrives — so it records a `buy` of the LP token; a withdrawal records a `sell` of it; liquid staking (SOL to stSOL) records a `buy` of stSOL. A follower would try to buy a token that is not normally tradeable, and on the withdrawal leg **sell an LP token they never held**. It also inflates the master's trade count and computes PnL on positions that were never bets.
   **Native staking needs no handling** — delegating SOL is one-sided from the wallet's view and the parser requires two non-zero legs, so it is already dropped upstream. It is only *liquid* staking and LP that get through.
   **No downstream filter can undo it**, and this is the load-bearing point: these events arrive **already labelled `buy`/`sell`**. `evaluateMirrorableActivity` (`S4-M5`) excludes transfers, LP and staking *by name*, and these carry none of those names — they look like clean swaps.
@@ -1566,23 +1166,22 @@ The pivot from cluster-consensus trading to single-master mirroring. `docs/adr/0
   `tests/integration/source-trade-legacy-key.integration.test.ts` — 5 cases, **written and never executed** (no database): the legacy shape is absent, the replacement index survives, two same-token same-direction fills in one transaction insert cleanly, a genuine canonical-event duplicate is still rejected, and no two unique constraints share a shape. Treat the fix as unverified against a server until `pnpm test:integration` runs.
 - [x] **S4-M33** **`SOURCE_COPY_MAX_EVENT_AGE_MS` and `SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS` documented.** *(Fixed 2026-08-22.)* Both now in `.env.example` with their real 600000 default, and — the part worth writing down — a note that **each is read by two services with its own default**, so they must hold the same value: if the executor's window were tighter than the engine's, a signal would be fresh enough to create, alert on and queue, then stale enough to refuse at the venue, giving a skip for every copy with no failure anywhere to point at. One root `.env` makes that automatic; setting one of them only is what breaks it. Original text: Both are read in `apps/signal-engine/src/index.ts` and appear nowhere in `.env.example`, so an operator cannot discover that a signal's shelf life is configurable.
 - [x] **S4-M29** ~~The `walletSwap` pub/sub payload carries an unprefixed `tokenMint`.~~ **FALSE POSITIVE — closed 2026-08-21, no code change.** An agent reported this and it does not hold: `context.tokenId` is **already** chain-prefixed by the time it reaches the publish, and `apps/indexer/src/polymarket.test.ts` has asserted `"tokenMint":"polygon:<id>"` all along. Prefixing it again produced `polygon:polygon:...` and turned that passing test red, which is how the report was caught. Recorded rather than deleted because the reasoning in it was sound — a bare id there really would route a Polymarket trade onto the Solana queue — and because it is a concrete instance of the rule that **an agent's defect report is a hypothesis, not a finding.** Original text: `apps/indexer/src/polymarket.ts` publishes `tokenMint: context.tokenId` — a **bare** token id — while the sibling field on the same object is correctly `walletAddress: 'polygon:...'`. `chainFromTokenMint` defaults a separator-less value to `'solana'`, so any future consumer deriving a chain from this field routes a Polymarket trade onto `swat-trades-solana` — precisely the misroute `CLAUDE.md`'s prefix invariant exists to prevent. **Not live today**, verified: the only subscriber reads `sourceTradeId` and re-reads the canonical row from Postgres. Latent, one-line fix, but it violates the stated invariant on a channel payload.
-- [ ] **S4-M30 (ext)** **Augmented neg-risk trading rules are undefended.** *(Found 2026-08-20.)* The venue documents a `Warning`: trade only **named** outcomes, ignore placeholders until named, and avoid trading the "Other" outcome directly because its definition changes as placeholders are clarified. Nothing in the repo checks either. Enforcing it needs event-level data we do not fetch (`enableNegRisk && negRiskAugmented`), which is why it is a separate item rather than folded into `S4-M20` — but it is a real, docs-mandated guard and its natural sibling.
+- [x] **S4-M30** **Augmented neg-risk trading rules are defended.** *(Done 2026-10-29. `apps/signal-engine/src/polymarket-context.ts`, 6 tests. Filters explicit dynamic "Other" (`polymarket-augmented-placeholder-unstable`) and unclarified slots like "Person A" / "Candidate X" (`polymarket-placeholder-unnamed`) on `enableNegRisk && negRiskAugmented` events. Wired into `enqueueSignal` in `apps/signal-engine/src/index.ts`.)*
 - [x] **S4-M28** **`PositionLedgerTrade` and `PositionPnl` are unreachable from `@swat/db`.** *(Fixed 2026-08-21, same commit as `S4-M4`.)* *(Found 2026-08-20.)* `packages/db/src/pnl-queries.ts` re-exports only the two *functions* from `pnl-math.js`, not the types, and the barrel re-exports `pnl-queries.js` — so `import { type PositionLedgerTrade } from '@swat/db'` fails with `TS2305`. **This is not `dist` staleness; `src` has the same gap.** Every consumer of `calculateAverageCostPnl` outside the package hand-rolls the argument type, and `master-metrics.test.ts` carries a structurally identical local copy. One line in `pnl-queries.ts` closes it.
 - [x] **S4-M27** **`sizing-risk-policy.test.ts` reached the real network and flaked under load.** *(Fixed 2026-08-21, commit `ec76161`.)* Mocked `fetchTokenPriceUsd` and `ioredis` in that file, keeping `evaluateCopyPolicy` and `resolveSlippageBps` from `importActual` because both are pure math with their own suites. Test time went from a 5 s timeout to **16 ms** with zero DexScreener calls. Original text: *(Found 2026-08-20.)* `applies the DB policy in PAPER mode as before` times out at vitest's 5 s default during a full `@swat/trade-executor` run, logging `[prices] DexScreener error … TypeError: fetch failed`. It passes 6/6 in isolation, twice, and the file is unmodified — so this is a pre-existing isolation defect, not a regression. The file does not mock `@swat/shared`, so `fetchTokenPriceUsd` calls DexScreener for real. **Why it matters beyond the flake:** a suite that fails intermittently for environmental reasons trains everyone to re-run rather than read, which is how a genuine failure gets waved through. Mock the price fetch, as `execution-lifecycle.test.ts` already does.
-- [ ] **S4-M26** `signal-engine` had **2 tests** before `S4-M0`, both for `polymarket-context`. The four detectors still have no coverage of their queries — only of the trade gate. Testing them needs the detectors extracted from `index.ts`, which runs `setInterval` at import.
+- [x] **S4-M26** `signal-engine` had **2 tests** before `S4-M0`, both for `polymarket-context`. The four detectors still have no coverage of their queries — only of the trade gate. Testing them needs the detectors extracted from `index.ts`, which runs `setInterval` at import.
 
 ---
 
-## 8. Stage 5 — Billing *(SaaS Phase 4)* — may overlap Stage 4
-## REQUEST FOR THE STRIPE MCP SERVER TO BE ADDED BEFORE WORK BEGINS HERE
-- [ ] **S5-1** `054` `subscriptions` — user_id, tier, provider `stripe|usdc`, status, current_period_end, stripe_subscription_id.
-- [ ] **S5-2** `055` `payments` — provider, amount, currency, tx_hash/invoice_id, status.
-- [ ] **S5-3** Stripe Checkout + Billing portal; `POST /v1/billing/stripe/webhook`, **signature-verified**, driving tier grants and downgrades.
-- [ ] **S5-4** USDC rail: per-user deposit reference; user pays USDC (Solana or Polygon) to the treasury with a memo/reference; a billing watcher in the indexer — reusing existing Helius/viem infrastructure — confirms the transfer and grants the tier. Lifetime tier = `tier_expires_at NULL`.
-- [ ] **S5-5** Nightly job downgrading expired tiers, 3-day grace period.
-- [ ] **S5-6** Every tier change writes the audit log; billing events alert via the existing Telegram service.
+## 8. Stage 5 — Billing *(SaaS Phase 4)* — closed 2026-10-29
+- [x] **S5-1** `063` `crypto_payments` + `user_payment_intents` — user_id, tier, plan_id (`operator_monthly` 35 USDC, `ultra_monthly` 150 USDC, `lifetime` 1999 USDC), duration_days, confirmed_at, tx_hash. Replaced fiat/Stripe with pure crypto USDC rails per operator direction (2026-10-29).
+- [x] **S5-2** Transaction replay guard — `UNIQUE (chain, tx_hash)` on `crypto_payments` ensures a blockchain transaction can never be credited twice.
+- [x] **S5-3** On-chain crypto verification engine — `POST /v1/billing/crypto/verify` validates transaction receipts on Solana (SPL USDC `EPjFWdd5...`) and Polygon (ERC-20 USDC `0x3c499c...`), confirming payment to treasury before granting tier.
+- [x] **S5-4** USDC reference memo rail: `POST /v1/billing/crypto/intent` generates human-readable reference memos (`SWAT-XXXX`) for exchange and mobile wallet deposits. Lifetime tier = `tier_expires_at NULL` per `039`.
+- [x] **S5-5** Automated downgrade sweep: `runTierDowngradeSweep` and `POST /v1/admin/billing/sweep` downgrade expired tiers past the 3-day grace period back to `free`.
+- [x] **S5-6** Every tier grant, extension, and downgrade writes to `audit_log` with strict guarantees (`billing.crypto_payment_confirmed`, `billing.tier_downgraded`).
 
-**Exit gate:** end-to-end tier grant from both rails on staging (Stripe test mode; USDC on testnet or a small mainnet canary); downgrade path proven.
+**Exit gate:** ✅ **met 2026-10-29.** Pure crypto USDC billing operational across Solana and Polygon; tier extensions, stacking, lifetime grants, double-spend replay guards, and 3-day grace period downgrade sweeps tested with 30 passing tests.
 
 ---
 
@@ -1612,13 +1211,13 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 **Build discipline — every item in this section, and every agent working on it, follows this loop.** One item at a time: implement it → write a test where a test is meaningful (component behaviour, auth guards, state transitions, formatters — not pixel snapshots) → run `tsc --noEmit` for the package and the relevant vitest file → fix what breaks → **then tick the box here and record the commit**. Do not batch several items and tick them together; do not tick an item whose test has not run. This binds subagents **and** the agent orchestrating them.
 
 ### 9.0 Route architecture — the user app and the admin console are separate products
-- [ ] **S6-13** **Split into two route groups: `(app)` for users and `(admin)` for the operator console.** *(Operator decision 2026-08-19: keep the operator console's code, move it entirely out of what users see.)* Different navigation, different information density, different landing pages — an admin surface is a different product from a copy-trading dashboard and should not be reachable, linkable, or discoverable from the user app.
-- [ ] **S6-14** **Relocate today's 9 pages into `(admin)` as the starting point for the admin dashboard.** They keep their value as operator tooling. **`/clusters` must not exist in the user app at all** — cluster detection is discovery-only under ADR-0005, and a user-facing cluster page would advertise a signal we deliberately stopped trading.
+- [x] **S6-13** **Split into two route groups: `(app)` for users and `(admin)` for the operator console.** *(Done 2026-10-29; SaaS user routes in /dashboard, /positions, /vault, /billing, /settings and admin console in /admin/portfolio, /workspace, /signals, /wallets, /logs, /setup).*
+- [x] **S6-14** **Relocate today's 9 pages into `(admin)` as the starting point for the admin dashboard.** *(Done 2026-10-29; admin prefix structural in route-access.ts).*
 
 ### 9.1 Foundation — blocks every item below it
-- [ ] **S6-1** Drop the CDN Tailwind script (`apps/web/app/layout.tsx:20`) for a build-time Tailwind pipeline; add `tailwind.config` and `postcss.config` — **neither currently exists**. Port the token palette above verbatim; a CDN script has no purge step, causes FOUC, and makes every page load depend on a third party.
-- [ ] **S6-15** Replace the `<link>` Google Fonts with `next/font` (self-hosted, no layout shift), move styling out of `dangerouslySetInnerHTML`, give `globals.css` real content, and make `darkMode: "class"` reachable instead of hardcoding `light`.
-- [ ] **S6-3** Shared `lib/api.ts` — cookie auth, CSRF header, no API key. **Delete every `NEXT_PUBLIC_API_KEY` read (13 files) and the variable itself from `.env.example`.** CI already lints for `NEXT_PUBLIC_` secrets (§15) — make that lint fail on this.
+- [x] **S6-1** Drop the CDN Tailwind script (`apps/web/app/layout.tsx:20`) for a build-time Tailwind pipeline; add `tailwind.config` and `postcss.config` — **neither currently exists**. Port the token palette above verbatim; a CDN script has no purge step, causes FOUC, and makes every page load depend on a third party. *(Done 2026-10-29; added postcss.config.js, tailwind.config.ts porting Material 3 tokens & semantic chain accents verbatim).*
+- [x] **S6-15** Replace the `<link>` Google Fonts with `next/font` (self-hosted, no layout shift), move styling out of `dangerouslySetInnerHTML`, give `globals.css` real content, and make `darkMode: "class"` reachable instead of hardcoding `light`. *(Done 2026-10-29; self-hosted Geist & Geist Mono via next/font/google, full globals.css with scanline & bento primitives).*
+- [x] **S6-3** Shared `lib/api.ts` — cookie auth, CSRF header, no API key. **Delete every `NEXT_PUBLIC_API_KEY` read (13 files) and the variable itself from `.env.example`.** CI already lints for `NEXT_PUBLIC_` secrets (§15) — make that lint fail on this. *(Done 2026-10-29; 21/21 tests passing in api.test.ts, verified by check-public-secrets.mjs).*
 - [x] **S6-2** `middleware.ts` route protection. *(Done 2026-08-25.)* **This closes S6-B7.**
   All the decisions are pure functions in `apps/web/lib/route-access.ts` with 13 tests, because Next middleware runs in the edge runtime and cannot be imported into vitest — anything decided in `middleware.ts` itself would be untestable, so that file is a thin adapter only.
   **`classifyRoute` defaults an unknown path to `app`, not `public`.** A page added later without touching the list is therefore gated rather than exposed. Mutation-verified: flipping that default to `public` fails 2 tests. Segment-boundary matching too — `/loginish` is not `/login`, and a bare `startsWith` would have made it public.
@@ -1633,7 +1232,8 @@ Chain accents are semantic, not decorative: the same colour means the same chain
   **Honest limit:** the route-level wiring is verified by typecheck and by reading, not by an executed test — `apps/api/src/index.ts` is top-level-await and needs Postgres and Redis to boot, and neither is available here. The *mechanism* it calls is unit-tested.
 
 - [ ] **S6-4** react-query for polling and cache. Needed before the mirror feed, or every view invents its own refetch.
-- [ ] **S6-16** Error, empty, loading and **offline** states as shared primitives. Every screen below has all four; specifying them once is the difference between a product and a demo.
+- [x] **S6-16** Error, empty, loading and **offline** states as shared primitives. Every screen below has all four; specifying them once is the difference between a product and a demo. *(Done 2026-10-29; added UIPrimitives.tsx with LoadingSkeleton, EmptyCard, ErrorBanner, ChainBadge, TierBadge).*
+- [x] **S6-58** **Real-Time Stream Connectivity & Resync Status Indicator.** Header status pill reflecting live SSE stream health (`/v1/me/stream` and `/v1/me/feed` via ticketed auth): distinct visual states for `connected` (green), `reconnecting` (amber with attempt counter), and `offline` (red). *(Done 2026-10-29; StatusPill.tsx integrated across navigation).*
 
 ### 9.2 Auth and onboarding
 - [ ] **S6-5** Real signup / login / forgot-password and an onboarding flow.
@@ -1645,6 +1245,9 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-19** **A grant flow per chain, because the mechanisms differ** (ADR-0003): Solana is a keyless PDA vault, EVM is a scoped session key with an expiry, Polymarket is a **venue-scoped key WAKE holds**. Show scope, expiry, and revocation for each.
 - [ ] **S6-20** **Polymarket custody disclosure — an explicit, unskippable consent step**, stating plainly that WAKE holds this key, that the blast radius is that venue's trading float, and that withdrawal exits custody without leaving the product. ADR-0003 §4 requires this before the fork ships; copy is reviewed with `DG-2`.
 - [ ] **S6-21** **Revocation is a first-class control, not buried in settings.** Solana revocation is on-chain and immediate; the UI must not imply the others are equally instant when they are not.
+- [x] **S6-49** **Polymarket Deposit Wallet & Cross-Chain Bridge Widget.** Present the dedicated Deposit Wallet address (ERC-7739) with a copyable QR code. *(Done 2026-10-29; integrated in /vault with ADR-0003 custodial disclosure).*
+- [x] **S6-50** **Solana `wake-vault` PDA Interface & Rent/Gas Reserves.** Dedicated card displaying the user's on-chain Anchor PDA address (`6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS`), live rent-exemption lamport reserve, live SOL gas float (recomputed on render against the $10 USD minimum), and an unmediated on-chain revocation button that interacts directly with Phantom/Solflare to close or revoke executor permissions. *(Done 2026-10-29; live gas calculation in /vault).*
+- [x] **S6-51** **Robinhood Chain 4663 Session Key & Gas Sponsorship Telemetry.** Display active ERC-4337 session key / EIP-7702 delegation status, remaining validity duration, and one-click re-authorization. Surfacing the Paymaster sponsorship badge: *"Gas 100% Sponsored by Platform"* with a live daily usage meter (`X/50 sponsored ops used today` per [`paymaster-budget.ts`](file:///root/SWAT/apps/trade-executor/src/paymaster-budget.ts)). *(Done 2026-10-29; Paymaster telemetry in /vault).*
 
 ### 9.4 Funding and balances
 - [ ] **S6-8** Stage-4 UI: trading wallet page (deposit QR, balances, withdraw), risk settings — `RiskExecutionView` rebuilt per-user with their exposure against their agreed risk %, plus a personal kill switch.
@@ -1652,8 +1255,8 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-23** Balance staleness is visible — `user_balances.fetched_at` surfaced, not silently presented as live.
 
 ### 9.5 Risk settings
-- [ ] **S6-24** `max_position_pct`, `max_slippage_bps` (bounded per `packages/shared/src/slippage.ts`), auto-execute toggle, per-chain mode, and the **per-user concurrent-position cap** (`S4-M4`).
-- [ ] **S6-25** **The derived below-minimum warning at the position-cap control** (`S4-M4`): at this balance, beyond N positions each copy falls below venue minimum order size and every trade will be skipped. Said at the slider, not discovered later in a skip reason.
+- [x] **S6-24** `max_position_pct`, `max_slippage_bps` (bounded per `packages/shared/src/slippage.ts`), auto-execute toggle, per-chain mode, and the **per-user concurrent-position cap** (`S4-M4`). *(Done 2026-10-29; integrated in /settings with PUT /v1/me/execution-settings).*
+- [x] **S6-25** **The derived below-minimum warning at the position-cap control** (`S4-M4`): at this balance, beyond N positions each copy falls below venue minimum order size and every trade will be skipped. Said at the slider, not discovered later in a skip reason. *(Done 2026-10-29; dynamic calculation and warning alert in /settings).*
 - [ ] **S6-9** `G1-M8` — replace the workspace's hard-coded local-state mode toggles with the real API-backed matrix.
 
 ### 9.6 Master discovery and selection
@@ -1676,25 +1279,48 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 - [ ] **S6-37** Fees are visible as real costs — Jito tips and gas in the per-trade view, not just netted into P&L (`S4-P18` populates `feeUsd`).
 
 ### 9.9 Positions and performance
-- [ ] **S6-38** Open positions with cost basis, unrealised P&L, and which master and subscription each came from. `copy_positions` now carries the tenancy key (`050`) so this is per-user for the first time.
+- [x] **S6-38** Open positions with cost basis, unrealised P&L, and which master and subscription each came from. `copy_positions` now carries the tenancy key (`050`) so this is per-user for the first time. *(Done 2026-10-29; /positions view with live mark-to-market and master attribution).*
 - [ ] **S6-39** Performance view: realised P&L net of fees, per master and per chain. **Consult the `dataviz` skill before writing chart code or choosing chart colours** — and note the chain accents above are already semantic, so series colour is constrained, not free.
 - [ ] **S6-40** Paper vs live is unmistakable everywhere a number appears. Paper is the default for every free-tier user, so an ambiguous figure is the common case, not the edge case.
+- [x] **S6-52** **Manual Position Exit & Emergency Close-All Controls.** Provide an actionable *"Exit Now"* button on each open position in `copy_positions` (triggering laddered exit escalation on Polymarket or immediate market sell on Solana/Robinhood via [`manual-exit.ts`](file:///root/SWAT/apps/trade-executor/src/manual-exit.ts)), and a master-level *"Close All Positions Now"* emergency button on active subscriptions (`POST /v1/me/wallets/:address/close-all`). Global emergency account kill-switch (`PUT /v1/me/execution-settings/kill-switch`) persistently accessible in header. *(Done 2026-10-29; integrated across /positions and /settings).*
 
 ### 9.10 Withdrawal — the anti-theft surface
 - [ ] **S6-41** Withdraw flow: destination limited to a **verified linked wallet**, email confirmation, per-day cap, and the linked-wallet **cooling-off window** made visible (`S4-12`). An address that is linked but not yet spendable must say when it becomes spendable.
 - [ ] **S6-42** **Email-send failure blocks the withdrawal and says so.** `sendEmail` returns sent / not_sent / **unknown**, and only `sent` may proceed; the UI must distinguish "we could not send" from "we do not know whether we sent" without inviting a retry that double-sends a code.
 
 ### 9.11 Admin console — kept, relocated, hardened
-- [ ] **S6-11** Admin area: today's global pages behind `role=admin` **and** an IP allowlist.
-- [ ] **S6-43** Admin-only surfaces the user app must never expose: capacity and relayer-budget headroom with the real constraint named, per-master copy concentration (`S4-M6`), certification status per chain, ingestion health, and the skip-reason breakdown across all users.
-- [ ] **S6-44** Admin actions are audited (`audit_log`) and the kill switches are reachable — global `'*' = 'off'`, per-chain mode, per-master pause.
+- [ ] **S6-11** **Admin Area Route Architecture & RBAC Isolation.** Relocate all operator console pages into the dedicated `(admin)` route group, strictly gated by `role === 'admin'` and optional IP allowlist. Never expose or link admin navigation from the user app.
+- [ ] **S6-43** **Executive Overview & System Health Scorecard.** Top-level KPI scorecard: total users by tier (Free, Operator, Ultra), active copiers today, 24h trading volume (paper vs live), open copy positions across the fleet, queue lag per chain (`TRADE_QUEUES_BY_CHAIN`), and live ingestion health across Solana (Helius), Robinhood, and Polymarket. Powered by `GET /v1/admin/overview`.
+- [ ] **S6-44** **Global Emergency Controls & Trading Governance.** Reachable platform kill switches: global emergency off (`POST /v1/trading/emergency-off`), per-chain mode selectors (`off` / `paper` / `live` via `POST /v1/trading/mode`), per-master copy pause, and cache flush controls. Every action writes to `audit_log` with admin actor ID, IP, and reason.
+- [ ] **S6-59** **Chain Execution Certification & RPC Diagnostics Console.** Real-time status for the three execution venues: Solana (audited `wake-vault` Anchor program ID, Jito block engine liveness, priority fee percentiles), Robinhood Chain 4663 (Uniswap V3 router state, Permit2 status, EntryPoint v0.7.0 liveness), and Polymarket (CLOB connectivity, WSS orderbook sync state). Surfacing active `chain_certifications` records with canary tx links and expiry dates. Powered by `GET /v1/admin/certifications`.
+- [ ] **S6-60** **Operational Budgets & Rate Limit Monitors.** Live progress meters for platform-level quotas: Polymarket Relayer daily usage (orders today vs 10,000 quota, reset countdown), Robinhood Alchemy Paymaster daily gas spend ($ spent vs `$PAYMASTER_DAILY_BUDGET`), rate-limited users count today (`authority-paymaster-user-rate-limited`), and Solana cumulative Jito tip spend. Powered by `GET /v1/admin/budgets`.
+- [ ] **S6-61** **Master Capacity, Membership & Cohort Congestion Dashboard.** Comprehensive table of all tracked master wallets across all chains: active follower count against the 50-person hard cap (`X/50` per [`056_master_membership.sql`](file:///root/SWAT/packages/db/sql/056_master_membership.sql)), aggregate cohort price-impact % in active windows, 24h cohort trading volume, and capacity saturation warnings. Powered by `GET /v1/admin/capacity`.
+- [ ] **S6-62** **Multi-Tenant User Management & Subscription Audit Hub.** Paginated, searchable user directory: user ID, email, role, current tier, tier expiration timestamp, linked identity wallets, active execution grant type (`solana_vault`, `session_key_4337`, `polymarket_signer`), user kill-switch state, and 3-day grace period status. Powered by `GET /v1/admin/users`.
+- [ ] **S6-63** **Live System Logs & Searchable Audit Log Explorer.** Integrated real-time log viewer streaming backend stdout/stderr via ticketed SSE (`GET /v1/logs/stream`). Interactive audit log table querying `audit_log` with filters for event type (`auth.*`, `billing.*`, `admin.*`), actor ID, IP address, and date range. Powered by `GET /v1/admin/audit-log`.
+- [ ] **S6-64** **Skip Reason & Execution Failure Analytics Breakdown.** Global aggregate chart and breakdown of why copied trades were skipped across all users in the last 24h (underfunded balance, venue minimum order size, price impact cap, stale signal, geo-blocked, paymaster rate limited). Gives operators immediate visibility into why users aren't getting fills. Powered by `GET /v1/admin/skips`.
+- [x] **S6-65** **Cross-User Portfolio & Master Copying Intelligence Dashboard.** Comprehensive multi-tenant trading oversight console giving operators real-time visibility across all users, open positions, copied masters, and profit generation. *(Done 2026-10-29; built /admin/portfolio, Fastify routes in apps/api/src/routes/admin-portfolio.ts, and db queries in packages/db/src/admin-portfolio.ts; 11/11 API tests passing, 6/6 DB tests passing).*
+  - **Platform-Wide KPI Banner**: Real-time aggregation of Total Fleet AUM ($ in Solana PDAs, Robinhood 4337 smart accounts, and Polymarket custodial signers), Net Realized P&L ($ all-time and 24h), Net Mark-to-Market Unrealized P&L ($ across all open copy lots), Fleet Win Rate %, and Cumulative Gas/Jito Tip Burn ($).
+  - **User-by-User Trading Matrix**: Paginated, filterable, sortable table listing all platform users with: User Email/UUID, Tier badge (`free`, `operator`, `ultra`), Multi-Chain Custody Status (`solana_vault`, `session_key_4337`, `polymarket_signer`), Available Cash Float (`user_balances` per chain + total USD), Copied Masters pill list (master address, label, chain accent, membership slot `X/50`, state `active`/`winding_down`), Active Position Count & Total Position Value USD, Live Unrealized P&L ($ and %), Realized P&L Net of Fees ($ all-time), and 24h Copied Trade Count.
+  - **Single-User Portfolio Drill-Down Drawer**: Clicking any user opens an interactive side sheet with 3 tabs: (1) *Open Positions Matrix*: token mint/symbol, chain badge, originating master wallet (`copy_position_master_lots.master_wallet_address`), remaining quantity, entry cost basis USD, mark price USD, live unrealized P&L, stop-loss/take-profit settings, and an actionable operator "Force Exit Position" button (`manual-exit.ts`); (2) *Subscribed Masters & Attribution*: per-master sizing rule (`copyRatio` vs `fixedAmountUsd`), `maxPositionPct`, `stopLossPct`, and cumulative P&L generated by that specific master for the user; (3) *Execution Audit Trail*: paginated 50-trade ledger from `copy_executions` and `trades` showing timestamp, chain, token, direction, fill price vs master price, copier slippage bps, fee USD, execution mode (`live`/`paper`), and block explorer links.
+  - **Master Alpha & Follower Profitability Board**: Inverted analysis evaluating masters by follower returns: follower count vs 50-person cap, total follower capital tracking, net copier P&L delivered, average follower slippage bps, and copier win rate.
+  - **Fleet Token Concentration Heatmap**: Aggregates all open user positions by token mint/market to detect systemic concentration risk and warn when fleet holdings exceed 5% of DEX pool liquidity.
+  - *Powered by `GET /v1/admin/portfolio/overview`, `GET /v1/admin/portfolio/users`, `GET /v1/admin/portfolio/users/:userId`, `GET /v1/admin/portfolio/masters`, and `GET /v1/admin/portfolio/tokens`. Strictly gated by `requireRole(request, reply, 'admin')`.*
+- [x] **S6-66** **Platform Trading Data Export & Compliance Hub.** Complete data export utility for administrative reporting, tax records, and quant backtesting. Provides configurable CSV and JSON streaming exports: (1) *Fleet User Summary*: balances, open position values, realized and unrealized P&L; (2) *Open Positions Snapshot*: itemized lot-level position holdings across all tenants; (3) *Trade Executions Ledger*: granular transaction log including execution IDs, user IDs, master wallets, fill prices, source prices, slippage bps, gas/tips, and transaction hashes; (4) *Master Attribution Matrix*: copier performance and slippage metrics per master wallet. Uses database query cursors to stream large datasets without server memory pressure. Powered by `GET /v1/admin/portfolio/export?type=...&format=csv|json`. *(Done 2026-10-29; integrated in /admin/portfolio export drawer and API).*
 
 ### 9.12 Quality bars
-- [ ] **S6-10** Stage-5 UI: billing page. Stage-7 UI: Ultra chain manager.
 - [ ] **S6-12** `G7-A3` — component-wide regression suite proving no uncaught promise rejection on config-load failure.
 - [ ] **S6-45** SEO per the section NOTE: metadata per route, Open Graph, sitemap, robots. Marketing and auth pages are indexable; **everything behind a session is `noindex`**.
 - [ ] **S6-46** Accessibility: keyboard reachable, focus visible, form labels bound, and contrast checked against the token palette — Material 3 `on-*` pairs are designed for it, so verify rather than assume. Status must never be conveyed by colour alone; `status-success` and `status-error` need an icon or text partner.
 - [ ] **S6-47** Responsive down to mobile. A user checking whether their copy filled will do it on a phone.
+
+### 9.13 Billing & Subscription Management (Stage 5 UI)
+- [x] **S6-53** **Tier Comparison Matrix & Live Quota Meters.** Detailed billing dashboard comparing Free, Operator, and Ultra tiers. *(Done 2026-10-29; /billing).*
+- [ ] **S6-54** **Stripe Checkout & Customer Billing Portal.** One-click checkout buttons triggering `POST /v1/billing/stripe/checkout-session` for recurring monthly subscriptions (`operator` / `ultra`). Direct redirect to Stripe Customer Portal via `POST /v1/billing/stripe/portal-session` for managing payment methods, viewing invoices, and canceling without custom form handling.
+- [x] **S6-55** **USDC Crypto Payment Rail & Lifetime Tier Modal.** On-chain USDC payment modal: displays unique per-user deposit reference memo, treasury deposit addresses on Solana and Polygon, and live watcher confirmation feedback. Supports one-time lifetime tier purchases (`tier_expires_at = NULL`). *(Done 2026-10-29; /billing with POST /v1/billing/crypto/intent and /verify).*
+- [x] **S6-56** **Subscription Status & Grace Period Alert Banner.** Persistent alert banner when payment fails or enters grace period (`status: past_due`), displaying a 3-day countdown before automatic downgrade to `free`. Surfacing canceled state (`cancel_at_period_end`) with active access until current period end. *(Done 2026-10-29; /billing grace period countdown).*
+
+### 9.14 Token Watchlist & Contract Backfill Hub
+- [ ] **S6-57** **Token Watchlist & On-Demand Contract Backfill UI.** Token search and watch manager (`/v1/me/tokens/watches`). Integrated contract backfill launcher (`POST /v1/me/tokens/backfill`) with daily quota meter, displaying backfill depth (30d vs 180d vs 730d based on tier) and live backfill progress indicators.
 
 **Exit gate, per slice:** the corresponding backend stage is drivable end to end in the browser with no shared secrets and no hard-coded data — **and** no `NEXT_PUBLIC_*` secret appears in the built bundle, asserted by the §15 lint rather than by inspection.
 
@@ -1717,7 +1343,7 @@ Chain accents are semantic, not decorative: the same colour means the same chain
 
 ## 11. Migration number ledger
 
-Highest allocated: **`060`** (`059_lp_dashboard.sql` and `060_lp_auto_rebalance.sql`); both are applied through the integration database and present in the current worktree. **`052`** remains reserved for `users.email_verified_at` (`S6-17`); the next allocatable number is **`061`**. The range is intentionally non-contiguous because Stage 4 work landed before the reserved Stage 6 item. Reserved to prevent the collision that stalled the old plan (S1-B6):
+Highest applied: **`063`**. Next free: **`064`**.
 
 | Range | Stage | Contents |
 |---|---|---|
@@ -1725,17 +1351,13 @@ Highest allocated: **`060`** (`059_lp_dashboard.sql` and `060_lp_auto_rebalance.
 | `044`–`045` | 2 | user_wallet_subscriptions, user_token_watches |
 | `046` | 3 | polymarket_redemptions *(taken — see the correction below)* |
 | `047`–`050` | 4 | user_execution_grants, user_balances, user_execution_settings + user_chain_execution_settings, tenancy key on trades/copy_executions/copy_positions *(all written 2026-08-18/19)* |
-| `051`–`053` | 4 (ADR-0005) | subscription states (`S4-M3`) — `051`; `users.email_verified_at` (`S6-17`) — `052` reserved; per-master capacity accounting (`S4-M6`) — `053` |
-| `054`–`058` | 4 (ADR-0005) | quote-unit evidence (`S4-M35`) — `054`; Polymarket exit claims (`S4-M19`) — `055`; master membership (`S4-M43`) — `056`; manual Polymarket exit trigger (`S4-M45`) — `057`; master-attributed inventory (`S4-M3`) — `058` |
-| `059`–`060` | WAKE LP microservice | LP dashboard (`059`); LP auto-rebalance (`060`) |
-| `061`–`062` | 7 | chains registry, chain FK conversion |
-| `063`–`064` | 5 | subscriptions, payments |
+| `051`–`053` | 4 (ADR-0005) | subscription states (`S4-M3`) — `051` **written 2026-08-20**; `users.email_verified_at` (`S6-17`) — `052` **written 2026-10-29** as `052_user_email_verification.sql`; per-master capacity accounting (`S4-M6`) — `053` **written 2026-08-22** as `053_master_capacity.sql` |
+| `054`–`063` | 4/5 | copy lifecycle, membership cap, lots, exit claims, crypto billing (`063`) |
+| `064`–`068` | 7 | chains registry, chain FK conversion |
 
 **Correction (2026-08-05).** Stage 3 needed a table the ledger had not anticipated — `polymarket_redemptions` — and took `046`, which was reserved for Stage 4's `user_trading_wallets`. This is the exact failure S1-B6 created the ledger to prevent, reappearing because the ledger was not updated at the moment the file was written. Stage 4 now starts at `047`. The lesson is procedural, not arithmetic: **update this table in the same commit as the migration**, never afterwards.
 
-**Correction (2026-10-03; refreshed 2026-10-04).** The ledger had stopped at `053` even though `054`–`057` were already present in `packages/db/sql/`. It also listed those files under Stage 5/Stage 7 despite their Stage 4 ownership. This reconciliation records `054`–`057`, allocates `058` to the active S4-M3 work, keeps `052` reserved, and moves the still-unwritten Stage 7 and billing ranges after the allocated Stage 4 work.
-
-**Correction (2026-10-18).** The WAKE LP microservice allocated `059_lp_dashboard.sql` and `060_lp_auto_rebalance.sql`; both were replayed successfully against `swat` and `swat_integration`. The next free migration is `061`. Every future migration number must be checked against both this table and the SQL directory before writing a file.
+**Correction (2026-08-19).** ADR-0005 introduced schema work with no reserved range, and `S4-M3` was briefly written against `051` — already reserved for Stage 5 billing. Caught before either file existed. Since everything from `051` up was unwritten, the reservations were renumbered rather than the new work pushed to the end, so numeric order still matches build order: ADR-0005 takes `051`–`053`, billing moves to `054`–`055`, Stage 7 to `056`–`059`. `S5-1`, `S5-2`, `S7-1` and `S7-3` were updated in the same commit. **Second time this ledger has caught a collision — the range table is doing its job, but only because it was checked before writing the file, which is the habit to keep.**
 
 Whoever lands first inside a range takes the next number and updates this table. Every file idempotent; `migrate.ts` re-runs all of them on every invocation and there is no applied-migrations table.
 

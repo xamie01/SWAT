@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import '@fastify/cookie';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 import {
@@ -70,6 +71,7 @@ export interface AuthRouteOptions {
   /** Origin this server accepts sign-in messages for. Bound into every nonce. */
   readonly domain: string;
   readonly uri: string;
+  readonly allowedOrigins?: readonly string[];
 }
 
 function publicUser(user: UserRecord) {
@@ -98,9 +100,12 @@ export async function registerAuthRoutes(
   ): Promise<void> {
     const session = await createSession({ userId: user.id, ip, userAgent });
     const csrf = issueCsrfToken();
+    const isSecure = process.env.COOKIE_SECURE !== undefined
+      ? process.env.COOKIE_SECURE === 'true'
+      : (options.isProduction && (reply.request.protocol === 'https' || reply.request.headers['x-forwarded-proto'] === 'https'));
     reply.setCookie(SESSION_COOKIE, session.token, {
       httpOnly: true,
-      secure: options.isProduction,
+      secure: isSecure,
       // Lax, not Strict: the wallet-linking flow can return the user via a
       // top-level cross-site navigation, which Strict would strip the cookie
       // from. The double-submit CSRF token covers what Lax does not.
@@ -113,7 +118,7 @@ export async function registerAuthRoutes(
       // header. That is the "double submit"; secrecy is not what makes it work,
       // same-origin read access is.
       httpOnly: false,
-      secure: options.isProduction,
+      secure: isSecure,
       sameSite: 'lax',
       path: '/',
       expires: session.expiresAt
@@ -222,9 +227,32 @@ export async function registerAuthRoutes(
     const address = normaliseAddress(parsed.data.chainKind, parsed.data.address);
     const nonce = generateNonce();
     const issuedAt = new Date().toISOString();
+
+    const rawOrigin = (typeof request.headers.origin === 'string' && request.headers.origin.trim().length > 0)
+      ? request.headers.origin.trim()
+      : null;
+    let requestDomain = options.domain;
+    let requestUri = options.uri;
+    if (rawOrigin) {
+      // Validate rawOrigin against configured allowlist or options.uri (H-04)
+      const isAllowed = options.allowedOrigins && options.allowedOrigins.length > 0
+        ? options.allowedOrigins.includes(rawOrigin)
+        : rawOrigin === options.uri;
+
+      if (isAllowed || !options.isProduction) {
+        try {
+          const u = new URL(rawOrigin);
+          requestDomain = u.host;
+          requestUri = `${u.protocol}//${u.host}`;
+        } catch {
+          // Fallback to options default
+        }
+      }
+    }
+
     const message = buildSignInMessage({
-      domain: options.domain,
-      uri: options.uri,
+      domain: requestDomain,
+      uri: requestUri,
       address,
       nonce,
       issuedAt,
@@ -234,7 +262,7 @@ export async function registerAuthRoutes(
     // cannot be spent proving control of another.
     await redis.set(
       `swat:siwe:${nonce}`,
-      `${parsed.data.chainKind}:${address}`,
+      JSON.stringify({ chainKind: parsed.data.chainKind, address, domain: requestDomain, uri: requestUri }),
       'EX',
       NONCE_TTL_SECONDS
     );
@@ -263,7 +291,26 @@ export async function registerAuthRoutes(
     // pair would allow.
     const bound = await redis.getdel(`swat:siwe:${nonce}`);
     if (!bound) return reply.code(410).send({ error: 'Nonce expired or already used' });
-    if (bound !== `${parsed.data.chainKind}:${address}`) {
+
+    let boundChain = parsed.data.chainKind;
+    let boundAddr = address;
+    let expectedDomain = options.domain;
+    let expectedUri = options.uri;
+
+    try {
+      const parsedBound = JSON.parse(bound);
+      boundChain = parsedBound.chainKind;
+      boundAddr = parsedBound.address;
+      expectedDomain = parsedBound.domain || options.domain;
+      expectedUri = parsedBound.uri || options.uri;
+    } catch {
+      // Legacy string format fallback
+      if (bound !== `${parsed.data.chainKind}:${address}`) {
+        return reply.code(401).send({ error: 'Invalid signature' });
+      }
+    }
+
+    if (boundChain !== parsed.data.chainKind || boundAddr !== address) {
       return reply.code(401).send({ error: 'Invalid signature' });
     }
 
@@ -273,8 +320,8 @@ export async function registerAuthRoutes(
       message: parsed.data.message,
       signature: parsed.data.signature,
       expectedNonce: nonce,
-      expectedDomain: options.domain,
-      expectedUri: options.uri
+      expectedDomain,
+      expectedUri
     });
     if (!result.ok) {
       await recordAuditEvent({

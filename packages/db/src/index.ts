@@ -8,6 +8,7 @@ export * from './trades.js';
 export * from './relationships.js';
 export * from './pnl-queries.js';
 export * from './scoring-queries.js';
+export * from './polymarket-perps.js';
 export * from './discovery-queries.js';
 export * from './clustering-queries.js';
 export * from './polymarket.js';
@@ -25,6 +26,7 @@ export * from './evm-nonce.js';
 export * from './position-cap.js';
 export * from './forward-only.js';
 export * from './independence.js';
+export * from './independence-queries.js';
 export * from './master-capacity.js';
 /**
  * Active-follower counts per (master, chain) -- the `activeFollowerCount` input
@@ -43,6 +45,8 @@ export * from './auth-wallets.js';
 export * from './audit-log.js';
 export * from './seed-admin.js';
 export * from './subscriptions.js';
+export * from './lot-allocation.js';
+export * from './close-all.js';
 
 /**
  * LP Dashboard (migration `059`, `apps/lp`). Pool discovery cache, per-user
@@ -100,3 +104,7 @@ export * from './fanout-candidates.js';
  * pure decider; the eviction rule lives in `selectPolymarketBookSubscriptions`.
  */
 export * from './polymarket-book-subscriptions.js';
+export * from './billing.js';
+export * from './admin-portfolio.js';
+export * from './scoring-queries.js';
+export * from './polymarket-perps.js';

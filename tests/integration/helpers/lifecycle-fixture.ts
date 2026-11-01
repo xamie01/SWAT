@@ -94,6 +94,27 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
       sourceValues
     ],
     [
+      'copy position lot reductions',
+      `DELETE FROM copy_position_master_lot_reductions reduction
+       USING copy_position_master_lots lot, copy_positions position
+       WHERE reduction.lot_id = lot.id
+         AND lot.position_id = position.id
+         AND position.target_account = $1
+         AND position.chain = $2
+         AND position.token_mint = $3`,
+      [targetAccount, fixture.chain, tokenMint]
+    ],
+    [
+      'copy position master lots',
+      `DELETE FROM copy_position_master_lots lot
+       USING copy_positions position
+       WHERE lot.position_id = position.id
+         AND position.target_account = $1
+         AND position.chain = $2
+         AND position.token_mint = $3`,
+      [targetAccount, fixture.chain, tokenMint]
+    ],
+    [
       'copy position applications',
       `DELETE FROM copy_position_applications application
        USING copy_executions execution, source_trades source

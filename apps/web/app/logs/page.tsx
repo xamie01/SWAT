@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { AdminNav } from '../../components/AdminNav.js';
 import { api, ApiError, resolveApiBase } from '../../lib/api.js';
 import { describeApiError } from '../../lib/api-error-message.js';
 
@@ -25,6 +26,58 @@ function apiBase(): string {
       ? null
       : { protocol: window.location.protocol, hostname: window.location.hostname }
   );
+}
+
+function formatLogMessage(raw: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const msg = parsed.msg || parsed.message || '';
+      
+      if (parsed.req && parsed.req.method) {
+        return `--> ${parsed.req.method} ${parsed.req.url} (from: ${parsed.req.remoteAddress || 'local'})`;
+      }
+      if (parsed.res && parsed.res.statusCode) {
+        const ms = parsed.responseTime ? ` in ${Math.round(parsed.responseTime)}ms` : '';
+        return `<-- ${parsed.res.statusCode} ${msg || 'OK'}${ms}`;
+      }
+      if (parsed.err || parsed.error) {
+        const errObj = parsed.err || parsed.error;
+        const errMsg = typeof errObj === 'string' ? errObj : (errObj.message || JSON.stringify(errObj));
+        return `[ERROR] ${msg ? msg + ': ' : ''}${errMsg !== '{}' ? errMsg : 'Exception encountered'}`;
+      }
+      
+      const extra = { ...parsed };
+      delete extra.msg;
+      delete extra.message;
+      delete extra.level;
+      delete extra.time;
+      delete extra.pid;
+      delete extra.hostname;
+      delete extra.reqId;
+      delete extra.req;
+      delete extra.res;
+      delete extra.responseTime;
+      delete extra.v;
+
+      const keys = Object.keys(extra);
+      if (keys.length > 0) {
+        const details = keys
+          .map((k) => {
+            const val = typeof extra[k] === 'object' ? JSON.stringify(extra[k]) : String(extra[k]);
+            return `${k}=${val}`;
+          })
+          .join(' ');
+        return msg ? `${msg} | ${details}` : details;
+      }
+      return msg || JSON.stringify(parsed);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
 }
 
 const SERVICE_COLORS: Record<string, string> = {
@@ -182,14 +235,16 @@ export default function LogsPage() {
   });
 
   return (
-    <main style={{ maxWidth: '100%', padding: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>System Logs</h1>
-          <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>
-            Real-time live streaming logs from the SWAT backend microservices.
-          </p>
-        </div>
+    <div className="min-h-screen bg-background text-on-background antialiased font-sans">
+      <AdminNav />
+      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">System Logs</h1>
+            <p className="text-body-sm text-on-surface-variant mb-4">
+              Real-time live streaming logs from the SWAT backend microservices.
+            </p>
+          </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
           {status === 'connected' && <span className="badge success" style={{ background: 'rgba(16, 185, 129, 0.1)' }}>● Stream Live</span>}
@@ -320,6 +375,7 @@ export default function LogsPage() {
           borderRadius: '10px',
           height: '60vh',
           overflowY: 'auto',
+          overflowX: 'auto',
           padding: '1rem',
           fontFamily: 'Consolas, Monaco, "Courier New", Courier, monospace',
           fontSize: '0.85rem',
@@ -390,8 +446,8 @@ export default function LogsPage() {
                 )}
 
                 {/* Message */}
-                <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                  {log.message}
+                <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1, fontFamily: 'monospace' }}>
+                  {formatLogMessage(log.message)}
                 </span>
               </div>
             );
@@ -400,5 +456,6 @@ export default function LogsPage() {
         <div ref={terminalEndRef} />
       </div>
     </main>
-  );
+  </div>
+);
 }

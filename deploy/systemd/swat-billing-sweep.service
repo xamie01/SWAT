@@ -1,0 +1,17 @@
+[Unit]
+Description=SWAT / WAKE Nightly Subscription Tier Downgrade Sweep
+After=network.target postgresql.service pgbouncer.service
+
+[Service]
+Type=oneshot
+User=swat
+WorkingDirectory=/root/SWAT
+Environment=NODE_ENV=production
+EnvironmentFile=/root/SWAT/.env
+ExecStart=/usr/bin/node /root/SWAT/apps/api/dist/cron/billing-sweep.js
+
+# Sandboxing
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
