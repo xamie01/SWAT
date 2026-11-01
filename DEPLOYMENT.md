@@ -24,6 +24,7 @@
 9. [Non-Custodial Architecture & Security Model](#9-non-custodial-architecture--security-model)
 10. [Operational Runbooks & Incident Response](#10-operational-runbooks--incident-response)
 11. [Smoke Testing & Health Verification](#11-smoke-testing--health-verification)
+12. [Self-Hosted CI/CD (Woodpecker CI)](#12-self-hosted-cicd-woodpecker-ci)
 
 ---
 
@@ -595,3 +596,33 @@ For full regression testing across the entire monorepo:
 taskset -c 0,1 pnpm test
 ```
 All 174 test files and 2,780+ unit and integration tests must pass cleanly.
+
+---
+
+## 12. Self-Hosted CI/CD (Woodpecker CI)
+
+Wake Protocol uses **Woodpecker CI** for lightweight, self-hosted, container-native continuous integration directly on the server, replacing GitHub Actions with zero cloud minute limits.
+
+### Architecture & Resource Usage
+- **Server**: `woodpecker-server` (~18 MB RAM at idle) provides the Web UI and GitHub webhook listener.
+- **Agent**: `woodpecker-agent` (~7 MB RAM at idle) executes pipeline steps inside isolated Docker containers.
+- **Total Footprint**: Under 25 MB RAM idle.
+- **Access URL**: [http://75.119.151.184:8000](http://75.119.151.184:8000)
+
+### Configuration & Service Management
+Configuration lives in `/opt/woodpecker/docker-compose.yml` and `/opt/woodpecker/.env`.
+
+```bash
+# Check status
+docker compose -f /opt/woodpecker/docker-compose.yml ps
+
+# View logs
+docker compose -f /opt/woodpecker/docker-compose.yml logs -f
+
+# Restart CI services
+docker compose -f /opt/woodpecker/docker-compose.yml restart
+```
+
+### Pipeline Specification
+Pipelines are defined in [`.woodpecker.yaml`](./.woodpecker.yaml). On every push or pull request to `main`, Woodpecker spins up dedicated `postgres:17-alpine` and `redis:7-alpine` service containers, executes database migrations, runs typecheck, and executes the unit and integration test suites.
+
