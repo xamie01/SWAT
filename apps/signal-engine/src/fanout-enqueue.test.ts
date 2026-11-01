@@ -278,7 +278,7 @@ describe('queue resolution', () => {
   });
 
   it('refuses an unsupported chain prefix rather than defaulting', () => {
-    expect(() => planFanoutTradeJobs(jobInput({ tokenMint: 'ethereum:0xdead' })))
+    expect(() => planFanoutTradeJobs(jobInput({ tokenMint: 'avalanche:0xdead' })))
       .toThrow(/Unsupported trade chain/);
   });
 

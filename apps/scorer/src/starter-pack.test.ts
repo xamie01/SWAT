@@ -38,7 +38,7 @@ describe('starter pack input validation', () => {
     expect(() => parseStarterPackWallets(JSON.stringify(['not-a-wallet']), 'solana')).toThrow(
       /valid solana address/
     );
-    expect(() => parseWalletChain('ethereum')).toThrow(/WALLET_CHAIN/);
+    expect(() => parseWalletChain('avalanche')).toThrow(/WALLET_CHAIN/);
   });
 
   it('resolves the default starter-pack path from the module location', () => {

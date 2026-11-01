@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Chain, RawIngestionHealth } from '@swat/shared';
+import { INGESTION_CHAINS, type Chain, type RawIngestionHealth } from '@swat/shared';
 import {
   checkIngestionHealth,
   formatIngestionOpsMessage
@@ -26,11 +26,9 @@ function rowsWith(
   target: RawIngestionHealth
 ): RawIngestionHealth[] {
   const healthyEvent = '2026-07-19T11:59:00.000Z';
-  return [
-    row('solana', healthyEvent),
-    row('polygon', healthyEvent),
-    row('robinhood-chain', healthyEvent)
-  ].map((item) => item.chain === target.chain ? target : item);
+  return INGESTION_CHAINS.map((chain) =>
+    chain === target.chain ? target : row(chain, healthyEvent)
+  );
 }
 
 function createStatefulReservations() {
