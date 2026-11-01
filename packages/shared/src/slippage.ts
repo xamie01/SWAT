@@ -29,7 +29,10 @@ import type { Chain } from './types.js';
 export const DEFAULT_SLIPPAGE_BPS: Readonly<Record<Chain, number>> = {
   solana: 1500,
   polygon: 300,
-  'robinhood-chain': 300
+  'robinhood-chain': 300,
+  base: 300,
+  ethereum: 300,
+  bsc: 300
 } as const;
 
 /**

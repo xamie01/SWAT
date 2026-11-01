@@ -1,23 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, ApiError } from '../../lib/api.js';
 
-/**
- * Real login against POST /v1/auth/login (checklist S6-3 / S6-5 partial).
- *
- * Replaces the previous behaviour, which was that `/` simply pushed the visitor
- * to `/workspace` with no credential of any kind -- the console was open to
- * anyone who could reach the port, and every request it made carried a shared
- * key baked into the JavaScript bundle.
- *
- * The session is established entirely by cookies the API sets on the response.
- * This component never sees, stores or forwards a token, which is the point:
- * there is nowhere for a secret to leak from because the client holds none.
- */
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get('next');
@@ -33,15 +21,9 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await api.post('/v1/auth/login', { email, password });
-      // A relative path only. `next` arrives from the query string, so treating
-      // it as a URL would let a crafted link bounce a freshly-authenticated
-      // operator to an attacker's host.
       const destination = next && next.startsWith('/') && !next.startsWith('//') ? next : '/workspace';
       router.push(destination);
     } catch (caught) {
-      // The API returns an identical body for unknown-email and wrong-password,
-      // and burns a matching argon2 verify so the timing matches too. Echoing its
-      // message rather than elaborating keeps that property intact.
       setError(
         caught instanceof ApiError
           ? caught.status === 401
@@ -111,15 +93,15 @@ export default function LoginPage() {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
-
-        {/*
-          No signup link yet, deliberately. `POST /v1/auth/signup` exists, but a
-          page for it is checklist S6-5 and linking to a route that does not
-          resolve is worse than not offering it. The first admin comes from
-          `pnpm --filter @swat/db seed:admin`, not from this form -- signup
-          creates a plain `user`, which cannot reach the operator console.
-        */}
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center font-mono text-xs">Loading sign-in...</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

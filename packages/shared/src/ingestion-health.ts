@@ -3,7 +3,10 @@ import type { Chain } from './types.js';
 export const INGESTION_CHAINS: readonly Chain[] = [
   'solana',
   'polygon',
-  'robinhood-chain'
+  'robinhood-chain',
+  'base',
+  'ethereum',
+  'bsc'
 ];
 
 export const INGESTION_HEALTH_POLICY: Record<
@@ -12,7 +15,10 @@ export const INGESTION_HEALTH_POLICY: Record<
 > = {
   solana: { staleAfterSeconds: 5 * 60, targetLagSeconds: 5 * 60 },
   polygon: { staleAfterSeconds: 10 * 60, targetLagSeconds: 5 * 60 },
-  'robinhood-chain': { staleAfterSeconds: 15 * 60, targetLagSeconds: 15 * 60 }
+  'robinhood-chain': { staleAfterSeconds: 15 * 60, targetLagSeconds: 15 * 60 },
+  base: { staleAfterSeconds: 15 * 60, targetLagSeconds: 15 * 60 },
+  ethereum: { staleAfterSeconds: 15 * 60, targetLagSeconds: 15 * 60 },
+  bsc: { staleAfterSeconds: 15 * 60, targetLagSeconds: 15 * 60 }
 };
 
 export type IngestionHealthStatus = 'healthy' | 'stale' | 'empty';

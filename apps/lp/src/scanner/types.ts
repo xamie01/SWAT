@@ -1,7 +1,6 @@
-import type { LpChain } from '@swat/shared';
+import type { LpChain, LpProtocol } from '@swat/shared';
 
-/** Protocol identifier, mirrored by `lp_pools.protocol` CHECK in migration 059. */
-export type LpProtocol = 'meteora-dlmm' | 'uniswap-v3' | 'uniswap-v4';
+export type { LpProtocol };
 
 /**
  * One pool as the scan job writes it — chain-normalized so every downstream

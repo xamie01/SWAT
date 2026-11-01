@@ -38,17 +38,19 @@ export interface TickBand {
 }
 
 export interface UniswapActiveTvlContext {
-  readonly protocol: 'uniswap-v3' | 'uniswap-v4';
+  readonly protocol: 'uniswap-v3' | 'uniswap-v4' | 'pancakeswap-v3' | 'raydium-clmm';
   readonly bands: readonly TickBand[];
   readonly currentTick: number;
   /** Half-width of the window, in ticks. */
   readonly range: number;
   readonly basePriceUsd: number | null;
   readonly quotePriceUsd: number | null;
-  /** Token decimals for raw Uniswap liquidity math; defaults to human-scale (0). */
+  /** Token decimals for raw Uniswap/CLMM liquidity math; defaults to human-scale (0). */
   readonly baseTokenDecimals?: number;
   readonly quoteTokenDecimals?: number;
 }
+
+export type TickActiveTvlContext = UniswapActiveTvlContext;
 
 export type ActiveTvlContext = MeteoraActiveTvlContext | UniswapActiveTvlContext;
 

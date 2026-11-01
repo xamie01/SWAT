@@ -1,3 +1,4 @@
+import type { LpChain } from '@swat/shared';
 import { getLpGuardrailConfig, resolveLpGuardrailConfig, type UserScope } from '@swat/db';
 
 /**
@@ -19,7 +20,7 @@ import { getLpGuardrailConfig, resolveLpGuardrailConfig, type UserScope } from '
  */
 
 export interface ResolvedReserveVault {
-  readonly chain: 'solana' | 'robinhood-chain';
+  readonly chain: LpChain;
   readonly address: string;
   /** True when the pointer matched an active execution grant of the vault kind. */
   readonly grantValidated: boolean;

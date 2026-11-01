@@ -1,17 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  createLpCopySubscription,
   getLpPosition,
   listDiscoverPools,
+  listLpCopyExecutions,
+  listLpCopySubscriptions,
   listLpPositions,
   queryLpWalletLeaderboard,
   setLpPositionAutoRebalance,
   trackLpWallet,
   transitionLpPosition,
   untrackLpWallet,
+  updateLpCopySubscriptionStatus,
+  type LpCopySubscriptionStatus,
   type UserScope
 } from '@swat/db';
-import type { LpChain } from '@swat/shared';
+import { isLpChain, type LpChain, type LpProtocol } from '@swat/shared';
 import { rankPoolsByVolumeToActiveLiquidity } from './scanner/ranking.js';
+import { rankHotNewLaunches } from './scanner/new-launches.js';
 import { requireUser, registerLpAuth, type LpAuthOptions } from './auth.js';
 import { buildPosition, type BuildPositionDeps, type BuildPositionResult } from './builder/build-position.js';
 import { listStrategyTemplates, STRATEGY_TEMPLATE_NAMES, type StrategyTemplateName } from './builder/templates.js';
@@ -62,7 +68,7 @@ export type LpRoutesDeps = BuildPositionDeps & {
    * tests stub it.
    */
   readonly livePreview: (input: {
-    readonly chain: 'solana' | 'robinhood-chain';
+    readonly chain: LpChain;
     readonly poolAddress: string;
     readonly template?: string;
     readonly custom?: {
@@ -94,15 +100,15 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     const limit = clampLimit(query.limit, 50, 200);
     const offset = clampOffset(query.offset);
 
-    if (chain !== undefined && chain !== 'solana' && chain !== 'robinhood-chain') {
-      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    if (chain !== undefined && !isLpChain(chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
     }
     if (!['volume', 'activeTvl', 'feeApr24h', 'ratio'].includes(sort)) {
       return reply.code(400).send({ error: 'sort must be volume, activeTvl, feeApr24h, or ratio' });
     }
 
     const pools = await listDiscoverPools({
-      chain: chain as 'solana' | 'robinhood-chain' | undefined,
+      chain: chain as LpChain | undefined,
       // ratio is a pure post-query sort over the same stored columns.
       sort: sort === 'ratio' ? 'volume' : sort,
       limit,
@@ -120,11 +126,11 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     const sort = query.sort === 'winRate' ? 'winRate' : 'pnl';
     const limit = clampLimit(query.limit, 25, 100);
 
-    if (chain !== undefined && chain !== 'solana' && chain !== 'robinhood-chain') {
-      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    if (chain !== undefined && !isLpChain(chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
     }
     const entries = await queryLpWalletLeaderboard({
-      chain: chain as 'solana' | 'robinhood-chain' | undefined,
+      chain: chain as LpChain | undefined,
       sort,
       limit
     });
@@ -165,8 +171,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     if (!chain || !poolAddress) {
       return reply.code(400).send({ error: 'chain and poolAddress are required' });
     }
-    if (chain !== 'solana' && chain !== 'robinhood-chain') {
-      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    if (!isLpChain(chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
     }
     if (!poolAddress.startsWith(`${chain}:`)) {
       return reply.code(400).send({ error: 'poolAddress must be chain-prefixed' });
@@ -190,7 +196,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
 
     try {
       const preview = await deps.livePreview({
-        chain,
+        chain: chain as LpChain,
         poolAddress,
         template,
         custom,
@@ -232,8 +238,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     if (!body.chain || !body.poolAddress || !body.depositAsset || !Number.isFinite(Number(body.depositAmount))) {
       return reply.code(400).send({ error: 'chain, poolAddress, depositAsset and depositAmount are required' });
     }
-    if (body.chain !== 'solana' && body.chain !== 'robinhood-chain') {
-      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    if (!isLpChain(body.chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
     }
     if (!body.poolAddress.startsWith(`${body.chain}:`)) {
       return reply.code(400).send({ error: 'poolAddress and depositAsset must be chain-prefixed' });
@@ -267,7 +273,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
 
     try {
       const result = await (deps.build ?? buildPosition)(deps, scope, {
-        chain: body.chain,
+        chain: body.chain as LpChain,
         poolAddress: body.poolAddress,
         template: body.template as StrategyTemplateName | undefined,
         custom:
@@ -407,8 +413,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       label?: string;
       pollingCadenceSeconds?: number;
     };
-    if (!body.chain || (body.chain !== 'solana' && body.chain !== 'robinhood-chain')) {
-      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    if (!body.chain || !isLpChain(body.chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
     }
     if (!body.walletAddress || !body.walletAddress.startsWith(`${body.chain}:`)) {
       return reply.code(400).send({ error: 'walletAddress must be chain-prefixed' });
@@ -429,14 +435,101 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     const query = request.query as Record<string, unknown>;
     const chain = typeof query.chain === 'string' ? query.chain : undefined;
     const walletAddress = typeof query.walletAddress === 'string' ? query.walletAddress : undefined;
-    if (!chain || (chain !== 'solana' && chain !== 'robinhood-chain')) {
-      return reply.code(400).send({ error: 'chain must be solana or robinhood-chain' });
+    if (!chain || !isLpChain(chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
     }
     if (!walletAddress || !walletAddress.startsWith(`${chain}:`)) {
       return reply.code(400).send({ error: 'walletAddress must be chain-prefixed' });
     }
     const removed = await untrackLpWallet(chain, walletAddress);
     return { removed };
+  });
+
+  // Track 3: Hot New Launches Feed (Rug Shield Audited)
+  app.get('/v1/lp/new-launches', async (request, reply) => {
+    if (!request.principal) return reply.code(401).send({ error: 'Unauthorized' });
+    const query = request.query as Record<string, unknown>;
+    const chain = typeof query.chain === 'string' ? query.chain : undefined;
+    if (chain !== undefined && !isLpChain(chain)) {
+      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
+    }
+    const pools = await listDiscoverPools({
+      chain: chain as LpChain | undefined,
+      sort: 'volume',
+      limit: 100,
+      offset: 0
+    });
+    const newLaunches = rankHotNewLaunches(pools);
+    return { newLaunches, count: newLaunches.length };
+  });
+
+  // Track 2: LP Copy-Trading Subscriptions
+  app.post('/v1/lp/copy/subscribe', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const body = request.body as {
+      masterWalletAddress?: string;
+      chain?: string;
+      venue?: string;
+      allocatedBudgetUsd?: number;
+      maxCapitalPerPositionUsd?: number;
+    };
+    if (!body.masterWalletAddress || !body.chain || !body.venue || !body.allocatedBudgetUsd || !body.maxCapitalPerPositionUsd) {
+      return reply.code(400).send({ error: 'masterWalletAddress, chain, venue, allocatedBudgetUsd, and maxCapitalPerPositionUsd are required' });
+    }
+    if (!isLpChain(body.chain)) {
+      return reply.code(400).send({ error: `unsupported chain: ${body.chain}` });
+    }
+    if (!body.masterWalletAddress.startsWith(`${body.chain}:`)) {
+      return reply.code(400).send({ error: 'masterWalletAddress must be chain-prefixed' });
+    }
+    if (Number(body.allocatedBudgetUsd) <= 0 || Number(body.maxCapitalPerPositionUsd) <= 0) {
+      return reply.code(400).send({ error: 'budget and max capital must be strictly positive' });
+    }
+
+    try {
+      const subscription = await createLpCopySubscription(scope, {
+        masterWalletAddress: body.masterWalletAddress,
+        chain: body.chain as LpChain,
+        venue: body.venue as LpProtocol,
+        allocatedBudgetUsd: Number(body.allocatedBudgetUsd),
+        maxCapitalPerPositionUsd: Number(body.maxCapitalPerPositionUsd)
+      });
+      return subscription;
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : 'failed to create subscription' });
+    }
+  });
+
+  app.get('/v1/lp/copy/subscriptions', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const query = request.query as Record<string, unknown>;
+    const status = typeof query.status === 'string' ? (query.status as LpCopySubscriptionStatus) : undefined;
+    const subscriptions = await listLpCopySubscriptions(scope, status);
+    return { subscriptions };
+  });
+
+  app.patch('/v1/lp/copy/subscriptions/:subscriptionId', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { subscriptionId } = request.params as { subscriptionId: string };
+    const body = request.body as { status?: string };
+    if (!body.status || !['active', 'paused', 'closed'].includes(body.status)) {
+      return reply.code(400).send({ error: 'status must be active, paused, or closed' });
+    }
+    const updated = await updateLpCopySubscriptionStatus(scope, subscriptionId, body.status as LpCopySubscriptionStatus);
+    if (!updated) return reply.code(404).send({ error: 'subscription not found' });
+    return updated;
+  });
+
+  app.get('/v1/lp/copy/executions', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const query = request.query as Record<string, unknown>;
+    const subscriptionId = typeof query.subscriptionId === 'string' ? query.subscriptionId : undefined;
+    const executions = await listLpCopyExecutions(scope, subscriptionId);
+    return { executions };
   });
 }
 

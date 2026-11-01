@@ -55,6 +55,7 @@ export * from './lp-pools.js';
 export * from './lp-guardrails.js';
 export * from './lp-positions.js';
 export * from './lp-tracked-wallets.js';
+export * from './lp-copy-trading.js';
 
 /**
  * Quote-leg valuation (S4-M35).

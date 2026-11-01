@@ -1,11 +1,15 @@
 import { stripChainPrefix } from '@swat/shared';
 import {
   BLACKLIST_CAPABLE_FLAG,
+  EXCESSIVE_TAX_FLAG,
   HOLDER_CONCENTRATION_FLAG,
+  HONEYPOT_DETECTED_FLAG,
   LIQUIDITY_UNLOCKED_FLAG,
   MINT_AUTHORITY_FLAG,
   PAUSE_CAPABLE_FLAG,
-  type TokenRiskCheck
+  UNVERIFIED_SOURCE_FLAG,
+  type TokenRiskCheck,
+  type TokenRiskFinding
 } from './types.js';
 
 /**
@@ -29,6 +33,48 @@ export interface EvmHolderListPort {
 
 export interface EvmTotalSupplyPort {
   totalSupply(token: string): Promise<number | null>;
+}
+
+export interface EvmHoneypotPort {
+  checkTokenSecurity(token: string): Promise<{
+    isHoneypot: boolean;
+    buyTax: number;
+    sellTax: number;
+    isOpenSource: boolean;
+    cannotSellAll: boolean;
+  } | null>;
+}
+
+export function evmHoneypotCheck(port: EvmHoneypotPort): TokenRiskCheck {
+  return async (context) => {
+    const token = stripChainPrefix(context.baseTokenMint).toLowerCase();
+    const result = await port.checkTokenSecurity(token);
+    if (!result) return [];
+
+    const findings: TokenRiskFinding[] = [];
+    if (result.isHoneypot || result.cannotSellAll) {
+      findings.push({
+        flag: HONEYPOT_DETECTED_FLAG,
+        detail: 'Honeypot detected: Token cannot be sold or simulated sell failed'
+      });
+    }
+
+    if (result.buyTax > 0.05 || result.sellTax > 0.05) {
+      findings.push({
+        flag: EXCESSIVE_TAX_FLAG,
+        detail: `Excessive trading tax: buy ${(result.buyTax * 100).toFixed(1)}%, sell ${(result.sellTax * 100).toFixed(1)}%`
+      });
+    }
+
+    if (!result.isOpenSource) {
+      findings.push({
+        flag: UNVERIFIED_SOURCE_FLAG,
+        detail: 'Contract source code is unverified'
+      });
+    }
+
+    return findings;
+  };
 }
 
 export function evmHolderConcentrationCheck(

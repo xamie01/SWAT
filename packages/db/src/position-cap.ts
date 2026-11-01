@@ -172,6 +172,27 @@ export const VENUE_MINIMUM_ORDER_NOTIONAL_USD: Readonly<
     note:
       'A Uniswap V3 router quotes any size. Gas makes a tiny swap poor value, but '
       + 'no venue rule rejects it, so there is no minimum order size to warn about.'
+  }),
+  base: Object.freeze({
+    chain: 'base' as Chain,
+    minOrderNotionalUsd: 0,
+    basis: 'no-venue-minimum',
+    approximate: false,
+    note: 'Uniswap v3 quotes any size.'
+  }),
+  ethereum: Object.freeze({
+    chain: 'ethereum' as Chain,
+    minOrderNotionalUsd: 0,
+    basis: 'no-venue-minimum',
+    approximate: false,
+    note: 'Uniswap v3 quotes any size.'
+  }),
+  bsc: Object.freeze({
+    chain: 'bsc' as Chain,
+    minOrderNotionalUsd: 0,
+    basis: 'no-venue-minimum',
+    approximate: false,
+    note: 'PancakeSwap v3 quotes any size.'
   })
 });
 

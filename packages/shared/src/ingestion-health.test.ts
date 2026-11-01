@@ -63,7 +63,10 @@ describe('ingestion health snapshots', () => {
     expect(snapshots.map((item) => item.chain)).toEqual([
       'solana',
       'polygon',
-      'robinhood-chain'
+      'robinhood-chain',
+      'base',
+      'ethereum',
+      'bsc'
     ]);
     expect(snapshots.every((item) => item.status === 'empty')).toBe(true);
     expect(snapshots.every((item) => item.insertRatio === null)).toBe(true);

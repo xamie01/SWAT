@@ -1,21 +1,7 @@
-import type { LpChain } from '@swat/shared';
+import type { LpChain, LpProtocol } from '@swat/shared';
 import { query } from './client.js';
 
-/**
- * LP pool discovery cache (`059`).
- *
- * The table is a cache of what the scanner last saw, not authority: a pool that
- * vanished on-chain keeps its row until `pruneStaleLpPools` is called, and a
- * row whose `risk_score` is still NULL has not been through the Track C risk
- * filter. `listDiscoverPools` enforces that second rule in SQL so the Discover
- * feed can never ship an unassessed pool, even if a future caller forgets.
- *
- * There is no `UserScope` anywhere in this module: pools are a shared cache
- * with no user-owned column. Rows are upserted by the scan job
- * (`crossTenantScope` work) and read by whoever renders the feed.
- */
-
-export type LpProtocol = 'meteora-dlmm' | 'uniswap-v3' | 'uniswap-v4';
+export type { LpProtocol };
 
 export interface LpPool {
   readonly id: string;

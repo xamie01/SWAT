@@ -9,8 +9,9 @@ import WalletIntelView from './views/WalletIntelView';
 import HealthView from './views/HealthView';
 import RiskExecutionView from './views/RiskExecutionView';
 import AttributionView from './views/AttributionView';
+import LpView from './views/LpView';
 
-type Tab = 'workspace' | 'command_center' | 'signals' | 'wallet_intel' | 'health' | 'risk_execution' | 'attribution';
+type Tab = 'workspace' | 'command_center' | 'signals' | 'wallet_intel' | 'health' | 'risk_execution' | 'attribution' | 'lp_liquidity';
 
 export default function WorkspaceShell() {
   const [activeTab, setActiveTab] = useState<Tab>('workspace');
@@ -38,6 +39,7 @@ export default function WorkspaceShell() {
       case 'health': return 'Health Telemetry';
       case 'risk_execution': return 'Risk & Execution';
       case 'attribution': return 'Performance & Attribution';
+      case 'lp_liquidity': return 'LP Liquidity & Copy';
       default: return 'WAKE';
     }
   };
@@ -47,6 +49,7 @@ export default function WorkspaceShell() {
     { id: 'command_center' as Tab, label: 'Command Center', icon: 'terminal' },
     { id: 'signals' as Tab, label: 'Signals', icon: 'sensors' },
     { id: 'wallet_intel' as Tab, label: 'Wallet Intel', icon: 'account_balance_wallet' },
+    { id: 'lp_liquidity' as Tab, label: 'LP Liquidity', icon: 'water_drop' },
     { id: 'health' as Tab, label: 'Health', icon: 'monitor_heart' },
     { id: 'risk_execution' as Tab, label: 'Risk/Execution', icon: 'security' },
     { id: 'attribution' as Tab, label: 'Attribution', icon: 'assessment' },
@@ -132,6 +135,7 @@ export default function WorkspaceShell() {
         {activeTab === 'command_center' && <CommandCenterView />}
         {activeTab === 'signals' && <SignalsView />}
         {activeTab === 'wallet_intel' && <WalletIntelView />}
+        {activeTab === 'lp_liquidity' && <LpView />}
         {activeTab === 'health' && <HealthView />}
         {activeTab === 'risk_execution' && <RiskExecutionView />}
         {activeTab === 'attribution' && <AttributionView />}

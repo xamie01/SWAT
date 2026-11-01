@@ -1,16 +1,19 @@
 import {
   BLACKLIST_CAPABLE_FLAG,
   BUNDLED_WALLETS_FLAG,
+  EXCESSIVE_TAX_FLAG,
   FREEZE_AUTHORITY_FLAG,
   HOLDER_CONCENTRATION_FLAG,
+  HONEYPOT_DETECTED_FLAG,
   LIQUIDITY_UNLOCKED_FLAG,
   MINT_AUTHORITY_FLAG,
   PAUSE_CAPABLE_FLAG,
+  UNVERIFIED_SOURCE_FLAG,
   type TokenRiskFinding
 } from './types.js';
 
 /**
- * Risk score combiner (Track C5) — folds the four checks' findings into one
+ * Risk score combiner (Track C5) — folds the checks' findings into one
  * 0..100 score (higher = riskier) plus a pass/fail gate.
  *
  * Weights live here and nowhere else: a check reports *facts* (flags), this
@@ -20,6 +23,9 @@ import {
  */
 
 const RISK_FLAG_WEIGHTS: Readonly<Record<string, number>> = {
+  [HONEYPOT_DETECTED_FLAG]: 100, // Instant kill
+  [EXCESSIVE_TAX_FLAG]: 50,
+  [UNVERIFIED_SOURCE_FLAG]: 30,
   [HOLDER_CONCENTRATION_FLAG]: 35,
   [BUNDLED_WALLETS_FLAG]: 25,
   [LIQUIDITY_UNLOCKED_FLAG]: 40,

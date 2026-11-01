@@ -37,7 +37,8 @@ function constantTimeMatches(provided: string, expected: Buffer): boolean {
 }
 
 function csrfValid(request: FastifyRequest): boolean {
-  const cookieToken = (request.cookies as Record<string, string | undefined>)[CSRF_COOKIE];
+  const cookies = (request as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+  const cookieToken = cookies[CSRF_COOKIE];
   const headerToken = request.headers[CSRF_HEADER];
   const presented = Array.isArray(headerToken) ? headerToken[0] : headerToken;
   if (!cookieToken || !presented) return false;
@@ -64,7 +65,8 @@ export async function registerLpAuth(app: FastifyInstance, options: LpAuthOption
     const path = request.url.split('?')[0]!;
     const isPublic = PUBLIC_PATHS.has(path);
 
-    const sessionToken = (request.cookies as Record<string, string | undefined>)[SESSION_COOKIE];
+    const cookies = (request as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    const sessionToken = cookies[SESSION_COOKIE];
     if (sessionToken) {
       const resolved = await resolveSession(sessionToken);
       if (resolved && resolved.user.status === 'active') {

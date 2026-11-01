@@ -2,22 +2,8 @@ import type { LpChain } from '@swat/shared';
 import { getLpPool } from '@swat/db';
 import type { LivePoolContext } from './live-preview.js';
 import type { MeteoraBinSource } from '../scanner/meteora-pools.js';
-import type { RobinhoodPoolReader } from '../scanner/robinhood-pools.js';
-
-/**
- * Live pool context for the manual builder's preview (Track I1) — the bin/tick
- * state of the selected pool fetched NOW, not the scan cache.
- *
- * Two sources:
- *   - Solana: the RPC bin source (`solana-bins.ts`, mainnet-verified decode) —
- *     LbPair for active_id/bin_step, BinArrays for liquidity, prices Q64.64.
- *   - Robinhood Chain: the viem pool reader — slot0 for tick + price,
- *     tick-band liquidity through the reader's `liquidityBands` seam.
- *
- * When the live fetch fails, the source degrades to the scan cache with an
- * explicit warning on the context — a preview backed by stale data must say
- * so, because the user is about to size a real deposit against it.
- */
+import type { EvmPoolReader } from '../scanner/evm-clmm-pools.js';
+import { isEvmChain, type EvmSupportedChain } from '../scanner/evm-clmm-registry.js';
 
 export interface LiveContextSource {
   fetchLiveContext(
@@ -28,7 +14,8 @@ export interface LiveContextSource {
 
 export interface LiveContextSourceOptions {
   readonly solanaBinSource?: MeteoraBinSource;
-  readonly evmReader?: RobinhoodPoolReader;
+  readonly evmReader?: EvmPoolReader;
+  readonly evmReaders?: Partial<Record<EvmSupportedChain, EvmPoolReader>>;
   /** Scan-cache fallback; injectable for tests. Defaults to getLpPool. */
   readonly getPool?: typeof getLpPool;
 }
@@ -42,8 +29,6 @@ export function createLiveContextSource(options: LiveContextSourceOptions): Live
     return {
       chain,
       currentPrice: pool.currentPrice,
-      // The scan cache carries no anchor observation; null is the honest
-      // "unknown" here — a fabricated bin id 0 would read as a real anchor.
       anchor: null,
       binStep: pool.binStep,
       tickSpacing: pool.tickSpacing,
@@ -77,26 +62,28 @@ export function createLiveContextSource(options: LiveContextSourceOptions): Live
           };
         }
 
-        if (!options.evmReader) return fromCache(chain, poolAddress);
-        const rawAddress = poolAddress.startsWith('robinhood-chain:')
-          ? poolAddress.slice('robinhood-chain:'.length)
-          : poolAddress;
-        const state = await options.evmReader.readPoolState(rawAddress);
-        // Quote-per-base from sqrtPriceX96, scaled by the decimal difference —
-        // same math as the scanner fetcher.
-        const sqrt = Number(state.sqrtPriceX96) / 2 ** 96;
-        const currentPrice = sqrt * sqrt * 10 ** (state.token0Decimals - state.token1Decimals);
-        return {
-          chain,
-          currentPrice,
-          anchor: { kind: 'tick', currentTick: state.tick },
-          binStep: null,
-          tickSpacing: state.tickSpacing,
-          bins: null,
-          bands: await options.evmReader.liquidityBands(rawAddress, state.tick, 1200),
-          fetchedAt: new Date(),
-          warnings: []
-        };
+        if (isEvmChain(chain)) {
+          const reader = options.evmReaders?.[chain] ?? options.evmReader;
+          if (!reader) return fromCache(chain, poolAddress);
+          const colon = poolAddress.indexOf(':');
+          const rawAddress = colon >= 0 ? poolAddress.slice(colon + 1) : poolAddress;
+          const state = await reader.readPoolState(rawAddress);
+          const sqrt = Number(state.sqrtPriceX96) / 2 ** 96;
+          const currentPrice = sqrt * sqrt * 10 ** (state.token0Decimals - state.token1Decimals);
+          return {
+            chain,
+            currentPrice,
+            anchor: { kind: 'tick', currentTick: state.tick },
+            binStep: null,
+            tickSpacing: state.tickSpacing,
+            bins: null,
+            bands: await reader.liquidityBands(rawAddress, state.tick, 1200),
+            fetchedAt: new Date(),
+            warnings: []
+          };
+        }
+
+        return fromCache(chain, poolAddress);
       } catch (error) {
         const cached = await fromCache(chain, poolAddress);
         if (cached) {

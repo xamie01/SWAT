@@ -61,7 +61,7 @@ const OPERATOR: TierCapabilities = {
   trackedWallets: 25,
   tokenBackfillsPerDay: 20,
   backfillDepthDays: 180,
-  chains: ['solana', 'polygon', 'robinhood-chain'],
+  chains: ['solana', 'polygon', 'robinhood-chain', 'base', 'ethereum', 'bsc'],
   signalDelaySeconds: 0,
   liveExecution: true,
   apiKeys: 3,

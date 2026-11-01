@@ -1,6 +1,6 @@
 import { createLpPosition, transitionLpPosition, type UserScope } from '@swat/db';
 import type { LpStrategyType } from '@swat/db';
-import type { LpChain } from '@swat/shared';
+import type { LpChain, LpProtocol } from '@swat/shared';
 import { buildLadderPlan, type LadderRung } from './ladder-plan.js';
 import type { EvmRungStep } from './evm-ladder.js';
 import type { RungTxStep } from './meteora-ladder.js';
@@ -45,7 +45,7 @@ export interface DeployGuardPort {
 }
 
 export interface LadderPoolView {
-  readonly protocol: 'meteora-dlmm' | 'uniswap-v3' | 'uniswap-v4';
+  readonly protocol: LpProtocol;
   readonly binStep: number | null;
   readonly tickSpacing: number | null;
   readonly currentPrice: number | null;

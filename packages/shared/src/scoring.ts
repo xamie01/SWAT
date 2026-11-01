@@ -1,6 +1,6 @@
-import type { WalletScoreInput, WalletTier } from './types.js';
+import type { Chain, WalletScoreInput, WalletTier } from './types.js';
 
-const WEIGHTS = {
+const WEIGHTS: Record<Chain, { winRate: number; realizedRoi: number; earlyEntryScore: number; consistencyScore: number }> = {
   solana: {
     winRate: 0.25,
     realizedRoi: 0.3,
@@ -18,8 +18,26 @@ const WEIGHTS = {
     realizedRoi: 0.3,
     earlyEntryScore: 0.25,
     consistencyScore: 0.2
+  },
+  base: {
+    winRate: 0.25,
+    realizedRoi: 0.3,
+    earlyEntryScore: 0.25,
+    consistencyScore: 0.2
+  },
+  ethereum: {
+    winRate: 0.25,
+    realizedRoi: 0.3,
+    earlyEntryScore: 0.25,
+    consistencyScore: 0.2
+  },
+  bsc: {
+    winRate: 0.25,
+    realizedRoi: 0.3,
+    earlyEntryScore: 0.25,
+    consistencyScore: 0.2
   }
-} as const;
+};
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 

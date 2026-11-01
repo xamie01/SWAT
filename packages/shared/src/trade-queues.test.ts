@@ -21,6 +21,9 @@ describe('trade queue naming (D6 / S3-25)', () => {
 
   it('covers exactly the supported chains', () => {
     expect(Object.keys(TRADE_QUEUES_BY_CHAIN).sort()).toEqual([
+      'base',
+      'bsc',
+      'ethereum',
       'polygon',
       'robinhood-chain',
       'solana'
@@ -62,8 +65,8 @@ describe('chainFromTokenMint (S3-25 routing agreement)', () => {
     // Defaulting would route a job to the Solana queue, whose worker would then
     // refuse it — a trade lost at the far end of the pipeline instead of a loud
     // failure at the near end.
-    expect(() => chainFromTokenMint('ethereum:0xabc')).toThrow(/Unsupported trade chain: ethereum/);
-    expect(() => chainFromTokenMint('base:0xabc')).toThrow(/Unsupported trade chain: base/);
+    expect(() => chainFromTokenMint('avalanche:0xabc')).toThrow(/Unsupported trade chain: avalanche/);
+    expect(() => chainFromTokenMint('arbitrum:0xabc')).toThrow(/Unsupported trade chain: arbitrum/);
   });
 
   it('throws on an empty prefix', () => {
@@ -81,9 +84,12 @@ describe('tradeQueueForTokenMint (S3-25 producer routing)', () => {
     expect(tradeQueueForTokenMint('solana:So111')).toBe('swat-trades-solana');
     expect(tradeQueueForTokenMint('polygon:0xabc')).toBe('swat-trades-polygon');
     expect(tradeQueueForTokenMint('robinhood-chain:0xabc')).toBe('swat-trades-robinhood');
+    expect(tradeQueueForTokenMint('base:0xabc')).toBe('swat-trades-base');
+    expect(tradeQueueForTokenMint('ethereum:0xabc')).toBe('swat-trades-ethereum');
+    expect(tradeQueueForTokenMint('bsc:0xabc')).toBe('swat-trades-bsc');
   });
 
   it('refuses to pick a queue for an unsupported chain', () => {
-    expect(() => tradeQueueForTokenMint('ethereum:0xabc')).toThrow(/Unsupported trade chain/);
+    expect(() => tradeQueueForTokenMint('avalanche:0xabc')).toThrow(/Unsupported trade chain/);
   });
 });

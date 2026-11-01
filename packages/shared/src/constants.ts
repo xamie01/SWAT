@@ -48,7 +48,10 @@ export const QUEUES = {
 export const TRADE_QUEUES_BY_CHAIN = {
   solana: 'swat-trades-solana',
   polygon: 'swat-trades-polygon',
-  'robinhood-chain': 'swat-trades-robinhood'
+  'robinhood-chain': 'swat-trades-robinhood',
+  base: 'swat-trades-base',
+  ethereum: 'swat-trades-ethereum',
+  bsc: 'swat-trades-bsc'
 } as const;
 
 /** Resolves the trade queue for a chain. */
@@ -97,9 +100,29 @@ export function tradeQueueForTokenMint(tokenMint: string): string {
  * (scorer pattern) and deliberately do not use queues; only jobs that sign and
  * submit, or decide to, are durable work.
  */
+export const LP_CHAINS: readonly LpChain[] = [
+  'solana',
+  'robinhood-chain',
+  'base',
+  'ethereum',
+  'bsc'
+] as const;
+
+export function isLpChain(chain: unknown): chain is LpChain {
+  return typeof chain === 'string' && (LP_CHAINS as readonly string[]).includes(chain);
+}
+
+/**
+ * Per-chain LP execution queues (LP Dashboard Tracks E/F). **Live** — producers
+ * route `build-position` and `rebalance` jobs here, and `apps/lp` runs one
+ * concurrency-1 worker per queue.
+ */
 export const LP_EXECUTION_QUEUES_BY_CHAIN: Record<LpChain, string> = {
   solana: 'swat-lp-exec-solana',
-  'robinhood-chain': 'swat-lp-exec-robinhood'
+  'robinhood-chain': 'swat-lp-exec-robinhood',
+  base: 'swat-lp-exec-base',
+  ethereum: 'swat-lp-exec-ethereum',
+  bsc: 'swat-lp-exec-bsc'
 };
 
 /** Resolves the LP execution queue for an LP-supported chain. */
@@ -116,7 +139,7 @@ export function lpExecutionQueueForChain(chain: LpChain): string {
 export function chainFromPoolAddress(poolAddress: string): LpChain {
   const separator = poolAddress.indexOf(':');
   const chain = separator >= 0 ? poolAddress.slice(0, separator) : 'solana';
-  if (chain !== 'solana' && chain !== 'robinhood-chain') {
+  if (!isLpChain(chain)) {
     throw new Error(`Unsupported LP chain: ${chain}`);
   }
   return chain;

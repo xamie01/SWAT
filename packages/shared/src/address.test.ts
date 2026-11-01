@@ -33,7 +33,7 @@ describe('chain value normalization', () => {
   it('rejects mismatched, nested, and unsupported prefixes', () => {
     expect(() => resolveChainValue(`solana:AbC123`, 'polygon')).toThrow(/does not match/);
     expect(() => resolveChainValue('polygon:solana:AbC123')).toThrow(/Nested/);
-    expect(() => resolveChainValue('ethereum:0xabc')).toThrow(/Unsupported/);
+    expect(() => resolveChainValue('avalanche:0xabc')).toThrow(/Unsupported/);
   });
 
   it('requires an explicit chain for raw EVM values', () => {

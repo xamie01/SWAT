@@ -130,6 +130,15 @@ export function resolveApiBase(
   return 'http://localhost:3001';
 }
 
+export function resolveLpApiBase(
+  location?: { protocol: string; hostname: string } | null,
+  configured: string | undefined = process.env.NEXT_PUBLIC_LP_API_URL
+): string {
+  if (configured) return configured.replace(/\/+$/, '');
+  if (location) return `${location.protocol}//${location.hostname}:3010`;
+  return 'http://localhost:3010';
+}
+
 function currentLocation(): { protocol: string; hostname: string } | null {
   if (typeof window === 'undefined') return null;
   return { protocol: window.location.protocol, hostname: window.location.hostname };
@@ -204,4 +213,49 @@ export const api = {
     apiFetch<T>(path, { ...options, method: 'POST', body }),
   delete: <T = unknown>(path: string, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
     apiFetch<T>(path, { ...options, method: 'DELETE' })
+};
+
+export async function lpApiFetch<T = unknown>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  const base = resolveLpApiBase(currentLocation());
+  const init = buildApiRequestInit({
+    method: options.method,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    csrfToken: parseCsrfToken(currentCookies()),
+    signal: options.signal
+  });
+
+  const response = await fetch(`${base}${path}`, init);
+
+  if (response.status === 401 && options.onUnauthenticated) {
+    options.onUnauthenticated();
+    throw new ApiError(401, 'Not signed in');
+  }
+
+  if (!response.ok) {
+    let body: unknown;
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      body = await response.json();
+      const described = (body as { message?: unknown; error?: unknown } | null)?.message
+        ?? (body as { error?: unknown } | null)?.error;
+      if (typeof described === 'string' && described.length > 0) message = described;
+    } catch {
+      // non-json response
+    }
+    throw new ApiError(response.status, message, body);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export const lpApi = {
+  get: <T = unknown>(path: string, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
+    lpApiFetch<T>(path, { ...options, method: 'GET' }),
+  post: <T = unknown>(path: string, body?: unknown, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
+    lpApiFetch<T>(path, { ...options, method: 'POST', body }),
+  patch: <T = unknown>(path: string, body?: unknown, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
+    lpApiFetch<T>(path, { ...options, method: 'PATCH', body }),
+  delete: <T = unknown>(path: string, options?: Omit<ApiFetchOptions, 'method' | 'body'>) =>
+    lpApiFetch<T>(path, { ...options, method: 'DELETE' })
 };

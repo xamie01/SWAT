@@ -12,7 +12,11 @@ const dbMocks = vi.hoisted(() => ({
   setLpPositionAutoRebalance: vi.fn(),
   transitionLpPosition: vi.fn(),
   trackLpWallet: vi.fn(),
-  untrackLpWallet: vi.fn()
+  untrackLpWallet: vi.fn(),
+  createLpCopySubscription: vi.fn(),
+  listLpCopySubscriptions: vi.fn(),
+  updateLpCopySubscriptionStatus: vi.fn(),
+  listLpCopyExecutions: vi.fn()
 }));
 vi.mock('@swat/db', () => dbMocks);
 
@@ -24,7 +28,7 @@ import { registerLpRoutes, type LpRoutesDeps } from './routes.js';
 
 async function buildApp(deps: Partial<LpRoutesDeps> = {}) {
   const app = Fastify({ logger: false });
-  await app.register(cookie);
+  await (app.register as any)(cookie);
   // Direct calls, not app.register: the auth hook must apply to the routes'
   // sibling scope (same pattern apps/api uses to avoid encapsulation).
   await registerLpAuth(app, { legacyKeyHash: legacyKeyHash('service-key') });
@@ -101,7 +105,7 @@ describe('LP routes (Track H)', () => {
     await app.ready();
     dbMocks.listDiscoverPools.mockResolvedValue([]);
 
-    const badChain = await app.inject({ method: 'GET', url: '/v1/lp/discover?chain=ethereum', headers: serviceHeaders });
+    const badChain = await app.inject({ method: 'GET', url: '/v1/lp/discover?chain=avalanche', headers: serviceHeaders });
     expect(badChain.statusCode).toBe(400);
 
     const badSort = await app.inject({ method: 'GET', url: '/v1/lp/discover?sort=bogus', headers: serviceHeaders });
@@ -279,7 +283,7 @@ describe('LP routes (Track H)', () => {
 
       expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview', headers: serviceHeaders })).statusCode).toBe(400);
       expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview?chain=solana&poolAddress=solana:pool', headers: serviceHeaders })).statusCode).toBe(400);
-      expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview?chain=ethereum&poolAddress=x&template=t', headers: serviceHeaders })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'GET', url: '/v1/lp/ladder-preview?chain=avalanche&poolAddress=x&template=t', headers: serviceHeaders })).statusCode).toBe(400);
       await app.close();
     });
 
@@ -516,7 +520,7 @@ describe('LP routes (Track H)', () => {
         method: 'POST',
         url: '/v1/lp/wallets',
         headers: serviceHeaders,
-        payload: { chain: 'ethereum', walletAddress: '0xabc' }
+        payload: { chain: 'avalanche', walletAddress: '0xabc' }
       });
       expect(badChain.statusCode).toBe(400);
 
@@ -544,6 +548,138 @@ describe('LP routes (Track H)', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ removed: true });
       expect(dbMocks.untrackLpWallet).toHaveBeenCalledWith('solana', 'solana:9xQe');
+      await app.close();
+    });
+  });
+
+  describe('LP copy trading and new launches routes', () => {
+    it('creates copy subscription with user session and validates parameters', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.createLpCopySubscription.mockResolvedValue({
+        id: 'sub-1',
+        userId: 'user-1',
+        masterWalletAddress: 'solana:whale1',
+        chain: 'solana',
+        venue: 'meteora-dlmm',
+        allocatedBudgetUsd: 1000,
+        maxCapitalPerPositionUsd: 500,
+        status: 'active'
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/copy/subscribe',
+        headers: sessionHeaders(),
+        payload: {
+          masterWalletAddress: 'solana:whale1',
+          chain: 'solana',
+          venue: 'meteora-dlmm',
+          allocatedBudgetUsd: 1000,
+          maxCapitalPerPositionUsd: 500
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().id).toBe('sub-1');
+      expect(dbMocks.createLpCopySubscription).toHaveBeenCalled();
+      await app.close();
+    });
+
+    it('rejects copy subscription with un-prefixed master address or bad chain', async () => {
+      const app = await buildApp();
+      await app.ready();
+
+      const badPrefix = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/copy/subscribe',
+        headers: sessionHeaders(),
+        payload: {
+          masterWalletAddress: 'whale1',
+          chain: 'solana',
+          venue: 'meteora-dlmm',
+          allocatedBudgetUsd: 1000,
+          maxCapitalPerPositionUsd: 500
+        }
+      });
+      expect(badPrefix.statusCode).toBe(400);
+
+      const badChain = await app.inject({
+        method: 'POST',
+        url: '/v1/lp/copy/subscribe',
+        headers: sessionHeaders(),
+        payload: {
+          masterWalletAddress: 'avalanche:whale1',
+          chain: 'avalanche',
+          venue: 'uniswap-v3',
+          allocatedBudgetUsd: 1000,
+          maxCapitalPerPositionUsd: 500
+        }
+      });
+      expect(badChain.statusCode).toBe(400);
+      await app.close();
+    });
+
+    it('lists user copy subscriptions and executions', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.listLpCopySubscriptions.mockResolvedValue([{ id: 'sub-1' }]);
+      dbMocks.listLpCopyExecutions.mockResolvedValue([{ id: 'exec-1' }]);
+
+      const subsRes = await app.inject({
+        method: 'GET',
+        url: '/v1/lp/copy/subscriptions',
+        headers: sessionHeaders()
+      });
+      expect(subsRes.statusCode).toBe(200);
+      expect(subsRes.json().subscriptions).toHaveLength(1);
+
+      const execRes = await app.inject({
+        method: 'GET',
+        url: '/v1/lp/copy/executions',
+        headers: sessionHeaders()
+      });
+      expect(execRes.statusCode).toBe(200);
+      expect(execRes.json().executions).toHaveLength(1);
+      await app.close();
+    });
+
+    it('returns filtered new launches feed', async () => {
+      const app = await buildApp();
+      await app.ready();
+      dbMocks.listDiscoverPools.mockResolvedValue([
+        {
+          id: 'p1',
+          chain: 'solana',
+          protocol: 'meteora-dlmm',
+          poolAddress: 'solana:pool1',
+          pairLabel: 'HOT/SOL',
+          baseTokenMint: 'solana:base1',
+          quoteTokenMint: 'solana:quote1',
+          feeBps: 100,
+          binStep: 20,
+          tickSpacing: null,
+          currentPrice: 1.0,
+          tvl: 50000,
+          activeTvl: 25000,
+          volume24h: 100000,
+          feeApr24h: 300,
+          feeApr7d: null,
+          riskScore: 10,
+          riskFlags: [],
+          lastScannedAt: new Date(),
+          createdAt: new Date()
+        }
+      ]);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/lp/new-launches',
+        headers: serviceHeaders
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().newLaunches).toHaveLength(1);
+      expect(res.json().newLaunches[0].pairLabel).toBe('HOT/SOL');
       await app.close();
     });
   });

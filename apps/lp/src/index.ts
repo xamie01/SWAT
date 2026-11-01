@@ -124,7 +124,7 @@ const liveContextSource = createLiveContextSource({
 
 // Pool view for ladder anchoring: served from the scan cache (Track B output).
 const poolView = {
-  getPool: async (chain: 'solana' | 'robinhood-chain', poolAddress: string) => {
+  getPool: async (chain: import('@swat/shared').LpChain, poolAddress: string) => {
     const { getLpPool } = await import('@swat/db');
     const pool = await getLpPool(chain, poolAddress);
     if (!pool) return null;
@@ -142,7 +142,7 @@ const poolView = {
 const meteoraBuilder = createMeteoraLadderBuilder(createPlanOnlyMeteoraPort());
 const evmBuilder = createEvmLadderBuilder(createPlanOnlyEvmPort());
 const executionMode = {
-  resolveMode: async (chain: 'solana' | 'robinhood-chain') => {
+  resolveMode: async (chain: import('@swat/shared').LpChain) => {
     const resolution = await resolveChainMode(chain);
     const mode = resolution.effectiveMode;
     // 'live+shadow' is observe-only: for LP it maps to paper — plans are
@@ -282,9 +282,9 @@ async function buildApp(): Promise<FastifyInstance> {
     .map((origin) => origin.trim())
     .filter(Boolean);
   if (corsOrigins.length > 0) {
-    await app.register(cors, { origin: corsOrigins, credentials: true });
+    await (app.register as any)(cors, { origin: corsOrigins, credentials: true });
   }
-  await app.register(cookie);
+  await (app.register as any)(cookie);
   if (apiKey) {
     await registerLpAuth(app, { legacyKeyHash: legacyKeyHash(apiKey) });
   }

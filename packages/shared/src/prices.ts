@@ -12,7 +12,7 @@ const ROBINHOOD_API_BASE_URL = 'https://api.robinhood.com/rhj';
 const ROBINHOOD_ASSET_CACHE_MS = 5 * 60 * 1000;
 const ROBINHOOD_PRICE_MAX_AGE_MS = 2 * 60 * 1000;
 
-export type DexScreenerChainId = 'solana' | 'polygon' | 'robinhood';
+export type DexScreenerChainId = 'solana' | 'polygon' | 'robinhood' | 'base' | 'ethereum' | 'bsc';
 
 export type DexScreenerPair = {
   chainId: string;
@@ -30,7 +30,10 @@ export type DexScreenerPair = {
 const DEX_SCREENER_CHAIN_IDS: Readonly<Record<Chain, DexScreenerChainId>> = {
   solana: 'solana',
   polygon: 'polygon',
-  'robinhood-chain': 'robinhood'
+  'robinhood-chain': 'robinhood',
+  base: 'base',
+  ethereum: 'ethereum',
+  bsc: 'bsc'
 };
 
 type RobinhoodAssetPriceInfo = {
