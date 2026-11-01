@@ -84,11 +84,11 @@ describe('tier matrix', () => {
   });
 
   describe('tierAllowsChain', () => {
-    it('restricts free to solana', () => {
+    it('allows free all registered chains so backfills are available across tiers', () => {
       const free = TIER_CAPABILITIES.free;
       expect(tierAllowsChain(free, 'solana')).toBe(true);
-      expect(tierAllowsChain(free, 'polygon')).toBe(false);
-      expect(tierAllowsChain(free, 'robinhood-chain')).toBe(false);
+      expect(tierAllowsChain(free, 'polygon')).toBe(true);
+      expect(tierAllowsChain(free, 'robinhood-chain')).toBe(true);
     });
 
     it('allows operator every built-in chain', () => {
@@ -98,46 +98,68 @@ describe('tier matrix', () => {
       expect(tierAllowsChain(operator, 'robinhood-chain')).toBe(true);
     });
 
-    it('treats ultra’s null chain list as every chain', () => {
+    it('treats ultra’s and unlimited’s null chain list as every chain', () => {
       // Ultra adds custom chains in Stage 7, so its list cannot be enumerated.
       const ultra = TIER_CAPABILITIES.ultra;
+      const unlimited = TIER_CAPABILITIES.unlimited;
       expect(ultra.chains).toBe(null);
+      expect(unlimited.chains).toBe(null);
       expect(tierAllowsChain(ultra, 'solana')).toBe(true);
       expect(tierAllowsChain(ultra, 'polygon')).toBe(true);
+      expect(tierAllowsChain(unlimited, 'solana')).toBe(true);
+      expect(tierAllowsChain(unlimited, 'polygon')).toBe(true);
     });
   });
 
   describe('matrix invariants', () => {
     it('never lets a higher tier have a smaller quota', () => {
-      const { free, operator, ultra } = TIER_CAPABILITIES;
+      const { free, operator, ultra, unlimited } = TIER_CAPABILITIES;
       const atLeast = (higher: number | null, lower: number | null) =>
         higher === null || (lower !== null && higher >= lower);
       expect(atLeast(operator.trackedWallets, free.trackedWallets)).toBe(true);
       expect(atLeast(ultra.trackedWallets, operator.trackedWallets)).toBe(true);
+      expect(atLeast(unlimited.trackedWallets, operator.trackedWallets)).toBe(true);
       expect(atLeast(operator.tokenBackfillsPerDay, free.tokenBackfillsPerDay)).toBe(true);
       expect(atLeast(ultra.tokenBackfillsPerDay, operator.tokenBackfillsPerDay)).toBe(true);
+      expect(atLeast(unlimited.tokenBackfillsPerDay, operator.tokenBackfillsPerDay)).toBe(true);
       expect(operator.backfillDepthDays).toBeGreaterThan(free.backfillDepthDays);
       expect(ultra.backfillDepthDays).toBeGreaterThan(operator.backfillDepthDays);
+      expect(unlimited.backfillDepthDays).toBeGreaterThan(operator.backfillDepthDays);
+    });
+
+    it('ensures unlimited and ultra have the exact same amount of everything', () => {
+      const { ultra, unlimited } = TIER_CAPABILITIES;
+      expect(unlimited.trackedWallets).toBe(ultra.trackedWallets);
+      expect(unlimited.tokenBackfillsPerDay).toBe(ultra.tokenBackfillsPerDay);
+      expect(unlimited.backfillDepthDays).toBe(ultra.backfillDepthDays);
+      expect(unlimited.chains).toBe(ultra.chains);
+      expect(unlimited.signalDelaySeconds).toBe(ultra.signalDelaySeconds);
+      expect(unlimited.liveExecution).toBe(ultra.liveExecution);
+      expect(unlimited.apiKeys).toBe(ultra.apiKeys);
+      expect(unlimited.backfillPriority).toBe(ultra.backfillPriority);
     });
 
     it('gives higher tiers a lower (sooner) backfill priority number', () => {
       // BullMQ runs LOWER priority numbers first — the inversion is easy to get
       // backwards and would silently starve paying users behind free ones.
-      const { free, operator, ultra } = TIER_CAPABILITIES;
+      const { free, operator, ultra, unlimited } = TIER_CAPABILITIES;
       expect(operator.backfillPriority).toBeLessThan(free.backfillPriority);
       expect(ultra.backfillPriority).toBeLessThan(operator.backfillPriority);
+      expect(unlimited.backfillPriority).toBe(ultra.backfillPriority);
     });
 
     it('delays only the free tier’s signal feed', () => {
       expect(TIER_CAPABILITIES.free.signalDelaySeconds).toBeGreaterThan(0);
       expect(TIER_CAPABILITIES.operator.signalDelaySeconds).toBe(0);
       expect(TIER_CAPABILITIES.ultra.signalDelaySeconds).toBe(0);
+      expect(TIER_CAPABILITIES.unlimited.signalDelaySeconds).toBe(0);
     });
 
     it('gates live execution to paid tiers', () => {
       expect(TIER_CAPABILITIES.free.liveExecution).toBe(false);
       expect(TIER_CAPABILITIES.operator.liveExecution).toBe(true);
       expect(TIER_CAPABILITIES.ultra.liveExecution).toBe(true);
+      expect(TIER_CAPABILITIES.unlimited.liveExecution).toBe(true);
     });
   });
 });

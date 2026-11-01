@@ -17,6 +17,7 @@ import {
   recordCryptoPaymentAndGrantTier,
   runTierDowngradeSweep,
   UnderpaidPaymentError,
+  query,
   type CryptoPaymentRecord,
   type PaymentIntentRecord,
   type UserBillingStatus
@@ -50,6 +51,7 @@ export interface BillingDependencies {
     treasuryAddress: string;
     memo?: string | null;
   }) => Promise<{ verified: boolean; payerAddress: string | null; amountUsdc: number }>;
+  readonly findPaymentIntentByMemo?: (memo: string) => Promise<{ userId: string; status: string } | null>;
 }
 
 export const DEFAULT_TREASURY_ADDRESSES = {
@@ -251,19 +253,38 @@ const defaultDependencies: BillingDependencies = {
   getUserBillingStatus,
   listUserCryptoPayments,
   runTierDowngradeSweep,
-  verifyOnChainPayment: defaultVerifier
+  verifyOnChainPayment: defaultVerifier,
+  findPaymentIntentByMemo: async (memo: string) => {
+    try {
+      const rows = await query<{ user_id: string; status: string }>(
+        `SELECT user_id, status FROM user_payment_intents WHERE reference_memo = $1`,
+        [memo]
+      );
+      return rows[0] ? { userId: rows[0].user_id, status: rows[0].status } : null;
+    } catch {
+      return null;
+    }
+  }
 };
 
 const intentBodySchema = z.object({
   planId: z.enum(['operator_monthly', 'ultra_monthly', 'lifetime'])
 });
 
-const verifyBodySchema = z.object({
-  chain: z.enum(['solana', 'polygon']),
-  txHash: z.string().min(10).max(128),
-  planId: z.enum(['operator_monthly', 'ultra_monthly', 'lifetime']),
-  memo: z.string().optional()
-});
+const verifyBodySchema = z
+  .object({
+    chain: z.enum(['solana', 'polygon']),
+    txHash: z.string().min(10).max(128),
+    planId: z.enum(['operator_monthly', 'ultra_monthly', 'lifetime']),
+    memo: z.string().optional(),
+    referenceMemo: z.string().optional()
+  })
+  .transform((data) => ({
+    chain: data.chain,
+    txHash: data.txHash,
+    planId: data.planId,
+    memo: data.memo || data.referenceMemo
+  }));
 
 export async function registerBillingRoutes(
   app: FastifyInstance,
@@ -352,6 +373,18 @@ export async function registerBillingRoutes(
     const plan = resolveBillingPlan(planId);
     if (!plan) {
       return reply.code(400).send({ error: 'Bad Request', message: `Unknown plan: ${planId}` });
+    }
+
+    // H-06: Prevent payment hijacking by checking intent ownership
+    const effectiveMemo = memo?.trim();
+    if (effectiveMemo && deps.findPaymentIntentByMemo) {
+      const intent = await deps.findPaymentIntentByMemo(effectiveMemo);
+      if (intent && intent.userId !== scope.userId) {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'This payment reference memo belongs to a different user account.'
+        });
+      }
     }
 
     const treasury = DEFAULT_TREASURY_ADDRESSES[chain];

@@ -152,10 +152,27 @@ export default function AdminPortfolioPage() {
     }
   };
 
-  const triggerExport = () => {
-    const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/v1/admin/portfolio/export?type=${exportType}&format=${exportFormat}`;
-    window.open(url, '_blank');
-    setShowExportModal(false);
+  const triggerExport = async () => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const url = `${apiUrl}/v1/admin/portfolio/export?type=${exportType}&format=${exportFormat}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) {
+        throw new Error(`Export failed: HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `wake-${exportType}-export.${exportFormat}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+      setShowExportModal(false);
+    } catch (err: any) {
+      alert(`Export error: ${err.message}`);
+    }
   };
 
   return (

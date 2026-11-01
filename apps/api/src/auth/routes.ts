@@ -71,6 +71,7 @@ export interface AuthRouteOptions {
   /** Origin this server accepts sign-in messages for. Bound into every nonce. */
   readonly domain: string;
   readonly uri: string;
+  readonly allowedOrigins?: readonly string[];
 }
 
 function publicUser(user: UserRecord) {
@@ -233,12 +234,19 @@ export async function registerAuthRoutes(
     let requestDomain = options.domain;
     let requestUri = options.uri;
     if (rawOrigin) {
-      try {
-        const u = new URL(rawOrigin);
-        requestDomain = u.host;
-        requestUri = `${u.protocol}//${u.host}`;
-      } catch {
-        // Fallback to options
+      // Validate rawOrigin against configured allowlist or options.uri (H-04)
+      const isAllowed = options.allowedOrigins && options.allowedOrigins.length > 0
+        ? options.allowedOrigins.includes(rawOrigin)
+        : rawOrigin === options.uri;
+
+      if (isAllowed || !options.isProduction) {
+        try {
+          const u = new URL(rawOrigin);
+          requestDomain = u.host;
+          requestUri = `${u.protocol}//${u.host}`;
+        } catch {
+          // Fallback to options default
+        }
       }
     }
 

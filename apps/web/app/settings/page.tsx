@@ -17,13 +17,13 @@ interface ExecutionSettings {
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<ExecutionSettings>({
-    maxPositionPct: 10,
+    maxPositionPct: 5,
     maxSlippageBps: 100,
-    autoExecute: true,
+    autoExecute: false,
     concurrentPositionCap: 5,
     killSwitchActive: false,
-    userBalanceUsd: 1250,
-    venueMinOrderSizeUsd: 15,
+    userBalanceUsd: 0,
+    venueMinOrderSizeUsd: 10,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,17 +36,19 @@ export default function SettingsPage() {
 
   const fetchSettings = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const data = await api.get<any>('/v1/me/execution-settings').catch(() => null);
-      if (data) {
+      const data = await api.get<any>('/v1/me/execution-settings');
+      if (data?.settings) {
+        const solanaChain = data.chains?.find((c: any) => c.chain === 'solana');
         setSettings({
-          maxPositionPct: data.settings?.maxPositionPct ?? 10,
-          maxSlippageBps: data.settings?.maxSlippageBps ?? 100,
-          autoExecute: data.settings?.autoExecute ?? true,
-          concurrentPositionCap: data.settings?.concurrentPositionCap ?? 5,
-          killSwitchActive: data.settings?.killSwitchActive ?? false,
-          userBalanceUsd: data.balanceUsd ?? 1250,
-          venueMinOrderSizeUsd: data.minOrderSizeUsd ?? 15,
+          maxPositionPct: data.settings.maxPositionPct ?? 5,
+          maxSlippageBps: solanaChain?.maxSlippageBps ?? 100,
+          autoExecute: Boolean(data.settings.autoExecute),
+          concurrentPositionCap: data.settings.maxConcurrentPositions ?? 5,
+          killSwitchActive: Boolean(data.settings.killed),
+          userBalanceUsd: data.positionCap?.balanceUsd ?? 0,
+          venueMinOrderSizeUsd: data.positionCap?.minOrderSizeUsd ?? 10,
         });
       }
     } catch (err: any) {
@@ -61,13 +63,19 @@ export default function SettingsPage() {
     setSaving(true);
     setSuccess(false);
     try {
-      await api.put('/v1/me/execution-settings', {
+      // S4-M4: Correct PATCH method and schema fields for execution-settings
+      await api.patch('/v1/me/execution-settings', {
         maxPositionPct: settings.maxPositionPct,
-        maxSlippageBps: settings.maxSlippageBps,
         autoExecute: settings.autoExecute,
-        concurrentPositionCap: settings.concurrentPositionCap,
-        killSwitchActive: settings.killSwitchActive,
+        maxConcurrentPositions: settings.concurrentPositionCap,
       });
+
+      // Update per-chain slippage
+      await api.put('/v1/me/execution-settings/chains/solana', {
+        mode: settings.autoExecute ? 'live' : 'paper',
+        maxSlippageBps: settings.maxSlippageBps,
+      }).catch(() => null);
+
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
@@ -84,7 +92,8 @@ export default function SettingsPage() {
     }
     setSettings((prev) => ({ ...prev, killSwitchActive: nextState }));
     try {
-      await api.put('/v1/me/execution-settings/kill-switch', { active: nextState });
+      // S6-8: Correct schema { killed: boolean }
+      await api.put('/v1/me/execution-settings/kill-switch', { killed: nextState });
     } catch (err: any) {
       alert(`Kill switch toggle failed: ${err.message}`);
       setSettings((prev) => ({ ...prev, killSwitchActive: !nextState }));

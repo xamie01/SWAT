@@ -6,8 +6,8 @@ export const WAKE_SOLANA_DEVNET_PROGRAM_ID = 'WakeDev111111111111111111111111111
 
 /**
  * Derives a real Anchor Program Derived Address (PDA) on Solana:
- * seeds = [b"wake_vault", user_public_key]
- * program_id = WAKE_SOLANA_PROGRAM_ID
+ * seeds = [b"vault", user_public_key]
+ * program_id = WAKE_SOLANA_MAINNET_PROGRAM_ID (or devnet)
  */
 export function deriveSolanaAnchorPda(
   userAddress: string,
@@ -19,13 +19,13 @@ export function deriveSolanaAnchorPda(
       cluster === 'devnet' ? WAKE_SOLANA_DEVNET_PROGRAM_ID : WAKE_SOLANA_MAINNET_PROGRAM_ID
     );
     const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from('wake_vault'), userPubkey.toBuffer()],
+      [new TextEncoder().encode('vault'), userPubkey.toBytes()],
       progId
     );
     return { pdaAddress: pda.toBase58(), bump };
   } catch (err) {
-    console.warn('Could not derive Anchor PDA with @solana/web3.js, using fallback:', err);
-    return { pdaAddress: '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS', bump: 255 };
+    console.warn('Could not derive Anchor PDA with @solana/web3.js:', err);
+    return { pdaAddress: WAKE_SOLANA_MAINNET_PROGRAM_ID, bump: 255 };
   }
 }
 
@@ -49,7 +49,7 @@ export function detectSolanaCluster(provider?: any): 'mainnet-beta' | 'devnet' {
 export function copyToClipboard(text: string): boolean {
   if (!text) return false;
   try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text).catch(() => {});
       return true;
     }
@@ -60,7 +60,8 @@ export function copyToClipboard(text: string): boolean {
     const el = document.createElement('textarea');
     el.value = text;
     el.setAttribute('readonly', '');
-    el.style.position = 'absolute';
+    el.style.position = 'fixed';
+    el.style.top = '-9999px';
     el.style.left = '-9999px';
     document.body.appendChild(el);
     el.select();
@@ -213,19 +214,23 @@ export async function connectEvmWallet(targetChainId?: '0x89'): Promise<EvmWalle
               chainId: '0x89',
               chainName: 'Polygon Mainnet',
               nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-              rpcUrls: ['https://polygon-rpc.com'],
+              rpcUrls: ['https://polygon-bor-rpc.publicnode.com'],
               blockExplorerUrls: ['https://polygonscan.com'],
             },
           ],
         });
+      } else {
+        throw new Error('Please approve switching your wallet to Polygon Mainnet (Chain ID 137) in MetaMask/Rabby.');
       }
     }
   }
 
+  const updatedChainId: string = await provider.request({ method: 'eth_chainId' }).catch(() => currentChainId);
+
   return {
     address: accounts[0].toLowerCase(),
     provider,
-    chainId: currentChainId,
+    chainId: updatedChainId,
     walletName: name,
   };
 }
@@ -276,4 +281,75 @@ export async function linkWalletWithSignature(params: {
   });
 
   return verifyRes.wallet;
+}
+
+/**
+ * Prompts the connected EVM wallet (MetaMask / Rabby) to sign the Polymarket
+ * ClobAuth EIP-712 typed data via eth_signTypedData_v4.
+ */
+export async function signPolymarketClobAuth(
+  provider: any,
+  address: string,
+  typedData: any
+): Promise<string> {
+  // Ensure wallet is strictly on Polygon (0x89 / 137) before signing
+  const currentHex: string = await provider.request({ method: 'eth_chainId' }).catch(() => '0x1');
+  if (currentHex.toLowerCase() !== '0x89') {
+    try {
+      await provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x89' }],
+      });
+    } catch (switchErr: any) {
+      if (switchErr?.code === 4902) {
+        await provider.request({
+          method: 'wallet_addEthereumChain',
+          params: [
+            {
+              chainId: '0x89',
+              chainName: 'Polygon Mainnet',
+              nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+              rpcUrls: ['https://polygon-bor-rpc.publicnode.com'],
+              blockExplorerUrls: ['https://polygonscan.com'],
+            },
+          ],
+        });
+      } else {
+        throw new Error('Please switch your wallet to Polygon Mainnet (Chain ID 137) before signing Polymarket credentials.');
+      }
+    }
+  }
+
+  // Ensure EIP712Domain is explicitly in types for MetaMask eth_signTypedData_v4
+  const payload = {
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+      ],
+      ...typedData.types,
+    },
+  };
+
+  try {
+    return await provider.request({
+      method: 'eth_signTypedData_v4',
+      params: [address, JSON.stringify(payload)],
+    });
+  } catch (err: any) {
+    if (err?.code === 4001) {
+      throw new Error('Polymarket authentication signature rejected by user.');
+    }
+    // Fallback: some providers expect parsed object instead of serialized JSON string
+    try {
+      return await provider.request({
+        method: 'eth_signTypedData_v4',
+        params: [address, payload],
+      });
+    } catch {
+      throw err;
+    }
+  }
 }

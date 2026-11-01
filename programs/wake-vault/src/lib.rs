@@ -32,6 +32,12 @@ pub mod jupiter {
     pub const ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 }
 
+pub mod admin_authority {
+    use super::*;
+    // Pinned deployment authority permitted to initialize global WakeConfig PDA (C-02)
+    pub const INITIAL_ADMIN: Pubkey = pubkey!("2hNXKEQem7JKFkgG5wUTxuZyPdBDyTXDsLpXoFm6XNny");
+}
+
 #[program]
 pub mod wake_vault {
     use super::*;
@@ -242,9 +248,20 @@ pub mod wake_vault {
             VaultError::UnknownCpiTarget
         );
 
+        // Enforce non-zero minimum output to prevent drain via arbitrary min_out == 0 (C-01)
+        require!(min_out > 0, VaultError::ZeroMinOutNotAllowed);
+
         let in_key = ctx.accounts.vault_token_in.key();
         let out_key = ctx.accounts.vault_token_out.key();
         require_keys_neq!(in_key, out_key, VaultError::IdenticalSwapTokens);
+
+        // Verify swap output token account is present in CPI remaining accounts and is writable (C-01)
+        require!(
+            ctx.remaining_accounts
+                .iter()
+                .any(|acc| acc.key() == out_key && acc.is_writable),
+            VaultError::MissingOutputTokenAccount
+        );
 
         // Record baseline token balances and native lamports before swap
         ctx.accounts.vault_token_in.reload()?;
@@ -329,7 +346,10 @@ pub struct InitializeConfig<'info> {
         bump
     )]
     pub config: Account<'info, WakeConfig>,
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = admin.key() == admin_authority::INITIAL_ADMIN @ VaultError::UnauthorizedAdmin
+    )]
     pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -532,6 +552,10 @@ pub enum VaultError {
     MintMismatch,
     #[msg("Vault account is already initialized or owned by another program")]
     AlreadyInitialized,
+    #[msg("Minimum output amount must be greater than zero")]
+    ZeroMinOutNotAllowed,
+    #[msg("Swap output token account must be included in CPI remaining accounts as writable")]
+    MissingOutputTokenAccount,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -548,8 +572,9 @@ pub mod invariants {
         Ok(in_spent)
     }
 
-    /// Verifies the minimum token return invariant: received >= min_out
+    /// Verifies the minimum token return invariant: received >= min_out and min_out > 0
     pub fn verify_token_out_delta(out_before: u64, out_after: u64, min_out: u64) -> Result<u64> {
+        require!(min_out > 0, VaultError::ZeroMinOutNotAllowed);
         let out_received = out_after.checked_sub(out_before).ok_or(VaultError::ArithmeticUnderflow)?;
         require!(out_received >= min_out, VaultError::SlippageExceeded);
         Ok(out_received)
@@ -661,6 +686,21 @@ mod tests {
         let res = invariants::verify_token_out_delta(300, 100, 50);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), error!(VaultError::ArithmeticUnderflow));
+    }
+
+    #[test]
+    fn test_minimum_return_invariant_zero_min_out_fails() {
+        let res = invariants::verify_token_out_delta(100, 300, 0);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), error!(VaultError::ZeroMinOutNotAllowed));
+    }
+
+    #[test]
+    fn test_initial_admin_authorization() {
+        let deployer = admin_authority::INITIAL_ADMIN;
+        let impostor = Pubkey::new_unique();
+        assert_eq!(deployer, admin_authority::INITIAL_ADMIN);
+        assert_ne!(impostor, admin_authority::INITIAL_ADMIN);
     }
 
     #[test]

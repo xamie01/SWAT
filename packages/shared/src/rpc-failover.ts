@@ -49,7 +49,8 @@ export const DEFAULT_FALLBACK_RPCS: Record<Chain, readonly string[]> = {
   ],
   polygon: [
     'https://polygon-bor-rpc.publicnode.com',
-    'https://polygon.llamarpc.com'
+    'https://1rpc.io/matic',
+    'https://polygon.drpc.org'
   ],
   'robinhood-chain': [
     'https://rpc.mainnet.chain.robinhood.com'

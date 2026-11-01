@@ -87,11 +87,11 @@ export function AdminNav() {
         </div>
 
         {/* Desktop Actions */}
-        <div className="hidden sm:flex items-center gap-3 ml-auto pl-6 sm:pl-8 border-l border-border-subtle shrink-0">
+        <div className="hidden sm:flex items-center gap-3 ml-auto pl-8 border-l border-border-subtle shrink-0">
           <button
             onClick={handleEmergencyOff}
             disabled={submitting}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors shadow-sm ${
               emergencyOffTriggered
                 ? 'bg-status-error text-white'
                 : 'bg-status-error/10 text-status-error hover:bg-status-error hover:text-white border border-status-error/30'

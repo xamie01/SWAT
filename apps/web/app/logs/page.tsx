@@ -35,6 +35,20 @@ function formatLogMessage(raw: string): string {
     try {
       const parsed = JSON.parse(trimmed);
       const msg = parsed.msg || parsed.message || '';
+      
+      if (parsed.req && parsed.req.method) {
+        return `--> ${parsed.req.method} ${parsed.req.url} (from: ${parsed.req.remoteAddress || 'local'})`;
+      }
+      if (parsed.res && parsed.res.statusCode) {
+        const ms = parsed.responseTime ? ` in ${Math.round(parsed.responseTime)}ms` : '';
+        return `<-- ${parsed.res.statusCode} ${msg || 'OK'}${ms}`;
+      }
+      if (parsed.err || parsed.error) {
+        const errObj = parsed.err || parsed.error;
+        const errMsg = typeof errObj === 'string' ? errObj : (errObj.message || JSON.stringify(errObj));
+        return `[ERROR] ${msg ? msg + ': ' : ''}${errMsg !== '{}' ? errMsg : 'Exception encountered'}`;
+      }
+      
       const extra = { ...parsed };
       delete extra.msg;
       delete extra.message;
@@ -43,23 +57,22 @@ function formatLogMessage(raw: string): string {
       delete extra.pid;
       delete extra.hostname;
       delete extra.reqId;
-      
-      if (parsed.req && parsed.req.method) {
-        return `[HTTP REQUEST] ${parsed.req.method} ${parsed.req.url} from ${parsed.req.remoteAddress}`;
-      }
-      if (parsed.res && parsed.res.statusCode) {
-        return `[HTTP RESPONSE] Status ${parsed.res.statusCode} (${Math.round(parsed.responseTime || 0)}ms)`;
-      }
-      if (parsed.err && parsed.err.message) {
-        return `[ERROR] ${parsed.err.message}`;
-      }
-      
       delete extra.req;
       delete extra.res;
       delete extra.responseTime;
-      const extraDetails = Object.keys(extra).length > 0 ? ` — ${JSON.stringify(extra)}` : '';
-      if (msg) return `${msg}${extraDetails}`;
-      return JSON.stringify(parsed);
+      delete extra.v;
+
+      const keys = Object.keys(extra);
+      if (keys.length > 0) {
+        const details = keys
+          .map((k) => {
+            const val = typeof extra[k] === 'object' ? JSON.stringify(extra[k]) : String(extra[k]);
+            return `${k}=${val}`;
+          })
+          .join(' ');
+        return msg ? `${msg} | ${details}` : details;
+      }
+      return msg || JSON.stringify(parsed);
     } catch {
       return raw;
     }

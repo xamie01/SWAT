@@ -9,6 +9,7 @@ import {
   connectSolanaWallet,
   connectEvmWallet,
   linkWalletWithSignature,
+  signPolymarketClobAuth,
   getSolanaProvider,
   getEvmProvider,
   deriveSolanaAnchorPda,
@@ -35,6 +36,9 @@ interface VaultData {
   };
   polymarket: {
     depositAddress: string;
+    signerAddress?: string | null;
+    status?: string | null;
+    apiKey?: string | null;
     geoEligible: boolean;
     geoExpiresAt: string | null;
   };
@@ -67,6 +71,7 @@ export default function VaultPage() {
   const [walletConnectError, setWalletConnectError] = useState<string | null>(null);
   const [walletConnectSuccess, setWalletConnectSuccess] = useState<string | null>(null);
   const [showManualInput, setShowManualInput] = useState(false);
+  const [authorizingPoly, setAuthorizingPoly] = useState(false);
 
   // Interactive Modals
   const [activeModal, setActiveModal] = useState<'solana-gas' | 'robinhood-delegate' | 'polymarket-deposit' | null>(null);
@@ -261,14 +266,42 @@ export default function VaultPage() {
         const { address, provider, walletName } = await connectEvmWallet('0x89');
         setDetectedEvm(walletName);
 
-        // Sign challenge and link in backend
+        // 1. Link wallet with SIWE challenge
         await linkWalletWithSignature({
           chainKind: 'evm',
           address,
           provider,
         });
 
-        const derivedPolyDeposit = address.startsWith('0x') ? `0x7739${address.slice(6)}` : `0x7739${address}`;
+        // 2. Derive Polymarket CLOB L2 credentials via EIP-712 ClobAuth
+        let polyApiKey: string | null = null;
+        try {
+          const challenge = await api.get<{
+            address: string;
+            timestampSeconds: number;
+            nonce: number;
+            typedData: any;
+          }>(`/v1/me/vault/polymarket/challenge?address=${address}`);
+
+          const signature = await signPolymarketClobAuth(provider, address, challenge.typedData);
+
+          const credsRes = await api.post<{
+            success: boolean;
+            apiKey: string;
+            address: string;
+          }>('/v1/me/vault/polymarket/credentials', {
+            address,
+            signature,
+            timestampSeconds: challenge.timestampSeconds,
+            nonce: challenge.nonce,
+          });
+
+          polyApiKey = credsRes.apiKey;
+        } catch (authErr: any) {
+          console.warn('Polymarket L2 credential derivation deferred:', authErr);
+        }
+
+        const derivedPolyDeposit = address;
 
         setData((prev) =>
           prev
@@ -277,6 +310,9 @@ export default function VaultPage() {
                 polymarket: {
                   ...prev.polymarket,
                   depositAddress: derivedPolyDeposit,
+                  signerAddress: address,
+                  status: polyApiKey ? 'active' : prev.polymarket?.status ?? 'uninitialized',
+                  apiKey: polyApiKey ?? prev.polymarket?.apiKey ?? null,
                   geoEligible: true,
                 },
                 linkedWallets: [
@@ -294,12 +330,66 @@ export default function VaultPage() {
             : prev
         );
 
-        setWalletConnectSuccess(`Connected to ${walletName} on Polygon! Address ${address.slice(0, 6)}...${address.slice(-4)} verified. Polymarket deposit proxy active: ${derivedPolyDeposit}`);
+        if (polyApiKey) {
+          setWalletConnectSuccess(
+            `Connected to ${walletName} on Polygon! Polymarket CLOB L2 credentials derived & active (API Key: ${polyApiKey.slice(0, 8)}...).`
+          );
+        } else {
+          setWalletConnectSuccess(
+            `Connected to ${walletName} on Polygon! Address ${address.slice(0, 6)}...${address.slice(-4)} verified. You can authorize Polymarket L2 signing below.`
+          );
+        }
       }
     } catch (err: any) {
       setWalletConnectError(err.message || 'Failed to connect wallet.');
     } finally {
       setConnectingWallet(false);
+    }
+  };
+
+  const handleAuthorizePolymarketL2 = async () => {
+    setAuthorizingPoly(true);
+    setError(null);
+    setWalletConnectError(null);
+    setWalletConnectSuccess(null);
+    try {
+      const { address, provider, walletName } = await connectEvmWallet('0x89');
+      setDetectedEvm(walletName);
+
+      // 1. Fetch challenge from API
+      const challenge = await api.get<{
+        address: string;
+        timestampSeconds: number;
+        nonce: number;
+        typedData: any;
+      }>(`/v1/me/vault/polymarket/challenge?address=${address}`);
+
+      // 2. Sign EIP-712 ClobAuth typed data with MetaMask
+      const signature = await signPolymarketClobAuth(provider, address, challenge.typedData);
+
+      // 3. Post to backend to call Polymarket CLOB and seal credentials
+      const res = await api.post<{
+        success: boolean;
+        apiKey: string;
+        address: string;
+        message: string;
+      }>('/v1/me/vault/polymarket/credentials', {
+        address,
+        signature,
+        timestampSeconds: challenge.timestampSeconds,
+        nonce: challenge.nonce,
+      });
+
+      setWalletConnectSuccess(
+        `Polymarket CLOB L2 Authenticated! Signer ${address.slice(0, 6)}...${address.slice(-4)} active with API key ${res.apiKey.slice(0, 8)}...`
+      );
+
+      // Refresh vault data
+      await fetchVault();
+    } catch (err: any) {
+      setWalletConnectError(err.message || 'Failed to authenticate with Polymarket CLOB.');
+    } finally {
+      setAuthorizingPoly(false);
     }
   };
 
@@ -329,21 +419,21 @@ export default function VaultPage() {
           solana: {
             ...prev.solana,
             pdaAddress: derivedPda,
-            status: 'active',
+            status: 'preview',
           },
           linkedWallets: [
             ...prev.linkedWallets.filter((w) => w.address !== address),
             {
               address,
               chain: 'solana',
-              verified: true,
+              verified: false,
               linkedAt: new Date().toISOString(),
               spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
               isCoolingOff: true,
             },
           ],
         } : prev);
-        setLinkSuccess(`Solana wallet linked successfully! Anchor Execution PDA derived: ${derivedPda}`);
+        setLinkSuccess(`Solana wallet preview loaded. Connect with Phantom/Solflare extension to sign SIWS verification.`);
       } else if (linkChain === 'robinhood-chain') {
         const derivedSmartAccount = address.startsWith('0x') ? `0x4337${address.slice(6)}` : `0x4337${address}`;
         setData((prev) => prev ? {
@@ -351,7 +441,7 @@ export default function VaultPage() {
           robinhood: {
             ...prev.robinhood,
             smartAccountAddress: derivedSmartAccount,
-            sessionKeyStatus: 'delegated',
+            sessionKeyStatus: 'unverified_preview',
             expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
           },
           linkedWallets: [
@@ -359,14 +449,14 @@ export default function VaultPage() {
             {
               address,
               chain: 'robinhood-chain',
-              verified: true,
+              verified: false,
               linkedAt: new Date().toISOString(),
               spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
               isCoolingOff: true,
             },
           ],
         } : prev);
-        setLinkSuccess(`Robinhood wallet linked! ERC-4337 Smart Account active: ${derivedSmartAccount}`);
+        setLinkSuccess(`Robinhood wallet preview loaded. Connect with MetaMask/Rabby to cryptographically sign session.`);
       } else {
         const derivedPolyDeposit = address.startsWith('0x') ? `0x7739${address.slice(6)}` : `0x7739${address}`;
         setData((prev) => prev ? {
@@ -381,14 +471,14 @@ export default function VaultPage() {
             {
               address,
               chain: 'polygon',
-              verified: true,
+              verified: false,
               linkedAt: new Date().toISOString(),
               spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
               isCoolingOff: true,
             },
           ],
         } : prev);
-        setLinkSuccess(`Polymarket wallet linked! Dedicated Deposit Proxy: ${derivedPolyDeposit}`);
+        setLinkSuccess(`Polymarket wallet preview loaded. Connect with extension to sign.`);
       }
 
       setWalletInput('');
@@ -400,12 +490,19 @@ export default function VaultPage() {
   };
 
   const handleSendEmailCode = async () => {
+    if (!withdrawDest) {
+      alert('Please specify a verified destination address first.');
+      return;
+    }
     try {
-      await api.post('/v1/me/withdraw/send-code', {}).catch(() => null);
+      await api.post('/v1/me/trading/withdraw/request-otp', {
+        destinationAddress: withdrawDest,
+        chainKind: withdrawChain === 'solana' ? 'solana' : 'evm'
+      });
       setCodeSent(true);
       alert('Security verification code sent to your registered email address.');
     } catch (err: any) {
-      alert(`Could not send code: ${err.message}`);
+      alert(`Could not send code: ${err.message || 'Error requesting code'}`);
     }
   };
 
@@ -417,63 +514,127 @@ export default function VaultPage() {
     }
     setSubmittingWithdraw(true);
     try {
-      await api.post('/v1/me/withdraw', {
-        chain: withdrawChain,
-        amount: Number(withdrawAmount),
+      const res = await api.post<{ status: string; message: string }>('/v1/me/trading/withdraw', {
         destinationAddress: withdrawDest,
-        emailCode,
-      }).catch(() => null);
+        chainKind: withdrawChain === 'solana' ? 'solana' : 'evm',
+        amountUsd: Number(withdrawAmount),
+        otpCode: emailCode.trim(),
+      });
 
-      alert(`Withdrawal of ${withdrawAmount} USDC broadcast successfully to ${withdrawDest}.`);
+      alert(res?.message || `Withdrawal authorization verified and queued.`);
       setWithdrawAmount('');
       setEmailCode('');
+      setCodeSent(false);
       fetchVault();
     } catch (err: any) {
-      alert(`Withdrawal failed: ${err.message}`);
+      alert(`Withdrawal failed: ${err.message || 'Transaction could not be submitted'}`);
     } finally {
       setSubmittingWithdraw(false);
     }
   };
 
-  const handleRevokeSolanaVault = () => {
-    setData((prev) =>
-      prev
-        ? {
-            ...prev,
-            solana: {
-              ...prev.solana,
-              status: 'revoked',
-              pdaAddress: 'REVOKED (Rent Lamports Returned to Wallet)',
-            },
-          }
-        : prev
-    );
-    setActionSuccessNotice('Solana Anchor Vault revoked. Rent-exempt lamports refunded to signer.');
-    setTimeout(() => setActionSuccessNotice(null), 4000);
+  const handleRevokeSolanaVault = async () => {
+    try {
+      if (data?.solana.status === 'revoked') {
+        const solWallet = data?.linkedWallets?.find((w) => w.chain === 'solana');
+        if (solWallet) {
+          const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, solanaCluster);
+          await api.post('/v1/me/vault/grant', {
+            chain: 'solana',
+            grantKind: 'solana_vault',
+            accountAddress: newPda
+          });
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  solana: {
+                    ...prev.solana,
+                    status: 'active',
+                    pdaAddress: newPda,
+                  },
+                }
+              : prev
+          );
+          setActionSuccessNotice('Solana Anchor Vault re-activated and registered on-chain.');
+        }
+      } else {
+        await api.post('/v1/me/vault/revoke', { chain: 'solana' });
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                solana: {
+                  ...prev.solana,
+                  status: 'revoked',
+                  pdaAddress: 'REVOKED (Rent Lamports Returned to Wallet)',
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice('Solana Anchor Vault revoked. Rent-exempt lamports refunded to signer.');
+      }
+      setTimeout(() => setActionSuccessNotice(null), 4000);
+    } catch (err: any) {
+      alert(`Action failed: ${err.message || 'Could not update vault state'}`);
+    }
   };
 
-  const handleRevokeRobinhoodSession = () => {
-    setData((prev) =>
-      prev
-        ? {
-            ...prev,
-            robinhood: {
-              ...prev.robinhood,
-              sessionKeyStatus: 'revoked',
-            },
-          }
-        : prev
-    );
-    setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
-    setTimeout(() => setActionSuccessNotice(null), 4000);
+  const handleRevokeRobinhoodSession = async () => {
+    try {
+      if (data?.robinhood.sessionKeyStatus === 'revoked') {
+        const rhWallet = data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain');
+        const smartAddr = rhWallet ? `0x4337${rhWallet.address.slice(2)}` : (data?.robinhood.smartAccountAddress || '0x4337000000000000000000000000000000000000');
+        await api.post('/v1/me/vault/grant', {
+          chain: 'robinhood-chain',
+          grantKind: 'eip7702',
+          accountAddress: smartAddr
+        });
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                robinhood: {
+                  ...prev.robinhood,
+                  sessionKeyStatus: 'delegated',
+                  smartAccountAddress: smartAddr,
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation restored. Automated trading resumed.');
+      } else {
+        await api.post('/v1/me/vault/revoke', { chain: 'robinhood-chain' });
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                robinhood: {
+                  ...prev.robinhood,
+                  sessionKeyStatus: 'revoked',
+                },
+              }
+            : prev
+        );
+        setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
+      }
+      setTimeout(() => setActionSuccessNotice(null), 4000);
+    } catch (err: any) {
+      alert(`Action failed: ${err.message || 'Could not update delegation state'}`);
+    }
   };
 
-  const handleToggleSolanaCluster = (cluster: 'mainnet-beta' | 'devnet') => {
+  const handleToggleSolanaCluster = async (cluster: 'mainnet-beta' | 'devnet') => {
     setSolanaCluster(cluster);
     if (data?.linkedWallets) {
       const solWallet = data.linkedWallets.find((w) => w.chain === 'solana');
       if (solWallet) {
         const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, cluster);
+        await api.post('/v1/me/vault/grant', {
+          chain: 'solana',
+          grantKind: 'solana_vault',
+          accountAddress: newPda
+        }).catch(() => null);
         setData((prev) =>
           prev
             ? {
@@ -485,7 +646,7 @@ export default function VaultPage() {
               }
             : prev
         );
-        setActionSuccessNotice(`Switched Solana cluster to ${cluster.toUpperCase()}. Anchor PDA recalculated.`);
+        setActionSuccessNotice(`Switched Solana cluster to ${cluster.toUpperCase()}. Anchor PDA recalculated: ${newPda.slice(0, 4)}...${newPda.slice(-4)}.`);
         setTimeout(() => setActionSuccessNotice(null), 3000);
       }
     }
@@ -1097,9 +1258,27 @@ export default function VaultPage() {
                           {copiedKey === 'poly-deposit' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy Address'}
                         </button>
                       </div>
-                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress}</div>
+                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress || 'Not linked yet'}</div>
                     </div>
                     <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
+                      <span className="text-on-surface-variant">L2 CLOB Signer:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        data?.polymarket.status === 'active'
+                          ? 'bg-status-success/15 text-status-success'
+                          : 'bg-surface-container-high text-on-surface-variant'
+                      }`}>
+                        {data?.polymarket.status === 'active' ? 'AUTHENTICATED (READY)' : 'UNINITIALIZED'}
+                      </span>
+                    </div>
+                    {data?.polymarket.apiKey && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-on-surface-variant">CLOB API Key:</span>
+                        <span className="font-bold text-primary truncate max-w-[160px]">
+                          {data.polymarket.apiKey.slice(0, 8)}...{data.polymarket.apiKey.slice(-4)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
                       <span className="text-on-surface-variant">Network:</span>
                       <span className="font-bold text-[#8B5CF6]">Polygon (Chain ID 137)</span>
                     </div>
@@ -1112,13 +1291,35 @@ export default function VaultPage() {
 
                 <div className="space-y-2">
                   <button
+                    type="button"
+                    onClick={handleAuthorizePolymarketL2}
+                    disabled={authorizingPoly}
+                    className="w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
+                  >
+                    {authorizingPoly ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Authenticating with Polymarket...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-sm">verified_user</span>
+                        <span>
+                          {data?.polymarket.status === 'active'
+                            ? 'Re-authorize Polymarket L2 Signer'
+                            : 'Authorize Polymarket L2 Signer (1-Click)'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                  <button
                     onClick={() => setActiveModal('polymarket-deposit')}
-                    className="w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                    className="w-full py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle text-primary font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-sm">qr_code</span>
                     <span>Deposit Polygon USDC Float</span>
                   </button>
-                  <div className="flex items-center justify-between text-xs font-mono text-on-surface-variant px-1">
+                  <div className="flex items-center justify-between text-xs font-mono text-on-surface-variant px-1 pt-1">
                     <span>Geo-Eligibility:</span>
                     <span className="text-status-success font-bold">ACTIVE (PASSED)</span>
                   </div>
