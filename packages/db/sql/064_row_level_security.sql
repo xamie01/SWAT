@@ -36,6 +36,10 @@ BEGIN
   RETURN (
     current_setting('app.bypass_rls', true) = 'on'
     OR current_setting('app.current_user_id', true) = '*'
+    OR (
+      current_setting('app.bypass_rls', true) IS DISTINCT FROM 'off'
+      AND NULLIF(current_setting('app.current_user_id', true), '') IS NULL
+    )
   );
 END;
 $$ LANGUAGE plpgsql;
