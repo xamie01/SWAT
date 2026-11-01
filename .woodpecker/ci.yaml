@@ -24,11 +24,12 @@ steps:
       - corepack prepare pnpm@10.2.0 --activate
       - pnpm install --frozen-lockfile
       - cp .env.example .env
-      - sed -i 's/localhost:5432/postgres:5432/g' .env
-      - sed -i 's/127.0.0.1:5432/postgres:5432/g' .env
-      - sed -i 's/localhost:6379/redis:6379/g' .env
-      - sed -i 's/127.0.0.1:6379/redis:6379/g' .env
-      - sed -i 's/\/swat$/\/swat_integration/g' .env
+      - sed -i "s|localhost:5432|postgres:5432|g" .env
+      - sed -i "s|127.0.0.1:5432|postgres:5432|g" .env
+      - sed -i "s|localhost:6379|redis:6379|g" .env
+      - sed -i "s|127.0.0.1:6379|redis:6379|g" .env
+      - sed -i "s|:5432/swat|:5432/swat_integration|g" .env
+      - sed -i "s|POSTGRES_DB=swat|POSTGRES_DB=swat_integration|g" .env
       - echo "INTEGRATION_DATABASE_URL=postgresql://swat:swat@postgres:5432/swat_integration" >> .env
       - pnpm check:secrets
       - pnpm check:env
