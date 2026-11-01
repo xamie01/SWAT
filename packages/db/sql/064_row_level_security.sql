@@ -49,7 +49,10 @@ BEGIN
 END $$;
 
 GRANT swat_app TO swat WITH SET TRUE;
-GRANT CONNECT ON DATABASE swat TO swat_app;
+DO $$
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO swat_app', current_database());
+END $$;
 GRANT USAGE ON SCHEMA public TO swat_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO swat_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO swat_app;

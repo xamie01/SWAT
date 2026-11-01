@@ -31,6 +31,7 @@ steps:
     image: node:22-slim
     environment:
       DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
+      INTEGRATION_DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
       REDIS_URL: redis://redis:6379
     commands:
       - corepack enable
@@ -42,9 +43,12 @@ steps:
     image: node:22-slim
     environment:
       DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
+      INTEGRATION_DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
       REDIS_URL: redis://redis:6379
       TRADING_MODE: paper
       AUTO_EXECUTE: "false"
+      API_KEY: swat-ci-key
+      NEXT_PUBLIC_API_KEY: swat-ci-key
     commands:
       - corepack enable
       - corepack prepare pnpm@10.2.0 --activate
