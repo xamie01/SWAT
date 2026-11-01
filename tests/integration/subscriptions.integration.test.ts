@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
+import { capabilitiesFor } from '@swat/shared';
 import { pool } from '../../packages/db/src/client.js';
 import { forUser } from '../../packages/db/src/tenancy.js';
 import { createUser } from '../../packages/db/src/users.js';
@@ -241,7 +242,7 @@ describe('stage 2 subscriptions', () => {
     });
     expect(first.created).toBe(true);
 
-    // Same token again: idempotent, and must not spend the day's single slot.
+    // Same token again: idempotent, and must not spend any quota.
     const repeat = await requestTokenWatch(scope, {
       chain: 'solana',
       tokenMint: mint,
@@ -250,10 +251,20 @@ describe('stage 2 subscriptions', () => {
     });
     expect(repeat.created).toBe(false);
 
+    const quota = capabilitiesFor(user.tier, user.tierExpiresAt).tokenBackfillsPerDay ?? 1;
+    for (let i = 1; i < quota; i++) {
+      await requestTokenWatch(scope, {
+        chain: 'solana',
+        tokenMint: `solana:MINT${runId}${i}`,
+        tier: user.tier,
+        tierExpiresAt: user.tierExpiresAt
+      });
+    }
+
     await expect(
       requestTokenWatch(scope, {
         chain: 'solana',
-        tokenMint: `solana:MINT${runId}b`,
+        tokenMint: `solana:MINT${runId}exhausted`,
         tier: user.tier,
         tierExpiresAt: user.tierExpiresAt
       })

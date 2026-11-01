@@ -150,11 +150,6 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
       sourceValues
     ],
     [
-      'copy position lots',
-      'DELETE FROM copy_position_lots WHERE target_account = $1 AND chain = $2 AND token_mint = $3',
-      [targetAccount, fixture.chain, tokenMint]
-    ],
-    [
       'copy positions',
       'DELETE FROM copy_positions WHERE target_account = $1 AND chain = $2 AND token_mint = $3',
       [targetAccount, fixture.chain, tokenMint]
@@ -235,7 +230,7 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
     try {
       await pool.query(statement, values);
     } catch (error) {
-      failures.push(new Error(`Failed to clean ${label}`, { cause: asError(error) }));
+      failures.push(new Error(`Failed to clean ${label}: ${asError(error).message}`, { cause: asError(error) }));
     }
   }
 

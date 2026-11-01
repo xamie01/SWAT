@@ -115,6 +115,14 @@ async function mirror(sourceTradeId: string, quantity: string, evidenceId: strin
 afterAll(async () => {
   if (createdExecutionIds.length > 0) {
     await pool.query(
+      `DELETE FROM copy_position_master_lot_reductions WHERE sell_execution_id = ANY($1::uuid[])`,
+      [createdExecutionIds]
+    );
+    await pool.query(
+      `DELETE FROM copy_position_master_lots WHERE acquisition_execution_id = ANY($1::uuid[])`,
+      [createdExecutionIds]
+    );
+    await pool.query(
       `DELETE FROM copy_position_applications WHERE execution_id = ANY($1::uuid[])`,
       [createdExecutionIds]
     );
@@ -139,11 +147,6 @@ afterAll(async () => {
     );
     await pool.query(`DELETE FROM source_trades WHERE id = ANY($1::uuid[])`, [createdSourceTradeIds]);
   }
-  await pool.query(
-    `DELETE FROM copy_position_lots
-      WHERE target_account = $1 AND chain = 'solana' AND token_mint = $2`,
-    [targetAccount, tokenMint]
-  );
   await pool.query(
     `DELETE FROM copy_positions
       WHERE target_account = $1 AND chain = 'solana' AND token_mint = $2`,
@@ -205,10 +208,11 @@ describe('master-attributed copy inventory', () => {
       master_wallet_address: string;
       confirmed_quantity: string;
     }>(
-      `SELECT master_wallet_address, confirmed_quantity::text AS confirmed_quantity
-         FROM copy_position_lots
-        WHERE target_account = $1 AND user_id = $2 AND chain = 'solana' AND token_mint = $3
-        ORDER BY master_wallet_address`,
+      `SELECT lot.master_wallet_address, lot.remaining_quantity::text AS confirmed_quantity
+         FROM copy_position_master_lots lot
+         JOIN copy_positions position ON position.id = lot.position_id
+        WHERE position.target_account = $1 AND lot.user_id = $2 AND lot.chain = 'solana' AND lot.token_mint = $3
+        ORDER BY lot.master_wallet_address`,
       [targetAccount, userId, tokenMint]
     );
     expect(lots).toEqual([

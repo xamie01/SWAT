@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, afterAll } from 'vitest';
+import { Keypair } from '@swat/shared';
 import { pool } from '../../packages/db/src/client.js';
 import { createUser } from '../../packages/db/src/users.js';
 import {
@@ -44,7 +45,7 @@ const targetAccounts: string[] = [];
 
 /** The shared synthetic address paper mode settles from — deliberately not per-user. */
 function paperTarget(suffix: string): string {
-  const account = `solana:PAPER${runId}${suffix}`.slice(0, 128);
+  const account = `solana:${Keypair.generate().publicKey.toBase58()}`;
   targetAccounts.push(account);
   return account;
 }
@@ -65,8 +66,17 @@ afterAll(async () => {
   // below — deleting a user out from under financial history must not be
   // possible.
   if (targetAccounts.length > 0) {
+    await pool.query('DELETE FROM copy_position_master_lot_reductions WHERE lot_id IN (SELECT id FROM copy_position_master_lots WHERE position_id IN (SELECT id FROM copy_positions WHERE target_account = ANY($1)))', [targetAccounts]);
+    await pool.query('DELETE FROM copy_position_master_lots WHERE position_id IN (SELECT id FROM copy_positions WHERE target_account = ANY($1))', [targetAccounts]);
+    await pool.query('DELETE FROM copy_position_applications WHERE execution_id IN (SELECT id FROM copy_executions WHERE target_account = ANY($1))', [targetAccounts]);
+    await pool.query('DELETE FROM copy_execution_evidence WHERE execution_id IN (SELECT id FROM copy_executions WHERE target_account = ANY($1))', [targetAccounts]);
+    await pool.query('DELETE FROM copy_execution_state_history WHERE execution_id IN (SELECT id FROM copy_executions WHERE target_account = ANY($1))', [targetAccounts]);
+    await pool.query('DELETE FROM copy_executions WHERE target_account = ANY($1)', [targetAccounts]);
     await pool.query('DELETE FROM copy_positions WHERE target_account = ANY($1)', [targetAccounts]);
   }
+  await pool.query("DELETE FROM source_position_applications WHERE source_trade_id IN (SELECT id FROM source_trades WHERE source_event_id LIKE 'tx:' || $1 || ':%')", [runId]);
+  await pool.query("DELETE FROM source_trade_confirmation_history WHERE source_trade_id IN (SELECT id FROM source_trades WHERE source_event_id LIKE 'tx:' || $1 || ':%')", [runId]);
+  await pool.query("DELETE FROM source_trades WHERE source_event_id LIKE 'tx:' || $1 || ':%'", [runId]);
   if (userIds.length > 0) {
     await pool.query('DELETE FROM audit_log WHERE actor_id = ANY($1)', [userIds]);
     await pool.query('DELETE FROM users WHERE id = ANY($1)', [userIds]);
@@ -197,16 +207,16 @@ describe('copy_positions tenancy (S4-10)', () => {
   it('drives two paper users through execution and evidence with completely disjoint ledgers', async () => {
     const [alice, bob] = [await makeUser(), await makeUser()];
     const target = paperTarget('E');
-    const master = `solana:Master${runId}`;
-    const token = `solana:TOKEN${runId}E`;
+    const master = `solana:${Keypair.generate().publicKey.toBase58()}`;
+    const token = `solana:${Keypair.generate().publicKey.toBase58()}`;
     const occurredAt = new Date('2026-10-01T00:00:00Z');
 
-    const sourceEventId = `source:${runId}:1`;
+    const sourceEventId = `tx:${runId}:1`;
     const source = await recordSourceTradeEvent({
       chain: 'solana',
       sourceEventType: 'transaction',
       sourceEventId,
-      transactionHash: `tx:${runId}:1`,
+      transactionHash: sourceEventId,
       walletAddress: master,
       tokenMint: token,
       side: 'buy',
@@ -264,7 +274,7 @@ describe('copy_positions tenancy (S4-10)', () => {
       confirmed_quantity: string;
       cost_basis_usd: string;
     }>(
-      `SELECT user_id, confirmed_quantity, cost_basis_usd
+      `SELECT user_id, confirmed_quantity::text, cost_basis_usd::text
          FROM copy_positions
         WHERE target_account = $1 AND token_mint = $2
         ORDER BY user_id`,
@@ -285,7 +295,7 @@ describe('copy_positions tenancy (S4-10)', () => {
       user_id: string;
       remaining_quantity: string;
     }>(
-      `SELECT user_id, remaining_quantity
+      `SELECT user_id, remaining_quantity::text
          FROM copy_position_master_lots
         WHERE token_mint = $1
         ORDER BY user_id`,

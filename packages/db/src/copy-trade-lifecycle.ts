@@ -1547,17 +1547,36 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
     if (source.direction === 'sell') {
       if (!requestedBase) throw new Error('Sell executions require requestedBaseQuantity');
       const available = await client.query<{ capped: string | null }>(
-        `SELECT CASE
-                  WHEN confirmed_quantity - reserved_sell_quantity <= 0 THEN NULL
-                  ELSE LEAST($4::numeric, confirmed_quantity - reserved_sell_quantity)::text
+        `WITH pos AS (
+           SELECT id, confirmed_quantity, reserved_sell_quantity
+             FROM copy_positions
+            WHERE target_account = $1
+              AND chain = $2
+              AND token_mint = $3
+              AND user_id IS NOT DISTINCT FROM $5
+            FOR UPDATE
+         ),
+         master_lots AS (
+           SELECT COALESCE(SUM(remaining_quantity), 0) AS total_remaining,
+                  COUNT(*) AS lot_count
+             FROM copy_position_master_lots
+            WHERE position_id = (SELECT id FROM pos)
+              AND master_wallet_address = $6
+         )
+         SELECT CASE
+                  WHEN pos.confirmed_quantity - pos.reserved_sell_quantity <= 0 THEN NULL
+                  WHEN (SELECT lot_count FROM master_lots) > 0 AND (SELECT total_remaining FROM master_lots) <= 0 THEN NULL
+                  ELSE LEAST(
+                    $4::numeric,
+                    pos.confirmed_quantity - pos.reserved_sell_quantity,
+                    CASE
+                      WHEN (SELECT lot_count FROM master_lots) > 0 THEN (SELECT total_remaining FROM master_lots)
+                      ELSE $4::numeric
+                    END
+                  )::text
                 END AS capped
-           FROM copy_positions
-          WHERE target_account = $1
-            AND chain = $2
-            AND token_mint = $3
-            AND user_id IS NOT DISTINCT FROM $5
-          FOR UPDATE`,
-        [target.prefixed, source.chain, source.token_mint, requestedBase, userId]
+           FROM pos`,
+        [target.prefixed, source.chain, source.token_mint, requestedBase, userId, source.wallet_address]
       );
       cappedBase = available.rows[0]?.capped ?? null;
       if (!cappedBase) {

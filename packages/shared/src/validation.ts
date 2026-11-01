@@ -1,5 +1,7 @@
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Keypair } from '@solana/web3.js';
 import { z } from 'zod';
+
+export { PublicKey, Keypair };
 
 export const chainSchema = z.enum(['solana', 'polygon', 'robinhood-chain', 'base', 'ethereum', 'bsc']);
 

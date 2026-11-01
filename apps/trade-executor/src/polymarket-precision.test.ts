@@ -150,15 +150,17 @@ describe('polymarket venue precision parity', () => {
     // superset and this test would catch it.
     for (const { tickSize, priceDecimals } of DOCS_PRECISION) {
       const tick = Number(tickSize);
+      let maxDecimals = 0;
       for (let step = 1; step * tick < 1; step++) {
         const price = Number((step * tick).toFixed(10));
         const text = price.toString();
         const decimals = text.includes('.') ? text.split('.')[1]!.length : 0;
-        expect(
-          decimals,
-          `on-grid price ${price} at tick ${tickSize} exceeds ${priceDecimals} decimals`
-        ).toBeLessThanOrEqual(priceDecimals);
+        if (decimals > maxDecimals) maxDecimals = decimals;
       }
+      expect(
+        maxDecimals,
+        `at tick ${tickSize} exceeds ${priceDecimals} decimals`
+      ).toBeLessThanOrEqual(priceDecimals);
     }
-  });
+  }, 15_000);
 });
