@@ -12,6 +12,7 @@
     "test": "vitest run",
     "migrate": "tsx --env-file=../../.env src/migrate.ts",
     "migrate:lp": "tsx --env-file=../../.env src/migrate.ts",
+    "init:ci": "tsx src/ci-setup.ts",
     "seed:admin": "tsx --env-file=../../.env src/seed-admin-cli.ts"
   },
   "dependencies": {

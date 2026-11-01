@@ -9,6 +9,7 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck && pnpm typecheck:tools && tsc --noEmit -p tsconfig.integration.json",
     "typecheck:tools": "tsc -p tsconfig.tools.json",
+    "db:init:ci": "pnpm --filter @swat/db init:ci",
     "db:migrate": "pnpm --filter @swat/db migrate",
     "db:migrate:lp": "pnpm --filter @swat/db migrate:lp",
     "acceptance:g0-d11": "pnpm --filter @swat/indexer acceptance:g0-d11",

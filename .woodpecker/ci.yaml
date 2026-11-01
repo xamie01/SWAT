@@ -6,7 +6,7 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: swat_integration
-      POSTGRES_USER: swat
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: swat
     ports:
       - 5432
@@ -39,10 +39,12 @@ steps:
     environment:
       DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
       INTEGRATION_DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
+      ADMIN_DATABASE_URL: postgresql://postgres:swat@postgres:5432/swat_integration
       REDIS_URL: redis://redis:6379
     commands:
       - corepack enable
       - corepack prepare pnpm@10.2.0 --activate
+      - pnpm db:init:ci
       - pnpm db:migrate
       - pnpm typecheck
 
