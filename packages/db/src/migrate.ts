@@ -10,12 +10,8 @@ const __dirname = dirname(__filename);
 async function main() {
   try {
     const sqlDir = resolve(__dirname, '../sql');
-    const lpSqlDir = resolve(__dirname, '../sql-lp');
-    const profile = migrationProfileFromEnv(process.env.SWAT_DB_PROFILE);
-    const migrations = await discoverMigrations(sqlDir, lpSqlDir, profile);
-    console.log(
-      `Migration profile: ${profile}; roots: ${profile === 'lp' ? `${sqlDir}, ${lpSqlDir}` : sqlDir}`
-    );
+    const migrations = await discoverMigrations(sqlDir);
+    console.log(`Discovered ${migrations.length} migrations from ${sqlDir}`);
 
     const client = await pool.connect();
     try {

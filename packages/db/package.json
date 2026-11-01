@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "migrate": "tsx --env-file=../../.env src/migrate.ts",
-    "migrate:lp": "SWAT_DB_PROFILE=lp tsx --env-file=../../.env src/migrate.ts",
+    "migrate:lp": "tsx --env-file=../../.env src/migrate.ts",
     "seed:admin": "tsx --env-file=../../.env src/seed-admin-cli.ts"
   },
   "dependencies": {
