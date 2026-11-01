@@ -19,7 +19,9 @@ async function setup(): Promise<void> {
         DO $$
         BEGIN
           IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'swat') THEN
-            CREATE ROLE swat WITH LOGIN PASSWORD 'swat' CREATEDB;
+            CREATE ROLE swat WITH LOGIN PASSWORD 'swat' CREATEDB CREATEROLE;
+          ELSE
+            ALTER ROLE swat CREATEDB CREATEROLE;
           END IF;
           ALTER DATABASE swat_integration OWNER TO swat;
           GRANT ALL PRIVILEGES ON DATABASE swat_integration TO swat;
