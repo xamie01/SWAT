@@ -54,6 +54,21 @@ export const DEFAULT_FALLBACK_RPCS: Record<Chain, readonly string[]> = {
   ],
   'robinhood-chain': [
     'https://rpc.mainnet.chain.robinhood.com'
+  ],
+  base: [
+    'https://mainnet.base.org',
+    'https://1rpc.io/base',
+    'https://base.drpc.org'
+  ],
+  ethereum: [
+    'https://eth.llamarpc.com',
+    'https://1rpc.io/eth',
+    'https://ethereum.drpc.org'
+  ],
+  bsc: [
+    'https://binance.llamarpc.com',
+    'https://1rpc.io/bnb',
+    'https://bsc-dataseed.binance.org'
   ]
 };
 

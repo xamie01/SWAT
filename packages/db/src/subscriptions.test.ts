@@ -39,7 +39,6 @@ import {
   requestCloseAll,
   subscribeToWallet,
   SUBSCRIPTION_STATES,
-  unsubscribeFromWallet,
   WalletNotSubscribedError,
   type SubscriptionState
 } from './subscriptions.js';
@@ -254,45 +253,10 @@ describe('beginWindDown', () => {
   });
 });
 
-describe('unsubscribeFromWallet', () => {
-  it('winds down when this master has an attributed open lot', async () => {
-    routeClient([
-      { match: /FOR UPDATE/, rows: [row('active')] },
-      { match: /copy_position_lots/, rows: [{ open: true }] },
-      { match: /^\s*UPDATE/, rows: [] }
-    ]);
-
-    await expect(unsubscribeFromWallet(scope, WALLET)).resolves.toBe(true);
-    expect(updates()).toHaveLength(1);
-    expect(updates()[0]).toContain("state = 'winding_down'");
-    expect(updates()[0]).not.toContain('DELETE FROM');
-  });
-
-  it('ends immediately when this master has no attributed open lot', async () => {
-    routeClient([
-      { match: /FOR UPDATE/, rows: [row('active')] },
-      { match: /copy_position_lots/, rows: [{ open: false }] },
-      { match: /^\s*UPDATE/, rows: [] }
-    ]);
-
-    await expect(unsubscribeFromWallet(scope, WALLET)).resolves.toBe(true);
-    expect(updates()).toHaveLength(1);
-    expect(updates()[0]).toContain("state = 'ended'");
-  });
-
-  it('does not write when the subscription does not exist', async () => {
-    routeClient([{ match: /FOR UPDATE/, rows: [] }]);
-
-    await expect(unsubscribeFromWallet(scope, WALLET)).resolves.toBe(false);
-    expect(updates()).toEqual([]);
-  });
-});
-
 describe('endSubscription', () => {
   it('ends a subscription that never opened a position, straight from active', async () => {
     routeClient([
       { match: /FOR UPDATE/, rows: [row('active')] },
-      { match: /copy_position_lots/, rows: [{ open: false }] },
       { match: /^\s*UPDATE/, rows: [row('ended', { wound_down_at: null })] }
     ]);
 
@@ -309,7 +273,6 @@ describe('endSubscription', () => {
   it('preserves wound_down_at when the wind-down completes', async () => {
     routeClient([
       { match: /FOR UPDATE/, rows: [row('winding_down')] },
-      { match: /copy_position_lots/, rows: [{ open: false }] },
       { match: /^\s*UPDATE/, rows: [row('ended')] }
     ]);
 
@@ -323,18 +286,6 @@ describe('endSubscription', () => {
     routeClient([{ match: /FOR UPDATE/, rows: [row('ended')] }]);
 
     expect((await endSubscription(scope, WALLET)).changed).toBe(false);
-    expect(updates()).toEqual([]);
-  });
-
-  it('refuses to end while the subscription still owns an open lot', async () => {
-    routeClient([
-      { match: /FOR UPDATE/, rows: [row('winding_down')] },
-      { match: /copy_position_lots/, rows: [{ open: true }] }
-    ]);
-
-    await expect(endSubscription(scope, WALLET)).rejects.toThrow(
-      'attributed positions remain open'
-    );
     expect(updates()).toEqual([]);
   });
 });

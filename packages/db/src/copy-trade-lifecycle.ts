@@ -176,30 +176,6 @@ export interface CopyPositionRecord {
   lastEvidenceAt: Date | null;
 }
 
-/**
- * Accounting inventory attributed to one immutable source master.
- *
- * This is deliberately not a second venue position: the venue still owns the
- * aggregate `copy_positions` balance.  The lot is the source-scoped claim used
- * for proportional sells, wind-down, and cost-basis reporting (ADR-0007).
- */
-export interface CopyPositionLotRecord {
-  id: string;
-  targetAccount: string;
-  userId: string | null;
-  masterWalletAddress: string;
-  chain: Chain;
-  tokenMint: string;
-  confirmedQuantity: string;
-  reservedSellQuantity: string;
-  costBasisUsd: string;
-  costBasisUnvaluedFillCount: number;
-  totalAcquiredQuantity: string;
-  totalReducedQuantity: string;
-  unmatchedReductionQuantity: string;
-  lastEvidenceAt: Date | null;
-}
-
 type SourceTradeDbRow = QueryResultRow & {
   id: string;
   chain: Chain;
@@ -253,59 +229,6 @@ type CopyExecutionDbRow = QueryResultRow & {
   source_sell_fraction: string | null;
   payload_matches?: boolean;
 };
-
-type CopyPositionLotRow = QueryResultRow & {
-  id: string;
-  target_account: string;
-  user_id: string | null;
-  master_wallet_address: string;
-  chain: Chain;
-  token_mint: string;
-  confirmed_quantity: string;
-  reserved_sell_quantity: string;
-  cost_basis_usd: string;
-  cost_basis_unvalued_fill_count: number;
-  total_acquired_quantity: string;
-  total_reduced_quantity: string;
-  unmatched_reduction_quantity: string;
-  last_evidence_at: Date | null;
-};
-
-const COPY_POSITION_LOT_COLUMNS = `
-  id,
-  target_account,
-  user_id,
-  master_wallet_address,
-  chain,
-  token_mint,
-  confirmed_quantity::text AS confirmed_quantity,
-  reserved_sell_quantity::text AS reserved_sell_quantity,
-  cost_basis_usd::text AS cost_basis_usd,
-  cost_basis_unvalued_fill_count,
-  total_acquired_quantity::text AS total_acquired_quantity,
-  total_reduced_quantity::text AS total_reduced_quantity,
-  unmatched_reduction_quantity::text AS unmatched_reduction_quantity,
-  last_evidence_at
-`;
-
-function mapCopyPositionLot(row: CopyPositionLotRow): CopyPositionLotRecord {
-  return {
-    id: row.id,
-    targetAccount: row.target_account,
-    userId: row.user_id ?? null,
-    masterWalletAddress: row.master_wallet_address,
-    chain: row.chain,
-    tokenMint: row.token_mint,
-    confirmedQuantity: row.confirmed_quantity,
-    reservedSellQuantity: row.reserved_sell_quantity,
-    costBasisUsd: row.cost_basis_usd,
-    costBasisUnvaluedFillCount: Number(row.cost_basis_unvalued_fill_count ?? 0),
-    totalAcquiredQuantity: row.total_acquired_quantity,
-    totalReducedQuantity: row.total_reduced_quantity,
-    unmatchedReductionQuantity: row.unmatched_reduction_quantity,
-    lastEvidenceAt: row.last_evidence_at
-  };
-}
 
 const SOURCE_TRADE_COLUMNS = `
   id,
@@ -1304,195 +1227,6 @@ async function ensureCopyPosition(
   return id;
 }
 
-async function getSourceMasterWalletAddress(
-  client: PoolClient,
-  sourceTradeId: string
-): Promise<string> {
-  const result = await client.query<{ wallet_address: string }>(
-    `SELECT wallet_address
-       FROM source_trades
-      WHERE id = $1
-      FOR SHARE`,
-    [sourceTradeId]
-  );
-  const masterWalletAddress = result.rows[0]?.wallet_address;
-  if (!masterWalletAddress) {
-    throw new Error(`Source trade ${sourceTradeId} has no master wallet`);
-  }
-  return masterWalletAddress;
-}
-
-/**
- * Create and lock the source-master lot for one tenant position.
- *
- * The caller must already hold the aggregate position lock.  Lock ordering is
- * aggregate first, lot second everywhere in this module so a master sell and
- * an aggregate exit cannot deadlock while they reconcile the same venue row.
- */
-async function ensureCopyPositionLot(
-  client: PoolClient,
-  targetAccount: string,
-  userId: string | null,
-  masterWalletAddress: string,
-  chain: Chain,
-  tokenMint: string
-): Promise<string> {
-  await client.query(
-    `INSERT INTO copy_position_lots (
-       target_account, user_id, master_wallet_address, chain, token_mint
-     ) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT DO NOTHING`,
-    [targetAccount, userId, masterWalletAddress, chain, tokenMint]
-  );
-  const locked = await client.query<{ id: string }>(
-    `SELECT id
-       FROM copy_position_lots
-      WHERE target_account = $1
-        AND user_id IS NOT DISTINCT FROM $2
-        AND master_wallet_address = $3
-        AND chain = $4
-        AND token_mint = $5
-      FOR UPDATE`,
-    [targetAccount, userId, masterWalletAddress, chain, tokenMint]
-  );
-  const id = locked.rows[0]?.id;
-  if (!id) throw new Error('Copy position lot ensure did not return a row');
-  return id;
-}
-
-async function rebuildCopyPositionLot(
-  client: PoolClient,
-  execution: Pick<CopyExecutionDbRow, 'target_account' | 'chain' | 'token_mint' | 'user_id'>,
-  masterWalletAddress: string
-): Promise<CopyPositionLotRecord> {
-  const lotId = await ensureCopyPositionLot(
-    client,
-    execution.target_account,
-    execution.user_id ?? null,
-    masterWalletAddress,
-    execution.chain,
-    execution.token_mint
-  );
-  const result = await client.query<CopyPositionLotRow>(
-    `WITH RECURSIVE ordered_events AS (
-       SELECT
-         ROW_NUMBER() OVER (ORDER BY evidence.occurred_at, evidence.id)::bigint AS sequence,
-         execution.direction,
-         evidence.base_quantity,
-         CASE
-           WHEN evidence.quote_currency IS NOT NULL THEN evidence.quote_quantity
-           ELSE NULL
-         END AS quote_usd,
-         evidence.price_usd,
-         evidence.occurred_at
-       FROM copy_position_applications application
-       JOIN copy_execution_evidence evidence ON evidence.id = application.evidence_id
-       JOIN copy_executions execution ON execution.id = application.execution_id
-       WHERE application.lot_id = $1
-         AND application.active
-     ), ledger AS (
-       SELECT
-         0::bigint AS sequence,
-         lot.opening_quantity AS quantity,
-         lot.opening_cost_basis_usd AS cost_basis,
-         0::numeric AS acquired,
-         0::numeric AS reduced,
-         0::numeric AS unmatched,
-         0::integer AS unvalued
-       FROM copy_position_lots lot
-       WHERE lot.id = $1
-
-       UNION ALL
-
-       SELECT
-         event.sequence,
-         CASE
-           WHEN event.direction = 'buy' THEN ledger.quantity + event.base_quantity
-           ELSE GREATEST(0, ledger.quantity - event.base_quantity)
-         END,
-         CASE
-           WHEN event.direction = 'buy' THEN
-             ledger.cost_basis + COALESCE(event.quote_usd, event.base_quantity * event.price_usd, 0)
-           WHEN ledger.quantity = 0 THEN 0
-           ELSE GREATEST(
-             0,
-             ledger.cost_basis - (ledger.cost_basis / ledger.quantity)
-               * LEAST(ledger.quantity, event.base_quantity)
-           )
-         END,
-         ledger.acquired + CASE WHEN event.direction = 'buy' THEN event.base_quantity ELSE 0 END,
-         ledger.reduced + CASE WHEN event.direction = 'sell' THEN event.base_quantity ELSE 0 END,
-         ledger.unmatched + CASE
-           WHEN event.direction = 'sell' THEN GREATEST(0, event.base_quantity - ledger.quantity)
-           ELSE 0
-         END,
-         ledger.unvalued + CASE
-           WHEN event.direction = 'buy'
-             AND COALESCE(event.quote_usd, event.base_quantity * event.price_usd) IS NULL
-             THEN 1
-           ELSE 0
-         END
-       FROM ledger
-       JOIN ordered_events event ON event.sequence = ledger.sequence + 1
-     ), final AS (
-       SELECT * FROM ledger ORDER BY sequence DESC LIMIT 1
-     ), metadata AS (
-       SELECT
-         MAX(occurred_at) AS last_evidence_at,
-         COALESCE((
-           SELECT SUM(reserved.reserved_base_quantity)
-           FROM copy_executions reserved
-           JOIN source_trades reserved_source ON reserved_source.id = reserved.source_trade_id
-           WHERE reserved.target_account = $2
-             AND reserved.user_id IS NOT DISTINCT FROM $3
-             AND reserved.chain = $4
-             AND reserved.token_mint = $5
-             AND reserved_source.wallet_address = $6
-             AND reserved.direction = 'sell'
-         ), 0) AS reserved_sell_quantity
-       FROM ordered_events
-     )
-     UPDATE copy_position_lots lot
-        SET confirmed_quantity = final.quantity,
-            reserved_sell_quantity = metadata.reserved_sell_quantity,
-            cost_basis_usd = final.cost_basis,
-            total_acquired_quantity = final.acquired,
-            total_reduced_quantity = final.reduced,
-            unmatched_reduction_quantity = final.unmatched,
-            cost_basis_unvalued_fill_count = final.unvalued,
-            last_evidence_at = metadata.last_evidence_at,
-            updated_at = NOW()
-       FROM final, metadata
-      WHERE lot.id = $1
-     RETURNING
-       lot.id,
-       lot.target_account,
-       lot.user_id,
-       lot.master_wallet_address,
-       lot.chain,
-       lot.token_mint,
-       lot.confirmed_quantity::text AS confirmed_quantity,
-       lot.reserved_sell_quantity::text AS reserved_sell_quantity,
-       lot.cost_basis_usd::text AS cost_basis_usd,
-       lot.cost_basis_unvalued_fill_count,
-       lot.total_acquired_quantity::text AS total_acquired_quantity,
-       lot.total_reduced_quantity::text AS total_reduced_quantity,
-       lot.unmatched_reduction_quantity::text AS unmatched_reduction_quantity,
-       lot.last_evidence_at`,
-    [
-      lotId,
-      execution.target_account,
-      execution.user_id ?? null,
-      execution.chain,
-      execution.token_mint,
-      masterWalletAddress
-    ]
-  );
-  const row = result.rows[0];
-  if (!row) throw new Error('Copy position lot rebuild did not return a row');
-  return mapCopyPositionLot(row);
-}
-
 /**
  * Recompute a position from its evidence ledger.
  *
@@ -1510,10 +1244,8 @@ async function rebuildCopyPositionLot(
  */
 async function rebuildCopyPosition(
   client: PoolClient,
-  execution: Pick<CopyExecutionDbRow, 'source_trade_id' | 'target_account' | 'chain' | 'token_mint' | 'user_id'>
+  execution: Pick<CopyExecutionDbRow, 'target_account' | 'chain' | 'token_mint' | 'user_id'>
 ): Promise<CopyPositionRecord> {
-  const masterWalletAddress = await getSourceMasterWalletAddress(client, execution.source_trade_id);
-  await rebuildCopyPositionLot(client, execution, masterWalletAddress);
   const result = await client.query<QueryResultRow & {
     id: string;
     target_account: string;
@@ -1766,10 +1498,17 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
       userId
     });
 
-    // Lock an already-created execution before taking the inventory lock. Fill
-    // evidence takes the same order (execution, then inventory); reversing it
-    // here would let a late evidence callback and a duplicate request deadlock.
-    const preExisting = await client.query<CopyExecutionDbRow>(
+    // The advisory lock guards the position row this transaction is about to
+    // create and read, so its key has to have the same shape as that row's
+    // uniqueness key. Without `userId` two tenants touching the same token on
+    // the same chain would serialise against each other for no reason.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId])]
+    );
+    await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint, userId);
+
+    const existing = await client.query<CopyExecutionDbRow>(
       `SELECT ${COPY_EXECUTION_COLUMNS},
               (
                 direction = $4
@@ -1797,58 +1536,6 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
         userId
       ]
     );
-    if (preExisting.rows[0]) {
-      if (!preExisting.rows[0].payload_matches) {
-        throw new Error('Copy execution identity collision with different requested quantities');
-      }
-      return { execution: mapCopyExecution(preExisting.rows[0]), created: false };
-    }
-
-    // The advisory lock guards the position row this transaction is about to
-    // create and read, so its key has to have the same shape as that row's
-    // uniqueness key. Without `userId` two tenants touching the same token on
-    // the same chain would serialise against each other for no reason.
-    await client.query(
-      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId, source.wallet_address])]
-    );
-    await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint, userId);
-    await ensureCopyPositionLot(
-      client,
-      target.prefixed,
-      userId,
-      source.wallet_address,
-      source.chain,
-      source.token_mint
-    );
-
-    const existing = await client.query<CopyExecutionDbRow>(
-      `SELECT ${COPY_EXECUTION_COLUMNS},
-              (
-                direction = $4
-                AND (
-                  (direction = 'sell' AND requested_base_quantity <= $5::numeric)
-                  OR (direction <> 'sell' AND requested_base_quantity IS NOT DISTINCT FROM $5::numeric)
-                )
-                AND requested_quote_quantity IS NOT DISTINCT FROM $6::numeric
-                AND client_order_id = $7
-              ) AS payload_matches
-         FROM copy_executions
-        WHERE source_trade_id = $1
-          AND target_account = $2
-          AND execution_mode = $3
-           AND user_id IS NOT DISTINCT FROM $8`,
-      [
-        sourceTradeId,
-        target.prefixed,
-        input.executionMode,
-        source.direction,
-        requestedBase,
-        requestedQuote,
-        clientOrderId,
-        userId
-      ]
-    );
     if (existing.rows[0]) {
       if (!existing.rows[0].payload_matches) {
         throw new Error('Copy execution identity collision with different requested quantities');
@@ -1860,31 +1547,17 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
     if (source.direction === 'sell') {
       if (!requestedBase) throw new Error('Sell executions require requestedBaseQuantity');
       const available = await client.query<{ capped: string | null }>(
-        `WITH aggregate_position AS (
-           SELECT GREATEST(0, confirmed_quantity - reserved_sell_quantity) AS available
-             FROM copy_positions
-            WHERE target_account = $1
-              AND chain = $2
-              AND token_mint = $3
-              AND user_id IS NOT DISTINCT FROM $5
-            FOR UPDATE
-         ), master_lot AS (
-           SELECT GREATEST(0, confirmed_quantity - reserved_sell_quantity) AS available
-             FROM copy_position_lots
-            WHERE target_account = $1
-              AND user_id IS NOT DISTINCT FROM $5
-              AND master_wallet_address = $6
-              AND chain = $2
-              AND token_mint = $3
-            FOR UPDATE
-         )
-         SELECT CASE
-                  WHEN LEAST($4::numeric, aggregate_position.available, master_lot.available) <= 0
-                    THEN NULL
-                  ELSE LEAST($4::numeric, aggregate_position.available, master_lot.available)::text
+        `SELECT CASE
+                  WHEN confirmed_quantity - reserved_sell_quantity <= 0 THEN NULL
+                  ELSE LEAST($4::numeric, confirmed_quantity - reserved_sell_quantity)::text
                 END AS capped
-           FROM aggregate_position, master_lot`,
-        [target.prefixed, source.chain, source.token_mint, requestedBase, userId, source.wallet_address]
+           FROM copy_positions
+          WHERE target_account = $1
+            AND chain = $2
+            AND token_mint = $3
+            AND user_id IS NOT DISTINCT FROM $5
+          FOR UPDATE`,
+        [target.prefixed, source.chain, source.token_mint, requestedBase, userId]
       );
       cappedBase = available.rows[0]?.capped ?? null;
       if (!cappedBase) {
@@ -2251,52 +1924,27 @@ export async function claimSourceSignalForCopyExecution(input: {
     // note in `requestCopyExecution`.
     await client.query(
       `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId, source.wallet_address])]
+      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId])]
     );
     await ensureCopyPosition(client, target.prefixed, source.chain, source.token_mint, userId);
-    await ensureCopyPositionLot(
-      client,
-      target.prefixed,
-      userId,
-      source.wallet_address,
-      source.chain,
-      source.token_mint
-    );
 
     let executionBase = requestedBase;
     let executionQuote = requestedQuote;
     if (source.direction === 'sell') {
       const availableResult = await client.query<{ requested_base: string | null }>(
-        `WITH aggregate_position AS (
-           SELECT GREATEST(0, confirmed_quantity - reserved_sell_quantity) AS available
-             FROM copy_positions
-            WHERE target_account = $1
-              AND chain = $2
-              AND token_mint = $3
-              AND user_id IS NOT DISTINCT FROM $5
-            FOR UPDATE
-         ), master_lot AS (
-           SELECT GREATEST(0, confirmed_quantity - reserved_sell_quantity) AS available
-             FROM copy_position_lots
-            WHERE target_account = $1
-              AND user_id IS NOT DISTINCT FROM $5
-              AND master_wallet_address = $6
-              AND chain = $2
-              AND token_mint = $3
-            FOR UPDATE
-         )
-         SELECT CASE
-                  WHEN LEAST(
-                    aggregate_position.available,
-                    master_lot.available * $4::numeric
-                  ) <= 0 THEN NULL
-                  ELSE LEAST(
-                    aggregate_position.available,
-                    master_lot.available * $4::numeric
+        `SELECT CASE
+                  WHEN confirmed_quantity - reserved_sell_quantity <= 0 THEN NULL
+                  ELSE (
+                    (confirmed_quantity - reserved_sell_quantity) * $4::numeric
                   )::text
                 END AS requested_base
-           FROM aggregate_position, master_lot`,
-        [target.prefixed, source.chain, source.token_mint, sourceSellFraction, userId, source.wallet_address]
+         FROM copy_positions
+         WHERE target_account = $1
+           AND chain = $2
+           AND token_mint = $3
+           AND user_id IS NOT DISTINCT FROM $5
+         FOR UPDATE`,
+        [target.prefixed, source.chain, source.token_mint, sourceSellFraction, userId]
       );
       executionBase = availableResult.rows[0]?.requested_base ?? null;
       executionQuote = null;
@@ -2891,34 +2539,12 @@ export async function recordCopyExecutionEvidenceWithClient(
     // argument: the execution is the authority on who this fill belongs to, and
     // evidence arrives from reconcilers and webhooks that have no user in scope.
     const evidenceUserId = execution.user_id ?? null;
-    const masterWalletAddress = await getSourceMasterWalletAddress(
-      client,
-      execution.source_trade_id
-    );
-    await client.query(
-      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-      [JSON.stringify([
-        execution.target_account,
-        execution.chain,
-        execution.token_mint,
-        evidenceUserId,
-        masterWalletAddress
-      ])]
-    );
     const positionId = await ensureCopyPosition(
       client,
       execution.target_account,
       execution.chain,
       execution.token_mint,
       evidenceUserId
-    );
-    const lotId = await ensureCopyPositionLot(
-      client,
-      execution.target_account,
-      evidenceUserId,
-      masterWalletAddress,
-      execution.chain,
-      execution.token_mint
     );
     // `user_id` on the application row is what makes the copy_positions split
     // real rather than cosmetic: `rebuildCopyPosition` aggregates the ledger
@@ -2927,14 +2553,12 @@ export async function recordCopyExecutionEvidenceWithClient(
     await client.query(
       `INSERT INTO copy_position_applications (
          evidence_id, execution_id, target_account, chain, token_mint, active,
-         user_id, position_id, master_wallet_address, lot_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         user_id, position_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (evidence_id) DO UPDATE
          SET active = EXCLUDED.active,
              user_id = EXCLUDED.user_id,
              position_id = EXCLUDED.position_id,
-             master_wallet_address = EXCLUDED.master_wallet_address,
-             lot_id = EXCLUDED.lot_id,
              updated_at = NOW()`,
       [
         evidence.id,
@@ -2944,9 +2568,7 @@ export async function recordCopyExecutionEvidenceWithClient(
         execution.token_mint,
         isAppliedSourceConfirmation(evidence.confirmation_state),
         evidenceUserId,
-        positionId,
-        masterWalletAddress,
-        lotId
+        positionId
       ]
     );
 
@@ -3207,43 +2829,4 @@ export async function releaseCopyExecutionReconciliationClaim(input: {
     ]
   );
   return rows.length === 1;
-}
-
-/**
- * Open master-attributed lots (confirmed or reserved) for one subscription.
- *
- * Read-only: enumerates lots without mutation, so wind-down sweeps, close-all
- * planning, and the subscription-end guard can all read the same source of
- * truth. `reservedSellQuantity` counts an in-flight exit as open, so a reserved
- * sell that has not reached terminal evidence keeps the subscription alive.
- *
- * Returns lots in id ascending so deterministic callers can plan exits
- * without imposing a non-deterministic ordering on the result set.
- */
-export async function listSubscriptionMasterLots(input: {
-  targetAccount: string;
-  userId: string | null;
-  masterWalletAddress: string;
-  chain: Chain;
-  tokenMint: string;
-}): Promise<CopyPositionLotRecord[]> {
-  const rows = await query<CopyPositionLotRow>(
-    `SELECT ${COPY_POSITION_LOT_COLUMNS}
-       FROM copy_position_lots
-      WHERE target_account = $1
-        AND user_id IS NOT DISTINCT FROM $2
-        AND master_wallet_address = $3
-        AND chain = $4
-        AND token_mint = $5
-        AND (confirmed_quantity > 0 OR reserved_sell_quantity > 0)
-      ORDER BY id ASC`,
-    [
-      assertIdentifier('targetAccount', input.targetAccount, 128),
-      input.userId,
-      assertIdentifier('masterWalletAddress', input.masterWalletAddress, 128),
-      input.chain,
-      assertIdentifier('tokenMint', input.tokenMint, 128)
-    ]
-  );
-  return rows.map(mapCopyPositionLot);
 }

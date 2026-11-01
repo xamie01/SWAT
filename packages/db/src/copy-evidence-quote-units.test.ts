@@ -88,26 +88,6 @@ function positionRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function lotRow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: '55555555-5555-5555-5555-555555555555',
-    target_account: 'solana:TargetAccount',
-    user_id: null,
-    master_wallet_address: 'solana:MasterAccount',
-    chain: 'solana',
-    token_mint: 'solana:Mint',
-    confirmed_quantity: '100',
-    reserved_sell_quantity: '0',
-    cost_basis_usd: '187.5',
-    cost_basis_unvalued_fill_count: 0,
-    total_acquired_quantity: '100',
-    total_reduced_quantity: '0',
-    unmatched_reduction_quantity: '0',
-    last_evidence_at: new Date('2026-08-20T00:00:00.000Z'),
-    ...overrides
-  };
-}
-
 /**
  * A client that answers by statement shape rather than by call index, so inserting
  * an unrelated statement into the write path does not silently shift every stubbed
@@ -132,10 +112,6 @@ function fakeClient(options: {
       calls.push({ sql, params });
       if (sql.includes('FROM copy_executions') && sql.includes('FOR UPDATE')) {
         return { rows: [executionRow()] };
-      }
-      if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
-      if (sql.includes('FROM source_trades') && sql.includes('wallet_address')) {
-        return { rows: [{ wallet_address: 'solana:MasterAccount' }] };
       }
       if (sql.includes('INSERT INTO copy_execution_evidence')) {
         return { rows: [] };
@@ -164,10 +140,6 @@ function fakeClient(options: {
       if (sql.includes('FROM copy_positions') && sql.includes('FOR UPDATE')) {
         return { rows: [{ id: positionRow().id }] };
       }
-      if (sql.includes('INSERT INTO copy_position_lots')) return { rows: [] };
-      if (sql.includes('FROM copy_position_lots') && sql.includes('FOR UPDATE')) {
-        return { rows: [{ id: lotRow().id }] };
-      }
       if (sql.includes('INSERT INTO copy_position_applications')) return { rows: [] };
       if (sql.includes('SELECT source.wallet_address') && sql.includes('FROM source_trades source')) {
         return { rows: [{ wallet_address: 'master-wallet', direction: 'buy', signal_id: 'signal-id' }] };
@@ -178,9 +150,6 @@ function fakeClient(options: {
       }
       if (sql.includes('UPDATE copy_positions position')) {
         return { rows: [positionRow()] };
-      }
-      if (sql.includes('UPDATE copy_position_lots lot')) {
-        return { rows: [lotRow()] };
       }
       if (sql.includes('INSERT INTO copy_execution_state_history')) return { rows: [] };
       if (sql.includes('UPDATE copy_executions')) {
