@@ -10,6 +10,11 @@ import { forUser, crossTenantScope, scopedQuery, withTenantTransaction } from '.
 const USER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const USER_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+const adminQuery = <T extends import('pg').QueryResultRow = import('pg').QueryResultRow>(
+  text: string,
+  values: unknown[] = []
+): Promise<T[]> => scopedQuery<T>(crossTenantScope('rls_test_fixture'), text, values);
+
 const EXPECTED_RLS_TABLES = [
   'users',
   'user_sessions',
@@ -33,13 +38,13 @@ const EXPECTED_RLS_TABLES = [
 describe('PostgreSQL Row-Level Security (RLS) — Tenant Isolation', () => {
   beforeAll(async () => {
     // Clean up test fixtures if present
-    await query("DELETE FROM user_execution_grants WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
-    await query("DELETE FROM user_balances WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
-    await query("DELETE FROM crypto_payments WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
-    await query("DELETE FROM users WHERE id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM user_execution_grants WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM user_balances WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM crypto_payments WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM users WHERE id IN ($1, $2)", [USER_A, USER_B]);
 
     // Seed two independent users using admin bypass
-    await query(
+    await adminQuery(
       `INSERT INTO users (id, email, password_hash, role) VALUES 
        ($1, 'user_a@wake.protocol', 'hash_a', 'user'),
        ($2, 'user_b@wake.protocol', 'hash_b', 'user')`,
@@ -47,7 +52,7 @@ describe('PostgreSQL Row-Level Security (RLS) — Tenant Isolation', () => {
     );
 
     // Seed User A & B Execution Grants (valid solana_vault grant)
-    await query(
+    await adminQuery(
       `INSERT INTO user_execution_grants (id, user_id, chain, grant_kind, account_address, status) VALUES
        (gen_random_uuid(), $1, 'solana', 'solana_vault', 'AccountA1111111111111111111111111111111111', 'active'),
        (gen_random_uuid(), $2, 'solana', 'solana_vault', 'AccountB2222222222222222222222222222222222', 'active')`,
@@ -55,7 +60,7 @@ describe('PostgreSQL Row-Level Security (RLS) — Tenant Isolation', () => {
     );
 
     // Seed User A & B Balances
-    await query(
+    await adminQuery(
       `INSERT INTO user_balances (user_id, chain, asset, amount, decimals, source) VALUES
        ($1, 'solana', 'USDC', 5000, 6, 'manual-refresh'),
        ($2, 'polygon', 'USDC.e', 12500, 6, 'manual-refresh')`,
@@ -63,7 +68,7 @@ describe('PostgreSQL Row-Level Security (RLS) — Tenant Isolation', () => {
     );
 
     // Seed User A & B Crypto Payments
-    await query(
+    await adminQuery(
       `INSERT INTO crypto_payments (user_id, chain, tx_hash, amount_usdc, tier, plan_id, treasury_address, status) VALUES
        ($1, 'solana', 'tx_hash_user_a_sig_123', 35, 'operator', 'operator_monthly', 'TreasurySolanaAddress', 'confirmed'),
        ($2, 'polygon', 'tx_hash_user_b_sig_456', 150, 'ultra', 'ultra_monthly', '0xTreasuryPolygonAddress', 'confirmed')`,
@@ -72,10 +77,10 @@ describe('PostgreSQL Row-Level Security (RLS) — Tenant Isolation', () => {
   });
 
   afterAll(async () => {
-    await query("DELETE FROM user_execution_grants WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
-    await query("DELETE FROM user_balances WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
-    await query("DELETE FROM crypto_payments WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
-    await query("DELETE FROM users WHERE id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM user_execution_grants WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM user_balances WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM crypto_payments WHERE user_id IN ($1, $2)", [USER_A, USER_B]);
+    await adminQuery("DELETE FROM users WHERE id IN ($1, $2)", [USER_A, USER_B]);
   });
 
   describe('PostgreSQL Catalog Enforcement', () => {
@@ -140,7 +145,7 @@ describe('PostgreSQL Row-Level Security (RLS) — Tenant Isolation', () => {
       );
 
       // Verify User B email was not modified
-      const rows = await query<{ email: string }>(
+      const rows = await adminQuery<{ email: string }>(
         `SELECT email FROM users WHERE id = $1`,
         [USER_B]
       );
