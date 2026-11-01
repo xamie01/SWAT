@@ -488,6 +488,15 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     }
 
     try {
+      try {
+        await trackLpWallet({
+          chain: body.chain as LpChain,
+          walletAddress: body.masterWalletAddress,
+          label: 'Copied LP Master'
+        });
+      } catch {
+        // Best-effort if already tracked or duplicate
+      }
       const subscription = await createLpCopySubscription(scope, {
         masterWalletAddress: body.masterWalletAddress,
         chain: body.chain as LpChain,
@@ -521,6 +530,15 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     const updated = await updateLpCopySubscriptionStatus(scope, subscriptionId, body.status as LpCopySubscriptionStatus);
     if (!updated) return reply.code(404).send({ error: 'subscription not found' });
     return updated;
+  });
+
+  app.delete('/v1/lp/copy/subscriptions/:subscriptionId', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+    const { subscriptionId } = request.params as { subscriptionId: string };
+    const updated = await updateLpCopySubscriptionStatus(scope, subscriptionId, 'closed');
+    if (!updated) return reply.code(404).send({ error: 'subscription not found' });
+    return { ok: true, subscription: updated };
   });
 
   app.get('/v1/lp/copy/executions', async (request, reply) => {

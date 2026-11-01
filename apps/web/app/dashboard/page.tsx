@@ -409,20 +409,27 @@ export default function DashboardPage() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
               <Link
                 href="/lp/discover"
-                className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-2"
+                className="px-3.5 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-xs"
               >
                 <span className="material-symbols-outlined text-base">explore</span>
                 <span>Discover Pools</span>
               </Link>
               <Link
+                href="/lp/copy"
+                className="px-3.5 py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-xs"
+              >
+                <span className="material-symbols-outlined text-base">content_copy</span>
+                <span>Copy Masters</span>
+              </Link>
+              <Link
                 href="/lp/builder"
-                className="px-4 py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+                className="px-3.5 py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-xs"
               >
                 <span className="material-symbols-outlined text-base">build</span>
-                <span>Position Builder</span>
+                <span>Builder</span>
               </Link>
             </div>
           </div>

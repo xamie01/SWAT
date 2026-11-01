@@ -283,7 +283,7 @@ export async function queryLpWalletLeaderboard(options: {  chain?: LpChain;
            COUNT(*) FILTER (WHERE r.closed)        AS closed_position_count,
            MODE() WITHIN GROUP (ORDER BY r.strategy_type) AS dominant_strategy_type
          FROM lp_tracked_wallets w
-         JOIN lp_wallet_position_results r ON r.tracked_wallet_id = w.id
+         LEFT JOIN lp_wallet_position_results r ON r.tracked_wallet_id = w.id
          WHERE w.chain = $1
          GROUP BY w.id, w.chain, w.wallet_address, w.label
          ORDER BY ${sortExpression}
@@ -304,7 +304,7 @@ export async function queryLpWalletLeaderboard(options: {  chain?: LpChain;
            COUNT(*) FILTER (WHERE r.closed)        AS closed_position_count,
            MODE() WITHIN GROUP (ORDER BY r.strategy_type) AS dominant_strategy_type
          FROM lp_tracked_wallets w
-         JOIN lp_wallet_position_results r ON r.tracked_wallet_id = w.id
+         LEFT JOIN lp_wallet_position_results r ON r.tracked_wallet_id = w.id
          GROUP BY w.id, w.chain, w.wallet_address, w.label
          ORDER BY ${sortExpression}
          LIMIT $1`,

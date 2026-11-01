@@ -70,20 +70,69 @@ export default function LpPositionsPage() {
     }
   };
 
+  const stateBadge = (state: PositionItem['state']) => {
+    switch (state) {
+      case 'active':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            Active
+          </span>
+        );
+      case 'near_edge':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
+            Near Edge
+          </span>
+        );
+      case 'out_of_range':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/20 text-red-300 border border-red-500/30">
+            Out of Range
+          </span>
+        );
+      case 'rebalancing':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+            Rebalancing
+          </span>
+        );
+      case 'closed':
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-surface-container border border-border-subtle text-on-surface-variant">
+            Closed
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-surface-container text-on-surface-variant">
+            {state}
+          </span>
+        );
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-primary tracking-tight">Active LP Positions & Rebalancing</h1>
-          <p className="text-xs text-on-surface-variant mt-1">
-            Real-time concentrated liquidity position monitor with automated boundary alerts, economic rebalancing, and one-click exits.
+    <div className="space-y-4 sm:space-y-6 max-w-full overflow-hidden">
+      {/* Header and Hero Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-surface-container-low border border-border-subtle rounded-xl p-4 sm:p-5 shadow-xs">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg sm:text-xl font-bold text-primary tracking-tight">
+              Active LP Positions & Rebalancing
+            </h1>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/20 text-primary border border-primary/30 uppercase">
+              Monitor
+            </span>
+          </div>
+          <p className="text-xs text-on-surface-variant max-w-2xl leading-relaxed">
+            Real-time concentrated liquidity monitor with automated boundary alerts, economic rebalancing, and one-click exits.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <Link
             href="/lp/builder"
-            className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity flex items-center gap-1.5"
+            className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-sm"
           >
             <span className="material-symbols-outlined text-[16px]">add</span>
             <span>New Ladder</span>
@@ -104,112 +153,195 @@ export default function LpPositionsPage() {
         </div>
       )}
 
-      {/* Positions Table */}
-      <div className="bg-surface-container-lowest border border-border-subtle rounded-lg overflow-hidden shadow-sm">
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="border-b border-border-subtle bg-surface-container-low text-on-surface-variant font-mono text-[11px] uppercase tracking-wider">
-              <th className="px-4 py-3">Position & Pool</th>
-              <th className="px-4 py-3">Venue</th>
-              <th className="px-4 py-3 text-right">Range Bounds</th>
-              <th className="px-4 py-3 text-right">Capital Deposited</th>
-              <th className="px-4 py-3 text-center">Status</th>
-              <th className="px-4 py-3 text-center">Auto-Rebalance</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border-subtle">
-            {loading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-on-surface-variant font-mono">
-                  Loading active concentrated LP positions...
-                </td>
-              </tr>
-            ) : positions.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-on-surface-variant font-mono">
-                  No positions deployed yet.{' '}
-                  <Link href="/lp/builder" className="text-primary font-bold hover:underline">
-                    Deploy your first custom LP ladder
-                  </Link>
-                  .
-                </td>
-              </tr>
-            ) : (
-              positions.map((pos) => {
-                const isClosed = pos.state === 'closed';
-                const isNearEdge = pos.state === 'near_edge';
-                const isOutOfRange = pos.state === 'out_of_range';
-
-                return (
-                  <tr key={pos.id} className="hover:bg-surface-container-low/50 transition-colors">
-                    <td className="px-4 py-3 font-mono">
-                      <span className="font-bold text-on-surface block truncate max-w-[240px] text-sm">
+      {loading ? (
+        <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center text-xs text-on-surface-variant font-mono">
+          Loading active concentrated LP positions...
+        </div>
+      ) : positions.length === 0 ? (
+        <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center space-y-3">
+          <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+            <span className="material-symbols-outlined text-[20px]">water_drop</span>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-on-surface">No LP Positions Deployed</p>
+            <p className="text-[11px] text-on-surface-variant mt-0.5">
+              Deploy your first custom liquidity ladder or copy a verified master to begin earning fees.
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-2.5 pt-1">
+            <Link
+              href="/lp/builder"
+              className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity"
+            >
+              Deploy Custom Ladder
+            </Link>
+            <Link
+              href="/lp/copy"
+              className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-on-surface transition-colors"
+            >
+              Copy a Master
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Mobile View: Cards */}
+          <div className="block md:hidden space-y-3">
+            {positions.map((pos) => {
+              const isClosed = pos.state === 'closed';
+              return (
+                <div
+                  key={pos.id}
+                  className="bg-surface-container-lowest border border-border-subtle rounded-xl p-4 space-y-3 shadow-xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <span className="font-mono text-xs font-bold text-on-surface truncate block">
                         {pos.poolAddress}
                       </span>
-                      <span className="text-[10px] text-on-surface-variant capitalize">
-                        {pos.strategyType} ladder
+                      <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant font-mono">
+                        <span className="capitalize">{pos.chain}</span>
+                        <span>•</span>
+                        <span>{pos.protocol}</span>
+                        <span>•</span>
+                        <span className="uppercase">{pos.strategyType}</span>
+                      </div>
+                    </div>
+                    {stateBadge(pos.state)}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-surface-container-low p-2.5 rounded-lg border border-border-subtle font-mono text-xs">
+                    <div>
+                      <span className="text-[9px] text-on-surface-variant uppercase block">Range Bounds</span>
+                      <span className="text-on-surface font-bold">
+                        {pos.rangeLower} → {pos.rangeUpper}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-on-surface-variant capitalize">
-                      {pos.protocol} ({pos.chain})
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono font-medium">
-                      ${pos.rangeLower.toFixed(2)} — ${pos.rangeUpper.toFixed(2)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono font-bold text-sm">
-                      ${pos.depositAmount.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                        pos.state === 'active'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : isNearEdge
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                          : isOutOfRange
-                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                          : 'bg-surface-container text-on-surface-variant'
-                      }`}>
-                        {pos.state.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-on-surface-variant uppercase block">Capital Deposited</span>
+                      <span className="text-emerald-400 font-bold">${pos.depositAmount} USD</span>
+                    </div>
+                  </div>
+
+                  {!isClosed && (
+                    <div className="flex items-center justify-between p-2.5 bg-surface-container rounded-lg text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[16px] text-primary">auto_mode</span>
+                        <div>
+                          <span className="font-bold text-on-surface block text-[11px]">Auto Rebalance</span>
+                          <span className="text-[9px] text-on-surface-variant">Fee uplift &gt; IL + cost</span>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={pos.autoRebalance}
+                        onChange={() => void handleToggleAutoRebalance(pos)}
+                        className="h-4 w-4 accent-primary"
+                      />
+                    </div>
+                  )}
+
+                  {!isClosed && (
+                    <div className="flex items-center gap-2 pt-1">
                       <button
-                        onClick={() => void handleToggleAutoRebalance(pos)}
-                        className={`px-2 py-1 rounded text-[11px] font-mono font-bold border transition-colors ${
-                          pos.autoRebalance
-                            ? 'bg-primary/20 text-primary border-primary/40'
-                            : 'bg-surface-container text-on-surface-variant border-border-subtle hover:text-on-surface'
-                        }`}
+                        onClick={() => void handleTriggerRebalance(pos.id)}
+                        className="flex-1 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-xs font-bold text-on-surface transition-colors"
                       >
-                        {pos.autoRebalance ? 'AUTO ON' : 'MANUAL'}
+                        Rebalance Now
                       </button>
-                    </td>
-                    <td className="px-4 py-3 text-right space-x-2">
-                      {!isClosed && (isNearEdge || isOutOfRange) && (
-                        <button
-                          onClick={() => void handleTriggerRebalance(pos.id)}
-                          className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-colors"
-                        >
-                          Rebalance
-                        </button>
-                      )}
-                      {!isClosed && (
-                        <button
-                          onClick={() => void handleClosePosition(pos.id)}
-                          className="px-2.5 py-1 text-xs font-bold rounded-lg bg-surface-container border border-border-subtle text-red-400 hover:bg-red-500/10 transition-colors"
-                        >
-                          Close
-                        </button>
-                      )}
-                    </td>
+                      <button
+                        onClick={() => void handleClosePosition(pos.id)}
+                        className="py-1.5 px-3 rounded-lg text-xs font-bold text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop View: Table */}
+          <div className="hidden md:block bg-surface-container-lowest border border-border-subtle rounded-xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-border-subtle bg-surface-container-low text-on-surface-variant font-mono text-[11px] uppercase tracking-wider">
+                    <th className="px-4 py-3">Position & Pool</th>
+                    <th className="px-4 py-3">Venue</th>
+                    <th className="px-4 py-3 text-right">Range Bounds</th>
+                    <th className="px-4 py-3 text-right">Capital Deposited</th>
+                    <th className="px-4 py-3 text-center">Status</th>
+                    <th className="px-4 py-3 text-center">Auto-Rebalance</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {positions.map((pos) => {
+                    const isClosed = pos.state === 'closed';
+                    return (
+                      <tr key={pos.id} className="hover:bg-surface-container-low/50 transition-colors">
+                        <td className="px-4 py-3 font-mono">
+                          <span className="font-bold text-on-surface block truncate max-w-[240px] text-sm">
+                            {pos.poolAddress}
+                          </span>
+                          <span className="text-[10px] text-on-surface-variant capitalize">
+                            Strategy: {pos.strategyType}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono">
+                          <div className="capitalize text-on-surface font-medium">{pos.chain}</div>
+                          <div className="text-[10px] text-on-surface-variant">{pos.protocol}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-medium">
+                          {pos.rangeLower} → {pos.rangeUpper}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400">
+                          ${pos.depositAmount}
+                        </td>
+                        <td className="px-4 py-3 text-center">{stateBadge(pos.state)}</td>
+                        <td className="px-4 py-3 text-center">
+                          {!isClosed ? (
+                            <input
+                              type="checkbox"
+                              checked={pos.autoRebalance}
+                              onChange={() => void handleToggleAutoRebalance(pos)}
+                              className="h-4 w-4 accent-primary"
+                            />
+                          ) : (
+                            <span className="text-on-surface-variant text-[11px] font-mono">N/A</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {!isClosed ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => void handleTriggerRebalance(pos.id)}
+                                className="px-2.5 py-1 text-xs font-bold rounded bg-surface-container hover:bg-surface-container-high border border-border-subtle text-on-surface transition-colors"
+                              >
+                                Rebalance
+                              </button>
+                              <button
+                                onClick={() => void handleClosePosition(pos.id)}
+                                className="px-2.5 py-1 text-xs font-bold rounded text-red-400 hover:bg-red-500/10 transition-colors"
+                              >
+                                Close
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-on-surface-variant text-[11px] font-mono">Archived</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
