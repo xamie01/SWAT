@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { WakeLogo } from '../../components/WakeLogo.js';
 
 export default function LpLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -19,12 +20,8 @@ export default function LpLayout({ children }: { children: React.ReactNode }) {
       {/* Top Navigation Bar */}
       <header className="h-14 sm:h-16 border-b border-outline-variant bg-surface px-3 sm:px-6 md:px-12 flex items-center justify-between z-50 sticky top-0 shadow-xs">
         <div className="flex items-center gap-2.5 sm:gap-4 md:gap-6">
-          <Link href="/" className="flex items-center gap-2 sm:gap-3 hover:opacity-85 transition-opacity">
-            <img
-              alt="WAKE Logo"
-              className="w-6 h-6 sm:w-7 sm:h-7 object-contain"
-              src="https://lh3.googleusercontent.com/aida/AP1WRLtbiJamaZZC7KwG5HAC1bnTyrrpCooabzkx-afw4Hp3qnVeDYAxIj9CLKbXPMe92O_IlprpgSWFQtrJZtapEqhgnCmjmkhv1LuJYEAbn2qfgPjlfX3MnBwrz-NwtXz4Z-EEAR3Se7g1jQv9ih8wMXyH5w_5ItNZkzn3ToFuhTgeAt6kCATuziBpGQsuYGlz4yx3GgwHDVkghvJpYolBYA_-A1cOUIGqWivShnnDEsXeOA5JXcwqWUD4se4"
-            />
+          <Link href="/dashboard" className="flex items-center gap-2 sm:gap-3 hover:opacity-85 transition-opacity">
+            <WakeLogo size="sm" showText={false} />
             <span className="font-bold text-base sm:text-lg text-primary leading-none">WAKE</span>
           </Link>
 

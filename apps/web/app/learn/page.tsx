@@ -127,10 +127,10 @@ const TROUBLESHOOTING_GUIDES: FaqItem[] = [
       'Attempting to track or mirror a new master returns HTTP 403 / Quota Exceeded.',
     ],
     rootCause:
-      'Your account tier limits the number of concurrent active master wallets you can mirror (Free: 1 master, Pro: 5 masters, Ultra: 15 masters).',
+      'Your account tier limits the number of concurrent active master wallets you can mirror (Free: 3 masters, Operator: 25 masters, Ultra / Lifetime: Unlimited masters).',
     resolution: [
       'Go to "Dashboard" (/dashboard) and remove/unsubscribe from an underperforming master wallet to free up a subscription slot.',
-      'Or upgrade to Pro or Ultra tier on the "Billing" page (/billing) for expanded master tracking slots and priority mempool bundles.',
+      'Or upgrade to Operator (35 USDC/mo), Ultra (150 USDC/mo), or Lifetime (1,999 USDC) on the "Billing" page (/billing) for expanded master tracking slots and sub-second mempool priority.',
     ],
     actionLink: { href: '/billing', label: 'Upgrade Tier Limits' },
   },
@@ -205,7 +205,7 @@ const TROUBLESHOOTING_GUIDES: FaqItem[] = [
     rootCause:
       'You navigated to an internal operator route (/workspace, /wallets, /signals) designed exclusively for backend cluster operators.',
     resolution: [
-      'All retail, Pro, and Ultra features live under /dashboard, /positions, /lp/discover, /lp/copy, /lp/builder, /lp/positions, /vault, /settings, and /billing.',
+      'All retail, Operator, Ultra, and Lifetime features live under /dashboard, /positions, /lp/discover, /lp/copy, /lp/builder, /lp/positions, /vault, /settings, and /billing.',
       'You do NOT need the operator console: full automated trading, LP ladders, and wallet mirroring operate non-custodially from your Dashboard.',
       'If you need operator access for cluster diagnostics, log in with an administrator role account.',
     ],
@@ -639,62 +639,131 @@ export default function LearnPage() {
                   Account Tiers, Capacities & Quotas
                 </h2>
                 <p className="text-xs text-on-surface-variant">
-                  Understanding what your tier unlocks.
+                  Transparent crypto-native USDC pricing. 4 tiers engineered for every scale.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-on-surface uppercase font-mono">Free Tier</h3>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container text-on-surface-variant">
-                    Starter
-                  </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Free Tier - 0 USDC */}
+              <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-5 space-y-3 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-on-surface uppercase font-mono">Free Tier</h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container text-on-surface-variant">
+                      Starter
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-primary font-mono">
+                    0 USDC <span className="text-xs font-normal text-on-surface-variant font-sans">/ free</span>
+                  </div>
+                  <ul className="text-xs text-on-surface-variant space-y-2 font-mono pt-3 border-t border-border-subtle">
+                    <li className="flex items-start gap-1.5"><span className="text-primary font-bold">✓</span> 3 Tracked Master Wallets</li>
+                    <li className="flex items-start gap-1.5"><span className="text-primary font-bold">✓</span> 5 Token Backfills / Day</li>
+                    <li className="flex items-start gap-1.5"><span className="text-primary font-bold">✓</span> Standard Mempool Relays</li>
+                    <li className="flex items-start gap-1.5"><span className="text-primary font-bold">✓</span> Paper Trading Simulation</li>
+                    <li className="flex items-start gap-1.5"><span className="text-primary font-bold">✓</span> Manual LP Ladder Builder</li>
+                  </ul>
                 </div>
-                <div className="text-xl font-extrabold text-primary font-mono">$0</div>
-                <ul className="text-xs text-on-surface-variant space-y-1.5 font-mono pt-2 border-t border-border-subtle">
-                  <li>• 1 Active Master Wallet</li>
-                  <li>• 5 Token Backfills / Day</li>
-                  <li>• Standard Mempool Relays</li>
-                  <li>• Manual LP Ladder Builder</li>
-                </ul>
+                <Link
+                  href="/dashboard"
+                  className="w-full block py-2 text-center text-xs font-bold border border-border-subtle rounded-lg hover:bg-surface-container transition-colors"
+                >
+                  Active by Default
+                </Link>
               </div>
 
-              <div className="bg-surface-container-lowest border border-primary/40 rounded-xl p-5 space-y-3 relative shadow-xs">
+              {/* Operator Pass - 35 USDC */}
+              <div className="bg-surface-container-lowest border-2 border-primary/40 rounded-xl p-5 space-y-3 relative shadow-xs flex flex-col justify-between">
                 <span className="absolute -top-2.5 right-4 px-2 py-0.5 rounded bg-primary text-white text-[9px] font-bold uppercase tracking-wider">
                   Popular
                 </span>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-primary uppercase font-mono">Pro Trader</h3>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-primary/20 text-primary">
-                    PRO
-                  </span>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-primary uppercase font-mono">Operator</h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-primary/20 text-primary">
+                      PASS
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-primary font-mono">
+                    35 USDC <span className="text-xs font-normal text-on-surface-variant font-sans">/ mo</span>
+                  </div>
+                  <ul className="text-xs text-on-surface-variant space-y-2 font-mono pt-3 border-t border-border-subtle">
+                    <li className="flex items-start gap-1.5"><span className="text-emerald-500 font-bold">✓</span> 25 Tracked Master Wallets</li>
+                    <li className="flex items-start gap-1.5"><span className="text-emerald-500 font-bold">✓</span> 0s Real-Time Signal Stream</li>
+                    <li className="flex items-start gap-1.5"><span className="text-emerald-500 font-bold">✓</span> Live Non-Custodial Execution</li>
+                    <li className="flex items-start gap-1.5"><span className="text-emerald-500 font-bold">✓</span> Solana PDA & 4337 Smart Account</li>
+                    <li className="flex items-start gap-1.5"><span className="text-emerald-500 font-bold">✓</span> 25 Token Backfills / Day (180d)</li>
+                    <li className="flex items-start gap-1.5"><span className="text-emerald-500 font-bold">✓</span> 3 Automated API Keys</li>
+                  </ul>
                 </div>
-                <div className="text-xl font-extrabold text-primary font-mono">$49 / mo</div>
-                <ul className="text-xs text-on-surface-variant space-y-1.5 font-mono pt-2 border-t border-border-subtle">
-                  <li>• 5 Active Master Wallets</li>
-                  <li>• 50 Token Backfills / Day</li>
-                  <li>• Priority Jito & Flashbots Bundles</li>
-                  <li>• Autonomous LP Rebalancing</li>
-                </ul>
+                <Link
+                  href="/billing?selected=operator"
+                  className="w-full block py-2 text-center text-xs font-bold bg-primary text-on-primary rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Upgrade to Operator
+                </Link>
               </div>
 
-              <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-purple-400 uppercase font-mono">Ultra Whale</h3>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-400">
-                    ULTRA
-                  </span>
+              {/* Ultra Whale - 150 USDC */}
+              <div className="bg-surface-container-lowest border border-purple-500/40 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-purple-400 uppercase font-mono">Ultra Whale</h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-400">
+                      ULTRA
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-primary font-mono">
+                    150 USDC <span className="text-xs font-normal text-on-surface-variant font-sans">/ mo</span>
+                  </div>
+                  <ul className="text-xs text-on-surface-variant space-y-2 font-mono pt-3 border-t border-border-subtle">
+                    <li className="flex items-start gap-1.5"><span className="text-purple-400 font-bold">✓</span> Unlimited Tracked Wallets</li>
+                    <li className="flex items-start gap-1.5"><span className="text-purple-400 font-bold">✓</span> Priority Sub-Second Fan-Out</li>
+                    <li className="flex items-start gap-1.5"><span className="text-purple-400 font-bold">✓</span> Dynamic Custom EVM Chains</li>
+                    <li className="flex items-start gap-1.5"><span className="text-purple-400 font-bold">✓</span> Autonomous LP Dynamic Rebalancing</li>
+                    <li className="flex items-start gap-1.5"><span className="text-purple-400 font-bold">✓</span> 100 Backfills / Day (730d Depth)</li>
+                    <li className="flex items-start gap-1.5"><span className="text-purple-400 font-bold">✓</span> Dedicated Quant Webhook Streams</li>
+                  </ul>
                 </div>
-                <div className="text-xl font-extrabold text-primary font-mono">$199 / mo</div>
-                <ul className="text-xs text-on-surface-variant space-y-1.5 font-mono pt-2 border-t border-border-subtle">
-                  <li>• 15 Active Master Wallets</li>
-                  <li>• Unlimited Token Backfills</li>
-                  <li>• Sub-millisecond Execution Slices</li>
-                  <li>• Dedicated Whale Indexer Streams</li>
-                  <li>• Pro Concierge Support</li>
-                </ul>
+                <Link
+                  href="/billing?selected=ultra"
+                  className="w-full block py-2 text-center text-xs font-bold border border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white rounded-lg transition-colors"
+                >
+                  Upgrade to Ultra
+                </Link>
+              </div>
+
+              {/* Lifetime Pass - 1999 USDC */}
+              <div className="bg-surface-container-lowest border-2 border-amber-500/40 rounded-xl p-5 space-y-3 relative shadow-xs flex flex-col justify-between">
+                <span className="absolute -top-2.5 right-4 px-2 py-0.5 rounded bg-amber-500 text-white text-[9px] font-bold uppercase tracking-wider">
+                  Best Value
+                </span>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-amber-500 uppercase font-mono">Lifetime</h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400">
+                      PERPETUAL
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-primary font-mono">
+                    1,999 USDC <span className="text-xs font-normal text-on-surface-variant font-sans">one-time</span>
+                  </div>
+                  <ul className="text-xs text-on-surface-variant space-y-2 font-mono pt-3 border-t border-border-subtle">
+                    <li className="flex items-start gap-1.5"><span className="text-amber-500 font-bold">✓</span> Permanent Ultra Access Forever</li>
+                    <li className="flex items-start gap-1.5"><span className="text-amber-500 font-bold">✓</span> Zero Recurring Monthly Fees</li>
+                    <li className="flex items-start gap-1.5"><span className="text-amber-500 font-bold">✓</span> Priority Fleet Execution</li>
+                    <li className="flex items-start gap-1.5"><span className="text-amber-500 font-bold">✓</span> Direct Core Engineer Telegram</li>
+                    <li className="flex items-start gap-1.5"><span className="text-amber-500 font-bold">✓</span> Exclusive Beta Features Access</li>
+                    <li className="flex items-start gap-1.5"><span className="text-amber-500 font-bold">✓</span> All Future Protocol Chains</li>
+                  </ul>
+                </div>
+                <Link
+                  href="/billing?selected=lifetime"
+                  className="w-full block py-2 text-center text-xs font-bold bg-amber-500 text-white rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Secure Lifetime Spot
+                </Link>
               </div>
             </div>
           </section>
