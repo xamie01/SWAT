@@ -7,6 +7,7 @@ describe('classifyRoute', () => {
     expect(classifyRoute('/login')).toBe('public');
     expect(classifyRoute('/signup')).toBe('public');
     expect(classifyRoute('/forgot-password')).toBe('public');
+    expect(classifyRoute('/learn')).toBe('public');
   });
 
   it("classifies today's operator pages as admin", () => {

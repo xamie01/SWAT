@@ -21,7 +21,7 @@ export type RouteClass = 'public' | 'admin' | 'app';
 export type Role = 'admin' | 'user';
 
 /** Reachable without a session. */
-const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password'] as const;
+const PUBLIC_PREFIXES = ['/login', '/signup', '/forgot-password', '/learn'] as const;
 
 /**
  * The operator console: today's nine pages.

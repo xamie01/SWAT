@@ -43,6 +43,14 @@ export default function LpLayout({ children }: { children: React.ReactNode }) {
         {/* Action Links */}
         <div className="flex items-center gap-2 sm:gap-4">
           <Link
+            href="/learn"
+            className="text-xs font-bold text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle"
+          >
+            <span className="material-symbols-outlined text-[16px]">school</span>
+            <span className="hidden xs:inline">Learn</span>
+          </Link>
+
+          <Link
             href="/dashboard"
             className="text-xs font-bold text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle"
           >

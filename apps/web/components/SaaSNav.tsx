@@ -52,6 +52,7 @@ export function SaaSNav() {
     { label: 'Funding & Vault', href: '/vault', icon: 'account_balance_wallet' },
     { label: 'Billing', href: '/billing', icon: 'credit_card' },
     { label: 'Risk Settings', href: '/settings', icon: 'tune' },
+    { label: 'Learn', href: '/learn', icon: 'school' },
   ];
 
   return (

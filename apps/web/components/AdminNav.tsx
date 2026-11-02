@@ -54,6 +54,7 @@ export function AdminNav() {
     { label: 'Performance', href: '/performance', icon: 'monitoring' },
     { label: 'SaaS Revenue', href: '/admin/revenue', icon: 'payments' },
     { label: 'Setup', href: '/setup', icon: 'settings' },
+    { label: 'Learn', href: '/learn', icon: 'school' },
   ];
 
   return (
