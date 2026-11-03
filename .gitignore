@@ -33,3 +33,6 @@ Thumbs.db
 
 # ZCode session artifacts
 .zcode/
+
+# Brag output
+brag-output/
