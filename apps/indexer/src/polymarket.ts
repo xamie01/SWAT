@@ -42,17 +42,9 @@ function getRedis(): Redis {
 }
 
 /**
- * Page size. The Data API clamps `limit` at 10000; 500 keeps the request count
- * ~5x lower than the old 100 while staying far inside the 200 req / 10s budget
- * documented for `/trades`.
+ * Page size for Data API v2.
  */
 const TRADES_PAGE_LIMIT = 500;
-
-/**
- * The Data API *rejects* an `offset` past 10000 with a 400 rather than clamping
- * it, and each `start`/`end` window carries its own offset budget.
- */
-const TRADES_MAX_OFFSET = 10_000;
 
 function rawTradeTimestampSeconds(row: unknown): number | null {
   const value = (row as { timestamp?: unknown } | null)?.timestamp;
@@ -61,16 +53,11 @@ function rawTradeTimestampSeconds(row: unknown): number | null {
 }
 
 /**
- * Read a wallet's whole confirmed-trade history out of the Data API.
+ * Read a wallet's confirmed-trade history out of Polymarket Data API v2.
  *
- * Paging is windowed, not a flat offset walk. A flat walk cannot get past
- * offset 10000 - the API answers a deeper offset with a 400, which used to
- * abort the entire backfill and discard every page already read, so the
- * highest-volume wallets (exactly the ones worth tracking) could never be
- * backfilled at all. When a window's offset budget is spent we re-anchor `end`
- * on the oldest fill seen and open a fresh window. Rows repeated across a
- * boundary cost nothing: `recordConfirmedPolymarketTrade` dedupes on its
- * natural key and the source-trade fill index is a hash of the same identity.
+ * Uses opaque cursor pagination via `next_cursor` across `https://data-api.polymarket.com/v2/trades`.
+ * Handles both the v2 envelope `{ data: [...], pagination: { next_cursor, has_more } }`
+ * and bare arrays for backwards compatibility with legacy mocks.
  */
 export async function fetchConfirmedPolymarketTradePages(input: {
   user: string;
@@ -79,65 +66,63 @@ export async function fetchConfirmedPolymarketTradePages(input: {
   maxOffset?: number;
 }): Promise<unknown[]> {
   const pageLimit = input.pageLimit ?? TRADES_PAGE_LIMIT;
-  const maxOffset = input.maxOffset ?? TRADES_MAX_OFFSET;
+  const maxItems = input.maxOffset;
   const rawTrades: unknown[] = [];
-  let offset = 0;
-  let windowEnd: number | null = null;
-  let oldestInWindow: number | null = null;
+  let cursor: string | null = null;
 
   while (true) {
-    const url = new URL('https://data-api.polymarket.com/trades');
+    const url = new URL('https://data-api.polymarket.com/v2/trades');
     // `user` first so the query string stays recognisable in logs and tests.
     url.searchParams.set('user', input.user);
     url.searchParams.set('limit', String(pageLimit));
-    url.searchParams.set('offset', String(offset));
-    if (windowEnd !== null) url.searchParams.set('end', String(windowEnd));
+    if (cursor) {
+      url.searchParams.set('cursor', cursor);
+    }
 
     const response = await input.fetchImpl(url.toString());
     if (!response.ok) {
       throw new Error(`Polymarket Data API returned status ${response.status}`);
     }
-    const page = await response.json() as unknown;
-    if (!Array.isArray(page)) throw new Error('Polymarket Data API returned a non-array trade page');
+    const payload = await response.json() as unknown;
+    let page: unknown[] = [];
+    let nextCursor: string | null = null;
+    let hasMore: boolean | undefined = undefined;
+
+    if (Array.isArray(payload)) {
+      page = payload;
+    } else if (payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).data)) {
+      page = (payload as Record<string, unknown>).data as unknown[];
+      const pagination = (payload as Record<string, unknown>).pagination as Record<string, unknown> | undefined;
+      nextCursor = typeof pagination?.next_cursor === 'string' && pagination.next_cursor.trim()
+        ? pagination.next_cursor.trim()
+        : null;
+      hasMore = typeof pagination?.has_more === 'boolean' ? pagination.has_more : undefined;
+    } else {
+      throw new Error('Polymarket Data API returned an invalid trade page envelope');
+    }
+
     if (page.length === 0) break;
     console.log(
-      `[polymarket] Fetched ${page.length} confirmed trades (offset: ${offset}`
-      + `${windowEnd === null ? '' : `, end: ${windowEnd}`}) for ${input.user}`
+      `[polymarket] Fetched ${page.length} confirmed trades`
+      + `${cursor ? ` (cursor: ${cursor.slice(0, 16)}...)` : ''} for ${input.user}`
     );
     rawTrades.push(...page);
-    for (const row of page) {
-      const seconds = rawTradeTimestampSeconds(row);
-      if (seconds === null) continue;
-      if (oldestInWindow === null || seconds < oldestInWindow) oldestInWindow = seconds;
-    }
 
-    // A short page means this window is exhausted, and the last window is the
-    // whole history.
-    if (page.length < pageLimit) break;
-
-    offset += pageLimit;
-    if (offset + pageLimit <= maxOffset) continue;
-
-    if (oldestInWindow === null) {
-      console.warn(
-        `[polymarket] offset budget spent with no usable timestamp to re-anchor on for ${input.user};`
-        + ' history older than this point was not read'
-      );
+    if (maxItems !== undefined && rawTrades.length >= maxItems) {
       break;
     }
-    if (windowEnd !== null && oldestInWindow >= windowEnd) {
-      // The window did not move, so another pass would re-read the same rows
-      // forever. Stop, and say so - a silent truncation here would read as a
-      // complete backfill.
-      console.warn(
-        `[polymarket] could not advance the trade window past ${windowEnd} for ${input.user};`
-        + ' history older than that timestamp was not read'
-      );
+
+    if (nextCursor) {
+      if (cursor === nextCursor) {
+        console.warn(`[polymarket] cursor did not advance for ${input.user}; terminating pagination`);
+        break;
+      }
+      cursor = nextCursor;
+    } else if (hasMore === false || page.length < pageLimit) {
+      break;
+    } else {
       break;
     }
-    windowEnd = oldestInWindow;
-    oldestInWindow = null;
-    offset = 0;
   }
 
   return rawTrades;

@@ -354,13 +354,18 @@ class PolymarketSnapshotProvider:
             "end": _epoch(at),
         }
         try:
-            response = self.client.get(f"{DATA_API}/trades", params=params)
+            response = self.client.get(f"{DATA_API}/v2/trades", params=params)
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError):
             return {"volume_5m_usd": None, "volume_1h_usd": None, "volume_24h_usd": None}
 
-        rows = payload if isinstance(payload, list) else payload.get("items") or []
+        if isinstance(payload, dict) and "data" in payload and isinstance(payload["data"], list):
+            rows = payload["data"]
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            rows = payload.get("items") or [] if isinstance(payload, dict) else []
         if not isinstance(rows, list):
             return {"volume_5m_usd": None, "volume_1h_usd": None, "volume_24h_usd": None}
 
@@ -390,7 +395,7 @@ class PolymarketSnapshotProvider:
                 totals["volume_1h_usd"] += notional
             if ts > cutoff_5m:
                 totals["volume_5m_usd"] += notional
-                wallet = row.get("proxyWallet")
+                wallet = row.get("proxy_wallet") or row.get("proxyWallet")
                 side = (row.get("side") or "").upper()
                 if side == "BUY":
                     buys += 1

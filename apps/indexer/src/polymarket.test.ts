@@ -11,6 +11,7 @@ import {
 } from '@swat/db';
 import { REDIS_CHANNELS } from '@swat/shared';
 import { backfillPolymarketWallet, fetchConfirmedPolymarketTradePages } from './polymarket.js';
+import { parseConfirmedPolymarketTrade } from './polymarket-helpers.js';
 
 vi.mock('@swat/db', () => ({
   getPolymarketMarket: vi.fn(),
@@ -104,7 +105,7 @@ describe('Polymarket confirmed-trade backfill', () => {
       .mockResolvedValue(persistedContext);
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes('data-api.polymarket.com/trades')) return jsonResponse([trade]);
+      if (url.includes('data-api.polymarket.com/trades') || url.includes('data-api.polymarket.com/v2/trades')) return jsonResponse([trade]);
       if (url.includes('gamma-api.polymarket.com/markets')) return jsonResponse([market]);
       throw new Error(`Unexpected URL: ${url}`);
     }) as typeof fetch;
@@ -266,7 +267,7 @@ describe('Polymarket confirmed-trade backfill', () => {
     vi.mocked(getPolymarketOutcomeContext).mockResolvedValue(null);
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes('data-api.polymarket.com/trades')) return jsonResponse([trade]);
+      if (url.includes('data-api.polymarket.com/trades') || url.includes('data-api.polymarket.com/v2/trades')) return jsonResponse([trade]);
       if (url.includes('gamma-api.polymarket.com/markets')) {
         return jsonResponse([{ ...market, clobTokenIds: JSON.stringify([TOKEN_NO, `${TOKEN_NO}1`]) }]);
       }
@@ -299,76 +300,57 @@ describe('Polymarket trade paging', () => {
     return fetchImpl.mock.calls.map(([input]) => new URL(String(input)));
   }
 
-  it('walks offsets until a short page ends the history', async () => {
+  it('walks cursors across v2 envelopes until next_cursor is null', async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
-      const offset = Number(new URL(String(input)).searchParams.get('offset'));
-      return jsonResponse(offset === 0 ? page(2, 1_000) : page(1, 998));
+      const cursor = new URL(String(input)).searchParams.get('cursor');
+      if (!cursor) {
+        return jsonResponse({
+          data: page(2, 1_000),
+          pagination: { limit: 2, next_cursor: 'cursor_page_2', has_more: true }
+        });
+      }
+      return jsonResponse({
+        data: page(1, 998),
+        pagination: { limit: 2, next_cursor: null, has_more: false }
+      });
     }) as unknown as typeof fetch & { mock: { calls: unknown[][] } };
 
     const trades = await fetchConfirmedPolymarketTradePages({
       user: USER,
       fetchImpl,
-      pageLimit: 2,
-      maxOffset: 100
+      pageLimit: 2
     });
 
     expect(trades).toHaveLength(3);
-    expect(urlsOf(fetchImpl).map((url) => url.searchParams.get('offset'))).toEqual(['0', '2']);
-    // A single window is enough here, so `end` is never pinned.
-    expect(urlsOf(fetchImpl).every((url) => url.searchParams.get('end') === null)).toBe(true);
+    expect(urlsOf(fetchImpl).map((url) => url.searchParams.get('cursor'))).toEqual([null, 'cursor_page_2']);
+    expect(urlsOf(fetchImpl).every((url) => url.pathname.includes('/v2/trades'))).toBe(true);
   });
 
-  it('re-anchors on a new end window instead of walking past the offset cap', async () => {
-    // The API answers an offset past its cap with a 400 rather than clamping,
-    // so a flat walk would abort the whole backfill for a high-volume wallet.
-    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
-      const url = new URL(String(input));
-      const offset = Number(url.searchParams.get('offset'));
-      const end = url.searchParams.get('end');
-      if (offset > 2) return jsonResponse({ error: 'offset out of range' }, 400);
-      if (end === null) return jsonResponse(page(2, 1_000 - offset));
-      if (end === '997') return jsonResponse(offset === 0 ? page(2, 997) : page(1, 995));
-      return jsonResponse([]);
-    }) as unknown as typeof fetch & { mock: { calls: unknown[][] } };
-
+  it('supports bare array pages for backwards compatibility with legacy fixtures', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(page(2, 1_000))) as unknown as typeof fetch;
     const trades = await fetchConfirmedPolymarketTradePages({
       user: USER,
       fetchImpl,
-      pageLimit: 2,
-      maxOffset: 4
+      pageLimit: 5
     });
-
-    const windows = urlsOf(fetchImpl).map((url) => [
-      url.searchParams.get('offset'),
-      url.searchParams.get('end')
-    ]);
-    expect(windows).toEqual([
-      ['0', null],
-      ['2', null],
-      // Budget spent: re-anchor on the oldest fill seen and reset the offset.
-      ['0', '997'],
-      ['2', '997']
-    ]);
-    expect(trades).toHaveLength(7);
+    expect(trades).toHaveLength(2);
   });
 
-  it('stops instead of looping when a window cannot advance', async () => {
-    // Every window returns the same oldest timestamp, so re-anchoring would
-    // re-read the same rows forever.
-    const fetchImpl = vi.fn(async () => jsonResponse(page(2, 500))) as unknown as
-      typeof fetch & { mock: { calls: unknown[][] } };
+  it('stops instead of looping when a cursor cannot advance', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: page(2, 500),
+      pagination: { next_cursor: 'static_stuck_cursor', has_more: true }
+    })) as unknown as typeof fetch & { mock: { calls: unknown[][] } };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const trades = await fetchConfirmedPolymarketTradePages({
       user: USER,
       fetchImpl,
-      pageLimit: 2,
-      maxOffset: 4
+      pageLimit: 2
     });
 
-    expect(trades.length).toBeGreaterThan(0);
-    // Truncation is loud: a silent stop here would read as a complete backfill.
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not advance the trade window'));
+    expect(trades).toHaveLength(4);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cursor did not advance'));
     warn.mockRestore();
   });
 
@@ -376,5 +358,25 @@ describe('Polymarket trade paging', () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: 'nope' }, 500)) as typeof fetch;
     await expect(fetchConfirmedPolymarketTradePages({ user: USER, fetchImpl }))
       .rejects.toThrow('Polymarket Data API returned status 500');
+  });
+
+  it('parses v2 snake_case trade fields correctly', () => {
+    const v2Trade = {
+      proxy_wallet: PROXY_WALLET,
+      token_id: TOKEN_YES,
+      condition_id: CONDITION_ID,
+      transaction_hash: TRANSACTION_HASH,
+      side: 'BUY',
+      size: 100,
+      price: 0.5,
+      timestamp: 1710000000,
+      outcome: 'Yes',
+      title: 'Test Condition'
+    };
+    const parsed = parseConfirmedPolymarketTrade(v2Trade);
+    expect(parsed.proxyWallet).toBe(PROXY_WALLET);
+    expect(parsed.asset).toBe(TOKEN_YES);
+    expect(parsed.conditionId).toBe(CONDITION_ID);
+    expect(parsed.transactionHash).toBe(TRANSACTION_HASH);
   });
 });

@@ -120,14 +120,14 @@ export function parseConfirmedPolymarketTrade(value: unknown): ConfirmedPolymark
   if (price > 1) throw new Error(`Invalid Polymarket trade price: ${price}`);
 
   return {
-    proxyWallet: normalizeProxyWallet(raw.proxyWallet),
-    timestamp: parsePolymarketTimestamp(raw.timestamp as string | number),
-    conditionId: normalizeConditionId(raw.conditionId),
-    asset: normalizeTokenId(raw.asset),
+    proxyWallet: normalizeProxyWallet(raw.proxy_wallet ?? raw.proxyWallet),
+    timestamp: parsePolymarketTimestamp((raw.timestamp ?? raw.created_at) as string | number),
+    conditionId: normalizeConditionId(raw.condition_id ?? raw.conditionId),
+    asset: normalizeTokenId(raw.token_id ?? raw.asset_id ?? raw.asset),
     size: positiveNumber(raw.size, 'trade size'),
     price,
     side,
-    transactionHash: normalizeTransactionHash(raw.transactionHash),
+    transactionHash: normalizeTransactionHash(raw.transaction_hash ?? raw.transactionHash),
     outcome: nonEmptyString(raw.outcome, 'trade outcome'),
     title: nonEmptyString(raw.title, 'market title')
   };
