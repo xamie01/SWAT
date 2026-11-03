@@ -1,15 +1,20 @@
 import type { NextConfig } from 'next';
 import path from 'node:path';
 
-const BACKEND_API_INTERNAL_URL =
-  process.env.BACKEND_API_INTERNAL_URL ||
-  process.env.INTERNAL_API_URL ||
-  'http://75.119.151.184:3001';
+const sanitizeUrl = (url: string | undefined, fallback: string) => {
+  if (!url || url.includes('[SENSITIVE]') || !url.startsWith('http')) return fallback;
+  return url;
+};
 
-const BACKEND_LP_INTERNAL_URL =
-  process.env.BACKEND_LP_INTERNAL_URL ||
-  process.env.INTERNAL_LP_URL ||
-  'http://75.119.151.184:3010';
+const BACKEND_API_INTERNAL_URL = sanitizeUrl(
+  process.env.BACKEND_API_INTERNAL_URL || process.env.INTERNAL_API_URL,
+  'http://75.119.151.184:3001'
+);
+
+const BACKEND_LP_INTERNAL_URL = sanitizeUrl(
+  process.env.BACKEND_LP_INTERNAL_URL || process.env.INTERNAL_LP_URL,
+  'http://75.119.151.184:3010'
+);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,

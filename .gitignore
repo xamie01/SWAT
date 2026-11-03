@@ -36,3 +36,5 @@ Thumbs.db
 
 # Brag output
 brag-output/
+.vercel
+.env*
