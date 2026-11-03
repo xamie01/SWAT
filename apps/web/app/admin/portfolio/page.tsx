@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { AdminNav } from '../../../components/AdminNav.js';
 import { ChainBadge, TierBadge, LoadingSkeleton, ErrorBanner } from '../../../components/UIPrimitives.js';
-import { api } from '../../../lib/api.js';
+import { api, resolveApiBase } from '../../../lib/api.js';
 
 interface Overview {
   totalFleetAumUsd: number;
@@ -154,7 +154,7 @@ export default function AdminPortfolioPage() {
 
   const triggerExport = async () => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const apiUrl = resolveApiBase(typeof window !== 'undefined' ? window.location : null);
       const url = `${apiUrl}/v1/admin/portfolio/export?type=${exportType}&format=${exportFormat}`;
       const res = await fetch(url, { credentials: 'include' });
       if (!res.ok) {

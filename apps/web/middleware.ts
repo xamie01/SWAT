@@ -18,7 +18,11 @@ import { SESSION_COOKIE } from './lib/api.js';
  * data 403s.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const API_BASE =
+  process.env.INTERNAL_API_URL ??
+  process.env.BACKEND_API_INTERNAL_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  (process.env.NODE_ENV === 'production' ? 'http://75.119.151.184:3001' : 'http://localhost:3001');
 
 /**
  * Asks the API who this session belongs to.
@@ -51,6 +55,10 @@ async function fetchRole(request: NextRequest): Promise<Role | null> {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname.startsWith('/v1/')) {
+    return NextResponse.next();
+  }
+
   const hasSession = request.cookies.has(SESSION_COOKIE);
 
   const role = (await (requiresRoleCheck(pathname, hasSession) ? fetchRole(request) : null)) as Role | null;
@@ -75,5 +83,5 @@ export const config = {
    * anyway. It is a cost one: without it every image request on an admin page
    * triggers a `/v1/auth/me` round trip.
    */
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|v1/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)']
 };

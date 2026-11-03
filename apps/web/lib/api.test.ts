@@ -103,6 +103,10 @@ describe('resolveApiBase', () => {
       .toBe('http://192.168.1.10:3001');
   });
 
+  it('returns relative origin for remote HTTPS deployment so Next.js rewrites proxy requests', () => {
+    expect(resolveApiBase({ protocol: 'https:', hostname: 'wake.vercel.app' }, undefined)).toBe('');
+  });
+
   it('falls back to localhost when there is no window (SSR)', () => {
     expect(resolveApiBase(null, undefined)).toBe('http://localhost:3001');
   });

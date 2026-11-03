@@ -126,7 +126,12 @@ export function resolveApiBase(
   configured: string | undefined = process.env.NEXT_PUBLIC_API_URL
 ): string {
   if (configured) return configured.replace(/\/+$/, '');
-  if (location) return `${location.protocol}//${location.hostname}:3001`;
+  if (location) {
+    if (location.protocol === 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      return '';
+    }
+    return `${location.protocol}//${location.hostname}:3001`;
+  }
   return 'http://localhost:3001';
 }
 
@@ -135,7 +140,12 @@ export function resolveLpApiBase(
   configured: string | undefined = process.env.NEXT_PUBLIC_LP_API_URL
 ): string {
   if (configured) return configured.replace(/\/+$/, '');
-  if (location) return `${location.protocol}//${location.hostname}:3010`;
+  if (location) {
+    if (location.protocol === 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      return '';
+    }
+    return `${location.protocol}//${location.hostname}:3010`;
+  }
   return 'http://localhost:3010';
 }
 
