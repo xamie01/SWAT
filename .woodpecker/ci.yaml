@@ -64,3 +64,27 @@ steps:
       - pnpm test
       - pnpm build
       - pnpm test:integration
+
+  - name: deploy-vercel
+    image: node:22-slim
+    when:
+      - event: push
+        branch: main
+    environment:
+      VERCEL_TOKEN:
+        from_secret: vercel_token
+      VERCEL_ORG_ID:
+        from_secret: vercel_org_id
+      VERCEL_PROJECT_ID:
+        from_secret: vercel_project_id
+    commands:
+      - corepack enable
+      - corepack prepare pnpm@10.2.0 --activate
+      - npm install -g vercel@latest
+      - cd apps/web
+      - ln -s ../../node_modules/.pnpm node_modules/.pnpm || true
+      - vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+      - vercel build --prod --token=$VERCEL_TOKEN
+      - cp -r .vercel ../../.vercel
+      - cd ../..
+      - vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN --yes
