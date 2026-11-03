@@ -27,6 +27,7 @@ Thumbs.db
 
 # Agent skills (installed locally via `npx skills add`)
 .agents/
+.agent/
 .claude/skills/
 .claude/settings.local.json
 
