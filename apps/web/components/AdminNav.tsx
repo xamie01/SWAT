@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { WakeLogo } from './WakeLogo.js';
+import { ThemeToggle } from './ThemeToggle.js';
 import { api } from '../lib/api.js';
 
 export function AdminNav() {
@@ -77,7 +78,7 @@ export function AdminNav() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                     isActive
                       ? 'bg-surface-container text-primary font-semibold'
                       : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-low'
@@ -93,6 +94,7 @@ export function AdminNav() {
 
         {/* Desktop Actions */}
         <div className="hidden sm:flex items-center gap-3 ml-auto pl-8 border-l border-border-subtle shrink-0">
+          <ThemeToggle />
           <button
             onClick={handleEmergencyOff}
             disabled={submitting}
@@ -117,6 +119,7 @@ export function AdminNav() {
 
         {/* Mobile Hamburger Button */}
         <div className="flex items-center gap-2 lg:hidden">
+          <ThemeToggle />
           <button
             onClick={handleEmergencyOff}
             disabled={submitting}

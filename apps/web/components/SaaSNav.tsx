@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { WakeLogo } from './WakeLogo.js';
 import { StatusPill, type StreamState } from './StatusPill.js';
 import { TierBadge } from './UIPrimitives.js';
+import { ThemeToggle } from './ThemeToggle.js';
 import { api } from '../lib/api.js';
 
 export function SaaSNav() {
@@ -75,7 +76,7 @@ export function SaaSNav() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                     isActive
                       ? 'bg-surface-container text-primary font-semibold'
                       : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-low'
@@ -90,7 +91,8 @@ export function SaaSNav() {
         </div>
 
         {/* Right Status & Actions */}
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <ThemeToggle />
           <div className="hidden xs:flex items-center gap-2">
             <StatusPill state={streamState} />
             <TierBadge tier={tier} />

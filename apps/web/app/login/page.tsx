@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { WakeLogo } from '../../components/WakeLogo.js';
+import { ThemeToggle } from '../../components/ThemeToggle.js';
 import { api, ApiError } from '../../lib/api.js';
 
 /**
@@ -70,7 +71,10 @@ function LoginForm() {
   };
 
   return (
-    <div className="bg-background text-on-background min-h-screen antialiased font-sans flex items-center justify-center px-6">
+    <div className="bg-background text-on-background min-h-screen antialiased font-sans flex items-center justify-center px-6 relative">
+      <div className="fixed top-4 right-4 z-50">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm">
         <Link href="/" className="inline-block mb-8 hover:opacity-85 transition-opacity">
           <WakeLogo size="md" />

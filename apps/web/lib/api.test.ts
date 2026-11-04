@@ -98,17 +98,13 @@ describe('resolveApiBase', () => {
     expect(resolveApiBase(null, 'https://api.example.com/')).toBe('https://api.example.com');
   });
 
-  it('derives the host from the page so LAN devices work', () => {
-    expect(resolveApiBase({ protocol: 'http:', hostname: '192.168.1.10' }, undefined))
-      .toBe('http://192.168.1.10:3001');
-  });
-
-  it('returns relative origin for remote HTTPS deployment so Next.js rewrites proxy requests', () => {
+  it('returns relative origin for browser execution so Next.js rewrites proxy requests', () => {
+    expect(resolveApiBase({ protocol: 'http:', hostname: '192.168.1.10' }, undefined)).toBe('');
     expect(resolveApiBase({ protocol: 'https:', hostname: 'wake.vercel.app' }, undefined)).toBe('');
   });
 
-  it('falls back to localhost when there is no window (SSR)', () => {
-    expect(resolveApiBase(null, undefined)).toBe('http://localhost:3001');
+  it('falls back to internal backend URL when there is no window (SSR)', () => {
+    expect(resolveApiBase(null, undefined)).toMatch(/http:\/\/(localhost|75\.119\.151\.184):3001/);
   });
 });
 

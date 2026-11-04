@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { WakeLogo } from '../../components/WakeLogo.js';
+import { ThemeToggle } from '../../components/ThemeToggle.js';
 import { api, ApiError } from '../../lib/api.js';
 
 type TierKey = 'free' | 'operator' | 'ultra' | 'lifetime';
@@ -129,9 +130,12 @@ function SignupForm() {
           <Link href="/" className="inline-block hover:opacity-85 transition-opacity">
             <WakeLogo size="md" />
           </Link>
-          <span className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-surface-container text-on-surface-variant border border-border-subtle">
-            STAGE 4 // SECURE
-          </span>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <span className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-surface-container text-on-surface-variant border border-border-subtle">
+              STAGE 4 // SECURE
+            </span>
+          </div>
         </div>
 
         <h1 className="font-headline-md text-2xl sm:text-3xl font-extrabold tracking-tight mb-2 text-primary">

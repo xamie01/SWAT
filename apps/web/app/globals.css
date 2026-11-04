@@ -4,20 +4,139 @@
 
 @layer base {
   :root {
+    --canvas-base: #fdf8f8;
     --background: #fdf8f8;
     --foreground: #1c1b1b;
+    --surface-deep: #ffffff;
+    --surface-raised: #f7f3f2;
+    --surface-container-lowest: #ffffff;
+    --surface-container-low: #f7f3f2;
+    --surface-container: #f1edec;
+    --surface-container-high: #ebe7e6;
+    --surface-container-highest: #e5e2e1;
+    --surface: #fdf8f8;
+    --surface-dim: #ddd9d8;
+    --surface-bright: #ffffff;
+    --surface-variant: #e5e2e1;
+    --on-surface: #1c1b1b;
+    --on-surface-variant: #444748;
+    --text-primary: #1c1b1b;
+    --text-secondary: #444748;
+    --text-tertiary: #747878;
+    --border-subtle: #E2E8F0;
+    --border-muted: #CBD5E1;
+    --border-prominent: #94A3B8;
+    --primary: #000000;
+    --on-primary: #ffffff;
+    --primary-container: #1c1b1b;
+    --on-primary-container: #858383;
   }
 
   .dark {
-    --background: #1c1b1b;
-    --foreground: #fdf8f8;
+    --canvas-base: #050506;
+    --background: #050506;
+    --foreground: #e5e1e4;
+    --surface-deep: #0a0a0c;
+    --surface-raised: #121214;
+    --surface-container-lowest: #0e0e10;
+    --surface-container-low: #1b1b1d;
+    --surface-container: #201f21;
+    --surface-container-high: #2a2a2c;
+    --surface-container-highest: #353437;
+    --surface: #131315;
+    --surface-dim: #131315;
+    --surface-bright: #39393b;
+    --surface-variant: #353437;
+    --on-surface: #e5e1e4;
+    --on-surface-variant: #a1a1aa;
+    --text-primary: #ffffff;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #71717a;
+    --border-subtle: #1f1f23;
+    --border-muted: #27272a;
+    --border-prominent: #3f3f46;
+    --primary: #ef4444;
+    --on-primary: #ffffff;
+    --primary-container: #ef4444;
+    --on-primary-container: #ffffff;
   }
 
   body {
     background-color: var(--background);
     color: var(--foreground);
     font-feature-settings: "rlig" 1, "calt" 1;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
+}
+
+/* ==========================================================================
+   Dark Mode: Primary Action Boxes (Previously Black in Light Mode)
+   Turn into Crimson Red Backgrounds with Crisp White Text
+   ========================================================================== */
+.dark .bg-primary {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+
+.dark .bg-primary-container {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+
+.dark .bg-primary *,
+.dark .bg-primary-container * {
+  color: #ffffff !important;
+}
+
+/* Hover & Interactive States */
+.dark button.bg-primary:hover,
+.dark a.bg-primary:hover,
+.dark .hover\:bg-primary:hover {
+  background-color: #ff3344 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.45) !important;
+}
+
+/* Text primary in dark mode remains clean readable white unless inside colored badges */
+.dark .text-primary {
+  color: #ffffff;
+}
+
+/* Primary borders */
+.dark .border-primary {
+  border-color: #ef4444 !important;
+}
+
+.dark .border-primary\/20 {
+  border-color: rgba(239, 68, 68, 0.25) !important;
+}
+
+.dark .border-primary\/30 {
+  border-color: rgba(239, 68, 68, 0.35) !important;
+}
+
+/* Alpha primary badges and pills */
+.dark .bg-primary\/10 {
+  background-color: rgba(239, 68, 68, 0.14) !important;
+  color: #ef4444 !important;
+}
+
+.dark .bg-primary\/20 {
+  background-color: rgba(239, 68, 68, 0.24) !important;
+  color: #ef4444 !important;
+}
+
+.dark .bg-primary\/30 {
+  background-color: rgba(239, 68, 68, 0.34) !important;
+  color: #ef4444 !important;
+}
+
+.dark .bg-primary\/70 {
+  background-color: rgba(239, 68, 68, 0.75) !important;
+}
+
+.dark .shadow-primary\/20 {
+  --tw-shadow-color: rgba(239, 68, 68, 0.3) !important;
 }
 
 .material-symbols-outlined {
@@ -36,12 +155,18 @@
   background: #e5e2e1;
   border-radius: 10px;
 }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #27272a;
+}
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #c8c6c5;
 }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
 
 .mono-font {
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-jetbrains-mono), var(--font-geist-mono), monospace;
 }
 
 .bento-grid {
@@ -56,6 +181,10 @@
   background: rgba(20, 241, 149, 0.2);
   position: absolute;
   animation: scan 4s linear infinite;
+}
+
+.dark .scanline {
+  background: rgba(239, 68, 68, 0.25);
 }
 
 @keyframes scan {
