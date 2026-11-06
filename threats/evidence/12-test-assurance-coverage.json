@@ -1,0 +1,21 @@
+{
+  "deep": [
+    "vitest.integration.config.ts",
+    "tests/integration/global-setup.ts",
+    "tests/integration/helpers/schema-guard.ts",
+    "tests/integration/helpers/lifecycle-fixture.ts",
+    "tests/integration/chaos.integration.test.ts",
+    "tests/integration/cross-tenant.integration.test.ts",
+    "tests/integration/lot-exits.integration.test.ts",
+    "tsconfig.integration.json",
+    "package.json",
+    "turbo.json"
+  ],
+  "skim": [],
+  "excluded": [
+    {
+      "path": "tests/integration/* other suites",
+      "reason": "Inventoried only; targeted module reviewers may supply independent depth evidence."
+    }
+  ]
+}

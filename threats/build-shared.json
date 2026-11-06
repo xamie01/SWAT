@@ -1,0 +1,1 @@
+{"extends": "../packages/shared/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/packages-shared", "tsBuildInfoFile": "runtime/build/packages-shared.tsbuildinfo"}}

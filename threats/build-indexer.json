@@ -1,0 +1,1 @@
+{"extends": "../apps/indexer/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-indexer", "tsBuildInfoFile": "runtime/build/apps-indexer.tsbuildinfo"}}

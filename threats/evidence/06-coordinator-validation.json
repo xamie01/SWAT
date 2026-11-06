@@ -1,0 +1,34 @@
+{
+  "checkedUtc": "2026-11-06T21:48:45.109120+00:00",
+  "cpuAffinity": [
+    0
+  ],
+  "scope": "Focused report structure, explicit citation ranges, index links and indexed-source integrity; not exploitability or compliance verification",
+  "indexedFilesChecked": 608,
+  "changedIndexedFiles": [],
+  "missingIndexedFiles": [],
+  "findingCount": 15,
+  "severityCounts": {
+    "High": 4,
+    "Medium": 8,
+    "Low": 3
+  },
+  "confidenceCounts": {
+    "Verified": 8,
+    "Likely": 7
+  },
+  "explicitSourceCitationOccurrencesChecked": 95,
+  "referencedArtifactsChecked": 12,
+  "indexLinksChecked": 12,
+  "literalHttpRouteEntries": 112,
+  "routeCounts": {
+    "apps/api": 92,
+    "apps/lp": 18,
+    "apps/mcp-server": 2
+  },
+  "head": "d5852a0e31e8e9a517c6e7c47ed9623819c7fc71",
+  "trackedDiffEmpty": true,
+  "gitStatus": "?? LP-BUILD-RECORD.md\n?? apps/lp/.zcodeignore\n?? threats/",
+  "applicationRequestsTestsBuildsServicesRunByValidator": false,
+  "issues": []
+}

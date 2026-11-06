@@ -1,0 +1,1 @@
+{"extends": "../apps/trade-executor/tsconfig.json", "compilerOptions": {"rootDir": "..", "noEmit": true, "baseUrl": "..", "paths": {"@swat/shared": ["packages/shared/src/index.ts"], "@swat/db": ["packages/db/src/index.ts"]}}}

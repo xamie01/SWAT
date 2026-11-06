@@ -1,0 +1,1065 @@
+{
+  "unit_suites": [
+    {
+      "suite": "unit-alert-service",
+      "tests": 17,
+      "passed": 17,
+      "failed": 0,
+      "files": 3
+    },
+    {
+      "suite": "unit-api",
+      "tests": 86,
+      "passed": 86,
+      "failed": 0,
+      "files": 8
+    },
+    {
+      "suite": "unit-db",
+      "tests": 893,
+      "passed": 887,
+      "failed": 6,
+      "files": 51
+    },
+    {
+      "suite": "unit-discovery",
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "files": 1
+    },
+    {
+      "suite": "unit-indexer",
+      "tests": 208,
+      "passed": 208,
+      "failed": 0,
+      "files": 16
+    },
+    {
+      "suite": "unit-lp",
+      "tests": 206,
+      "passed": 206,
+      "failed": 0,
+      "files": 25
+    },
+    {
+      "suite": "unit-mcp-server",
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "files": 1
+    },
+    {
+      "suite": "unit-scorer",
+      "tests": 78,
+      "passed": 78,
+      "failed": 0,
+      "files": 5
+    },
+    {
+      "suite": "unit-shared",
+      "tests": 509,
+      "passed": 509,
+      "failed": 0,
+      "files": 30
+    },
+    {
+      "suite": "unit-signal-engine",
+      "tests": 176,
+      "passed": 176,
+      "failed": 0,
+      "files": 8
+    },
+    {
+      "suite": "unit-trade-executor",
+      "tests": 816,
+      "passed": 816,
+      "failed": 0,
+      "files": 53
+    },
+    {
+      "suite": "unit-web",
+      "tests": 46,
+      "passed": 46,
+      "failed": 0,
+      "files": 4
+    }
+  ],
+  "unit_total": 3042,
+  "unit_passed": 3036,
+  "unit_failed": 6,
+  "integration": {
+    "numTotalTests": 124,
+    "numPassedTests": 124,
+    "numFailedTests": 0,
+    "configuration": "threats/runtime-vitest.config.ts; migrations run separately; original global setup/schema guard not invoked",
+    "files": 18
+  },
+  "rls_correct_role": {
+    "numTotalTests": 10,
+    "numPassedTests": 10,
+    "numFailedTests": 0,
+    "role": "swat_review_runtime, inherited swat_app grants; one test explicitly SET LOCAL ROLE swat_app",
+    "caveat": "Does not erase six initial failures or certify full service call paths/SQL-injection resistance."
+  },
+  "containers": [
+    {
+      "name": "e6c153c61e35_swat-postgres-1",
+      "id": "e6c153c61e351c4a844a62fd62109cc1e3d48d025ee6ef4ee09b9871b23a04bc",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0,
+        "PidsLimit": null
+      },
+      "port_bindings": {
+        "5432/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "5432"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "swat_postgres_data",
+          "Source": "/var/lib/docker/volumes/swat_postgres_data/_data",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    {
+      "name": "6873d13d7d79_swat-redis-1",
+      "id": "6873d13d7d795dfdf5d1fa8f0ace1ca5b746233cde585157c4717cefc273809b",
+      "image": "redis:7-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0,
+        "PidsLimit": null
+      },
+      "port_bindings": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "6379"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "swat_redis_data",
+          "Source": "/var/lib/docker/volumes/swat_redis_data/_data",
+          "Destination": "/data"
+        }
+      ]
+    },
+    {
+      "name": "swat-review-postgres",
+      "id": "6fac4132d72ad702cffed1402de3b4b9f0eb2639489e0ed4a8ead3245d7f2dc8",
+      "image": "postgres:16-alpine",
+      "running": false,
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 650000000,
+        "Memory": 268435456,
+        "MemorySwap": 402653184,
+        "PidsLimit": 64
+      },
+      "port_bindings": {
+        "5432/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "55432"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "836cafbdd100737dbbab27e534cbedb3c3960aae342712ad2a1f4c9b9b5aeb16",
+          "Source": "/var/lib/docker/volumes/836cafbdd100737dbbab27e534cbedb3c3960aae342712ad2a1f4c9b9b5aeb16/_data",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    {
+      "name": "swat-review-redis",
+      "id": "4e40813dff3a8b21489ef337b77ab0e011677711b2304d91d5ceb61a8302e341",
+      "image": "redis:7-alpine",
+      "running": false,
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 150000000,
+        "Memory": 67108864,
+        "MemorySwap": 100663296,
+        "PidsLimit": 32
+      },
+      "port_bindings": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "56379"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "cec572be2bc02f690f7fd78ceb2d07e2bd2c9fc6d7666780d1d93991ed79499e",
+          "Source": "/var/lib/docker/volumes/cec572be2bc02f690f7fd78ceb2d07e2bd2c9fc6d7666780d1d93991ed79499e/_data",
+          "Destination": "/data"
+        }
+      ]
+    }
+  ],
+  "wake_program_response": {
+    "jsonrpc": "2.0",
+    "result": {
+      "context": {
+        "apiVersion": "4.4.0",
+        "slot": 466128956
+      },
+      "value": null
+    },
+    "id": 1
+  },
+  "source_hash_changes": [],
+  "git_status": [
+    "?? LP-BUILD-RECORD.md",
+    "?? apps/lp/.zcodeignore",
+    "?? threats/"
+  ],
+  "tracked_diff": "",
+  "git_head": "d5852a0e31e8e9a517c6e7c47ed9623819c7fc71",
+  "phase": "runtime-verification",
+  "finalized_at_utc": "2026-11-06T14:08:28.470821+00:00",
+  "resource_controls": {
+    "review_cpu": 0,
+    "all_recorded_commands_cpu_zero": true,
+    "vitest_workers": 1,
+    "file_parallelism": false,
+    "node_heap_mib_initial": 384,
+    "node_heap_mib_retry": 640,
+    "scope": "Review-launched commands and containers only; existing infrastructure and Docker daemon not globally constrained."
+  },
+  "containers_before_cleanup": [
+    {
+      "name": "e6c153c61e35_swat-postgres-1",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0
+      }
+    },
+    {
+      "name": "6873d13d7d79_swat-redis-1",
+      "image": "redis:7-alpine",
+      "running": true,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0
+      }
+    },
+    {
+      "name": "swat-review-postgres",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 650000000,
+        "Memory": 268435456,
+        "MemorySwap": 402653184
+      }
+    },
+    {
+      "name": "swat-review-redis",
+      "image": "redis:7-alpine",
+      "running": true,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 150000000,
+        "Memory": 67108864,
+        "MemorySwap": 100663296
+      }
+    }
+  ],
+  "cleanup_evidence": "threats/runtime/cleanup.json",
+  "existing_local_schema": {
+    "database": "existing-local-swat",
+    "public_table_count": 55,
+    "checked_required_tables": [
+      "users",
+      "copy_executions",
+      "copy_position_master_lots",
+      "master_capacity_ledger",
+      "user_payment_intents",
+      "crypto_payments",
+      "lp_pools",
+      "lp_positions",
+      "lp_guardrail_configs",
+      "lp_tracked_wallets",
+      "lp_copy_subscriptions",
+      "lp_copy_executions"
+    ],
+    "missing_required_tables": [
+      "copy_position_master_lots",
+      "user_payment_intents",
+      "crypto_payments",
+      "lp_copy_subscriptions",
+      "lp_copy_executions"
+    ]
+  },
+  "existing_local_role": {
+    "name": "swat",
+    "superuser": true,
+    "createdb": true,
+    "createrole": true,
+    "bypassrls": true,
+    "evidence": "threats/runtime/existing-postgres-read-only.log",
+    "remote_role_verified": false
+  },
+  "build_and_typecheck_attempts": [
+    {
+      "name": "build-shared",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-shared.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 22.729,
+      "exit_code": 0,
+      "log": "threats/runtime/build-shared.log",
+      "timestamp_utc": "2026-11-06T12:58:24Z"
+    },
+    {
+      "name": "build-db",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-db.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 23.948,
+      "exit_code": 2,
+      "log": "threats/runtime/build-db.log",
+      "timestamp_utc": "2026-11-06T12:58:48Z"
+    },
+    {
+      "name": "build-api",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-api.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 73.507,
+      "exit_code": -6,
+      "log": "threats/runtime/build-api.log",
+      "timestamp_utc": "2026-11-06T13:00:01Z"
+    },
+    {
+      "name": "build-indexer",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-indexer.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 64.835,
+      "exit_code": -6,
+      "log": "threats/runtime/build-indexer.log",
+      "timestamp_utc": "2026-11-06T13:01:06Z"
+    },
+    {
+      "name": "build-signal-engine",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-signal-engine.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 30.39,
+      "exit_code": 0,
+      "log": "threats/runtime/build-signal-engine.log",
+      "timestamp_utc": "2026-11-06T13:01:37Z"
+    },
+    {
+      "name": "build-scorer",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-scorer.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 12.313,
+      "exit_code": 0,
+      "log": "threats/runtime/build-scorer.log",
+      "timestamp_utc": "2026-11-06T13:01:49Z"
+    },
+    {
+      "name": "build-trade-executor",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-trade-executor.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 64.091,
+      "exit_code": -6,
+      "log": "threats/runtime/build-trade-executor.log",
+      "timestamp_utc": "2026-11-06T13:02:53Z"
+    },
+    {
+      "name": "build-lp",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-lp.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 45.578,
+      "exit_code": 2,
+      "log": "threats/runtime/build-lp.log",
+      "timestamp_utc": "2026-11-06T13:03:39Z"
+    },
+    {
+      "name": "build-discovery",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-discovery.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 13.081,
+      "exit_code": 0,
+      "log": "threats/runtime/build-discovery.log",
+      "timestamp_utc": "2026-11-06T13:03:52Z"
+    },
+    {
+      "name": "build-alert-service",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-alert-service.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 12.925,
+      "exit_code": 0,
+      "log": "threats/runtime/build-alert-service.log",
+      "timestamp_utc": "2026-11-06T13:04:05Z"
+    },
+    {
+      "name": "build-mcp-server",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-mcp-server.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 19.195,
+      "exit_code": 0,
+      "log": "threats/runtime/build-mcp-server.log",
+      "timestamp_utc": "2026-11-06T13:04:24Z"
+    },
+    {
+      "name": "build-fresh-db",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-fresh-db.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 17.374,
+      "exit_code": 0,
+      "log": "threats/runtime/build-fresh-db.log",
+      "timestamp_utc": "2026-11-06T13:10:49Z"
+    },
+    {
+      "name": "build-fresh-api",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-fresh-api.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 35.351,
+      "exit_code": 0,
+      "log": "threats/runtime/build-fresh-api.log",
+      "timestamp_utc": "2026-11-06T13:11:25Z"
+    },
+    {
+      "name": "build-fresh-indexer",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-fresh-indexer.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 56.738,
+      "exit_code": 0,
+      "log": "threats/runtime/build-fresh-indexer.log",
+      "timestamp_utc": "2026-11-06T13:12:22Z"
+    },
+    {
+      "name": "build-fresh-trade-executor",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-fresh-trade-executor.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 70.731,
+      "exit_code": 2,
+      "log": "threats/runtime/build-fresh-trade-executor.log",
+      "timestamp_utc": "2026-11-06T13:13:32Z"
+    },
+    {
+      "name": "build-fresh-lp",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/build-fresh-lp.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 52.788,
+      "exit_code": 0,
+      "log": "threats/runtime/build-fresh-lp.log",
+      "timestamp_utc": "2026-11-06T13:14:25Z"
+    },
+    {
+      "name": "web-typecheck",
+      "command": [
+        "node_modules/.bin/tsc",
+        "--noEmit",
+        "--incremental",
+        "false",
+        "-p",
+        "/home/xahmie/Documents/SWAT/threats/runtime/web-snapshot/tsconfig.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 47.368,
+      "exit_code": 2,
+      "log": "threats/runtime/web-typecheck.log",
+      "timestamp_utc": "2026-11-06T13:39:17Z"
+    },
+    {
+      "name": "web-build-isolated",
+      "command": [
+        "/home/xahmie/Documents/SWAT/apps/web/node_modules/.bin/next",
+        "build",
+        "/home/xahmie/Documents/SWAT/threats/runtime/web-snapshot"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 65.894,
+      "exit_code": 1,
+      "log": "threats/runtime/web-build-isolated.log",
+      "timestamp_utc": "2026-11-06T13:40:23Z"
+    },
+    {
+      "name": "executor-source-typecheck",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "threats/executor-source-typecheck.json",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 71.038,
+      "exit_code": 0,
+      "log": "threats/runtime/executor-source-typecheck.log",
+      "timestamp_utc": "2026-11-06T13:44:39Z"
+    },
+    {
+      "name": "web-original-typecheck",
+      "command": [
+        "node_modules/.bin/tsc",
+        "-p",
+        "apps/web/tsconfig.json",
+        "--noEmit",
+        "--incremental",
+        "false",
+        "--pretty",
+        "false"
+      ],
+      "cwd": ".",
+      "cpu": 0,
+      "seconds": 54.099,
+      "exit_code": 2,
+      "log": "threats/runtime/web-original-typecheck.log",
+      "timestamp_utc": "2026-11-06T13:46:10Z"
+    }
+  ],
+  "executor_build": {
+    "emitted_retry": "failed in temporary declaration layout: TS7006",
+    "source_typecheck": "passed",
+    "original_emitted_build_verified": false
+  },
+  "web_build": {
+    "original_typecheck": "failed: @solana/web3.js and tailwindcss unresolved",
+    "copied_next_build": "failed: tailwindcss missing and Inter/JetBrains Mono network fetch timeout",
+    "dependencies_installed_by_review": false
+  },
+  "live_replay": {
+    "networkDuringReplay": false,
+    "realSubmissions": false,
+    "polymarket": [
+      {
+        "sourceTradeId": "2a0e2868-a68f-4f6c-b374-6dc44007ac58",
+        "replayIdempotent": true,
+        "candidates": 0,
+        "side": "BUY"
+      },
+      {
+        "paperExecutionId": "79d3e1b6-ba75-4f64-bb23-b343207a7745",
+        "state": "confirmed",
+        "resumedWithoutReexecution": true,
+        "tradePersisted": true
+      },
+      {
+        "sourceTradeId": "bbe1ede4-e6c5-4a54-96f7-c48c00ecceb4",
+        "replayIdempotent": true,
+        "candidates": 0,
+        "side": "BUY"
+      },
+      {
+        "paperExecutionId": "7672c3d5-81dc-44da-b02b-abb801501dad",
+        "state": "confirmed",
+        "resumedWithoutReexecution": true,
+        "tradePersisted": true
+      },
+      {
+        "sourceTradeId": "d040fa8b-b313-4971-a8c6-4ccf906aff9c",
+        "replayIdempotent": true,
+        "candidates": 0,
+        "side": "BUY"
+      },
+      {
+        "paperExecutionId": "40284c48-6876-45e7-9aa3-ffb2a590e1cb",
+        "state": "confirmed",
+        "resumedWithoutReexecution": true,
+        "tradePersisted": true
+      },
+      {
+        "sourceTradeId": "e42650b1-7b21-4e9c-926c-0322feda1e36",
+        "replayIdempotent": true,
+        "candidates": 0,
+        "side": "BUY"
+      },
+      {
+        "paperExecutionId": "6f2ec340-5184-4208-a6f0-c7caced10a82",
+        "state": "confirmed",
+        "resumedWithoutReexecution": true,
+        "tradePersisted": true
+      },
+      {
+        "sourceTradeId": "522517c5-47b7-4d05-b279-a254c0b461a2",
+        "replayIdempotent": true,
+        "candidates": 0,
+        "side": "BUY"
+      },
+      {
+        "paperExecutionId": "b34a5df3-e7aa-41c8-8230-ea34ba6ccbdb",
+        "state": "confirmed",
+        "resumedWithoutReexecution": true,
+        "tradePersisted": true
+      }
+    ],
+    "meteora": [
+      {
+        "pool": "solana:5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+        "price": 90.00244445506024,
+        "tvl": 3995023.3041315377,
+        "activeTvlExact": false
+      },
+      {
+        "pool": "solana:BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y",
+        "price": 90.10345200462945,
+        "tvl": 2875567.1732737613,
+        "activeTvlExact": false
+      },
+      {
+        "pool": "solana:DPAU7wDyMXDgNAfzQYMfyNqmTjzcoRsSPA2LeGH71hgi",
+        "price": 129.09950789049898,
+        "tvl": 2208255.460244487,
+        "activeTvlExact": false
+      }
+    ],
+    "solana": {
+      "version": 1,
+      "metaError": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 7
+          }
+        ]
+      },
+      "owners": [
+        {
+          "owner": "3zNWpeRBZY7c5eS5fYboheQP5juPqD525qixxbjiVhEQ",
+          "parsed": null
+        },
+        {
+          "owner": "FYfdJ6byJ8NwnU9WMhtpQHTphmDBqoLLwpCfWYSu1oZG",
+          "parsed": null
+        },
+        {
+          "owner": "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+          "parsed": null
+        },
+        {
+          "owner": "5xUrtEkYn6CXAyXYg5jcA44bJdMtK1W98Hh2LsiquNk5",
+          "parsed": null
+        }
+      ]
+    },
+    "redisRealDataRoundTrip": {
+      "result": {
+        "parsed": "0x9de2f6567d7fba010b8edfd17296ba69b07fbcb4b1164d8215ee7f73fb7a14be",
+        "paperOnly": true
+      },
+      "milliseconds": 91.45383200000106
+    }
+  },
+  "service_checks": [
+    {
+      "service": "api",
+      "path": "/health",
+      "service_key": false,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.017
+    },
+    {
+      "service": "api",
+      "path": "/health",
+      "service_key": true,
+      "status": 200,
+      "body": "{\"status\":\"ok\",\"service\":\"api\",\"uptimeSeconds\":7,\"timestamp\":\"2026-11-06T13:33:30.717Z\",\"dependencies\":{\"database\":{\"healthy\":true,\"latencyMs\":71},\"redis\":{\"healthy\":true,\"latencyMs\":1},\"rpc\":{\"solana\":{\"healthy\":true,\"network\":\"solana\"},\"polygon\":{\"healthy\":true,\"network\":\"polygon\"},\"robinhood\":{\"healthy\":true,\"network\":\"robinhood-chain\"}}}}",
+      "seconds": 0.099
+    },
+    {
+      "service": "api",
+      "path": "/v1/health",
+      "service_key": false,
+      "status": 200,
+      "body": "{\"status\":\"ok\",\"service\":\"api\",\"uptimeSeconds\":7,\"timestamp\":\"2026-11-06T13:33:30.805Z\",\"dependencies\":{\"database\":{\"healthy\":true,\"latencyMs\":4},\"redis\":{\"healthy\":true,\"latencyMs\":1},\"rpc\":{\"solana\":{\"healthy\":true,\"network\":\"solana\"},\"polygon\":{\"healthy\":true,\"network\":\"polygon\"},\"robinhood\":{\"healthy\":true,\"network\":\"robinhood-chain\"}}}}",
+      "seconds": 0.017
+    },
+    {
+      "service": "api",
+      "path": "/v1/health",
+      "service_key": true,
+      "status": 200,
+      "body": "{\"status\":\"ok\",\"service\":\"api\",\"uptimeSeconds\":7,\"timestamp\":\"2026-11-06T13:33:30.818Z\",\"dependencies\":{\"database\":{\"healthy\":true,\"latencyMs\":4},\"redis\":{\"healthy\":true,\"latencyMs\":1},\"rpc\":{\"solana\":{\"healthy\":true,\"network\":\"solana\"},\"polygon\":{\"healthy\":true,\"network\":\"polygon\"},\"robinhood\":{\"healthy\":true,\"network\":\"robinhood-chain\"}}}}",
+      "seconds": 0.014
+    },
+    {
+      "service": "api",
+      "path": "/v1/stats",
+      "service_key": false,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.005
+    },
+    {
+      "service": "api",
+      "path": "/v1/stats",
+      "service_key": true,
+      "status": 200,
+      "body": "{\"wallets\":5,\"active\":5,\"elite\":0,\"pro\":0,\"signals\":5,\"signalsToday\":5,\"trades\":5,\"paperTrades\":5,\"clusters\":0}",
+      "seconds": 0.042
+    },
+    {
+      "service": "api",
+      "path": "/v1/me/account",
+      "service_key": false,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.004
+    },
+    {
+      "service": "api",
+      "path": "/v1/me/account",
+      "service_key": true,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.009
+    },
+    {
+      "service": "api",
+      "path": "/v1/trading/status",
+      "service_key": false,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.006
+    },
+    {
+      "service": "api",
+      "path": "/v1/trading/status",
+      "service_key": true,
+      "status": 200,
+      "body": "{\"modes\":{\"solana\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"polygon\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"robinhood-chain\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"base\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"ethereum\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"bsc\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false}},\"killSwitchActive\":false,\"autoExecute\":false,\"minScore\":85,\"basePositionSol\":0.5,\"basePositionUsdc\":100,\"basePositionEth\":0.05,\"useDynamicBalanceSizing\":false,\"usdcBalanceRiskPct\":2,\"ethBalanceRiskPct\":2}",
+      "seconds": 0.04
+    },
+    {
+      "service": "lp",
+      "path": "/v1/health",
+      "service_key": false,
+      "status": 200,
+      "body": "{\"status\":\"ok\",\"service\":\"lp\"}",
+      "seconds": 0.013
+    },
+    {
+      "service": "lp",
+      "path": "/v1/health",
+      "service_key": true,
+      "status": 200,
+      "body": "{\"status\":\"ok\",\"service\":\"lp\"}",
+      "seconds": 0.039
+    },
+    {
+      "service": "lp",
+      "path": "/v1/lp/discover",
+      "service_key": false,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.045
+    },
+    {
+      "service": "lp",
+      "path": "/v1/lp/discover",
+      "service_key": true,
+      "status": 200,
+      "body": "{\"pools\":[],\"sort\":\"volume\",\"limit\":50,\"offset\":0}",
+      "seconds": 0.107
+    },
+    {
+      "service": "lp",
+      "path": "/v1/lp/positions",
+      "service_key": false,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.005
+    },
+    {
+      "service": "lp",
+      "path": "/v1/lp/positions",
+      "service_key": true,
+      "status": 401,
+      "body": "{\"error\":\"Unauthorized\"}",
+      "seconds": 0.011
+    }
+  ],
+  "queue_real_data": {
+    "state": "completed",
+    "result": {
+      "hash": "0x9de2f6567d7fba010b8edfd17296ba69b07fbcb4b1164d8215ee7f73fb7a14be",
+      "noBroadcast": true
+    },
+    "milliseconds": 91.3250250000001,
+    "queue": "review-real-data-1793971450917",
+    "cpuAffinityInherited": true,
+    "workerConcurrency": 1
+  },
+  "solana_success_parse": {
+    "version": 0,
+    "error": null,
+    "parsed": [
+      {
+        "owner": "42adJweWUkeRPkNKwkTh63nX5TNxdVdkuFaa56RqyF62",
+        "event": {
+          "chain": "solana",
+          "transactionIdentity": "4SbrWbu9WofVEACjGpzTQzAMbHRU5rbva42aobwLWKuQ4c6DqfPETckb5NDYxKLofaJdgDsdScWumEmtTP4Xm5s3",
+          "slot": 466125141,
+          "walletAddress": "42adJweWUkeRPkNKwkTh63nX5TNxdVdkuFaa56RqyF62",
+          "occurredAt": "2026-11-06T13:24:11.000Z",
+          "tokenIn": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump",
+          "tokenOut": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "amountIn": "169560087",
+          "amountOut": "9800",
+          "direction": "sell",
+          "targetToken": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump"
+        }
+      },
+      {
+        "owner": "6XSEnbhqtu1W7RFCenAPcHcW2X8tCrvgyB8eGRBjxb9K",
+        "event": null
+      },
+      {
+        "owner": "5BKxfWMbmYBAEWvyPZS9esPducUba9GqyMjtLCfbaqyF",
+        "event": null
+      },
+      {
+        "owner": "6QvFMaucJmuAuHz1zbqQN2tP41L2XT3aGdQiSvcKdt6N",
+        "event": {
+          "chain": "solana",
+          "transactionIdentity": "4SbrWbu9WofVEACjGpzTQzAMbHRU5rbva42aobwLWKuQ4c6DqfPETckb5NDYxKLofaJdgDsdScWumEmtTP4Xm5s3",
+          "slot": 466125141,
+          "walletAddress": "6QvFMaucJmuAuHz1zbqQN2tP41L2XT3aGdQiSvcKdt6N",
+          "occurredAt": "2026-11-06T13:24:11.000Z",
+          "tokenIn": "So11111111111111111111111111111111111111112",
+          "tokenOut": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump",
+          "amountIn": "109548",
+          "amountOut": "169560087",
+          "direction": "buy",
+          "targetToken": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump"
+        }
+      },
+      {
+        "owner": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+        "event": null
+      }
+    ]
+  },
+  "live_read_only_calls": {
+    "count": 15,
+    "http_responses": 12,
+    "transport_errors": [
+      {
+        "name": "polygon-chain",
+        "url": "https://polygon-bor-rpc.publicnode.com",
+        "method": "POST-read-only-JSON-RPC",
+        "timestamp_utc": "2026-11-06T13:09:49Z",
+        "error": "<urlopen error [Errno 101] Network is unreachable>",
+        "seconds": 0.688
+      },
+      {
+        "name": "polygon-chain-alternate",
+        "url": "https://polygon-rpc.com",
+        "method": "POST-read-only-JSON-RPC",
+        "timestamp_utc": "2026-11-06T13:17:44Z",
+        "error": "HTTP Error 401: Unauthorized",
+        "seconds": 0.971
+      },
+      {
+        "name": "remote-api-health",
+        "url": "https://api.wakeprotocol.io/health",
+        "method": "GET",
+        "timestamp_utc": "2026-11-06T13:37:44Z",
+        "error": "<urlopen error [Errno -2] Name or service not known>",
+        "seconds": 0.21
+      }
+    ],
+    "ledger": "threats/runtime/live-fetches.json",
+    "http_200_not_equivalent_to_rpc_success": true
+  },
+  "solana_version_observation": {
+    "rejected_limit": 0,
+    "retrieved_transaction_version": 1,
+    "retrieved_sample_failed_on_chain": true,
+    "successful_sample_version": 0,
+    "successful_version_1_swap_verified": false
+  },
+  "dependency_audit": {
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 9,
+        "moderate": 54,
+        "high": 45,
+        "critical": 6
+      },
+      "dependencies": 607,
+      "devDependencies": 0,
+      "optionalDependencies": 0,
+      "totalDependencies": 607
+    },
+    "ratings_are_registry_advisories_not_application_exploits": true,
+    "raw_evidence": "threats/runtime/dependency-audit.log",
+    "reachability_fully_triaged": false
+  },
+  "unverified": [
+    "Funded custody and real signer paths",
+    "Full two-user real-source autonomous paper fan-out and lot exits",
+    "Rust/Anchor/local-validator runtime tests: tools absent",
+    "Remote deployment/runtime roles/TLS/firewall",
+    "Polygon public RPC verification: requests blocked",
+    "External contract/dependency audit",
+    "End-to-end latency percentiles",
+    "Rendered browser UI acceptance"
+  ],
+  "no_application_source_fixes": true,
+  "no_real_submissions_or_fund_movements": true,
+  "final_integrity_evidence": "threats/runtime/final-integrity.json"
+}

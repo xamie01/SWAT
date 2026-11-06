@@ -1,0 +1,1 @@
+{"extends": "../apps/api/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-api", "tsBuildInfoFile": "runtime/build/apps-api.tsbuildinfo"}}

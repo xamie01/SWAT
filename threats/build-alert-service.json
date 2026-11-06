@@ -1,0 +1,1 @@
+{"extends": "../apps/alert-service/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-alert-service", "tsBuildInfoFile": "runtime/build/apps-alert-service.tsbuildinfo"}}

@@ -1,0 +1,50 @@
+{
+  "version": 0,
+  "error": null,
+  "parsed": [
+    {
+      "owner": "42adJweWUkeRPkNKwkTh63nX5TNxdVdkuFaa56RqyF62",
+      "event": {
+        "chain": "solana",
+        "transactionIdentity": "4SbrWbu9WofVEACjGpzTQzAMbHRU5rbva42aobwLWKuQ4c6DqfPETckb5NDYxKLofaJdgDsdScWumEmtTP4Xm5s3",
+        "slot": 466125141,
+        "walletAddress": "42adJweWUkeRPkNKwkTh63nX5TNxdVdkuFaa56RqyF62",
+        "occurredAt": "2026-11-06T13:24:11.000Z",
+        "tokenIn": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump",
+        "tokenOut": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amountIn": "169560087",
+        "amountOut": "9800",
+        "direction": "sell",
+        "targetToken": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump"
+      }
+    },
+    {
+      "owner": "6XSEnbhqtu1W7RFCenAPcHcW2X8tCrvgyB8eGRBjxb9K",
+      "event": null
+    },
+    {
+      "owner": "5BKxfWMbmYBAEWvyPZS9esPducUba9GqyMjtLCfbaqyF",
+      "event": null
+    },
+    {
+      "owner": "6QvFMaucJmuAuHz1zbqQN2tP41L2XT3aGdQiSvcKdt6N",
+      "event": {
+        "chain": "solana",
+        "transactionIdentity": "4SbrWbu9WofVEACjGpzTQzAMbHRU5rbva42aobwLWKuQ4c6DqfPETckb5NDYxKLofaJdgDsdScWumEmtTP4Xm5s3",
+        "slot": 466125141,
+        "walletAddress": "6QvFMaucJmuAuHz1zbqQN2tP41L2XT3aGdQiSvcKdt6N",
+        "occurredAt": "2026-11-06T13:24:11.000Z",
+        "tokenIn": "So11111111111111111111111111111111111111112",
+        "tokenOut": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump",
+        "amountIn": "109548",
+        "amountOut": "169560087",
+        "direction": "buy",
+        "targetToken": "6MBf1XdZNSAaDKcxxbnCAngRUxBmwbHS5Ybe2rLRpump"
+      }
+    },
+    {
+      "owner": "EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL",
+      "event": null
+    }
+  ]
+}

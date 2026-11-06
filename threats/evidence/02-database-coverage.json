@@ -1,0 +1,105 @@
+{
+  "reportIds": [
+    "DB-01",
+    "DB-02",
+    "DB-03",
+    "DB-04",
+    "DB-05",
+    "DB-06"
+  ],
+  "tested": false,
+  "deep": [
+    "/home/xahmie/Documents/SWAT/README.md",
+    "/home/xahmie/Documents/SWAT/docs/adr/0001-tenancy-key.md",
+    "/home/xahmie/Documents/SWAT/packages/db/package.json",
+    "/home/xahmie/Documents/SWAT/packages/db/src/migrate.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/migration-discovery.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/migrations.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/ci-setup.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/tenancy.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/rls.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/users.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/users-session-cache.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/execution-config.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/risk-policy.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/evm-nonce.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/close-all.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/index.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/audit-log.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/user-execution-settings.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/admin-portfolio.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/trading-control.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/admin-portfolio.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/robinhood.ts",
+    "/home/xahmie/Documents/SWAT/deploy/pgbouncer/pgbouncer.ini",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/028_copy_execution_lifecycle.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/029_attribution_semantics.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/030_source_signal_execution_linkage.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/049_user_execution_settings.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/050_copy_tenancy.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/051_subscription_states.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/054_copy_evidence_quote_units.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/056_master_membership.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/061_copy_position_lot_exits.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/063_crypto_billing.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/064_row_level_security.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/065_polymarket_perps.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/066_lp_dashboard.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/067_lp_auto_rebalance.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/068_lp_multichain.sql"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/apps/scorer/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/web/components/SaaSNav.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/components/AdminNav.tsx"
+  ],
+  "excluded": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/.env*",
+      "reason": "Explicit environment/secret exclusion; no example env opened"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/deploy/pgbouncer/userlist.txt",
+      "reason": "Potential credentials; filename discovery only"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/node_modules/**",
+      "reason": "Explicit dependency exclusion"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/{build,dist}/**",
+      "reason": "Explicit artifact exclusion"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/*lock*",
+      "reason": "Explicit lockfile exclusion"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/069_lp_copy_trading.sql",
+      "reason": "Filename enumeration only; latest LP behavior not depth-reviewed"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/**",
+      "reason": "LP migration boundaries reviewed; full service/callers outside scope"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/programs/**",
+      "reason": "On-chain enforcement outside database module"
+    },
+    {
+      "path": "/home/xahmie/Documents/.claude/CLAUDE.md",
+      "reason": "Requester identifies inherited FHEVM-only instructions as inapplicable"
+    }
+  ]
+}

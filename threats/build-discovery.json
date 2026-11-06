@@ -1,0 +1,1 @@
+{"extends": "../apps/discovery/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-discovery", "tsBuildInfoFile": "runtime/build/apps-discovery.tsbuildinfo"}}

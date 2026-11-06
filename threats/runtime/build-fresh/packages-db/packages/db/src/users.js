@@ -1,0 +1,188 @@
+import { query } from './client.js';
+import { withTransaction } from './transaction.js';
+import { generateToken, hashPassword, hashToken, verifyPassword, verifyPasswordAgainstDummy } from './credentials.js';
+function toUser(row) {
+    return {
+        id: row.id,
+        email: row.email,
+        displayName: row.display_name,
+        role: row.role,
+        tier: row.tier,
+        tierExpiresAt: row.tier_expires_at,
+        status: row.status,
+        createdAt: row.created_at
+    };
+}
+const USER_COLUMNS = 'id, email, display_name, role, tier, tier_expires_at, status, created_at';
+/** Raised when the email is already registered. Mapped to HTTP 409 by the API. */
+export class EmailAlreadyRegisteredError extends Error {
+    constructor() {
+        super('Email already registered');
+        this.name = 'EmailAlreadyRegisteredError';
+    }
+}
+export async function createUser(input) {
+    const passwordHash = await hashPassword(input.password);
+    try {
+        const rows = await query(`INSERT INTO users (email, password_hash, display_name, role, tier)
+       VALUES ($1, $2, $3, COALESCE($4, 'user'), COALESCE($5, 'free'))
+       RETURNING ${USER_COLUMNS}`, [input.email, passwordHash, input.displayName ?? null, input.role ?? null, input.tier ?? null]);
+        return toUser(rows[0]);
+    }
+    catch (error) {
+        // 23505 = unique_violation; only `users_email_key` can fire on this insert.
+        if (error.code === '23505')
+            throw new EmailAlreadyRegisteredError();
+        throw error;
+    }
+}
+export async function findUserById(id) {
+    const rows = await query(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [id]);
+    return rows[0] ? toUser(rows[0]) : null;
+}
+/**
+ * Verifies a password against an email.
+ *
+ * Returns `null` for both "no such user" and "wrong password", and burns an
+ * equivalent argon2 verify in the unknown-email case. The caller therefore cannot
+ * distinguish the two by return value *or* by timing — which is what makes the
+ * identical 401 body in the API meaningful rather than cosmetic.
+ *
+ * Account status is deliberately *not* consulted here. It is returned for the
+ * caller to check only after the password has been proven, so status is never
+ * disclosed to an unauthenticated guesser.
+ */
+export async function authenticateUser(email, password) {
+    const rows = await query(`SELECT ${USER_COLUMNS}, password_hash FROM users WHERE email = $1`, [email]);
+    const row = rows[0];
+    if (!row) {
+        await verifyPasswordAgainstDummy(password);
+        return null;
+    }
+    const ok = await verifyPassword(row.password_hash, password);
+    return ok ? toUser(row) : null;
+}
+/**
+ * Changes a password and revokes every live session, in one transaction.
+ *
+ * These must not be separable. A password change that leaves existing sessions
+ * valid fails to evict whoever the user is changing it because of — which is the
+ * entire reason they are changing it.
+ */
+export async function changePassword(scope, newPassword) {
+    const passwordHash = await hashPassword(newPassword);
+    await withTransaction(async (client) => {
+        await client.query('UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1', [
+            scope.userId,
+            passwordHash
+        ]);
+        await client.query('UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [scope.userId]);
+    });
+}
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+/** Absolute lifetime: a session cannot outlive this regardless of activity. */
+const SESSION_ABSOLUTE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** Idle lifetime, measured from `last_seen_at`. */
+const SESSION_IDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export async function createSession(input) {
+    const token = generateToken();
+    const expiresAt = new Date(Date.now() + SESSION_ABSOLUTE_TTL_MS);
+    await query(`INSERT INTO user_sessions (user_id, token_hash, expires_at, ip, user_agent)
+     VALUES ($1, $2, $3, $4, $5)`, [
+        input.userId,
+        hashToken(token),
+        expiresAt,
+        input.ip ?? null,
+        input.userAgent?.slice(0, 256) ?? null
+    ]);
+    return { token, expiresAt };
+}
+export const SESSION_CACHE_TTL_MS = 60_000;
+export const SESSION_CACHE_MAX_ENTRIES = 10_000;
+const cachedSessions = new Map();
+function pruneSessionCache(now) {
+    for (const [key, entry] of cachedSessions) {
+        if (now - entry.timestamp >= SESSION_CACHE_TTL_MS)
+            cachedSessions.delete(key);
+    }
+    if (cachedSessions.size <= SESSION_CACHE_MAX_ENTRIES)
+        return;
+    const excess = cachedSessions.size - SESSION_CACHE_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of cachedSessions.keys()) {
+        if (removed >= excess)
+            break;
+        cachedSessions.delete(key);
+        removed += 1;
+    }
+}
+export function clearSessionCache() {
+    cachedSessions.clear();
+}
+export function sessionCacheSize() {
+    return cachedSessions.size;
+}
+export function invalidateUserSessionCache(userId) {
+    for (const [key, entry] of cachedSessions) {
+        if (entry.session.user.id === userId) {
+            cachedSessions.delete(key);
+        }
+    }
+}
+/**
+ * Resolves a presented token to its session and user, or null.
+ *
+ * Both expiry rules live in the WHERE clause, so a stale session cannot be
+ * resolved by a caller that forgets to check one of them, and `last_seen_at` is
+ * advanced in the same statement so the idle window slides on use.
+ *
+ * Reads are cached in an in-memory bounded LRU map for 60 seconds to prevent
+ * write-amplification (an UPDATE on every GET) from saturating Postgres under load.
+ * Revocations invalidate the cache immediately.
+ */
+export async function resolveSession(token) {
+    const tokenHash = hashToken(token);
+    const cacheKey = tokenHash.toString('hex');
+    const now = Date.now();
+    const cached = cachedSessions.get(cacheKey);
+    if (cached && now - cached.timestamp < SESSION_CACHE_TTL_MS) {
+        return cached.session;
+    }
+    const rows = await query(`WITH touched AS (
+       UPDATE user_sessions
+          SET last_seen_at = NOW()
+        WHERE token_hash = $1
+          AND revoked_at IS NULL
+          AND expires_at > NOW()
+          AND last_seen_at > NOW() - ($2::bigint * interval '1 millisecond')
+        RETURNING id AS session_id, user_id
+     )
+     SELECT touched.session_id, ${USER_COLUMNS}
+       FROM touched
+       JOIN users ON users.id = touched.user_id`, [tokenHash, SESSION_IDLE_TTL_MS]);
+    const row = rows?.[0];
+    if (!row) {
+        cachedSessions.delete(cacheKey);
+        return null;
+    }
+    const resolved = { sessionId: row.session_id, user: toUser(row) };
+    cachedSessions.set(cacheKey, { session: resolved, timestamp: now });
+    pruneSessionCache(now);
+    return resolved;
+}
+export async function revokeSession(token) {
+    const tokenHash = hashToken(token);
+    const cacheKey = tokenHash.toString('hex');
+    cachedSessions.delete(cacheKey);
+    await query('UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL', [tokenHash]);
+}
+export async function revokeAllSessions(scope) {
+    invalidateUserSessionCache(scope.userId);
+    const rows = await query(`UPDATE user_sessions SET revoked_at = NOW()
+      WHERE user_id = $1 AND revoked_at IS NULL
+      RETURNING id`, [scope.userId]);
+    return rows.length;
+}
+//# sourceMappingURL=users.js.map

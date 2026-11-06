@@ -1,0 +1,116 @@
+{
+  "reportIds": [
+    "API-01",
+    "API-02",
+    "API-03",
+    "API-04",
+    "API-05",
+    "API-06",
+    "API-07",
+    "API-08"
+  ],
+  "tested": false,
+  "deep": [
+    "/home/xahmie/Documents/SWAT/README.md",
+    "/home/xahmie/Documents/SWAT/docs/adr/0001-tenancy-key.md",
+    "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/wallet-signature.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/cron/billing-sweep.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/billing.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/polymarket-clob-auth.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/polymarket-clob-credentials.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/users.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/credentials.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/auth-wallets.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/audit-log.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/063_crypto_billing.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql",
+    "/home/xahmie/Documents/SWAT/apps/web/lib/api.ts",
+    "/home/xahmie/Documents/SWAT/apps/web/app/billing/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx",
+    "/home/xahmie/Documents/SWAT/DEPLOYMENT.md",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/execution-settings.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/admin-portfolio.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/user-execution-settings.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/admin-portfolio.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/index.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/049_user_execution_settings.sql",
+    "/home/xahmie/Documents/SWAT/apps/web/app/settings/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/admin/revenue/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/admin/portfolio/page.tsx"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md",
+    "/home/xahmie/Documents/SWAT/apps/api/package.json",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/execution-grants.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-wiring.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/web/lib/route-access.ts",
+    "/home/xahmie/Documents/SWAT/apps/web/lib/route-access.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts",
+    "/home/xahmie/Documents/SWAT/apps/web/app/learn/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/logs/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/lp/whales/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/workspace/views/AttributionView.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/app/workspace/views/HealthView.tsx",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/email.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/jito.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter-swap.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/rpc-failover.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/015_audit_schema_repairs.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/042_user_api_keys.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/046_polymarket_redemptions.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/050_copy_tenancy.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/051_subscription_states.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/052_user_email_verification.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/054_copy_evidence_quote_units.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/055_polymarket_position_exits.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/056_master_membership.sql",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/064_row_level_security.sql"
+  ],
+  "excluded": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/.env*",
+      "reason": "No environment or secret reads, including example files"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/node_modules/**",
+      "reason": "Explicit dependency exclusion"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/{build,dist}/**",
+      "reason": "Explicit artifact exclusion"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/**/*lock*",
+      "reason": "Explicit lockfile exclusion"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/web/app/forgot-password/page.tsx",
+      "reason": "Read attempted; path absent"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/programs/**",
+      "reason": "On-chain enforcement excluded from API module"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/**",
+      "reason": "Separate service outside module"
+    },
+    {
+      "path": "/home/xahmie/Documents/.claude/CLAUDE.md",
+      "reason": "Requester identifies inherited FHEVM-only guidance as inapplicable"
+    }
+  ]
+}

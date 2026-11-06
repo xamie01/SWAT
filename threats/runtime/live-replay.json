@@ -1,0 +1,122 @@
+{
+  "networkDuringReplay": false,
+  "realSubmissions": false,
+  "polymarket": [
+    {
+      "sourceTradeId": "2a0e2868-a68f-4f6c-b374-6dc44007ac58",
+      "replayIdempotent": true,
+      "candidates": 0,
+      "side": "BUY"
+    },
+    {
+      "paperExecutionId": "79d3e1b6-ba75-4f64-bb23-b343207a7745",
+      "state": "confirmed",
+      "resumedWithoutReexecution": true,
+      "tradePersisted": true
+    },
+    {
+      "sourceTradeId": "bbe1ede4-e6c5-4a54-96f7-c48c00ecceb4",
+      "replayIdempotent": true,
+      "candidates": 0,
+      "side": "BUY"
+    },
+    {
+      "paperExecutionId": "7672c3d5-81dc-44da-b02b-abb801501dad",
+      "state": "confirmed",
+      "resumedWithoutReexecution": true,
+      "tradePersisted": true
+    },
+    {
+      "sourceTradeId": "d040fa8b-b313-4971-a8c6-4ccf906aff9c",
+      "replayIdempotent": true,
+      "candidates": 0,
+      "side": "BUY"
+    },
+    {
+      "paperExecutionId": "40284c48-6876-45e7-9aa3-ffb2a590e1cb",
+      "state": "confirmed",
+      "resumedWithoutReexecution": true,
+      "tradePersisted": true
+    },
+    {
+      "sourceTradeId": "e42650b1-7b21-4e9c-926c-0322feda1e36",
+      "replayIdempotent": true,
+      "candidates": 0,
+      "side": "BUY"
+    },
+    {
+      "paperExecutionId": "6f2ec340-5184-4208-a6f0-c7caced10a82",
+      "state": "confirmed",
+      "resumedWithoutReexecution": true,
+      "tradePersisted": true
+    },
+    {
+      "sourceTradeId": "522517c5-47b7-4d05-b279-a254c0b461a2",
+      "replayIdempotent": true,
+      "candidates": 0,
+      "side": "BUY"
+    },
+    {
+      "paperExecutionId": "b34a5df3-e7aa-41c8-8230-ea34ba6ccbdb",
+      "state": "confirmed",
+      "resumedWithoutReexecution": true,
+      "tradePersisted": true
+    }
+  ],
+  "meteora": [
+    {
+      "pool": "solana:5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+      "price": 90.00244445506024,
+      "tvl": 3995023.3041315377,
+      "activeTvlExact": false
+    },
+    {
+      "pool": "solana:BGm1tav58oGcsQJehL9WXBFXF7D27vZsKefj4xJKD5Y",
+      "price": 90.10345200462945,
+      "tvl": 2875567.1732737613,
+      "activeTvlExact": false
+    },
+    {
+      "pool": "solana:DPAU7wDyMXDgNAfzQYMfyNqmTjzcoRsSPA2LeGH71hgi",
+      "price": 129.09950789049898,
+      "tvl": 2208255.460244487,
+      "activeTvlExact": false
+    }
+  ],
+  "solana": {
+    "version": 1,
+    "metaError": {
+      "InstructionError": [
+        0,
+        {
+          "Custom": 7
+        }
+      ]
+    },
+    "owners": [
+      {
+        "owner": "3zNWpeRBZY7c5eS5fYboheQP5juPqD525qixxbjiVhEQ",
+        "parsed": null
+      },
+      {
+        "owner": "FYfdJ6byJ8NwnU9WMhtpQHTphmDBqoLLwpCfWYSu1oZG",
+        "parsed": null
+      },
+      {
+        "owner": "A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW",
+        "parsed": null
+      },
+      {
+        "owner": "5xUrtEkYn6CXAyXYg5jcA44bJdMtK1W98Hh2LsiquNk5",
+        "parsed": null
+      }
+    ]
+  },
+  "redisRealDataRoundTrip": {
+    "result": {
+      "parsed": "0x9de2f6567d7fba010b8edfd17296ba69b07fbcb4b1164d8215ee7f73fb7a14be",
+      "paperOnly": true
+    },
+    "milliseconds": 91.45383200000106
+  }
+}

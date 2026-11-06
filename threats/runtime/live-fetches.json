@@ -1,0 +1,146 @@
+[
+  {
+    "name": "solana-version",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:09:45Z",
+    "status": 200,
+    "bytes": 83,
+    "sha256": "950d4a370917ab191d7c92ec2ced2e0842a7a1a5ee35aaba51cd5baa078ff010",
+    "seconds": 1.455
+  },
+  {
+    "name": "solana-slot",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:09:47Z",
+    "status": 200,
+    "bytes": 44,
+    "sha256": "f21a19cda984ebcc9e51f497fc84cb92fb24431cf5efa63cd6711cf7161b288b",
+    "seconds": 0.61
+  },
+  {
+    "name": "solana-signatures",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:09:47Z",
+    "status": 200,
+    "bytes": 806,
+    "sha256": "e39b06f862a4c5333f66b423c3b7066170694b615a339066c5c0071bf5358c4a",
+    "seconds": 0.628
+  },
+  {
+    "name": "solana-transaction",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:09:48Z",
+    "status": 200,
+    "bytes": 239,
+    "sha256": "54bd6392bccf8e0984e11b59d2ec7749e865a13797af136fd42aa421e47359d8",
+    "seconds": 0.7
+  },
+  {
+    "name": "polygon-chain",
+    "url": "https://polygon-bor-rpc.publicnode.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:09:49Z",
+    "error": "<urlopen error [Errno 101] Network is unreachable>",
+    "seconds": 0.688
+  },
+  {
+    "name": "polymarket-trades",
+    "url": "https://data-api.polymarket.com/v2/trades?limit=5",
+    "method": "GET",
+    "timestamp_utc": "2026-11-06T13:09:49Z",
+    "status": 200,
+    "bytes": 4096,
+    "sha256": "5ae1f9e596ec4e78e7f405162613a59030e4114716a680c13343ae7d34d22f17",
+    "seconds": 0.644
+  },
+  {
+    "name": "polymarket-markets",
+    "url": "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=3",
+    "method": "GET",
+    "timestamp_utc": "2026-11-06T13:09:50Z",
+    "status": 200,
+    "bytes": 17919,
+    "sha256": "7c6f0fb84ec1e74598c6560d0e44810eb15a554a022490272b09e23e0d167fe0",
+    "seconds": 0.922
+  },
+  {
+    "name": "meteora-pools",
+    "url": "https://dlmm.datapi.meteora.ag/pools?page=1&page_size=3&sort_by=volume_24h%3Adesc",
+    "method": "GET",
+    "timestamp_utc": "2026-11-06T13:09:51Z",
+    "status": 200,
+    "bytes": 6073,
+    "sha256": "3fd51775abde6f04bfe1641dc269e6de18a9d0363d3bc24e2d1d014926eb26b2",
+    "seconds": 0.945
+  },
+  {
+    "name": "jupiter-quote",
+    "url": "https://api.jup.ag/swap/v1/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000&slippageBps=50",
+    "method": "GET",
+    "timestamp_utc": "2026-11-06T13:09:52Z",
+    "status": 200,
+    "bytes": 1041,
+    "sha256": "beed1fcbc77d3ccef7797be1eb04784e64feb6e7d0b891319cb9673bf8fa4a52",
+    "seconds": 0.79
+  },
+  {
+    "name": "solana-transaction-v1-0",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:17:43Z",
+    "status": 200,
+    "bytes": 18083,
+    "sha256": "3a90679ba200cb6c102c26fb6ccccb15c75037ec48a7896d24a5b75e6c4e25ee",
+    "seconds": 0.941
+  },
+  {
+    "name": "polygon-chain-alternate",
+    "url": "https://polygon-rpc.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:17:44Z",
+    "error": "HTTP Error 401: Unauthorized",
+    "seconds": 0.971
+  },
+  {
+    "name": "solana-success-candidates",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:24:11Z",
+    "status": 200,
+    "bytes": 2834,
+    "sha256": "1e69509e089e5a4409aa67bba9f6c18b6567d2a06a4f98b5745251437e94df3d",
+    "seconds": 0.944
+  },
+  {
+    "name": "solana-success-transaction",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:24:12Z",
+    "status": 200,
+    "bytes": 28514,
+    "sha256": "7f1e20aaab28a4ecbbedc410dfbd09a3f6969943d7641e3c3fde79918c9cef1f",
+    "seconds": 1.362
+  },
+  {
+    "name": "wake-program-account",
+    "url": "https://api.mainnet-beta.solana.com",
+    "method": "POST-read-only-JSON-RPC",
+    "timestamp_utc": "2026-11-06T13:37:40Z",
+    "status": 200,
+    "bytes": 99,
+    "sha256": "6eb4c6d22f01b7e8fd64760e1c61ae3d1b5d84bffad088440e1161020d351033",
+    "seconds": 4.63
+  },
+  {
+    "name": "remote-api-health",
+    "url": "https://api.wakeprotocol.io/health",
+    "method": "GET",
+    "timestamp_utc": "2026-11-06T13:37:44Z",
+    "error": "<urlopen error [Errno -2] Name or service not known>",
+    "seconds": 0.21
+  }
+]

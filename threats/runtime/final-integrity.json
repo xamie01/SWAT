@@ -1,0 +1,92 @@
+{
+  "timestamp_utc": "2026-11-06T14:08:28.400476+00:00",
+  "phase": "runtime-finalization",
+  "cpu_affinity": [
+    0
+  ],
+  "baseline_files_checked": 709,
+  "source_hash_changes": [],
+  "git_head": "d5852a0e31e8e9a517c6e7c47ed9623819c7fc71",
+  "tracked_diff": "",
+  "git_status": [
+    "?? LP-BUILD-RECORD.md",
+    "?? apps/lp/.zcodeignore",
+    "?? threats/"
+  ],
+  "local_links_checked": 77,
+  "source_citation_occurrences_checked": 204,
+  "report_issues": [],
+  "abbreviated_citations_not_validated": [
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "index.ts:1125-1162,1462-1469,1650-1658,1782-1795"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "routes/billing.ts:274-287,378-419"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "stop-loss.ts:225-277"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "polymarket.ts:684-707,878-989"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "index.ts:1798-1828,2647-2655,2732-2758"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "robinhood.ts:637-658"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "master-capacity.ts:174-198,721-747,815-839"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "execution-config.ts:6,68-89,222-239"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "jupiter-swap.ts:181-258"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "solana-simulation.ts:451-492"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "webhook-helpers.ts:102-133"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "source-trade-lifecycle.ts:116-163"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "polymarket.ts:152-209"
+    },
+    {
+      "report": "02-synthesis-and-remediation.md",
+      "citation": "cli.py:623-624"
+    }
+  ],
+  "validation_scope": "Local links and explicit repository source path/line ranges; not semantic review or abbreviated citation resolution.",
+  "ports_listening": {
+    "53001": false,
+    "53010": false,
+    "55432": false,
+    "56379": false,
+    "5432": true,
+    "6379": true
+  },
+  "memory": {
+    "MemTotal": "3547160 kB",
+    "MemAvailable": "1623824 kB",
+    "SwapTotal": "4478972 kB",
+    "SwapFree": "3092024 kB"
+  }
+}

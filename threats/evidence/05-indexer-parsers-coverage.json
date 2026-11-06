@@ -1,0 +1,32 @@
+{
+  "deep": [
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/parse.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/webhook.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/webhook-helpers.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/source-trade-lifecycle.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/evm.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/robinhood-ingestion.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/polymarket.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/polymarket-helpers.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/backfill-worker.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/ingestion-health.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/solana-parity.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/webhook-source-lifecycle.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/transactions.ts"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/README.md",
+    "/home/xahmie/Documents/SWAT/docs/PRD.md",
+    "/home/xahmie/Documents/SWAT/docs/adr/0006-robinhood-sequencer-trust.md",
+    "/home/xahmie/Documents/SWAT/.env.example",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/polymarket.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/parse.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/polymarket.ts",
+    "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/signal-engine/src/mirrorable-activity.ts",
+    "/home/xahmie/Documents/SWAT/deploy/crontab.example"
+  ],
+  "excluded": []
+}

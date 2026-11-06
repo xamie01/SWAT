@@ -1,0 +1,832 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
+import { Redis } from 'ioredis';
+import { Queue } from 'bullmq';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { deleteWalletCascade, getIngestionHealth24h, getWallet, listWallets, upsertWallet, query, getAttributionDashboard, getAttributionLatencyReport, getLatestExpectancyReport, getLiveShadowCostReport, loadTrackingDifferenceSummary } from '@swat/db';
+import { buildIngestionHealthSnapshots, chainFromTokenMint, chainSchema, createWalletBackfillJob, initLogger, isValidAddressForChain, prefixChainValue, QUEUES, REDIS_CHANNELS, tradeQueueForChain, walletInputSchema } from '@swat/shared';
+import { getActiveRpcUrl, probeRpcPool } from '@swat/shared';
+import { executeBillingSweepJob } from './cron/billing-sweep.js';
+import { emergencyOff, executionModeUpdateSchema, getTradingControlStatus, updateTradingMode } from './trading-control.js';
+import { registerAttributionRoutes } from './attribution-routes.js';
+import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
+import { registerAuthRoutes } from './auth/routes.js';
+import { registerMeRoutes } from './routes/me.js';
+import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
+import { registerBillingRoutes } from './routes/billing.js';
+import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
+initLogger('api');
+const app = Fastify({ logger: true });
+const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const tradeQueueConnection = new Redis(redisUrl, { maxRetriesPerRequest: null });
+// One trade queue per chain (D6 / S3-25). Manual executions route by the
+// signal's own chain-prefixed mint, using the same derivation the executor
+// applies — a mismatch would enqueue onto a queue whose worker serves a
+// different venue.
+const tradeQueues = new Map(['solana', 'polygon', 'robinhood-chain'].map((chain) => [
+    chain,
+    new Queue(tradeQueueForChain(chain), { connection: tradeQueueConnection })
+]));
+const backfillQueue = new Queue(QUEUES.walletBackfill, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+// On-chain token discovery: the indexer's tokenDiscovery worker consumes this.
+const tokenDiscoveryQueue = new Queue(QUEUES.tokenDiscovery, { connection: new Redis(redisUrl, { maxRetriesPerRequest: null }) });
+async function enqueueBackfill(address, chain = 'solana') {
+    const job = createWalletBackfillJob(address, chain);
+    await backfillQueue.add(job.name, job.data, job.options);
+}
+function parseChain(raw, fallback = 'solana') {
+    const parsed = chainSchema.safeParse(raw);
+    return parsed.success ? parsed.data : fallback;
+}
+// ─── CORS ───────────────────────────────────────────────────────────────────
+// Allow the web UI (any LAN origin / device) to call the API from the browser.
+// CORS_ORIGIN can pin this to a specific origin in production.
+const corsOrigin = process.env.CORS_ORIGIN;
+await app.register(cors, {
+    origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    // x-csrf-token is required, not optional: cookie auth means the browser
+    // attaches credentials to cross-site requests automatically, so the API
+    // rejects a cookie-authenticated mutation without the double-submit header.
+    // Omitting it here makes the preflight fail and every login-then-POST break
+    // with a CORS error that looks nothing like the auth problem it is.
+    allowedHeaders: ['Content-Type', 'X-Api-Key', 'x-csrf-token'],
+    // Without this the browser discards Set-Cookie on the login response and
+    // never sends the session back, so cookie auth cannot work cross-origin at
+    // all. Note `origin: true` reflects the caller's origin rather than sending
+    // `*`, which is what makes credentialed CORS legal here.
+    credentials: true
+});
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+// Fail fast in production rather than silently falling back to a publicly-known
+// dev key (which is also baked into the web client bundle).
+if (!process.env.API_KEY && process.env.NODE_ENV === 'production') {
+    throw new Error('[api] API_KEY must be set in production');
+}
+const API_KEY = process.env.API_KEY || 'swat-dev-key';
+const API_KEY_HASH = createHash('sha256').update(API_KEY).digest();
+/** Constant-time API key check (hash both sides so lengths always match). */
+function isValidApiKey(provided) {
+    const value = Array.isArray(provided) ? provided[0] ?? '' : provided ?? '';
+    const providedHash = createHash('sha256').update(value).digest();
+    return timingSafeEqual(providedHash, API_KEY_HASH);
+}
+await app.register(cookie);
+// Blunts credential stuffing at the app layer. Cloudflare supplies the edge
+// limits (D10); this is the second layer, and the one that still applies when
+// traffic reaches the box directly.
+await app.register(rateLimit, {
+    max: Number(process.env.RATE_LIMIT_MAX ?? 300),
+    timeWindow: '1 minute',
+    allowList: () => false
+});
+// Order matters: the auth hook must be registered BEFORE any route scope it
+// needs to serve. Fastify applies a parent's hooks only to children registered
+// after `addHook`, so registering the auth routes first would leave them without
+// a populated `request.principal` — and `POST /v1/auth/wallet/verify` would then
+// treat an authenticated link request as an anonymous wallet-only login.
+await registerAuth(app, {
+    legacyKeyHash: API_KEY_HASH,
+    isProduction: process.env.NODE_ENV === 'production',
+    // `del` returns the number of keys removed, so a ticket can only ever be
+    // consumed once even under concurrent requests.
+    consumeSseTicket: async (ticket) => (await redis.del(`swat:ticket:${ticket}`)) === 1
+});
+await registerAdminOnlyGlobals(app);
+// Stricter bucket for the credential endpoints specifically. Registered as a
+// scoped plugin so the tighter limit cannot leak onto ordinary read routes.
+await app.register(async (scope) => {
+    await scope.register(rateLimit, {
+        max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
+        timeWindow: '15 minutes',
+        // Exclude read-only session verification and wallet link nonce/verify
+        // from the credential-stuffing bucket. `/v1/auth/me` and wallet challenge routes
+        // are already governed by the global rate limit (300/min).
+        allowList: (request) => request.url === '/v1/auth/me' || request.url.startsWith('/v1/auth/wallet/'),
+        // Keyed on IP + email so one attacker cannot lock out an entire NAT, and a
+        // single account cannot be sprayed from one address.
+        keyGenerator: (request) => {
+            const body = request.body;
+            const email = typeof body?.email === 'string' ? body.email.toLowerCase() : '';
+            return `${request.ip}:${email}`;
+        }
+    });
+    await registerAuthRoutes(scope, {
+        redis,
+        isProduction: process.env.NODE_ENV === 'production',
+        domain: process.env.AUTH_DOMAIN ?? 'localhost:3000',
+        uri: process.env.AUTH_URI ?? 'http://localhost:3000',
+        allowedOrigins: corsOrigin
+            ? corsOrigin.split(',').map((o) => o.trim())
+            : [process.env.AUTH_URI ?? 'http://localhost:3000']
+    });
+});
+app.setErrorHandler((error, request, reply) => {
+    request.log.error(error);
+    // If it's a validation error or known client error, you can let it through.
+    // Fastify validation errors have a validation property.
+    const err = error;
+    if (err.validation) {
+        return reply.code(400).send({ error: 'Bad Request', message: err.message });
+    }
+    // PostgreSQL invalid uuid error (22P02) or similar can be mapped to 400
+    if (err.code === '22P02') {
+        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid parameter format' });
+    }
+    // Fastify's own client errors (malformed JSON, empty body, payload too large)
+    // already carry a 4xx statusCode. Without this they fell through to the 500
+    // below, reporting the caller's mistake as a server fault — which hides real
+    // 500s in the logs and tells the client to retry something that cannot work.
+    if (typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500) {
+        return reply.code(err.statusCode).send({ error: 'Bad Request', message: err.message });
+    }
+    // Return stable public error for anything else to prevent leaking DB details
+    reply.code(500).send({ error: 'Internal Server Error' });
+});
+/**
+ * Issues a one-time ticket for `GET /v1/logs/stream`, which is an admin surface.
+ *
+ * The role check is not decoration. This route sits under the `/v1/auth/` prefix,
+ * which `isUserReachable` admits for **any** authenticated principal -- that
+ * allowlist exists so a user can log in and read their own account, not so they
+ * can mint credentials. And a consumed ticket is upgraded to a `service`
+ * principal by the auth hook, which `registerAdminOnlyGlobals` admits
+ * unconditionally. So without this line any ordinary signed-up user could POST
+ * here and read the operator log stream: a privilege escalation that goes live
+ * the moment a second, non-admin account exists.
+ *
+ * The narrower fix would be to have the ticket carry the issuing principal and
+ * restore it on consumption, rather than conferring `service` on a credential a
+ * user can obtain. That is the right shape and is worth doing when SSE gains a
+ * second consumer; gating issuance is what closes the hole today.
+ */
+app.post('/v1/auth/ticket', async (request, reply) => {
+    if (!requireRole(request, reply, 'admin'))
+        return;
+    const ticket = randomBytes(16).toString('hex');
+    // Ticket expires in 60 seconds
+    await redis.set(`swat:ticket:${ticket}`, '1', 'EX', 60);
+    return { ticket };
+});
+await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
+await registerExecutionSettingsRoutes(app);
+await registerBillingRoutes(app);
+registerAdminPortfolioRoutes(app);
+// ─── Query-param coercion helpers ───────────────────────────────────────────
+// Query-string values are always strings. Coerce + bound them so a caller can't
+// pass `?limit=99999999` (full table scan) or `?min_score=abc` (DB type error
+// → 500 → broken pagination).
+function clampLimit(raw, def = 100, max = 200) {
+    const n = Number(raw);
+    if (!Number.isFinite(n))
+        return def;
+    return Math.min(Math.max(Math.trunc(n), 1), max);
+}
+function parseOptionalNumber(raw) {
+    if (raw === undefined || raw === null || raw === '')
+        return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+}
+// ─── Health & Ops Telemetry ───────────────────────────────────────────────────
+async function checkSystemHealth(reply) {
+    const ts = new Date().toISOString();
+    let dbHealthy = false;
+    let dbLatencyMs = -1;
+    let redisHealthy = false;
+    let redisLatencyMs = -1;
+    // 1. Check PostgreSQL
+    const dbStart = Date.now();
+    try {
+        await query('SELECT 1');
+        dbHealthy = true;
+        dbLatencyMs = Date.now() - dbStart;
+    }
+    catch (err) {
+        app.log.error(err, '[health] Database health check failed');
+    }
+    // 2. Check Redis
+    const redisStart = Date.now();
+    try {
+        const pingRes = await redis.ping();
+        if (pingRes === 'PONG') {
+            redisHealthy = true;
+            redisLatencyMs = Date.now() - redisStart;
+        }
+    }
+    catch (err) {
+        app.log.error(err, '[health] Redis health check failed');
+    }
+    // 3. Current active RPC endpoints (H-05: Redact raw provider URLs to prevent credential leakage)
+    const activeSolanaRpc = getActiveRpcUrl('solana');
+    const activePolygonRpc = getActiveRpcUrl('polygon');
+    const activeRobinhoodRpc = getActiveRpcUrl('robinhood');
+    const allHealthy = dbHealthy && redisHealthy;
+    const statusCode = allHealthy ? 200 : 503;
+    return reply.status(statusCode).send({
+        status: allHealthy ? 'ok' : 'degraded',
+        service: 'api',
+        uptimeSeconds: Math.floor(process.uptime()),
+        timestamp: ts,
+        dependencies: {
+            database: {
+                healthy: dbHealthy,
+                latencyMs: dbLatencyMs
+            },
+            redis: {
+                healthy: redisHealthy,
+                latencyMs: redisLatencyMs
+            },
+            rpc: {
+                solana: { healthy: Boolean(activeSolanaRpc), network: 'solana' },
+                polygon: { healthy: Boolean(activePolygonRpc), network: 'polygon' },
+                robinhood: { healthy: Boolean(activeRobinhoodRpc), network: 'robinhood-chain' }
+            }
+        }
+    });
+}
+app.get('/health', async (req, reply) => checkSystemHealth(reply));
+app.get('/v1/health', async (req, reply) => checkSystemHealth(reply));
+app.get('/v1/health/rpc', async () => {
+    const [solanaPool, polygonPool, robinhoodPool] = await Promise.all([
+        probeRpcPool('solana'),
+        probeRpcPool('polygon'),
+        probeRpcPool('robinhood')
+    ]);
+    return {
+        timestamp: new Date().toISOString(),
+        pools: {
+            solana: solanaPool,
+            polygon: polygonPool,
+            robinhood: robinhoodPool
+        }
+    };
+});
+// Built-in recurring billing downgrade sweep
+// Runs once every hour (or customizable via BILLING_SWEEP_INTERVAL_MS).
+// Can be disabled via DISABLE_BILLING_SWEEPER_DAEMON=true if running external cron.
+const disableSweeper = process.env.DISABLE_BILLING_SWEEPER_DAEMON === 'true';
+if (!disableSweeper && process.env.NODE_ENV !== 'test') {
+    const sweepIntervalMs = Number(process.env.BILLING_SWEEP_INTERVAL_MS ?? 3600_000);
+    const timer = setInterval(() => {
+        executeBillingSweepJob().catch((err) => {
+            app.log.error(err, '[cron] background billing sweep failed');
+        });
+    }, sweepIntervalMs);
+    timer.unref?.();
+}
+app.get('/v1/health/ingestion', async () => {
+    const generatedAt = new Date();
+    const rows = await getIngestionHealth24h();
+    return {
+        generatedAt: generatedAt.toISOString(),
+        items: buildIngestionHealthSnapshots(rows, generatedAt)
+    };
+});
+// ─── Stats (real data) ────────────────────────────────────────────────────────
+app.get('/v1/stats', async () => {
+    const [walletStats] = await query(`
+    SELECT
+      COUNT(*)                                    AS wallets,
+      COUNT(*) FILTER (WHERE status = 'active')  AS active,
+      COUNT(*) FILTER (WHERE tier = 'elite')     AS elite,
+      COUNT(*) FILTER (WHERE tier = 'pro')       AS pro
+    FROM wallets
+  `);
+    const [signalStats] = await query(`
+    SELECT
+      COUNT(*)                                                          AS signals,
+      COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS today
+    FROM signals
+  `);
+    const [tradeStats] = await query(`
+    SELECT
+      COUNT(*)                                                  AS trades,
+      COUNT(*) FILTER (WHERE execution_mode = 'paper') AS paper
+    FROM trades
+    WHERE execution_mode IS NULL OR execution_mode != 'shadow'
+  `);
+    const [clusterStats] = await query(`
+    SELECT COUNT(*) AS clusters FROM wallet_clusters WHERE status = 'active'
+  `);
+    return {
+        wallets: Number(walletStats?.wallets ?? 0),
+        active: Number(walletStats?.active ?? 0),
+        elite: Number(walletStats?.elite ?? 0),
+        pro: Number(walletStats?.pro ?? 0),
+        signals: Number(signalStats?.signals ?? 0),
+        signalsToday: Number(signalStats?.today ?? 0),
+        trades: Number(tradeStats?.trades ?? 0),
+        paperTrades: Number(tradeStats?.paper ?? 0),
+        clusters: Number(clusterStats?.clusters ?? 0)
+    };
+});
+// ─── Wallets ──────────────────────────────────────────────────────────────────
+app.get('/v1/wallets', async (req) => {
+    const q = req.query;
+    return listWallets(q.chain ? parseChain(q.chain) : undefined);
+});
+app.get('/v1/wallets/:address', async (req, reply) => {
+    const address = req.params.address;
+    const q = req.query;
+    const chain = parseChain(q.chain);
+    if (!isValidAddressForChain(address, chain))
+        return reply.code(400).send({ error: 'Invalid wallet' });
+    const wallet = await getWallet(address, chain);
+    if (!wallet)
+        return reply.code(404).send({ error: 'Wallet not found' });
+    return wallet;
+});
+app.post('/v1/wallets', async (req, reply) => {
+    const payload = (req.body ?? {});
+    if (!Array.isArray(payload.wallets) || payload.wallets.length === 0) {
+        return reply.code(400).send({ error: 'Body must contain a non-empty "wallets" array' });
+    }
+    const items = payload.wallets;
+    const parsed = items.map((item) => walletInputSchema.safeParse(item));
+    const invalid = parsed.filter((r) => !r.success);
+    if (invalid.length > 0)
+        return reply.code(400).send({ error: 'Invalid wallet payload', issues: invalid.map(i => i.error?.issues) });
+    const inserted = await Promise.all(parsed.map((r) => upsertWallet(r.data)));
+    // Kick off indexing so wallets added via the UI actually get their history.
+    await Promise.all(inserted.map((w) => enqueueBackfill(w.address, w.chain ?? 'solana')));
+    return { inserted: inserted.length, wallets: inserted, backfillQueued: inserted.length };
+});
+// Re-index: enqueue a backfill for every tracked wallet. Powers the
+// "Start indexer" button in the web UI.
+app.post('/v1/wallets/reindex', async () => {
+    const wallets = await listWallets();
+    await Promise.all(wallets.map((w) => enqueueBackfill(w.address, w.chain ?? 'solana')));
+    return { queued: wallets.length };
+});
+app.delete('/v1/wallets/:address', async (req, reply) => {
+    const q = req.query;
+    const address = req.params.address;
+    const chain = parseChain(q.chain);
+    if (!isValidAddressForChain(address, chain))
+        return reply.code(400).send({ error: 'Invalid wallet' });
+    const wallet = await getWallet(address, chain);
+    if (!wallet)
+        return reply.code(404).send({ error: 'Wallet not found' });
+    await deleteWalletCascade(wallet.address, chain);
+    return reply.code(204).send();
+});
+app.get('/v1/wallets/:address/history', async (req, reply) => {
+    const address = req.params.address;
+    const q = req.query;
+    const chain = parseChain(q.chain);
+    const limit = clampLimit(q.limit, 50, 200);
+    const before = q.before;
+    if (!isValidAddressForChain(address, chain))
+        return reply.code(400).send({ error: 'Invalid wallet address' });
+    const prefixedAddress = prefixChainValue(address, chain);
+    const rows = await query(`
+    SELECT id, signature, direction, target_token, amount_in, amount_out,
+           amount_in_usd, amount_out_usd, program_id, timestamp
+    FROM transactions
+    WHERE wallet_address = $1
+      AND chain = $2
+      ${before ? `AND timestamp < $4` : ''}
+    ORDER BY timestamp DESC
+    LIMIT $3
+  `, before ? [prefixedAddress, chain, limit, before] : [prefixedAddress, chain, limit]);
+    const nextCursor = rows.length === limit
+        ? rows[rows.length - 1].timestamp
+        : null;
+    return { items: rows, nextCursor };
+});
+app.get('/v1/wallets/:address/holdings', async (req, reply) => {
+    const address = req.params.address;
+    const q = req.query;
+    const chain = parseChain(q.chain);
+    if (!isValidAddressForChain(address, chain))
+        return reply.code(400).send({ error: 'Invalid wallet address' });
+    const prefixedAddress = prefixChainValue(address, chain);
+    // Calculate net token positions (bought - sold)
+    const rows = await query(`
+    SELECT
+      target_token AS mint,
+      tok.symbol,
+      tok.name,
+      SUM(CASE WHEN direction = 'buy'  THEN amount_out ELSE 0 END)::bigint AS total_bought,
+      SUM(CASE WHEN direction = 'sell' THEN amount_in  ELSE 0 END)::bigint AS total_sold,
+      SUM(CASE WHEN direction = 'buy'  THEN amount_in_usd  ELSE 0 END) AS cost_basis_usd,
+      SUM(CASE WHEN direction = 'sell' THEN amount_out_usd ELSE 0 END) AS realized_usd
+    FROM transactions t
+    LEFT JOIN tokens tok ON t.target_token = tok.mint AND tok.chain = $2
+    WHERE t.wallet_address = $1
+      AND t.chain = $2
+    GROUP BY t.target_token, tok.symbol, tok.name
+    HAVING SUM(CASE WHEN direction = 'buy' THEN amount_out ELSE 0 END)
+         > SUM(CASE WHEN direction = 'sell' THEN amount_in  ELSE 0 END)
+    ORDER BY cost_basis_usd DESC NULLS LAST
+  `, [prefixedAddress, chain]);
+    return { items: rows };
+});
+// ─── Discovery ────────────────────────────────────────────────────────────────
+app.post('/v1/discovery/from-token', async (req, reply) => {
+    const { tokenMint, chain = 'solana' } = (req.body ?? {});
+    if (!['solana', 'polygon', 'robinhood-chain'].includes(chain)) {
+        return reply.code(400).send({ error: 'chain must be one of solana, polygon, or robinhood-chain' });
+    }
+    if (!tokenMint || typeof tokenMint !== 'string') {
+        return reply.code(400).send({ error: 'Valid tokenMint or contract address required' });
+    }
+    const cleanMint = tokenMint.trim();
+    if (!isValidAddressForChain(cleanMint, chain)) {
+        return reply.code(400).send({
+            error: `Invalid ${chain === 'solana' ? 'Solana token mint' : 'EVM contract'} address`
+        });
+    }
+    // The indexer owns token-seeded discovery. Queue exactly one canonical scan;
+    // its deterministic job ID deduplicates concurrent requests for the same mint.
+    await tokenDiscoveryQueue.add('token-discovery', { tokenMint: cleanMint, chain }, {
+        jobId: `token-discovery-${chain}-${cleanMint.toLowerCase()}`,
+        removeOnComplete: true,
+        removeOnFail: 1000
+    });
+    return { queued: true, tokenMint: cleanMint, chain };
+});
+app.post('/v1/discovery/run', async () => {
+    await redis.publish(REDIS_CHANNELS.discoveryRun, JSON.stringify({ trigger: 'manual' }));
+    return { queued: true };
+});
+app.get('/v1/discovery/log', async (req) => {
+    const limit = clampLimit(req.query.limit, 50, 200);
+    const rows = await query(`
+    SELECT id, source, seed_value, wallets_discovered, ran_at
+    FROM discovery_log
+    ORDER BY ran_at DESC, id DESC
+    LIMIT $1
+  `, [limit]);
+    return { items: rows };
+});
+// ─── Clusters (real data) ─────────────────────────────────────────────────────
+app.get('/v1/clusters', async () => {
+    const rows = await query(`
+    SELECT id, name, cluster_type, confidence, wallet_count,
+           total_realized_roi, avg_composite_score, status, last_active, created_at
+    FROM wallet_clusters
+    WHERE status = 'active'
+    ORDER BY confidence DESC, wallet_count DESC
+  `);
+    return { items: rows };
+});
+app.get('/v1/clusters/:id', async (req, reply) => {
+    const { id } = req.params;
+    const [cluster] = await query(`SELECT * FROM wallet_clusters WHERE id = $1`, [id]);
+    if (!cluster)
+        return reply.code(404).send({ error: 'Cluster not found' });
+    const members = await query(`
+    SELECT w.address, w.tier, w.composite_score, w.win_rate, w.realized_roi,
+           cm.confidence, cm.joined_at
+    FROM cluster_memberships cm
+    JOIN wallets w ON w.address = cm.wallet_address
+    WHERE cm.cluster_id = $1
+    ORDER BY w.composite_score DESC NULLS LAST
+  `, [id]);
+    return { cluster, members };
+});
+app.get('/v1/clusters/:id/performance', async (req) => {
+    const { id } = req.params;
+    const [perf] = await query(`
+    SELECT
+      AVG(w.realized_roi)     AS avg_roi,
+      AVG(w.win_rate)         AS avg_win_rate,
+      AVG(w.composite_score)  AS avg_score,
+      COUNT(*)                AS member_count
+    FROM wallets w
+    JOIN cluster_memberships cm ON w.address = cm.wallet_address
+    WHERE cm.cluster_id = $1
+  `, [id]);
+    return perf ?? {};
+});
+app.post('/v1/clusters/:id/refresh', async (req) => {
+    const { id } = req.params;
+    await redis.publish(REDIS_CHANNELS.clusterRefresh, JSON.stringify({ clusterId: id }));
+    return { queued: true };
+});
+app.get('/v1/clusters/:id/timeline', async (req) => {
+    const { id } = req.params;
+    const events = await query(`
+    SELECT s.id, s.pattern_type, s.token_mint, s.signal_score, s.created_at
+    FROM signals s
+    WHERE s.cluster_id = $1
+    ORDER BY s.created_at DESC
+    LIMIT 30
+  `, [id]);
+    return { events };
+});
+// ─── Signals ──────────────────────────────────────────────────────────────────
+app.get('/v1/signals', async (req) => {
+    const q = req.query;
+    const minScore = parseOptionalNumber(q.min_score);
+    const limit = clampLimit(q.limit);
+    let sql = `SELECT * FROM signals WHERE 1=1`;
+    const params = [];
+    let i = 1;
+    if (q.status) {
+        sql += ` AND status = $${i++}`;
+        params.push(q.status);
+    }
+    if (minScore !== undefined) {
+        sql += ` AND signal_score >= $${i++}`;
+        params.push(minScore);
+    }
+    if (q.pattern) {
+        sql += ` AND pattern_type = $${i++}`;
+        params.push(q.pattern);
+    }
+    sql += ` ORDER BY created_at DESC, id DESC LIMIT $${i++}`;
+    params.push(limit);
+    return { items: await query(sql, params) };
+});
+// NOTE: /stats must be registered BEFORE /:id, otherwise Fastify matches 'stats' as an :id
+app.get('/v1/signals/stats', async () => {
+    const [stats] = await query(`
+    SELECT
+      COUNT(*)                                         AS total,
+      COUNT(*) FILTER (WHERE status = 'alerted')      AS alerted,
+      COUNT(*) FILTER (WHERE status = 'executed')     AS executed,
+      COUNT(*) FILTER (WHERE status = 'rejected')     AS rejected,
+      AVG(signal_score) FILTER (WHERE status = 'alerted') AS avg_score
+    FROM signals
+  `);
+    return stats ?? {};
+});
+app.get('/v1/signals/:id', async (req, reply) => {
+    const { id } = req.params;
+    const [signal] = await query(`SELECT * FROM signals WHERE id = $1`, [id]);
+    if (!signal)
+        return reply.code(404).send({ error: 'Signal not found' });
+    return { item: signal };
+});
+app.get('/v1/signals/:id/tracking-difference', async (req) => {
+    const { id } = req.params;
+    return loadTrackingDifferenceSummary(query, {
+        signalId: id,
+        limit: 50
+    });
+});
+app.post('/v1/signals/:id/ignore', async (req, reply) => {
+    const { id } = req.params;
+    const updated = await query(`UPDATE signals SET status = 'rejected' WHERE id = $1 AND status NOT IN ('executed', 'rejected', 'failed') RETURNING id`, [id]);
+    if (updated.length === 0) {
+        return reply.code(409).send({ error: 'Signal not found or already processed' });
+    }
+    return { ignored: true, signalId: id };
+});
+app.post('/v1/signals/:id/execute', async (req, reply) => {
+    const { id } = req.params;
+    const [signal] = await query(`SELECT s.token_mint,
+            s.signal_score,
+            CASE
+              WHEN wc.avg_composite_score >= 90 THEN 'elite'
+              WHEN wc.avg_composite_score >= 75 THEN 'pro'
+              WHEN wc.avg_composite_score >= 60 THEN 'promising'
+              ELSE 'speculative'
+            END AS cluster_tier
+       FROM signals s
+       LEFT JOIN wallet_clusters wc ON wc.id = s.cluster_id
+      WHERE s.id = $1`, [id]);
+    if (!signal)
+        return reply.code(404).send({ error: 'Signal not found' });
+    if (!signal.token_mint) {
+        return reply.code(409).send({ error: 'Signal has no executable token' });
+    }
+    // Enqueue to trade executor via BullMQ (not redis pubsub), on the queue for
+    // this signal's own chain (S3-25). An unsupported prefix is refused here
+    // rather than enqueued: before the split it reached the shared queue and died
+    // in the executor, which reported a failed job instead of a bad request.
+    let chain;
+    try {
+        chain = chainFromTokenMint(signal.token_mint);
+    }
+    catch (error) {
+        return reply.code(409).send({
+            error: error instanceof Error ? error.message : 'Unsupported trade chain'
+        });
+    }
+    const tradeQueue = tradeQueues.get(chain);
+    if (!tradeQueue) {
+        return reply.code(409).send({ error: `No trade queue configured for chain ${chain}` });
+    }
+    await tradeQueue.add('signal-trade', {
+        signalId: id,
+        score: signal.signal_score,
+        tokenMint: signal.token_mint,
+        clusterTier: signal.cluster_tier,
+        manual: true
+    }, {
+        removeOnComplete: true,
+        attempts: 4,
+        backoff: { type: 'exponential', delay: 5000 }
+    });
+    return { queued: true };
+});
+// ─── Tokens ───────────────────────────────────────────────────────────────────
+app.get('/v1/tokens/trending', async () => {
+    const rows = await query(`
+    SELECT t.target_token AS mint, tok.symbol, tok.name,
+           COUNT(DISTINCT t.wallet_address) AS unique_buyers,
+           SUM(t.amount_in_usd) AS volume_usd
+    FROM transactions t
+    LEFT JOIN tokens tok ON t.target_token = tok.mint
+    WHERE t.direction = 'buy'
+      AND t.timestamp > NOW() - INTERVAL '24 hours'
+      AND t.amount_in_usd IS NOT NULL
+    GROUP BY t.target_token, tok.symbol, tok.name
+    ORDER BY unique_buyers DESC, volume_usd DESC
+    LIMIT 20
+  `);
+    return { items: rows };
+});
+app.get('/v1/tokens/:mint', async (req, reply) => {
+    const { mint } = req.params;
+    const q = req.query;
+    const chain = parseChain(q.chain);
+    const prefixedMint = prefixChainValue(mint, chain);
+    const [token] = await query(`SELECT * FROM tokens WHERE mint = $1`, [prefixedMint]);
+    if (!token)
+        return reply.code(404).send({ error: 'Token not found' });
+    return { item: token };
+});
+// ─── Trading ──────────────────────────────────────────────────────────────────
+app.get('/v1/trading/status', async () => {
+    const control = await getTradingControlStatus();
+    return {
+        ...control,
+        autoExecute: process.env.AUTO_EXECUTE === 'true',
+        minScore: Number(process.env.AUTO_EXECUTE_MIN_SCORE ?? 85),
+        basePositionSol: Number(process.env.BASE_POSITION_SOL ?? 0.5),
+        basePositionUsdc: Number(process.env.BASE_POSITION_USDC ?? 100),
+        basePositionEth: Number(process.env.BASE_POSITION_ETH ?? 0.05),
+        useDynamicBalanceSizing: process.env.USE_DYNAMIC_BALANCE_SIZING === 'true',
+        usdcBalanceRiskPct: Number(process.env.USDC_BALANCE_RISK_PCT ?? 2.0),
+        ethBalanceRiskPct: Number(process.env.ETH_BALANCE_RISK_PCT ?? 2.0)
+    };
+});
+app.post('/v1/trading/mode', async (req, reply) => {
+    const parsed = executionModeUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return reply.code(400).send({
+            error: 'Body must contain exactly one valid chain and execution mode'
+        });
+    }
+    return updateTradingMode(parsed.data);
+});
+app.post('/v1/trading/emergency-off', async () => {
+    return emergencyOff();
+});
+app.get('/v1/trading/portfolio', async () => {
+    const positions = await query(`
+    SELECT token_mint, SUM(amount_sol) AS total_sol, SUM(amount_usd) AS total_usd, direction
+    FROM trades
+    WHERE execution_mode IS NULL OR execution_mode != 'shadow'
+    GROUP BY token_mint, direction
+  `);
+    return { positions };
+});
+app.get('/v1/trading/performance', async () => {
+    const [perf] = await query(`
+    SELECT
+      AVG(CASE WHEN pnl_usd > 0 THEN 1.0 ELSE 0.0 END) AS win_rate,
+      SUM(pnl_usd) AS total_pnl_usd,
+      COUNT(*) AS total_signals
+    FROM signals
+    WHERE pnl_usd IS NOT NULL
+  `);
+    return {
+        win_rate: perf?.win_rate ?? 0,
+        total_pnl_usd: perf?.total_pnl_usd ?? 0,
+        total_signals: perf?.total_signals ?? 0
+    };
+});
+app.get('/v1/trading/trades', async () => {
+    const items = await query(`
+    SELECT id, signal_id, token_mint, direction, amount_sol, amount_usd, token_amount, price_usd, slippage_bps, signature, execution_mode, executor, status, price_impact_pct, quote_slot, min_token_amount, executed_at
+    FROM trades
+    WHERE execution_mode IS NULL OR execution_mode != 'shadow'
+    ORDER BY executed_at DESC, id DESC
+    LIMIT 50
+  `);
+    return { items };
+});
+app.get('/v1/trading/tracking-difference', async (req) => {
+    const queryParams = req.query;
+    const limit = queryParams.limit ? Math.min(100, Math.max(1, Number(queryParams.limit))) : 50;
+    return loadTrackingDifferenceSummary(query, {
+        signalId: queryParams.signalId,
+        targetAccount: queryParams.targetAccount,
+        userId: queryParams.userId,
+        limit
+    });
+});
+registerAttributionRoutes(app, {
+    getDashboard: getAttributionDashboard,
+    getExpectancy: getLatestExpectancyReport,
+    getLatency: getAttributionLatencyReport,
+    getShadowCost: getLiveShadowCostReport
+});
+// ─── Config ───────────────────────────────────────────────────────────────────
+app.get('/v1/config', async () => {
+    const rows = await query(`SELECT key, value FROM config ORDER BY key`);
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+});
+app.post('/v1/scorer/run', async () => {
+    await redis.publish(REDIS_CHANNELS.scorerRun, JSON.stringify({}));
+    return { queued: true };
+});
+app.get('/v1/logs', async () => {
+    const logs = await redis.lrange('swat:logs:list', 0, -1);
+    return {
+        items: logs.map(l => {
+            try {
+                return JSON.parse(l);
+            }
+            catch {
+                return { timestamp: new Date().toISOString(), service: 'unknown', level: 'error', message: l };
+            }
+        })
+    };
+});
+// Shared singleton Redis subscriber for logs streaming. Multiplexes all SSE client
+// connections over one TCP connection to Redis rather than spawning a new Redis
+// client socket per visitor (which exhausts Redis connection limits and leaks on abrupt disconnects).
+const sharedLogsSubscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const activeLogListeners = new Set();
+sharedLogsSubscriber.subscribe('swat:logs:stream').catch((err) => {
+    app.log.error(err, '[api] failed to subscribe to swat:logs:stream');
+});
+sharedLogsSubscriber.on('message', (channel, message) => {
+    if (channel === 'swat:logs:stream') {
+        for (const listener of activeLogListeners) {
+            try {
+                listener(message);
+            }
+            catch {
+                activeLogListeners.delete(listener);
+            }
+        }
+    }
+});
+app.get('/v1/logs/stream', async (req, reply) => {
+    const reqOrigin = req.headers.origin;
+    const configuredOrigins = corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : [];
+    const allowedOrigin = (reqOrigin && configuredOrigins.includes(reqOrigin))
+        ? reqOrigin
+        : (configuredOrigins[0] || (reqOrigin ?? ''));
+    const sseHeaders = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+    };
+    if (allowedOrigin) {
+        sseHeaders['Access-Control-Allow-Origin'] = allowedOrigin;
+        sseHeaders['Access-Control-Allow-Credentials'] = 'true';
+    }
+    reply.raw.writeHead(200, sseHeaders);
+    reply.hijack();
+    const listener = (message) => {
+        try {
+            reply.raw.write(`data: ${message}\n\n`);
+        }
+        catch {
+            activeLogListeners.delete(listener);
+        }
+    };
+    activeLogListeners.add(listener);
+    req.raw.on('close', () => {
+        activeLogListeners.delete(listener);
+    });
+});
+// Only these config keys may be written through the API. Prevents an arbitrary
+// caller from creating junk rows or shadowing keys consumers don't expect.
+const ALLOWED_CONFIG_KEYS = new Set(['signals', 'trading', 'risk', 'discovery', 'blacklist']);
+app.post('/v1/config', async (req, reply) => {
+    const body = req.body;
+    // Guard against non-object bodies (Object.entries(null) throws → 500).
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return reply.code(400).send({ error: 'Body must be a JSON object of config keys' });
+    }
+    const entries = Object.entries(body);
+    const unknown = entries.filter(([key]) => !ALLOWED_CONFIG_KEYS.has(key)).map(([key]) => key);
+    if (unknown.length > 0) {
+        return reply.code(400).send({ error: `Unknown config key(s): ${unknown.join(', ')}` });
+    }
+    for (const [key, value] of entries) {
+        await query(`INSERT INTO config (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, [key, JSON.stringify(value)]);
+    }
+    return { updated: entries.length };
+});
+// ─── Start ────────────────────────────────────────────────────────────────────
+const port = Number(process.env.PORT ?? 3001);
+app.listen({ host: '0.0.0.0', port }).catch((error) => {
+    app.log.error(error);
+    process.exit(1);
+});
+//# sourceMappingURL=index.js.map

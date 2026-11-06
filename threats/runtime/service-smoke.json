@@ -1,0 +1,130 @@
+[
+  {
+    "service": "api",
+    "path": "/health",
+    "service_key": false,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.017
+  },
+  {
+    "service": "api",
+    "path": "/health",
+    "service_key": true,
+    "status": 200,
+    "body": "{\"status\":\"ok\",\"service\":\"api\",\"uptimeSeconds\":7,\"timestamp\":\"2026-11-06T13:33:30.717Z\",\"dependencies\":{\"database\":{\"healthy\":true,\"latencyMs\":71},\"redis\":{\"healthy\":true,\"latencyMs\":1},\"rpc\":{\"solana\":{\"healthy\":true,\"network\":\"solana\"},\"polygon\":{\"healthy\":true,\"network\":\"polygon\"},\"robinhood\":{\"healthy\":true,\"network\":\"robinhood-chain\"}}}}",
+    "seconds": 0.099
+  },
+  {
+    "service": "api",
+    "path": "/v1/health",
+    "service_key": false,
+    "status": 200,
+    "body": "{\"status\":\"ok\",\"service\":\"api\",\"uptimeSeconds\":7,\"timestamp\":\"2026-11-06T13:33:30.805Z\",\"dependencies\":{\"database\":{\"healthy\":true,\"latencyMs\":4},\"redis\":{\"healthy\":true,\"latencyMs\":1},\"rpc\":{\"solana\":{\"healthy\":true,\"network\":\"solana\"},\"polygon\":{\"healthy\":true,\"network\":\"polygon\"},\"robinhood\":{\"healthy\":true,\"network\":\"robinhood-chain\"}}}}",
+    "seconds": 0.017
+  },
+  {
+    "service": "api",
+    "path": "/v1/health",
+    "service_key": true,
+    "status": 200,
+    "body": "{\"status\":\"ok\",\"service\":\"api\",\"uptimeSeconds\":7,\"timestamp\":\"2026-11-06T13:33:30.818Z\",\"dependencies\":{\"database\":{\"healthy\":true,\"latencyMs\":4},\"redis\":{\"healthy\":true,\"latencyMs\":1},\"rpc\":{\"solana\":{\"healthy\":true,\"network\":\"solana\"},\"polygon\":{\"healthy\":true,\"network\":\"polygon\"},\"robinhood\":{\"healthy\":true,\"network\":\"robinhood-chain\"}}}}",
+    "seconds": 0.014
+  },
+  {
+    "service": "api",
+    "path": "/v1/stats",
+    "service_key": false,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.005
+  },
+  {
+    "service": "api",
+    "path": "/v1/stats",
+    "service_key": true,
+    "status": 200,
+    "body": "{\"wallets\":5,\"active\":5,\"elite\":0,\"pro\":0,\"signals\":5,\"signalsToday\":5,\"trades\":5,\"paperTrades\":5,\"clusters\":0}",
+    "seconds": 0.042
+  },
+  {
+    "service": "api",
+    "path": "/v1/me/account",
+    "service_key": false,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.004
+  },
+  {
+    "service": "api",
+    "path": "/v1/me/account",
+    "service_key": true,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.009
+  },
+  {
+    "service": "api",
+    "path": "/v1/trading/status",
+    "service_key": false,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.006
+  },
+  {
+    "service": "api",
+    "path": "/v1/trading/status",
+    "service_key": true,
+    "status": 200,
+    "body": "{\"modes\":{\"solana\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"polygon\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"robinhood-chain\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"base\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"ethereum\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false},\"bsc\":{\"requestedMode\":\"paper\",\"effectiveMode\":\"paper\",\"certified\":false}},\"killSwitchActive\":false,\"autoExecute\":false,\"minScore\":85,\"basePositionSol\":0.5,\"basePositionUsdc\":100,\"basePositionEth\":0.05,\"useDynamicBalanceSizing\":false,\"usdcBalanceRiskPct\":2,\"ethBalanceRiskPct\":2}",
+    "seconds": 0.04
+  },
+  {
+    "service": "lp",
+    "path": "/v1/health",
+    "service_key": false,
+    "status": 200,
+    "body": "{\"status\":\"ok\",\"service\":\"lp\"}",
+    "seconds": 0.013
+  },
+  {
+    "service": "lp",
+    "path": "/v1/health",
+    "service_key": true,
+    "status": 200,
+    "body": "{\"status\":\"ok\",\"service\":\"lp\"}",
+    "seconds": 0.039
+  },
+  {
+    "service": "lp",
+    "path": "/v1/lp/discover",
+    "service_key": false,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.045
+  },
+  {
+    "service": "lp",
+    "path": "/v1/lp/discover",
+    "service_key": true,
+    "status": 200,
+    "body": "{\"pools\":[],\"sort\":\"volume\",\"limit\":50,\"offset\":0}",
+    "seconds": 0.107
+  },
+  {
+    "service": "lp",
+    "path": "/v1/lp/positions",
+    "service_key": false,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.005
+  },
+  {
+    "service": "lp",
+    "path": "/v1/lp/positions",
+    "service_key": true,
+    "status": 401,
+    "body": "{\"error\":\"Unauthorized\"}",
+    "seconds": 0.011
+  }
+]

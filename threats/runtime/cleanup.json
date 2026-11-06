@@ -1,0 +1,282 @@
+{
+  "timestamp_utc": "2026-11-06T14:02:25.069368+00:00",
+  "cpu_affinity": [
+    0
+  ],
+  "before": [
+    {
+      "name": "e6c153c61e35_swat-postgres-1",
+      "id": "e6c153c61e351c4a844a62fd62109cc1e3d48d025ee6ef4ee09b9871b23a04bc",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0,
+        "PidsLimit": null
+      },
+      "port_bindings": {
+        "5432/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "5432"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "swat_postgres_data",
+          "Source": "/var/lib/docker/volumes/swat_postgres_data/_data",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    {
+      "name": "6873d13d7d79_swat-redis-1",
+      "id": "6873d13d7d795dfdf5d1fa8f0ace1ca5b746233cde585157c4717cefc273809b",
+      "image": "redis:7-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0,
+        "PidsLimit": null
+      },
+      "port_bindings": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "6379"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "swat_redis_data",
+          "Source": "/var/lib/docker/volumes/swat_redis_data/_data",
+          "Destination": "/data"
+        }
+      ]
+    },
+    {
+      "name": "swat-review-postgres",
+      "id": "6fac4132d72ad702cffed1402de3b4b9f0eb2639489e0ed4a8ead3245d7f2dc8",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 650000000,
+        "Memory": 268435456,
+        "MemorySwap": 402653184,
+        "PidsLimit": 64
+      },
+      "port_bindings": {
+        "5432/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "55432"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "836cafbdd100737dbbab27e534cbedb3c3960aae342712ad2a1f4c9b9b5aeb16",
+          "Source": "/var/lib/docker/volumes/836cafbdd100737dbbab27e534cbedb3c3960aae342712ad2a1f4c9b9b5aeb16/_data",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    {
+      "name": "swat-review-redis",
+      "id": "4e40813dff3a8b21489ef337b77ab0e011677711b2304d91d5ceb61a8302e341",
+      "image": "redis:7-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 150000000,
+        "Memory": 67108864,
+        "MemorySwap": 100663296,
+        "PidsLimit": 32
+      },
+      "port_bindings": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "56379"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "cec572be2bc02f690f7fd78ceb2d07e2bd2c9fc6d7666780d1d93991ed79499e",
+          "Source": "/var/lib/docker/volumes/cec572be2bc02f690f7fd78ceb2d07e2bd2c9fc6d7666780d1d93991ed79499e/_data",
+          "Destination": "/data"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "swat-review-postgres",
+      "action": "stop",
+      "output": "Flag --time has been deprecated, use --timeout instead\nswat-review-postgres",
+      "timestamp_utc": "2026-11-06T14:02:32.333267+00:00"
+    },
+    {
+      "name": "swat-review-redis",
+      "action": "stop",
+      "output": "Flag --time has been deprecated, use --timeout instead\nswat-review-redis",
+      "timestamp_utc": "2026-11-06T14:02:34.767119+00:00"
+    }
+  ],
+  "after": [
+    {
+      "name": "e6c153c61e35_swat-postgres-1",
+      "id": "e6c153c61e351c4a844a62fd62109cc1e3d48d025ee6ef4ee09b9871b23a04bc",
+      "image": "postgres:16-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0,
+        "PidsLimit": null
+      },
+      "port_bindings": {
+        "5432/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "5432"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "swat_postgres_data",
+          "Source": "/var/lib/docker/volumes/swat_postgres_data/_data",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    {
+      "name": "6873d13d7d79_swat-redis-1",
+      "id": "6873d13d7d795dfdf5d1fa8f0ace1ca5b746233cde585157c4717cefc273809b",
+      "image": "redis:7-alpine",
+      "running": true,
+      "status": "running",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "",
+        "NanoCpus": 0,
+        "Memory": 0,
+        "MemorySwap": 0,
+        "PidsLimit": null
+      },
+      "port_bindings": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "6379"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "swat_redis_data",
+          "Source": "/var/lib/docker/volumes/swat_redis_data/_data",
+          "Destination": "/data"
+        }
+      ]
+    },
+    {
+      "name": "swat-review-postgres",
+      "id": "6fac4132d72ad702cffed1402de3b4b9f0eb2639489e0ed4a8ead3245d7f2dc8",
+      "image": "postgres:16-alpine",
+      "running": false,
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 650000000,
+        "Memory": 268435456,
+        "MemorySwap": 402653184,
+        "PidsLimit": 64
+      },
+      "port_bindings": {
+        "5432/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "55432"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "836cafbdd100737dbbab27e534cbedb3c3960aae342712ad2a1f4c9b9b5aeb16",
+          "Source": "/var/lib/docker/volumes/836cafbdd100737dbbab27e534cbedb3c3960aae342712ad2a1f4c9b9b5aeb16/_data",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    {
+      "name": "swat-review-redis",
+      "id": "4e40813dff3a8b21489ef337b77ab0e011677711b2304d91d5ceb61a8302e341",
+      "image": "redis:7-alpine",
+      "running": false,
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false,
+      "limits": {
+        "CpusetCpus": "0",
+        "NanoCpus": 150000000,
+        "Memory": 67108864,
+        "MemorySwap": 100663296,
+        "PidsLimit": 32
+      },
+      "port_bindings": {
+        "6379/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "56379"
+          }
+        ]
+      },
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "cec572be2bc02f690f7fd78ceb2d07e2bd2c9fc6d7666780d1d93991ed79499e",
+          "Source": "/var/lib/docker/volumes/cec572be2bc02f690f7fd78ceb2d07e2bd2c9fc6d7666780d1d93991ed79499e/_data",
+          "Destination": "/data"
+        }
+      ]
+    }
+  ],
+  "removed_containers_or_volumes": false,
+  "existing_containers_unchanged": true
+}

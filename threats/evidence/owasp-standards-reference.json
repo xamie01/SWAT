@@ -1,0 +1,66 @@
+{
+  "retrieved_date": "2026-11-06",
+  "scope": "Public official standards references only; no application target, credentials or repository content submitted.",
+  "web_top_10": {
+    "version": "2025",
+    "source": "https://raw.githubusercontent.com/OWASP/Top10/master/2025/docs/en/index.md",
+    "published_site": "https://top10.owasp.org/2025/",
+    "categories": {
+      "A01:2025": "Broken Access Control",
+      "A02:2025": "Security Misconfiguration",
+      "A03:2025": "Software Supply Chain Failures",
+      "A04:2025": "Cryptographic Failures",
+      "A05:2025": "Injection",
+      "A06:2025": "Insecure Design",
+      "A07:2025": "Authentication Failures",
+      "A08:2025": "Software or Data Integrity Failures",
+      "A09:2025": "Security Logging and Alerting Failures",
+      "A10:2025": "Mishandling of Exceptional Conditions"
+    },
+    "qualification": "OWASP describes the Top 10 as an awareness document; a mapping is not a certification or exhaustive verification."
+  },
+  "api_top_10": {
+    "version": "2023",
+    "source": "https://raw.githubusercontent.com/OWASP/API-Security/master/editions/2023/en/0x11-t10.md",
+    "published_site": "https://api-security.owasp.org/editions/2023/en/0x11-t10/",
+    "categories": {
+      "API1:2023": "Broken Object Level Authorization",
+      "API2:2023": "Broken Authentication",
+      "API3:2023": "Broken Object Property Level Authorization",
+      "API4:2023": "Unrestricted Resource Consumption",
+      "API5:2023": "Broken Function Level Authorization",
+      "API6:2023": "Unrestricted Access to Sensitive Business Flows",
+      "API7:2023": "Server Side Request Forgery",
+      "API8:2023": "Security Misconfiguration",
+      "API9:2023": "Improper Inventory Management",
+      "API10:2023": "Unsafe Consumption of APIs"
+    }
+  },
+  "asvs": {
+    "version": "5.0.0",
+    "release_date": "May 2025",
+    "stable_version_reference": "https://raw.githubusercontent.com/OWASP/ASVS/master/README.md",
+    "pinned_source": "https://raw.githubusercontent.com/OWASP/ASVS/v5.0.0/5.0/docs_en/OWASP_Application_Security_Verification_Standard_5.0.0_en.csv",
+    "families": {
+      "V1": "Encoding and Sanitization",
+      "V2": "Validation and Business Logic",
+      "V3": "Web Frontend Security",
+      "V4": "API and Web Service",
+      "V5": "File Handling",
+      "V6": "Authentication",
+      "V7": "Session Management",
+      "V8": "Authorization",
+      "V9": "Self-contained Tokens",
+      "V10": "OAuth and OIDC",
+      "V11": "Cryptography",
+      "V12": "Secure Communication",
+      "V13": "Configuration",
+      "V14": "Data Protection",
+      "V15": "Secure Coding and Architecture",
+      "V16": "Security Logging and Error Handling",
+      "V17": "WebRTC"
+    },
+    "assessment_target": "Level 2 is a recommended baseline for the financial web/API application, with additional risk-based verification for signing and credential custody; no compliance certification or score is claimed."
+  },
+  "retrieval_notes": "OWASP published sites redirected and timed out; primary project-owned GitHub raw sources succeeded. No installation or target runtime testing occurred."
+}

@@ -1,0 +1,141 @@
+/**
+ * Redemption ledger for resolved Polymarket positions (checklist S3-18).
+ *
+ * A resolved market stops accepting orders, so a winning position cannot be
+ * sold — redemption is the only exit. `redeemPositions()` converts each winning
+ * outcome token into 1 pUSD and each losing token into 0, with no deadline.
+ *
+ * The claim/confirm split matters because `redeemPositions()` takes no amount
+ * and redeems the wallet's entire balance for both outcomes. A second call after
+ * a successful first is an on-chain no-op that still burns gas and still returns
+ * a transaction hash, which a naive reconciler would read as a fresh fill. The
+ * partial unique index on `(user_id, condition_id) WHERE status IN
+ * ('claimed','confirmed')` is what makes the sweep safe to run on a timer.
+ */
+export interface RedemptionClaim {
+    readonly id: string;
+    readonly conditionId: string;
+    readonly userId: string | null;
+}
+/**
+ * One outcome position of ours that a resolved market would redeem.
+ *
+ * Quantities are returned as strings because `copy_positions` stores them as
+ * unconstrained NUMERIC: routing a share count through a JS double before the
+ * caller has decided what precision it needs is how a ledger acquires drift.
+ */
+export interface RedeemablePosition {
+    readonly positionId: string;
+    /** Carried per row so the fan-out can verify it against the market it came from. */
+    readonly conditionId: string;
+    readonly userId: string | null;
+    readonly targetAccount: string;
+    /** Chain-prefixed, as stored: `polygon:<outcomeTokenId>`. */
+    readonly tokenMint: string;
+    /** The bare ERC-1155 outcome token id. */
+    readonly tokenId: string;
+    readonly outcome: string;
+    readonly outcomeIndex: number;
+    readonly heldShares: string;
+    readonly reservedSellShares: string;
+}
+export interface RedeemableMarket {
+    readonly conditionId: string;
+    readonly winningTokenId: string | null;
+    readonly resolvedOutcome: string | null;
+    readonly negRisk: boolean;
+    /**
+     * The positions *we* hold in this condition. A condition holds two outcomes, so
+     * this can carry two rows, and collapsing them is exactly what `S4-M20`'s
+     * `assertPolymarketPositionsDistinct` exists to refuse.
+     */
+    readonly positions: readonly RedeemablePosition[];
+}
+/**
+ * Resolved markets in which **we hold a confirmed position**, minus any already
+ * claimed or confirmed for redemption (checklist `S4-M37`).
+ *
+ * **What was wrong before.** This joined `polymarket_markets` to
+ * `polymarket_trades` — *observed master* trades — with no status filter and no
+ * join to `copy_executions` or `copy_positions`, while its own doc comment
+ * claimed it was "scoped to confirmed fills". It was not. A redemption sweep
+ * acting on it would try to redeem markets we never entered, and every wallet we
+ * merely watch would have produced a redemption attempt.
+ *
+ * **The decided inversion.** Redemption is driven by our own open positions —
+ * close only what we actually hold. The master's holdings remain a
+ * *cross-reference* for deciding whether an exit is due (`S4-M19`), never the
+ * source of what to redeem. So the driving join is `copy_positions` with
+ * `confirmed_quantity > 0`, and `polymarket_trades` does not appear at all.
+ *
+ * **Why `copy_positions` and also `copy_executions`.** `confirmed_quantity` is
+ * the net holding rebuilt from confirmed evidence, which is the "do we hold it"
+ * test. The `copy_executions` existence check is the "did we ever enter" test,
+ * and it is kept separate because a position row can in principle survive its
+ * evidence being reclassified. A pending or reconciliation-required execution has
+ * no proven token balance, so neither test passes on one.
+ *
+ * **Tenancy.** `IS NOT DISTINCT FROM` rather than `=` because `user_id` is NULL
+ * for the pre-multi-tenant operator account, and `= NULL` is never true. This
+ * matches the NULLS NOT DISTINCT semantics of the redemption claim index in
+ * `046`; without it the operator's own positions would be invisible to the sweep.
+ *
+ * The token join is on the chain-prefixed form on both sides:
+ * `polymarket_outcomes.token_id` and `copy_positions.token_mint` both store
+ * `polygon:<tokenId>`, per the repo's prefixed-address invariant.
+ */
+export declare function listRedeemablePolymarketMarkets(input?: {
+    userId?: string | null;
+    limit?: number;
+}): Promise<RedeemableMarket[]>;
+/**
+ * Claims a market for redemption, or returns null when another sweep holds it.
+ *
+ * The conflict target is stated explicitly — `(user_id, condition_id) WHERE
+ * status IN ('claimed','confirmed')` — because a bare `ON CONFLICT DO NOTHING`
+ * does not engage a *partial* index. It must also match the index predicate
+ * exactly or Postgres raises "no unique or exclusion constraint matching".
+ *
+ * Returning null rather than throwing lets the caller treat contention as
+ * "someone else has it" instead of an error, which is the normal case when two
+ * workers sweep concurrently.
+ */
+export declare function claimPolymarketRedemption(input: {
+    conditionId: string;
+    userId?: string | null;
+}): Promise<RedemptionClaim | null>;
+/**
+ * Records a settled redemption.
+ *
+ * The transaction hash is required by a table constraint, not merely by
+ * convention: a confirmed row without evidence reads as settled money that
+ * cannot be verified against the chain.
+ */
+export declare function confirmPolymarketRedemption(input: {
+    id: string;
+    transactionHash: string;
+    redeemedCollateral: string;
+    winningTokenId?: string | null;
+}): Promise<void>;
+/**
+ * Releases a claim as failed so a later sweep can retry.
+ *
+ * Deliberately distinct from deleting the row: the failure reason is the only
+ * record of *why* a market went unredeemed, and losing it turns a recurring
+ * venue problem into an invisible one.
+ */
+export declare function failPolymarketRedemption(input: {
+    id: string;
+    reason: string;
+}): Promise<void>;
+/**
+ * Recovers claims stranded by a crash between claim and confirm.
+ *
+ * These are genuinely ambiguous — the on-chain call may or may not have landed —
+ * so they are marked `failed` rather than retried silently. `redeemPositions` is
+ * idempotent in effect (a second call on an already-redeemed market moves no
+ * tokens), so a later retry is safe; what must not happen is a stuck `claimed`
+ * row blocking the market forever.
+ */
+export declare function releaseStalePolymarketRedemptionClaims(olderThanMs: number): Promise<number>;
+//# sourceMappingURL=polymarket-redemptions.d.ts.map

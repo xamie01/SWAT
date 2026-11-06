@@ -1,0 +1,43 @@
+{
+  "deep": [
+    "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/auth.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/routes.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/builder/build-position.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/builder/plan-ports.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/guardrails/deploy-guard.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/guardrails/exposure-cap.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/monitor/monitor-job.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/copy/copy-worker.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/copy/master-listener.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/lp-copy-trading.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/polymarket-perps.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/069_lp_copy_trading.sql",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket-perps.ts",
+    "/home/xahmie/Documents/SWAT/apps/alert-service/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/alert-service/src/alert-bridge.ts",
+    "/home/xahmie/Documents/SWAT/apps/alert-service/src/alert-delivery.ts",
+    "/home/xahmie/Documents/SWAT/apps/alert-service/src/alert-payload.ts",
+    "/home/xahmie/Documents/SWAT/apps/discovery/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/discovery/src/runner.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/discovery-queries.ts",
+    "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+    "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+    "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/sources/base.py"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/packages/db/src/lp-positions.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/lp-tracked-wallets.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/wallets.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/constants.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/queues.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/indexer/src/index.ts",
+    "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+    "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/sources/polymarket.py"
+  ],
+  "excluded": []
+}

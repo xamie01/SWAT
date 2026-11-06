@@ -1,0 +1,26 @@
+{
+  "deep": [
+    "/home/xahmie/Documents/SWAT/apps/mcp-server/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/mcp-server/src/index.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/mcp-server/package.json",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/064_row_level_security.sql"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/README.md",
+    "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/scorer/src/index.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/001_init.sql",
+    "/home/xahmie/Documents/SWAT/DEPLOYMENT.md",
+    "/home/xahmie/Documents/SWAT/apps/alert-service/src/alert-bridge.ts",
+    "/home/xahmie/Documents/SWAT/scripts/start.sh",
+    "/home/xahmie/Documents/SWAT/packages/db/src/index.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/constants.ts",
+    "/home/xahmie/Documents/SWAT/docker-compose.yml"
+  ],
+  "excluded": [],
+  "source": "Completed reviewer manifest; exact partial/search ranges in report appendix."
+}

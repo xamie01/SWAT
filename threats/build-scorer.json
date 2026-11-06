@@ -1,0 +1,1 @@
+{"extends": "../apps/scorer/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-scorer", "tsBuildInfoFile": "runtime/build/apps-scorer.tsbuildinfo"}}

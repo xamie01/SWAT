@@ -1,0 +1,11 @@
+export const HOLDER_CONCENTRATION_FLAG = 'holder_concentration';
+export const BUNDLED_WALLETS_FLAG = 'bundled_launch';
+export const LIQUIDITY_UNLOCKED_FLAG = 'liquidity_unlocked';
+export const MINT_AUTHORITY_FLAG = 'mint_authority_active';
+export const FREEZE_AUTHORITY_FLAG = 'freeze_authority_active';
+export const PAUSE_CAPABLE_FLAG = 'pause_capable';
+export const BLACKLIST_CAPABLE_FLAG = 'blacklist_capable';
+export const HONEYPOT_DETECTED_FLAG = 'honeypot_detected';
+export const EXCESSIVE_TAX_FLAG = 'excessive_tax';
+export const UNVERIFIED_SOURCE_FLAG = 'unverified_contract';
+//# sourceMappingURL=types.js.map

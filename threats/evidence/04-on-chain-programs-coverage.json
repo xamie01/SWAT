@@ -1,0 +1,26 @@
+{
+  "deep": [
+    "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs",
+    "/home/xahmie/Documents/SWAT/programs/pda-vault-minimal/src/lib.rs",
+    "/home/xahmie/Documents/SWAT/programs/wake-vault/trident-tests/fuzz_0/src/lib.rs",
+    "/home/xahmie/Documents/SWAT/programs/wake-vault/Cargo.toml",
+    "/home/xahmie/Documents/SWAT/programs/wake-vault/trident-tests/fuzz_0/Cargo.toml",
+    "/home/xahmie/Documents/SWAT/programs/pda-vault-minimal/Cargo.toml",
+    "/home/xahmie/Documents/SWAT/docs/adr/0004-solana-vault.md",
+    "/home/xahmie/Documents/SWAT/docs/dg-8/wake-vault-skeleton.rs",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-dispatch.ts",
+    "/home/xahmie/Documents/SWAT/README.md",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md",
+    "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx",
+    "/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts"
+  ],
+  "excluded": []
+}

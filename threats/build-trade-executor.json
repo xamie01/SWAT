@@ -1,0 +1,1 @@
+{"extends": "../apps/trade-executor/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-trade-executor", "tsBuildInfoFile": "runtime/build/apps-trade-executor.tsbuildinfo"}}

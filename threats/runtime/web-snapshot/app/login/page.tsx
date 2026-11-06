@@ -1,0 +1,151 @@
+'use client';
+
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { WakeLogo } from '../../components/WakeLogo.js';
+import { ThemeToggle } from '../../components/ThemeToggle.js';
+import { api, ApiError } from '../../lib/api.js';
+
+/**
+ * Real login against POST /v1/auth/login (checklist S6-3 / S6-5 partial).
+ *
+ * Replaces the previous behaviour, which was that `/` simply pushed the visitor
+ * to `/workspace` with no credential of any kind -- the console was open to
+ * anyone who could reach the port, and every request it made carried a shared
+ * key baked into the JavaScript bundle.
+ *
+ * The session is established entirely by cookies the API sets on the response.
+ * This component never sees, stores or forwards a token, which is the point:
+ * there is nowhere for a secret to leak from because the client holds none.
+ */
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = searchParams.get('next');
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      const res = await api.post<{ user: { id: string; email: string; role: string; tier: string } }>('/v1/auth/login', { email, password });
+      
+      const role = res?.user?.role;
+      const isAdminPrefix = (path: string) => [
+        '/admin', '/workspace', '/signals', '/wallets', '/logs', '/clusters', '/setup', '/performance'
+      ].some(prefix => path === prefix || path.startsWith(`${prefix}/`));
+
+      let destination = '/dashboard';
+      if (next && next.startsWith('/') && !next.startsWith('//')) {
+        if (role !== 'admin' && isAdminPrefix(next)) {
+          destination = '/dashboard';
+        } else {
+          destination = next;
+        }
+      } else if (role === 'admin') {
+        destination = '/admin/portfolio';
+      } else {
+        destination = '/dashboard';
+      }
+
+      router.push(destination);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.status === 401
+            ? 'Invalid email or password.'
+            : caught.status === 403
+              ? 'This account is suspended.'
+              : caught.message
+          : 'Could not reach the API.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="bg-background text-on-background min-h-screen antialiased font-sans flex items-center justify-center px-6 relative">
+      <div className="fixed top-4 right-4 z-50">
+        <ThemeToggle />
+      </div>
+      <div className="w-full max-w-sm">
+        <Link href="/" className="inline-block mb-8 hover:opacity-85 transition-opacity">
+          <WakeLogo size="md" />
+        </Link>
+
+        <h1 className="font-headline-md text-2xl font-bold tracking-tight mb-2">Sign in</h1>
+        <p className="text-body-sm text-on-surface-variant mb-8">
+          Operator and user accounts use the same sign-in.
+        </p>
+
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <label className="flex flex-col gap-2">
+            <span className="text-label-caps text-on-surface-variant uppercase tracking-wide text-[11px] font-medium">
+              Email
+            </span>
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="bg-surface-container-lowest border border-border-subtle rounded px-3 py-2 text-body-md outline-none focus:border-primary"
+            />
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-label-caps text-on-surface-variant uppercase tracking-wide text-[11px] font-medium">
+              Password
+            </span>
+            <input
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="bg-surface-container-lowest border border-border-subtle rounded px-3 py-2 text-body-md outline-none focus:border-primary"
+            />
+          </label>
+
+          {error ? (
+            <p role="alert" className="text-body-sm text-status-error">
+              {error}
+            </p>
+          ) : null}
+
+          <button
+            type="submit"
+            disabled={submitting || !email || !password}
+            className="mt-2 bg-primary text-on-primary rounded px-4 py-2 text-body-md font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+          >
+            {submitting ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+
+        <div className="mt-6 pt-6 border-t border-border-subtle text-center">
+          <p className="text-body-sm text-on-surface-variant">
+            Don't have an account?{' '}
+            <Link href="/signup" className="text-primary font-semibold hover:underline">
+              Create account
+            </Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="bg-background min-h-screen" />}>
+      <LoginForm />
+    </Suspense>
+  );
+}

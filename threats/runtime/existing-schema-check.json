@@ -1,0 +1,25 @@
+{
+  "database": "existing-local-swat",
+  "public_table_count": 55,
+  "checked_required_tables": [
+    "users",
+    "copy_executions",
+    "copy_position_master_lots",
+    "master_capacity_ledger",
+    "user_payment_intents",
+    "crypto_payments",
+    "lp_pools",
+    "lp_positions",
+    "lp_guardrail_configs",
+    "lp_tracked_wallets",
+    "lp_copy_subscriptions",
+    "lp_copy_executions"
+  ],
+  "missing_required_tables": [
+    "copy_position_master_lots",
+    "user_payment_intents",
+    "crypto_payments",
+    "lp_copy_subscriptions",
+    "lp_copy_executions"
+  ]
+}

@@ -1,0 +1,1 @@
+{"extends": "../apps/signal-engine/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-signal-engine", "tsBuildInfoFile": "runtime/build/apps-signal-engine.tsbuildinfo"}}

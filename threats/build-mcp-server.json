@@ -1,0 +1,1 @@
+{"extends": "../apps/mcp-server/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/apps-mcp-server", "tsBuildInfoFile": "runtime/build/apps-mcp-server.tsbuildinfo"}}

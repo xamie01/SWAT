@@ -1,0 +1,4490 @@
+{
+  "scope": "Source/config/test inventory excluding generated output, installed modules, lockfiles, documentation, skill packs, real .env, report artifacts. Shared utility ownership assigned to module 07; integration fixtures module 12 cross-cutting.",
+  "modules": {
+    "01-api": [
+      {
+        "path": "apps/api/package.json",
+        "loc": 31,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/api/src/attribution-routes.test.ts",
+        "loc": 102,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/attribution-routes.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/auth/plugin.test.ts",
+        "loc": 130,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/auth/plugin.ts",
+        "loc": 253,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "09-agent-mcp",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/api/src/auth/routes.ts",
+        "loc": 387,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "03-crypto-authority",
+          "08-secondary-services",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/api/src/auth/wallet-signature.test.ts",
+        "loc": 262,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/auth/wallet-signature.ts",
+        "loc": 167,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "apps/api/src/cron/billing-sweep.test.ts",
+        "loc": 19,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/cron/billing-sweep.ts",
+        "loc": 41,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/api/src/index.ts",
+        "loc": 976,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "08-secondary-services",
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/admin-portfolio.test.ts",
+        "loc": 297,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/routes/admin-portfolio.ts",
+        "loc": 136,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/billing.test.ts",
+        "loc": 296,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/billing.ts",
+        "loc": 463,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/execution-settings.test.ts",
+        "loc": 711,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/api/src/routes/execution-settings.ts",
+        "loc": 609,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/me.ts",
+        "loc": 1341,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "03-crypto-authority",
+          "04-on-chain-programs",
+          "06-signals-scorer",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/api/src/routes/withdraw.test.ts",
+        "loc": 217,
+        "status": "skim",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "apps/api/src/trading-control.ts",
+        "loc": 48,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "apps/api/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      }
+    ],
+    "02-database": [
+      {
+        "path": "packages/db/package.json",
+        "loc": 28,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/sql/001_init.sql",
+        "loc": 148,
+        "status": "skim",
+        "evidence_reports": [
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "packages/db/sql/002_schema_alignment.sql",
+        "loc": 31,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/003_fix_clustering.sql",
+        "loc": 12,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/004_trades_persistence.sql",
+        "loc": 12,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/005_tx_dedup_null_target.sql",
+        "loc": 26,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/006_wallet_discovery_method.sql",
+        "loc": 10,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/007_jupiter_simulation.sql",
+        "loc": 15,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/008_token_metadata.sql",
+        "loc": 3,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/009_signals_dedupe_index.sql",
+        "loc": 22,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/010_chain_discriminator.sql",
+        "loc": 84,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/011_widen_address_columns.sql",
+        "loc": 14,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/012_polymarket_markets.sql",
+        "loc": 17,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/013_widen_remaining_columns.sql",
+        "loc": 35,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/014_missing_indexes.sql",
+        "loc": 12,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/015_audit_schema_repairs.sql",
+        "loc": 85,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/sql/016_timestamp_tz.sql",
+        "loc": 61,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/017_execution_config.sql",
+        "loc": 6,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/018_shadow_trades.sql",
+        "loc": 4,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/019_attribution.sql",
+        "loc": 32,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/020_polymarket_resolutions.sql",
+        "loc": 3,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/021_latency_tracking.sql",
+        "loc": 6,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/022_cluster_chains.sql",
+        "loc": 6,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/023_copy_trade_lifecycle.sql",
+        "loc": 35,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/024_chain_certifications.sql",
+        "loc": 29,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/025_signal_pnl_components.sql",
+        "loc": 3,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/026_polymarket_context.sql",
+        "loc": 49,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/027_venue_execution_identity.sql",
+        "loc": 9,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/028_copy_execution_lifecycle.sql",
+        "loc": 467,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/029_attribution_semantics.sql",
+        "loc": 43,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/030_source_signal_execution_linkage.sql",
+        "loc": 135,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/031_execution_fees.sql",
+        "loc": 16,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/032_circuit_breaker_state.sql",
+        "loc": 5,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/033_breaker_account_key.sql",
+        "loc": 22,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/034_stop_loss_triggers.sql",
+        "loc": 22,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/035_copy_eligibility_policy.sql",
+        "loc": 25,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/036_transactions_brin.sql",
+        "loc": 17,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/037_pg_stat_statements.sql",
+        "loc": 22,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/038_venue_settlement_status.sql",
+        "loc": 15,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/039_users.sql",
+        "loc": 41,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/040_user_sessions.sql",
+        "loc": 35,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/041_user_auth_wallets.sql",
+        "loc": 34,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/042_user_api_keys.sql",
+        "loc": 29,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/sql/043_audit_log.sql",
+        "loc": 46,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/044_user_wallet_subscriptions.sql",
+        "loc": 37,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/045_user_token_watches.sql",
+        "loc": 31,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/046_polymarket_redemptions.sql",
+        "loc": 82,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/sql/047_user_execution_grants.sql",
+        "loc": 135,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/db/sql/048_user_balances.sql",
+        "loc": 64,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/049_user_execution_settings.sql",
+        "loc": 173,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/050_copy_tenancy.sql",
+        "loc": 383,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/051_subscription_states.sql",
+        "loc": 267,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/052_user_email_verification.sql",
+        "loc": 15,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/sql/053_master_capacity.sql",
+        "loc": 398,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/054_copy_evidence_quote_units.sql",
+        "loc": 352,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/055_polymarket_position_exits.sql",
+        "loc": 112,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/sql/056_master_membership.sql",
+        "loc": 338,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/057_polymarket_manual_exit_trigger.sql",
+        "loc": 62,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/058_copy_position_lots.sql",
+        "loc": 99,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/059_stop_loss_lot_identity.sql",
+        "loc": 36,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/060_close_all_claims.sql",
+        "loc": 31,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/sql/061_copy_position_lot_exits.sql",
+        "loc": 91,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/062_source_trade_fees.sql",
+        "loc": 5,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/sql/063_crypto_billing.sql",
+        "loc": 67,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/064_row_level_security.sql",
+        "loc": 117,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/sql/065_polymarket_perps.sql",
+        "loc": 105,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/066_lp_dashboard.sql",
+        "loc": 252,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/067_lp_auto_rebalance.sql",
+        "loc": 44,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/068_lp_multichain.sql",
+        "loc": 49,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/sql/069_lp_copy_trading.sql",
+        "loc": 50,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/src/admin-portfolio.test.ts",
+        "loc": 291,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/admin-portfolio.ts",
+        "loc": 620,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/attribution-queries.test.ts",
+        "loc": 155,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/attribution-queries.ts",
+        "loc": 390,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/audit-log.ts",
+        "loc": 94,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/auth-wallets.ts",
+        "loc": 111,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/src/billing.test.ts",
+        "loc": 277,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/billing.ts",
+        "loc": 432,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/src/chain-boundaries.test.ts",
+        "loc": 66,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/chain-certifications.test.ts",
+        "loc": 51,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/chain-certifications.ts",
+        "loc": 36,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/ci-setup.ts",
+        "loc": 54,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/src/circuit-breaker.test.ts",
+        "loc": 274,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/circuit-breaker.ts",
+        "loc": 201,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/client-pools.test.ts",
+        "loc": 115,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/client-runtime.test.ts",
+        "loc": 181,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/client-runtime.ts",
+        "loc": 180,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/src/client.ts",
+        "loc": 84,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "08-secondary-services",
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/src/close-all.test.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/close-all.ts",
+        "loc": 101,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/clustering-queries.test.ts",
+        "loc": 146,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/clustering-queries.ts",
+        "loc": 285,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/copy-eligibility.ts",
+        "loc": 166,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/copy-evidence-quote-units.test.ts",
+        "loc": 397,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/copy-trade-lifecycle.ts",
+        "loc": 2851,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "05-indexer-parsers",
+          "06-signals-scorer",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "packages/db/src/credentials.test.ts",
+        "loc": 149,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/credentials.ts",
+        "loc": 138,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/db/src/discovery-queries.ts",
+        "loc": 68,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/src/evm-nonce.test.ts",
+        "loc": 170,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/evm-nonce.ts",
+        "loc": 128,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "packages/db/src/execution-config.test.ts",
+        "loc": 223,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/execution-config.ts",
+        "loc": 239,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/execution-grants.test.ts",
+        "loc": 399,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/execution-grants.ts",
+        "loc": 417,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api",
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/db/src/fanout-candidates.test.ts",
+        "loc": 487,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/fanout-candidates.ts",
+        "loc": 291,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/fanout-eligibility.test.ts",
+        "loc": 361,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/fanout-eligibility.ts",
+        "loc": 309,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/forward-only.test.ts",
+        "loc": 271,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/forward-only.ts",
+        "loc": 472,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/independence-queries.test.ts",
+        "loc": 89,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/independence-queries.ts",
+        "loc": 100,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/independence.test.ts",
+        "loc": 323,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/independence.ts",
+        "loc": 360,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/index.ts",
+        "loc": 110,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "packages/db/src/ingestion-health.test.ts",
+        "loc": 82,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/ingestion-health.ts",
+        "loc": 238,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lot-allocation.test.ts",
+        "loc": 64,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lot-allocation.ts",
+        "loc": 74,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/lp-copy-trading.test.ts",
+        "loc": 142,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-copy-trading.ts",
+        "loc": 263,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/src/lp-guardrails.test.ts",
+        "loc": 119,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-guardrails.ts",
+        "loc": 135,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-pools.test.ts",
+        "loc": 164,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-pools.ts",
+        "loc": 304,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-positions.test.ts",
+        "loc": 272,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-positions.ts",
+        "loc": 427,
+        "status": "skim",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/src/lp-tracked-wallets.test.ts",
+        "loc": 204,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/lp-tracked-wallets.ts",
+        "loc": 324,
+        "status": "skim",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/src/master-capacity.test.ts",
+        "loc": 936,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/master-capacity.ts",
+        "loc": 1696,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/master-followers.test.ts",
+        "loc": 168,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/master-followers.ts",
+        "loc": 240,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/master-membership.test.ts",
+        "loc": 835,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/master-membership.ts",
+        "loc": 607,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/migrate.ts",
+        "loc": 47,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/db/src/migration-discovery.ts",
+        "loc": 32,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/migrations.test.ts",
+        "loc": 132,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/numeric.test.ts",
+        "loc": 47,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/numeric.ts",
+        "loc": 45,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/pnl-math.test.ts",
+        "loc": 113,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/pnl-math.ts",
+        "loc": 95,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/pnl-queries.test.ts",
+        "loc": 426,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/pnl-queries.ts",
+        "loc": 353,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/polymarket-book-subscriptions.test.ts",
+        "loc": 322,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/polymarket-book-subscriptions.ts",
+        "loc": 214,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/polymarket-exit-queries.ts",
+        "loc": 187,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/polymarket-perps.ts",
+        "loc": 284,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/src/polymarket-redemptions.ts",
+        "loc": 243,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/polymarket.test.ts",
+        "loc": 127,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/polymarket.ts",
+        "loc": 287,
+        "status": "skim",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "packages/db/src/position-cap.test.ts",
+        "loc": 203,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/position-cap.ts",
+        "loc": 471,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/quote-valuation.test.ts",
+        "loc": 249,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/quote-valuation.ts",
+        "loc": 441,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/relationships.ts",
+        "loc": 41,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/risk-policy-cache.test.ts",
+        "loc": 114,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/risk-policy.test.ts",
+        "loc": 110,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/risk-policy.ts",
+        "loc": 158,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/rls.test.ts",
+        "loc": 262,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/scoring-queries.test.ts",
+        "loc": 148,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/scoring-queries.ts",
+        "loc": 329,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/seed-admin-cli.ts",
+        "loc": 33,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/seed-admin.ts",
+        "loc": 66,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/signals.test.ts",
+        "loc": 56,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/signals.ts",
+        "loc": 113,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/stop-loss.test.ts",
+        "loc": 172,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/stop-loss.ts",
+        "loc": 124,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/db/src/subscriptions.test.ts",
+        "loc": 532,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/subscriptions.ts",
+        "loc": 864,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/tenancy.ts",
+        "loc": 111,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/tracking-difference.test.ts",
+        "loc": 616,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/tracking-difference.ts",
+        "loc": 1062,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/trades.test.ts",
+        "loc": 221,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/trades.ts",
+        "loc": 434,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "packages/db/src/transaction.test.ts",
+        "loc": 157,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/transaction.ts",
+        "loc": 71,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database",
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "packages/db/src/transactions.ts",
+        "loc": 153,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "packages/db/src/user-balances.test.ts",
+        "loc": 291,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/user-balances.ts",
+        "loc": 279,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/user-execution-settings.test.ts",
+        "loc": 550,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/db/src/user-execution-settings.ts",
+        "loc": 606,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/users-session-cache.test.ts",
+        "loc": 104,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/users.ts",
+        "loc": 286,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "02-database"
+        ]
+      },
+      {
+        "path": "packages/db/src/wallets.ts",
+        "loc": 131,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/db/tsconfig.json",
+        "loc": 12,
+        "status": "not-reviewed"
+      }
+    ],
+    "03-crypto-authority": [
+      {
+        "path": "packages/shared/src/authority/entrypoint.test.ts",
+        "loc": 62,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/authority/entrypoint.ts",
+        "loc": 37,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/authority/envelope.test.ts",
+        "loc": 129,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/envelope.ts",
+        "loc": 135,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/evm-calldata.test.ts",
+        "loc": 136,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/authority/evm-calldata.ts",
+        "loc": 360,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/index.ts",
+        "loc": 17,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/authority/key-wrapper.ts",
+        "loc": 127,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/permission-policy.test.ts",
+        "loc": 907,
+        "status": "skim",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/permission-policy.ts",
+        "loc": 1219,
+        "status": "skim",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/withdrawal-authorization.test.ts",
+        "loc": 166,
+        "status": "skim",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "packages/shared/src/authority/withdrawal-authorization.ts",
+        "loc": 195,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      }
+    ],
+    "04-on-chain-programs": [
+      {
+        "path": "programs/pda-vault-minimal/.gitignore",
+        "loc": 1,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "programs/pda-vault-minimal/Cargo.toml",
+        "loc": 10,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "04-on-chain-programs",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "programs/pda-vault-minimal/src/lib.rs",
+        "loc": 116,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "04-on-chain-programs"
+        ]
+      },
+      {
+        "path": "programs/wake-vault/.gitignore",
+        "loc": 3,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "programs/wake-vault/Cargo.toml",
+        "loc": 28,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "04-on-chain-programs",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "programs/wake-vault/src/lib.rs",
+        "loc": 882,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "04-on-chain-programs"
+        ]
+      },
+      {
+        "path": "programs/wake-vault/trident-tests/fuzz_0/Cargo.toml",
+        "loc": 10,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "04-on-chain-programs",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "programs/wake-vault/trident-tests/fuzz_0/src/lib.rs",
+        "loc": 143,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "04-on-chain-programs"
+        ]
+      }
+    ],
+    "05-indexer-parsers": [
+      {
+        "path": "apps/indexer/package.json",
+        "loc": 30,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/backfill-usd.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/backfill-worker.test.ts",
+        "loc": 59,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/backfill-worker.ts",
+        "loc": 71,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/evm-source-lifecycle.test.ts",
+        "loc": 238,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/evm-token-discovery.test.ts",
+        "loc": 115,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/evm.ts",
+        "loc": 648,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/g0-d11-acceptance.ts",
+        "loc": 312,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/index.ts",
+        "loc": 772,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/ingestion-health.test.ts",
+        "loc": 94,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/ingestion-health.ts",
+        "loc": 79,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/parse.test.ts",
+        "loc": 325,
+        "status": "skim",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/parse.ts",
+        "loc": 305,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/polymarket-book-acceptance.ts",
+        "loc": 309,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-book-runtime.test.ts",
+        "loc": 913,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-book-runtime.ts",
+        "loc": 643,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-book-subscriber.test.ts",
+        "loc": 802,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-book-subscriber.ts",
+        "loc": 1359,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-context-acceptance.ts",
+        "loc": 224,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-helpers.test.ts",
+        "loc": 165,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/polymarket-helpers.ts",
+        "loc": 224,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/polymarket.test.ts",
+        "loc": 382,
+        "status": "skim",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/polymarket.ts",
+        "loc": 498,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/robinhood-ingestion.test.ts",
+        "loc": 217,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/robinhood-ingestion.ts",
+        "loc": 324,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/seed-wallets.test.ts",
+        "loc": 46,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/seed-wallets.ts",
+        "loc": 47,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/solana-parity.test.ts",
+        "loc": 190,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/solana-source-lifecycle.test.ts",
+        "loc": 219,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/source-trade-lifecycle.test.ts",
+        "loc": 304,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/source-trade-lifecycle.ts",
+        "loc": 216,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/webhook-helpers.test.ts",
+        "loc": 57,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/indexer/src/webhook-helpers.ts",
+        "loc": 135,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/webhook-source-lifecycle.test.ts",
+        "loc": 62,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/src/webhook.ts",
+        "loc": 129,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers"
+        ]
+      },
+      {
+        "path": "apps/indexer/tsconfig.json",
+        "loc": 9,
+        "status": "not-reviewed"
+      }
+    ],
+    "06-signals-scorer": [
+      {
+        "path": "apps/scorer/_ingest_wallets.ts",
+        "loc": 86,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/scorer/package.json",
+        "loc": 28,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/close-all.test.ts",
+        "loc": 191,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/close-all.ts",
+        "loc": 87,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/expectancy.test.ts",
+        "loc": 95,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/scorer/src/expectancy.ts",
+        "loc": 28,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/scorer/src/index.ts",
+        "loc": 344,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "06-signals-scorer",
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/master-metrics.test.ts",
+        "loc": 670,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/master-metrics.ts",
+        "loc": 889,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/starter-pack.test.ts",
+        "loc": 49,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/scorer/src/starter-pack.ts",
+        "loc": 93,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/scorer/src/stop-loss.test.ts",
+        "loc": 497,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/scorer/src/stop-loss.ts",
+        "loc": 292,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/scorer/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/scorer/tsconfig.tools.json",
+        "loc": 10,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/package.json",
+        "loc": 24,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/capacity-inputs.test.ts",
+        "loc": 869,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/capacity-inputs.ts",
+        "loc": 702,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/detectors.test.ts",
+        "loc": 192,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/detectors.ts",
+        "loc": 304,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/fanout-enqueue.test.ts",
+        "loc": 512,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/fanout-enqueue.ts",
+        "loc": 360,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/index.ts",
+        "loc": 726,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "05-indexer-parsers",
+          "06-signals-scorer",
+          "07-trade-executor",
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/mirrorable-activity.test.ts",
+        "loc": 213,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/mirrorable-activity.ts",
+        "loc": 283,
+        "status": "skim",
+        "evidence_reports": [
+          "05-indexer-parsers",
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/polymarket-book-reader.test.ts",
+        "loc": 569,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/polymarket-book-reader.ts",
+        "loc": 338,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/polymarket-context.test.ts",
+        "loc": 105,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/polymarket-context.ts",
+        "loc": 88,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/routability-probe.test.ts",
+        "loc": 124,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/routability-probe.ts",
+        "loc": 161,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/safety.ts",
+        "loc": 282,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/src/trade-eligibility.test.ts",
+        "loc": 56,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/signal-engine/src/trade-eligibility.ts",
+        "loc": 72,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/signal-engine/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      }
+    ],
+    "07-trade-executor": [
+      {
+        "path": "apps/trade-executor/package.json",
+        "loc": 30,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/balances.test.ts",
+        "loc": 92,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/balances.ts",
+        "loc": 91,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/canonical-copy.test.ts",
+        "loc": 37,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/canonical-copy.ts",
+        "loc": 82,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/copy-eligibility.test.ts",
+        "loc": 225,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/copy-eligibility.ts",
+        "loc": 156,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/execution-authority-adapters.test.ts",
+        "loc": 586,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api",
+          "04-on-chain-programs"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/execution-authority-adapters.ts",
+        "loc": 627,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "03-crypto-authority",
+          "04-on-chain-programs",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/execution-authority-wiring.test.ts",
+        "loc": 555,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api",
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/execution-authority.test.ts",
+        "loc": 238,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/execution-authority.ts",
+        "loc": 414,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "03-crypto-authority",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/execution-lifecycle.test.ts",
+        "loc": 1181,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/index.ts",
+        "loc": 2932,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "03-crypto-authority",
+          "04-on-chain-programs",
+          "06-signals-scorer",
+          "07-trade-executor",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/jupiter-jito-config.test.ts",
+        "loc": 197,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/jupiter-jito-config.ts",
+        "loc": 143,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority",
+          "04-on-chain-programs",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/jupiter-jito-runtime.test.ts",
+        "loc": 745,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/jupiter-jito-runtime.ts",
+        "loc": 462,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority",
+          "04-on-chain-programs",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/jupiter-jito-simulation-wiring.test.ts",
+        "loc": 109,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/manual-exit.test.ts",
+        "loc": 333,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/manual-exit.ts",
+        "loc": 486,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/ops-alerts.test.ts",
+        "loc": 36,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/ops-alerts.ts",
+        "loc": 33,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/paymaster-budget.test.ts",
+        "loc": 118,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/paymaster-budget.ts",
+        "loc": 134,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/per-user-sizing.test.ts",
+        "loc": 668,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/per-user-sizing.ts",
+        "loc": 817,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/permit2.test.ts",
+        "loc": 604,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/permit2.ts",
+        "loc": 715,
+        "status": "skim",
+        "evidence_reports": [
+          "03-crypto-authority"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/policy.test.ts",
+        "loc": 114,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/policy.ts",
+        "loc": 155,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-cancellation.test.ts",
+        "loc": 256,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-cancellation.ts",
+        "loc": 352,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-collateral.test.ts",
+        "loc": 244,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-collateral.ts",
+        "loc": 364,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-exit-escalation-wiring.test.ts",
+        "loc": 318,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-exit-escalation.test.ts",
+        "loc": 320,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-exit-escalation.ts",
+        "loc": 414,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-exit-race.test.ts",
+        "loc": 547,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-exit-race.ts",
+        "loc": 528,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-exit-rung-cancel.test.ts",
+        "loc": 242,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-geo.test.ts",
+        "loc": 57,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-geo.ts",
+        "loc": 57,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-market-state.test.ts",
+        "loc": 165,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-market-state.ts",
+        "loc": 210,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-mirror-bound.test.ts",
+        "loc": 232,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-mirror-bound.ts",
+        "loc": 270,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-mirror-order.test.ts",
+        "loc": 414,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-negrisk.test.ts",
+        "loc": 463,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-perps.test.ts",
+        "loc": 202,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-perps.ts",
+        "loc": 282,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-precision.test.ts",
+        "loc": 166,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-redemption.test.ts",
+        "loc": 406,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-redemption.ts",
+        "loc": 324,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-relayer-budget.test.ts",
+        "loc": 60,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-relayer-budget.ts",
+        "loc": 79,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-representation.test.ts",
+        "loc": 201,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-representation.ts",
+        "loc": 321,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-staleness.test.ts",
+        "loc": 213,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-staleness.ts",
+        "loc": 360,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-startup.test.ts",
+        "loc": 245,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket-startup.ts",
+        "loc": 421,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket.test.ts",
+        "loc": 1243,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/polymarket.ts",
+        "loc": 2274,
+        "status": "skim",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/reconciliation-coordinator.test.ts",
+        "loc": 389,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/reconciliation-coordinator.ts",
+        "loc": 190,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/reconciliation-venues.ts",
+        "loc": 160,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/risk.test.ts",
+        "loc": 87,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood-base-spend.test.ts",
+        "loc": 133,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood-nonce.test.ts",
+        "loc": 188,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood-runtime.test.ts",
+        "loc": 318,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood-runtime.ts",
+        "loc": 358,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood-startup.test.ts",
+        "loc": 156,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood-startup.ts",
+        "loc": 146,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood.test.ts",
+        "loc": 686,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/robinhood.ts",
+        "loc": 1203,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "03-crypto-authority",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/runtime-codec.ts",
+        "loc": 36,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/shadow.test.ts",
+        "loc": 218,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/sizing-risk-policy.test.ts",
+        "loc": 250,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-dispatch.test.ts",
+        "loc": 320,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-dispatch.ts",
+        "loc": 187,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority",
+          "04-on-chain-programs",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/solana-executor-selection.test.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-executor-selection.ts",
+        "loc": 69,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-latency.test.ts",
+        "loc": 43,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-latency.ts",
+        "loc": 60,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/solana-live-clamp.test.ts",
+        "loc": 99,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-signer.ts",
+        "loc": 121,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "03-crypto-authority",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/solana-simulation.test.ts",
+        "loc": 531,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/solana-simulation.ts",
+        "loc": 507,
+        "status": "skim",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/stop-loss-job.test.ts",
+        "loc": 125,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/trade-workers.test.ts",
+        "loc": 95,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/trade-workers.ts",
+        "loc": 130,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/trojan-runtime.test.ts",
+        "loc": 116,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/trojan-runtime.ts",
+        "loc": 488,
+        "status": "skim",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "apps/trade-executor/src/trojan.test.ts",
+        "loc": 332,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/src/trojan.ts",
+        "loc": 465,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/trade-executor/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/package.json",
+        "loc": 22,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "packages/shared/src/address.test.ts",
+        "loc": 54,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/address.ts",
+        "loc": 90,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/billing.test.ts",
+        "loc": 100,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/billing.ts",
+        "loc": 125,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/shared/src/constants.ts",
+        "loc": 160,
+        "status": "skim",
+        "evidence_reports": [
+          "07-trade-executor",
+          "08-secondary-services",
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "packages/shared/src/copy-trade-lifecycle.test.ts",
+        "loc": 171,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/copy-trade-lifecycle.ts",
+        "loc": 250,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/email.test.ts",
+        "loc": 470,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/email.ts",
+        "loc": 486,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/shared/src/execution.test.ts",
+        "loc": 66,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/execution.ts",
+        "loc": 48,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/index.ts",
+        "loc": 56,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/ingestion-health.test.ts",
+        "loc": 74,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/ingestion-health.ts",
+        "loc": 106,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/jito.test.ts",
+        "loc": 426,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/jito.ts",
+        "loc": 546,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/shared/src/jupiter-swap.test.ts",
+        "loc": 214,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/jupiter-swap.ts",
+        "loc": 274,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "packages/shared/src/jupiter.test.ts",
+        "loc": 143,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/jupiter.ts",
+        "loc": 304,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "packages/shared/src/logger.test.ts",
+        "loc": 116,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/logger.ts",
+        "loc": 113,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/lp-lifecycle.test.ts",
+        "loc": 50,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/lp-lifecycle.ts",
+        "loc": 60,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-book-depth.test.ts",
+        "loc": 497,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-book-depth.ts",
+        "loc": 1066,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-book-transport.test.ts",
+        "loc": 720,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-book-transport.ts",
+        "loc": 1060,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-clob-auth.test.ts",
+        "loc": 211,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-clob-auth.ts",
+        "loc": 174,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/shared/src/polymarket-clob-credentials.test.ts",
+        "loc": 743,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/polymarket-clob-credentials.ts",
+        "loc": 782,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/shared/src/prices.test.ts",
+        "loc": 237,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/prices.ts",
+        "loc": 402,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/pusd-liquidity.test.ts",
+        "loc": 226,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/pusd-liquidity.ts",
+        "loc": 298,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/queues.test.ts",
+        "loc": 42,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/queues.ts",
+        "loc": 26,
+        "status": "skim",
+        "evidence_reports": [
+          "07-trade-executor",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "packages/shared/src/rpc-failover.test.ts",
+        "loc": 189,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/rpc-failover.ts",
+        "loc": 345,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "packages/shared/src/scoring.test.ts",
+        "loc": 80,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/scoring.ts",
+        "loc": 67,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer"
+        ]
+      },
+      {
+        "path": "packages/shared/src/slippage.test.ts",
+        "loc": 82,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/slippage.ts",
+        "loc": 86,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "07-trade-executor"
+        ]
+      },
+      {
+        "path": "packages/shared/src/sol-reserve.test.ts",
+        "loc": 92,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/sol-reserve.ts",
+        "loc": 80,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/starter-pack.test.ts",
+        "loc": 111,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/starter-pack.ts",
+        "loc": 154,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/tiers.test.ts",
+        "loc": 165,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/tiers.ts",
+        "loc": 137,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/trade-queues.test.ts",
+        "loc": 95,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/types.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/src/validation.ts",
+        "loc": 49,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "packages/shared/tsconfig.json",
+        "loc": 10,
+        "status": "not-reviewed"
+      }
+    ],
+    "08-secondary-services": [
+      {
+        "path": "apps/alert-service/package.json",
+        "loc": 23,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/alert-service/src/alert-bridge.test.ts",
+        "loc": 186,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/alert-service/src/alert-bridge.ts",
+        "loc": 68,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services",
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "apps/alert-service/src/alert-delivery.ts",
+        "loc": 24,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/alert-service/src/alert-payload.ts",
+        "loc": 270,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/alert-service/src/index.ts",
+        "loc": 500,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/alert-service/src/ingestion-health.test.ts",
+        "loc": 132,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/alert-service/src/ingestion-health.ts",
+        "loc": 120,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/alert-service/src/pusd-monitor.test.ts",
+        "loc": 89,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/alert-service/src/pusd-monitor.ts",
+        "loc": 58,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/alert-service/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/discovery/package.json",
+        "loc": 28,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/discovery/src/index.ts",
+        "loc": 87,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/discovery/src/runner.test.ts",
+        "loc": 99,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/discovery/src/runner.ts",
+        "loc": 123,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "06-signals-scorer",
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/discovery/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/.zcodeignore",
+        "loc": 37,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/package.json",
+        "loc": 33,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/lp/src/auth.ts",
+        "loc": 103,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/lp/src/builder/build-position.test.ts",
+        "loc": 205,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/build-position.ts",
+        "loc": 244,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/builder/evm-ladder.ts",
+        "loc": 116,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/ladder-builders.test.ts",
+        "loc": 145,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/ladder-plan.test.ts",
+        "loc": 164,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/ladder-plan.ts",
+        "loc": 232,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/live-context.ts",
+        "loc": 101,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/live-preview.test.ts",
+        "loc": 137,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/live-preview.ts",
+        "loc": 195,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/meteora-ladder.ts",
+        "loc": 100,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/builder/plan-ports.ts",
+        "loc": 30,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/builder/templates.ts",
+        "loc": 112,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/copy/copy-worker.ts",
+        "loc": 102,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/copy/copy.test.ts",
+        "loc": 273,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/copy/master-listener.ts",
+        "loc": 137,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/copy/sizing.ts",
+        "loc": 124,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/domain/net-lp-result.test.ts",
+        "loc": 72,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/domain/net-lp-result.ts",
+        "loc": 65,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/guardrails/deploy-guard.ts",
+        "loc": 60,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/guardrails/exposure-cap.ts",
+        "loc": 97,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/guardrails/guardrails.test.ts",
+        "loc": 185,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/guardrails/profit-bank.ts",
+        "loc": 97,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/guardrails/reserve-vault.ts",
+        "loc": 65,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/index.ts",
+        "loc": 446,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services",
+          "10-web-app",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/lp/src/monitor/classifier.ts",
+        "loc": 41,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/monitor/economic-check.ts",
+        "loc": 60,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/monitor/evm-rebalance.ts",
+        "loc": 44,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/monitor/meteora-rebalance.ts",
+        "loc": 52,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/monitor/monitor-job.test.ts",
+        "loc": 161,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/monitor/monitor-job.ts",
+        "loc": 153,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/monitor/monitor.test.ts",
+        "loc": 161,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/bundled-wallets.ts",
+        "loc": 87,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/evm-checks.ts",
+        "loc": 141,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/risk-pass.test.ts",
+        "loc": 102,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/risk-pass.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/score.test.ts",
+        "loc": 50,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/score.ts",
+        "loc": 74,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/solana-checks.test.ts",
+        "loc": 151,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/solana-checks.ts",
+        "loc": 187,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/solana-rpc.ts",
+        "loc": 57,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/risk/types.ts",
+        "loc": 41,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/routes.test.ts",
+        "loc": 686,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/routes.ts",
+        "loc": 556,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "apps/lp/src/scanner/active-tvl.test.ts",
+        "loc": 105,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/active-tvl.ts",
+        "loc": 149,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/evm-clmm-pools.ts",
+        "loc": 329,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/evm-clmm-registry.ts",
+        "loc": 101,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/evm-clmm.test.ts",
+        "loc": 99,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/fee-apr.test.ts",
+        "loc": 56,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/fee-apr.ts",
+        "loc": 44,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/meteora-pools.test.ts",
+        "loc": 165,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/meteora-pools.ts",
+        "loc": 231,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/new-launches.test.ts",
+        "loc": 176,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/new-launches.ts",
+        "loc": 107,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/ranking.ts",
+        "loc": 49,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/raydium-clmm.test.ts",
+        "loc": 95,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/raydium-clmm.ts",
+        "loc": 185,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/robinhood-pools.test.ts",
+        "loc": 161,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/robinhood-pools.ts",
+        "loc": 44,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/scan-job.test.ts",
+        "loc": 69,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/scan-job.ts",
+        "loc": 83,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/solana-bins.test.ts",
+        "loc": 175,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/solana-bins.ts",
+        "loc": 217,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/scanner/types.ts",
+        "loc": 60,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/evm-positions.ts",
+        "loc": 75,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/pnl.test.ts",
+        "loc": 61,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/pnl.ts",
+        "loc": 73,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/position-readers.test.ts",
+        "loc": 95,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/solana-positions.ts",
+        "loc": 80,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/types.ts",
+        "loc": 29,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/wallet-indexer.test.ts",
+        "loc": 111,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/src/wallets/wallet-indexer.ts",
+        "loc": 120,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/lp/tsconfig.json",
+        "loc": 5,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/.gitignore",
+        "loc": 18,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/config/kols.example.yaml",
+        "loc": 32,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/pyproject.toml",
+        "loc": 55,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "pattern-ml/scripts/setup-server.sh",
+        "loc": 87,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/__init__.py",
+        "loc": 15,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/__init__.py",
+        "loc": 62,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/assemble.py",
+        "loc": 325,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/providers/__init__.py",
+        "loc": 29,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/providers/polymarket.py",
+        "loc": 482,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/providers/solana.py",
+        "loc": 481,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/rank.py",
+        "loc": 347,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/schema.py",
+        "loc": 323,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/choice/snapshot.py",
+        "loc": 223,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/cli.py",
+        "loc": 926,
+        "status": "skim",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/config.py",
+        "loc": 234,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/index/__init__.py",
+        "loc": 11,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/index/normalize.py",
+        "loc": 389,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/index/positions.py",
+        "loc": 231,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/prices.py",
+        "loc": 123,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/report.py",
+        "loc": 238,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/schema.py",
+        "loc": 120,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/sources/__init__.py",
+        "loc": 19,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/sources/base.py",
+        "loc": 126,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/sources/bitquery.py",
+        "loc": 541,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/sources/polymarket.py",
+        "loc": 272,
+        "status": "skim",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/sources/solana.py",
+        "loc": 207,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/stats.py",
+        "loc": 151,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/storage.py",
+        "loc": 282,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "08-secondary-services"
+        ]
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/validate/__init__.py",
+        "loc": 24,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/validate/backtest.py",
+        "loc": 290,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/src/pattern_ml/venues.py",
+        "loc": 235,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/conftest.py",
+        "loc": 49,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_backtest.py",
+        "loc": 180,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_bitquery.py",
+        "loc": 172,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_choice_sets.py",
+        "loc": 462,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_config.py",
+        "loc": 110,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_normalize.py",
+        "loc": 398,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_polymarket_provider.py",
+        "loc": 299,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_positions.py",
+        "loc": 284,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_rank.py",
+        "loc": 163,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_solana_provider.py",
+        "loc": 341,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_stats.py",
+        "loc": 112,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pattern-ml/tests/test_venues.py",
+        "loc": 155,
+        "status": "not-reviewed"
+      }
+    ],
+    "09-agent-mcp": [
+      {
+        "path": "apps/mcp-server/package.json",
+        "loc": 26,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/mcp-server/src/index.test.ts",
+        "loc": 122,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "09-agent-mcp"
+        ]
+      },
+      {
+        "path": "apps/mcp-server/src/index.ts",
+        "loc": 405,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/mcp-server/tsconfig.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      }
+    ],
+    "10-web-app": [
+      {
+        "path": "apps/web/.gitignore",
+        "loc": 2,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/admin/page.tsx",
+        "loc": 5,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/admin/portfolio/page.tsx",
+        "loc": 832,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/admin/revenue/page.tsx",
+        "loc": 350,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/web/app/billing/page.tsx",
+        "loc": 538,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/web/app/clusters/page.tsx",
+        "loc": 175,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/dashboard/page.tsx",
+        "loc": 1024,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/globals.css",
+        "loc": 193,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/layout.tsx",
+        "loc": 98,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/learn/page.tsx",
+        "loc": 1772,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/web/app/login/page.tsx",
+        "loc": 151,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/logs/page.tsx",
+        "loc": 461,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/lp/builder/page.tsx",
+        "loc": 359,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/lp/copy/page.tsx",
+        "loc": 669,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/lp/discover/page.tsx",
+        "loc": 315,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/lp/layout.tsx",
+        "loc": 99,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/lp/page.tsx",
+        "loc": 18,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/lp/positions/page.tsx",
+        "loc": 347,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/lp/whales/page.tsx",
+        "loc": 552,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/web/app/page.tsx",
+        "loc": 1187,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/performance/page.tsx",
+        "loc": 227,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/positions/page.tsx",
+        "loc": 594,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/settings/page.tsx",
+        "loc": 299,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/setup/page.tsx",
+        "loc": 476,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/signals/page.tsx",
+        "loc": 89,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/signup/page.tsx",
+        "loc": 333,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/vault/page.tsx",
+        "loc": 1625,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "04-on-chain-programs",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/wallets/page.tsx",
+        "loc": 623,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/app/workspace/page.tsx",
+        "loc": 177,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/AttributionView.tsx",
+        "loc": 334,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/web/app/workspace/views/CommandCenterView.tsx",
+        "loc": 282,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/HealthView.tsx",
+        "loc": 489,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api"
+        ]
+      },
+      {
+        "path": "apps/web/app/workspace/views/LpView.tsx",
+        "loc": 987,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/RiskExecutionView.tsx",
+        "loc": 302,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/SignalsView.tsx",
+        "loc": 486,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/WalletIntelView.tsx",
+        "loc": 319,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/WorkspaceView.tsx",
+        "loc": 449,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/attribution-model.test.ts",
+        "loc": 58,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/app/workspace/views/attribution-model.ts",
+        "loc": 149,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/components/AdminNav.tsx",
+        "loc": 203,
+        "status": "skim",
+        "evidence_reports": [
+          "02-database",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/components/SaaSNav.tsx",
+        "loc": 179,
+        "status": "skim",
+        "evidence_reports": [
+          "02-database",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/components/StatusPill.tsx",
+        "loc": 37,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/components/ThemeProvider.tsx",
+        "loc": 79,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/components/ThemeToggle.tsx",
+        "loc": 49,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/components/UIPrimitives.tsx",
+        "loc": 138,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/components/WakeLogo.tsx",
+        "loc": 59,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/lib/api-error-message.test.ts",
+        "loc": 63,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/lib/api-error-message.ts",
+        "loc": 61,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/lib/api-server.ts",
+        "loc": 53,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/lib/api.test.ts",
+        "loc": 181,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/lib/api.ts",
+        "loc": 277,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/lib/route-access.test.ts",
+        "loc": 87,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/lib/route-access.ts",
+        "loc": 114,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "01-api",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/lib/wallets.ts",
+        "loc": 355,
+        "status": "skim",
+        "evidence_reports": [
+          "01-api",
+          "04-on-chain-programs",
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/middleware.ts",
+        "loc": 87,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "apps/web/next-env.d.ts",
+        "loc": 6,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/next.config.ts",
+        "loc": 49,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/web/package.json",
+        "loc": 26,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "apps/web/postcss.config.js",
+        "loc": 6,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/tailwind.config.ts",
+        "loc": 129,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/tsconfig.json",
+        "loc": 31,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "apps/web/vercel.json",
+        "loc": 9,
+        "status": "skim",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "pda-test-ui/.gitignore",
+        "loc": 2,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pda-test-ui/public/index.html",
+        "loc": 904,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      },
+      {
+        "path": "pda-test-ui/public/nacl-fast.min.js",
+        "loc": 1,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pda-test-ui/public/solanaWeb3.min.js",
+        "loc": 20,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "pda-test-ui/server.mjs",
+        "loc": 394,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app"
+        ]
+      }
+    ],
+    "11-infrastructure-supply-chain": [
+      {
+        "path": ".gitignore",
+        "loc": 40,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": ".mcp.json",
+        "loc": 8,
+        "status": "not-reviewed"
+      },
+      {
+        "path": ".vscode/mcp.json",
+        "loc": 4,
+        "status": "not-reviewed"
+      },
+      {
+        "path": ".woodpecker/ci.yaml",
+        "loc": 90,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": ".woodpecker.yaml",
+        "loc": 90,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": ".zcodeignore",
+        "loc": 62,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "deploy/pgbouncer/pgbouncer.ini",
+        "loc": 54,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "02-database",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "deploy/systemd/swat-api.service",
+        "loc": 24,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "deploy/systemd/swat-billing-sweep.service",
+        "loc": 17,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "deploy/systemd/swat-trade-executor.service",
+        "loc": 28,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "docker-compose.yml",
+        "loc": 65,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "package.json",
+        "loc": 46,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app",
+          "11-infrastructure-supply-chain",
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "pnpm-workspace.yaml",
+        "loc": 3,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/check-env-coverage.mjs",
+        "loc": 155,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/check-public-secrets.mjs",
+        "loc": 98,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/discover-starter-pack.ts",
+        "loc": 540,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/g0-d11-acceptance.ts",
+        "loc": 6,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/generate_campaign_docx.py",
+        "loc": 923,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/polymarket-book-acceptance.ts",
+        "loc": 6,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/polymarket-context-acceptance.ts",
+        "loc": 6,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/run-web-dev.mjs",
+        "loc": 28,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "10-web-app",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/seed-alpha-masters.ts",
+        "loc": 104,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/start.sh",
+        "loc": 163,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "09-agent-mcp",
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/test-integration.sh",
+        "loc": 25,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/update-threshold.sh",
+        "loc": 45,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "scripts/verify-acceptance.ts",
+        "loc": 109,
+        "status": "skim",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "skills-lock.json",
+        "loc": 365,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain"
+        ]
+      },
+      {
+        "path": "tsconfig.base.json",
+        "loc": 16,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tsconfig.integration.json",
+        "loc": 71,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tsconfig.tools.json",
+        "loc": 9,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "turbo.json",
+        "loc": 33,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "11-infrastructure-supply-chain",
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "vitest.integration.config.ts",
+        "loc": 35,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      }
+    ],
+    "12-test-assurance": [
+      {
+        "path": "tests/integration/chaos.integration.test.ts",
+        "loc": 432,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tests/integration/copy-eligibility.integration.test.ts",
+        "loc": 216,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/copy-position-master-lots.integration.test.ts",
+        "loc": 31,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/copy-position-tenancy.integration.test.ts",
+        "loc": 309,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/copy-trade-lifecycle.integration.test.ts",
+        "loc": 748,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/cross-tenant.integration.test.ts",
+        "loc": 252,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tests/integration/fanout-candidates.integration.test.ts",
+        "loc": 371,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/funder-degree-cap.integration.test.ts",
+        "loc": 184,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/global-setup.ts",
+        "loc": 17,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tests/integration/helpers/lifecycle-fixture.ts",
+        "loc": 309,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tests/integration/helpers/schema-guard.ts",
+        "loc": 110,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tests/integration/lot-exits.integration.test.ts",
+        "loc": 119,
+        "status": "in-depth-relevant-path",
+        "evidence_reports": [
+          "12-test-assurance"
+        ]
+      },
+      {
+        "path": "tests/integration/master-attributed-inventory.integration.test.ts",
+        "loc": 231,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/master-capacity.integration.test.ts",
+        "loc": 425,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/master-membership.integration.test.ts",
+        "loc": 286,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/pipeline.integration.test.ts",
+        "loc": 373,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/polymarket-redemption.integration.test.ts",
+        "loc": 133,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/reconciliation-coordinator.integration.test.ts",
+        "loc": 224,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/source-trade-legacy-key.integration.test.ts",
+        "loc": 153,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/subscription-states.integration.test.ts",
+        "loc": 321,
+        "status": "not-reviewed"
+      },
+      {
+        "path": "tests/integration/subscriptions.integration.test.ts",
+        "loc": 273,
+        "status": "not-reviewed"
+      }
+    ]
+  }
+}

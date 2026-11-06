@@ -1,0 +1,1 @@
+{"extends": "../packages/db/tsconfig.json", "compilerOptions": {"rootDir": "..", "outDir": "runtime/build/packages-db", "tsBuildInfoFile": "runtime/build/packages-db.tsbuildinfo"}}

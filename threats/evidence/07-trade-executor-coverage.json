@@ -1,0 +1,32 @@
+{
+  "deep": [
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/trade-workers.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-dispatch.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-signer.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/policy.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-latency.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/reconciliation-venues.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/evm-nonce.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter-swap.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/slippage.ts",
+    "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/robinhood.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-simulation.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/trojan-runtime.ts",
+    "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/constants.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/queues.ts"
+  ],
+  "excluded": []
+}

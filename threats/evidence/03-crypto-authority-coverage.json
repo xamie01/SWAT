@@ -1,0 +1,34 @@
+{
+  "deep": [
+    "/home/xahmie/Documents/SWAT/README.md",
+    "/home/xahmie/Documents/SWAT/docs/adr/0002-custody-key-store.md",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/key-wrapper.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/envelope.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/withdrawal-authorization.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/evm-calldata.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-signer.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/wallet-signature.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/envelope.test.ts"
+  ],
+  "skim": [
+    "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/permit2.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/robinhood.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/execution-grants.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-wiring.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/withdrawal-authorization.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/withdraw.test.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-dispatch.ts",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.test.ts"
+  ],
+  "excluded": []
+}

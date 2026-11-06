@@ -1,0 +1,726 @@
+{
+  "scope": "Static bounded observations; no exploit/test/deployment claim. Previous five lenses are not counted again.",
+  "raw_count": 82,
+  "raw_severity_counts": {
+    "High": 27,
+    "Medium": 48,
+    "Low": 7
+  },
+  "deduplicated_count": 76,
+  "deduplicated_severity_counts": {
+    "High": 24,
+    "Medium": 46,
+    "Low": 6
+  },
+  "deduplicated_confidence_counts": {
+    "Verified": 52,
+    "Likely": 21,
+    "Needs check": 3
+  },
+  "folded_into": {
+    "CRY-01": "EXE-01",
+    "SIG-01": "EXE-02",
+    "CRY-06": "API-03",
+    "CRY-07": "API-06",
+    "WEB-04": "INF-04",
+    "EXE-09": "EXE-06"
+  },
+  "findings": [
+    {
+      "report": "01-api",
+      "line": 23,
+      "id": "API-01",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "`apps/api/src/routes/billing.ts:274-286,378-419`; `packages/db/src/billing.ts:188-225`",
+      "folded_observations": []
+    },
+    {
+      "report": "01-api",
+      "line": 24,
+      "id": "API-02",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "`apps/api/src/routes/billing.ts:277,284,82,413`; `packages/db/src/billing.ts:195`; `packages/db/sql/063_crypto_billing.sql:18,34-35`",
+      "folded_observations": []
+    },
+    {
+      "report": "01-api",
+      "line": 25,
+      "id": "API-03",
+      "severity": "High",
+      "confidence": "Likely",
+      "evidence": "`apps/api/src/routes/me.ts:502-515,536-539,603-651`; `packages/shared/src/polymarket-clob-credentials.ts:744-781`",
+      "folded_observations": [
+        "CRY-06"
+      ]
+    },
+    {
+      "report": "01-api",
+      "line": 26,
+      "id": "API-04",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`packages/db/src/billing.ts:390-425`; `apps/api/src/routes/billing.ts:454-456`; `apps/api/src/cron/billing-sweep.ts:14-19`",
+      "folded_observations": []
+    },
+    {
+      "report": "01-api",
+      "line": 27,
+      "id": "API-05",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "`apps/api/src/index.ts:54,129-166`; `DEPLOYMENT.md:482-487`",
+      "folded_observations": []
+    },
+    {
+      "report": "01-api",
+      "line": 28,
+      "id": "API-06",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`apps/api/src/routes/me.ts:98-107,1184-1189,1268-1297`; `apps/web/app/vault/page.tsx:498-524`",
+      "folded_observations": [
+        "CRY-07"
+      ]
+    },
+    {
+      "report": "01-api",
+      "line": 29,
+      "id": "API-07",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`apps/api/src/routes/me.ts:447-477`; `packages/db/sql/047_user_execution_grants.sql:95-113`; `apps/web/app/vault/page.tsx:542-559,588-605`",
+      "folded_observations": []
+    },
+    {
+      "report": "01-api",
+      "line": 30,
+      "id": "API-08",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`apps/api/src/routes/execution-settings.ts:279,483,553`; `packages/db/src/user-execution-settings.ts:327-333,426-440`; `packages/db/sql/049_user_execution_settings.sql:44-48`; `apps/web/app/settings/page.tsx:67-79`",
+      "folded_observations": []
+    },
+    {
+      "report": "02-database",
+      "line": 23,
+      "id": "DB-01",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "`packages/db/src/evm-nonce.ts:87-126`; `deploy/pgbouncer/pgbouncer.ini:23`; `apps/trade-executor/src/robinhood.ts:799-900`; `packages/db/src/migrate.ts:18-37`",
+      "folded_observations": []
+    },
+    {
+      "report": "02-database",
+      "line": 24,
+      "id": "DB-02",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`packages/db/sql/064_row_level_security.sql:29-45,89-114`; `packages/db/src/tenancy.ts:72-110`; `packages/db/src/client.ts:65-68`; `packages/db/src/user-execution-settings.ts:389-449`",
+      "folded_observations": []
+    },
+    {
+      "report": "02-database",
+      "line": 25,
+      "id": "DB-03",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "`packages/db/src/users.ts:125-136,180-188,231-285`; `apps/api/src/auth/routes.ts:190-203`; `apps/api/src/auth/plugin.ts:135-151`",
+      "folded_observations": []
+    },
+    {
+      "report": "02-database",
+      "line": 26,
+      "id": "DB-04",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`packages/db/src/execution-config.ts:6,68-89,175-179,222-239`; `apps/api/src/trading-control.ts:45-47`; `apps/trade-executor/src/index.ts:1462-1475`",
+      "folded_observations": []
+    },
+    {
+      "report": "02-database",
+      "line": 27,
+      "id": "DB-05",
+      "severity": "Low",
+      "confidence": "Verified",
+      "evidence": "`packages/db/sql/064_row_level_security.sql:47-64`; `packages/db/sql/066_lp_dashboard.sql:71-101`; `packages/db/sql/065_polymarket_perps.sql:86-103`",
+      "folded_observations": []
+    },
+    {
+      "report": "02-database",
+      "line": 28,
+      "id": "DB-06",
+      "severity": "Low",
+      "confidence": "Likely",
+      "evidence": "`packages/db/src/migrate.ts:21-32`; `packages/db/sql/066_lp_dashboard.sql:168-193`; `packages/db/sql/067_lp_auto_rebalance.sql:24-44`",
+      "folded_observations": []
+    },
+    {
+      "report": "03-crypto-authority",
+      "line": 22,
+      "id": "CRY-02",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Verified primitive; likely needs integration test. AAD omits chain/account/grant/purpose and current API uses constant `evm`, version 1 (/home/xahmie/Documents/SWAT/packages/shared/src/authority/key-wrapper.ts:7\u201311,27\u201329; /home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:611\u2013651; /home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql:18\u201322,31\u201363). No production decrypt caller identified.",
+      "folded_observations": []
+    },
+    {
+      "report": "03-crypto-authority",
+      "line": 23,
+      "id": "CRY-03",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified design gap; deployment distribution needs check. API needs the environment wrapping key to seal; wrapper stores it locally, while SQL commentary claims the API has no wrapper key (/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:611\u2013623; /home/xahmie/Documents/SWAT/packages/shared/src/authority/key-wrapper.ts:40\u201368; /home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql:74\u201381). Opening rejects a different wrapper ID; caller creates only default version 1 (/home/xahmie/Documents/SWAT/packages/shared/src/authority/envelope.ts:92\u201395; /home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:611\u2013615).",
+      "folded_observations": []
+    },
+    {
+      "report": "03-crypto-authority",
+      "line": 24,
+      "id": "CRY-04",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Verified helper path; likely needs test. Withdrawal message lacks deployment/network/program/vault identity and verification does not issue or consume nonce (/home/xahmie/Documents/SWAT/packages/shared/src/authority/withdrawal-authorization.ts:4\u201311,34\u201343,55\u2013149). Inspected API uses OTP instead, not this helper (/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:1215\u20131297). Impact qualification: conditional before integration.",
+      "folded_observations": []
+    },
+    {
+      "report": "03-crypto-authority",
+      "line": 25,
+      "id": "CRY-05",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Verified compiler/evaluator path; likely needs test. Permit primary types require merely any address condition and any amount condition, not their semantic fields; contract allowance checks trust configured function name rather than selector binding (/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.ts:636\u2013692,709\u2013767,1105\u20131115). Engine checks whatever conditions are supplied, not mandatory swap recipient/minimum constraints (/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.ts:1185\u20131194). No runtime policy caller identified; per-user EVM denies (/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts:462\u2013467). Impact/confidence qualification: for compiler weakness; application exposure unproven.",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 30,
+      "id": "CHAIN-01",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified code path/callers read. Global executor chooses `max_in`, positive `min_out`, raw CPI data and token accounts; vault has no mint, expiry, cumulative-spend or price policy (/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:235\u2013329,465\u2013481,493\u2013515). Impact/confidence qualification: for economic scope; deployed impact conditional.",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 31,
+      "id": "CHAIN-02",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified callers read. UI reports on-chain revocation/rent refund after HTTP; API only changes DB status; actual program revocation requires owner Signer and changes on-chain flag (/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx:536\u2013575; /home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:400\u2013444; /home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:164\u2013172,399\u2013409). Impact/confidence qualification: for false revocation guarantee; deployed effect conditional.",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 32,
+      "id": "CHAIN-03",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified authority shape; operational setup needs check. Pinned initializer and `has_one` admin checks are real, but admin is a Signer, not intrinsic threshold enforcement; updater cannot replace admin (/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:35\u201339,46\u201379,339\u2013367).",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 33,
+      "id": "CHAIN-04",
+      "severity": "Medium",
+      "confidence": "Needs check",
+      "evidence": "Needs check. Named input/output require legacy `TokenAccount`/`Token`; rogue scan only considers that legacy owner ID; CPI gives vault signer to caller-selected remaining accounts (/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:25,273\u2013315,471\u2013486). Token2022 CPI routes/holdings were not verified. Impact qualification: conditional.",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 34,
+      "id": "CHAIN-05",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified coverage gap. Rust tests and \u201cTrident\u201d suite call pure helpers/synthetic state, not real instructions/Anchor account validation/CPI (/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:635\u2013881; /home/xahmie/Documents/SWAT/programs/wake-vault/trident-tests/fuzz_0/src/lib.rs:4\u20135,44\u2013102,109\u2013141). Initial-admin test compares keys, prefund test evaluates booleans (/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:698\u2013704,720\u2013729).",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 35,
+      "id": "CHAIN-06",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified helper/callers. PDA derivation error returns program ID as purported vault; page uses it as active identity/grant and substitutes active-looking fallback data on API failure (/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts:12\u201329; /home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx:131\u2013163,197\u2013224,632\u2013649). Impact/confidence qualification: for fail-open identity presentation.",
+      "folded_observations": []
+    },
+    {
+      "report": "04-on-chain-programs",
+      "line": 36,
+      "id": "CHAIN-07",
+      "severity": "Low",
+      "confidence": "Verified",
+      "evidence": "Verified minimal handler. Signature, own destination, PDA, positive amount and balance checks exist; vault System-owner/empty-data, account writable and System-program identity checks are not explicit before CPI (/home/xahmie/Documents/SWAT/programs/pda-vault-minimal/src/lib.rs:30\u201379). Impact/confidence qualification: for hardening, not demonstrated bypass.",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 20,
+      "id": "IDX-01",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/parse.ts:183-209,234-260; /home/xahmie/Documents/SWAT/apps/indexer/src/index.ts:157-164,251-305; /home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts:597-631",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 21,
+      "id": "IDX-02",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/parse.ts:138-155,179-209; /home/xahmie/Documents/SWAT/apps/indexer/src/index.ts:285-324; /home/xahmie/Documents/SWAT/apps/indexer/src/source-trade-lifecycle.ts:81-106",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 22,
+      "id": "IDX-03",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/webhook.ts:64-75; /home/xahmie/Documents/SWAT/apps/indexer/src/webhook-helpers.ts:102-133; /home/xahmie/Documents/SWAT/apps/indexer/src/parse.ts:76-78,162-176",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 23,
+      "id": "IDX-04",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/source-trade-lifecycle.ts:92-105,148-163,188-203; /home/xahmie/Documents/SWAT/apps/indexer/src/evm.ts:166-195; /home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts:719-746,872-880 (external reversal incidence: Needs check)",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 24,
+      "id": "IDX-05",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/source-trade-lifecycle.ts:116-163; /home/xahmie/Documents/SWAT/packages/db/src/transactions.ts:110-132; /home/xahmie/Documents/SWAT/apps/indexer/src/polymarket.ts:355-390; /home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts:644-645,700-710",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 25,
+      "id": "IDX-06",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/robinhood-ingestion.ts:190-262; /home/xahmie/Documents/SWAT/apps/indexer/src/evm.ts:313-329,455-488",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 26,
+      "id": "IDX-07",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/polymarket.ts:152-157,180-185,199-209,245-272; /home/xahmie/Documents/SWAT/packages/db/src/polymarket.ts:146-174",
+      "folded_observations": []
+    },
+    {
+      "report": "05-indexer-parsers",
+      "line": 27,
+      "id": "IDX-08",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/indexer/src/polymarket.ts:67-128,314-317; /home/xahmie/Documents/SWAT/apps/indexer/src/index.ts:91-109,130-153,261-283",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 18,
+      "id": "SIG-02",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts:1952-1976,2332-2365; /home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts:1743-1759,2304-2337; /home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts:25-73",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 19,
+      "id": "SIG-03",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/scorer/src/close-all.ts:46-70; /home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts:1665-1732; /home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts:1683-1688,2434-2435; /home/xahmie/Documents/SWAT/packages/db/src/trades.ts:309-318",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 20,
+      "id": "SIG-04",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts:300-317; /home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts:225-268; /home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts:85-123; /home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts:1505-1516,1902-1909,2304-2313,2454-2458,2608-2620; /home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket.ts:719-720",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 21,
+      "id": "SIG-05",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.ts:204-259; /home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts:274-283,435-475,507,586-587; /home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts:858-862",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 22,
+      "id": "SIG-06",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "/home/xahmie/Documents/SWAT/packages/db/src/scoring-queries.ts:19-115; /home/xahmie/Documents/SWAT/packages/shared/src/scoring.ts:44-59; /home/xahmie/Documents/SWAT/apps/scorer/src/index.ts:96-101,159-175; /home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts:630,507",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 23,
+      "id": "SIG-07",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/packages/db/src/clustering-queries.ts:34-44; /home/xahmie/Documents/SWAT/packages/db/src/independence.ts:288-317; /home/xahmie/Documents/SWAT/packages/db/src/independence-queries.ts:32-65,79-98; /home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:839-870",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 24,
+      "id": "SIG-08",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts:540-574; /home/xahmie/Documents/SWAT/apps/signal-engine/src/capacity-inputs.ts:641-655,685-702; /home/xahmie/Documents/SWAT/packages/db/src/master-capacity.ts:721-747,815-839,1596-1605,1673-1685; /home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts:1318-1338",
+      "folded_observations": []
+    },
+    {
+      "report": "06-signals-scorer",
+      "line": 25,
+      "id": "SIG-09",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts:306-313,540-552,586-587; /home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts:349-359; /home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts:269-277; /home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts:2894-2908; /home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts:110-123",
+      "folded_observations": []
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 23,
+      "id": "EXE-01",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified production construction, user adapter, dispatch and signer. User Solana inherits the operator signer, needs no grant, synthesizes an address, and ordinary Jupiter bypasses `authority.sign`: `apps/trade-executor/src/execution-authority-adapters.ts:498-568,604-618`; `apps/trade-executor/src/index.ts:1125-1162,1774-1795`; `apps/trade-executor/src/jupiter-jito-config.ts:109-131`.",
+      "folded_observations": [
+        "CRY-01"
+      ]
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 24,
+      "id": "EXE-02",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified fan-out to canonical claim and trade SQL. `userId` is omitted by `prepareCanonicalExecutions` and by every `persistTrade` input shape; DB normalizes omission to null: `apps/signal-engine/src/fanout-enqueue.ts:242-255`; `apps/trade-executor/src/index.ts:1179-1217,318-410`; `packages/db/src/copy-trade-lifecycle.ts:1746-1770,1834-1849`; `packages/db/src/trades.ts:140-180`.",
+      "folded_observations": [
+        "SIG-01"
+      ]
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 25,
+      "id": "EXE-03",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified producer-to-consumer policy mismatch. Producer carries user `executionMode`/`mirrors`; worker ignores both and re-resolves platform mode: `apps/signal-engine/src/fanout-enqueue.ts:246-253`; `apps/trade-executor/src/index.ts:1412-1436,1462-1469,1650-1657`. No producer `maxSlippageBps`; Polymarket call has no user slippage: `apps/signal-engine/src/fanout-enqueue.ts:215-255`; `apps/trade-executor/src/index.ts:1700,2304-2314`; `apps/trade-executor/src/polymarket.ts:740-746`.",
+      "folded_observations": []
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 26,
+      "id": "EXE-04",
+      "severity": "High",
+      "confidence": "Likely",
+      "evidence": "Verified arithmetic failure and non-atomic cap, Likely\u2014race test needed for overlap. Unvalidated `parseFloat` cap; guessed SOL/ETH rates; sum only confirmed filled/partial trades, excludes shadow but includes paper; unknown fill valuation writes zero: `apps/trade-executor/src/index.ts:1551-1565,353-368`; `packages/db/src/trades.ts:423-433`. Legacy/replica concurrency exists: `apps/trade-executor/src/trade-workers.ts:93-99`; `apps/trade-executor/src/index.ts:2893-2902`.",
+      "folded_observations": []
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 27,
+      "id": "EXE-05",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified build-to-sign trust boundary. Quote checks amounts/mode but not requested mints, amount equality or tolerance; builder trusts returned bytes/instructions and supplied ALT contents; signer only deserializes and signs: `packages/shared/src/jupiter.ts:201-215`; `packages/shared/src/jupiter-swap.ts:181-258`; `apps/trade-executor/src/solana-signer.ts:64-71`.",
+      "folded_observations": []
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 28,
+      "id": "EXE-06",
+      "severity": "High",
+      "confidence": "Likely",
+      "evidence": "Verified runtime unknown-state gap, Likely\u2014crash/race test needed for duplicate effect. Jito reads pending state without claim, transmits before saving, and retryable failure returns unknown without saving anything: `apps/trade-executor/src/jupiter-jito-runtime.ts:221-235,311-342`. Outer catch terminates canonical rows: `apps/trade-executor/src/index.ts:2647-2655`.",
+      "folded_observations": [
+        "EXE-09"
+      ]
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 29,
+      "id": "EXE-07",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Verified Jito sweeper caller and sinks. Sweep resolves its Redis state but caller only logs; submitted rows initially lack chain signature and canonical submission identity: `apps/trade-executor/src/index.ts:1798-1828,2732-2758`; `apps/trade-executor/src/jupiter-jito-runtime.ts:446-455`. Generic fallback cannot reconstruct quantities without identity: `apps/trade-executor/src/reconciliation-venues.ts:30-50,96-118`.",
+      "folded_observations": []
+    },
+    {
+      "report": "07-trade-executor",
+      "line": 30,
+      "id": "EXE-08",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified simulation factory/readiness gap. Signer can use shared RPC fallback, whereas simulator requires explicit RPC or Helius key; null gate becomes undefined while runtime still reports ready: `apps/trade-executor/src/solana-signer.ts:112-120`; `apps/trade-executor/src/solana-simulation.ts:451-492`; `apps/trade-executor/src/jupiter-jito-config.ts:109-135`.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 41,
+      "id": "SEC-01",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Verified credentialed CORS accepts every origin, contradicting allowlist comments: `apps/lp/src/index.ts:272-295`. Session issuer uses host-only `SameSite=Lax`: `apps/api/src/auth/routes.ts:106-124`. Needs check browser/deployment cookie delivery.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 42,
+      "id": "SEC-02",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified missing nonproduction key omits session hook despite warning: `apps/lp/src/index.ts:60-62,298-300`; routes require principal/user (`apps/lp/src/routes.ts:218-220,406-408`).",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 43,
+      "id": "SEC-03",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified user subscription calls service-only global registry writer before subscription; writer overwrites label and cadence on conflict: `apps/lp/src/routes.ts:403-408,490-505`; `packages/db/src/lp-tracked-wallets.ts:64-80`.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 44,
+      "id": "SEC-04",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified raw asset amounts are summed as USD across assets/chains, then compared with raw requested amount: `packages/db/src/lp-positions.ts:192-205,401-426`; `apps/lp/src/guardrails/deploy-guard.ts:38-48`. Likely\u2014race test needed read/check/insert overshoot (`apps/lp/src/builder/build-position.ts:151-201`). Current live submission refuses.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 45,
+      "id": "SEC-05",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified manual rebalance sets `rebalancing`, worker returns success without transition; monitor excludes that state: `apps/lp/src/routes.ts:332-350`; `apps/lp/src/index.ts:370-389`; `packages/db/src/lp-positions.ts:286-290`. Live plans remain building without a broadcast caller (`apps/lp/src/builder/build-position.ts:228-243`).",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 46,
+      "id": "SEC-06",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Verified latent perps arithmetic and submit-before-record: `apps/trade-executor/src/polymarket-perps.ts:97-99,172-217`. Zero withdrawable falls back, NaN margin/order comparisons can pass, client ID/leverage/builder not sent. Needs check production caller/session ownership; duplicate external effect Likely\u2014test needed.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 47,
+      "id": "SEC-07",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified tenant perps close updates SQL only; `query` returns rows and UPDATE has no RETURNING, so method reports false after a successful update: `apps/api/src/routes/me.ts:1330-1338`; `packages/db/src/polymarket-perps.ts:276-283`; `packages/db/src/client.ts:65-67`.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 48,
+      "id": "SEC-08",
+      "severity": "High",
+      "confidence": "Likely",
+      "evidence": "Verified alert delivery writes signal `status='alerted'` regardless of prior lifecycle after external send; TTL60 lock lacks ownership and send lacks timeout: `apps/alert-service/src/index.ts:41-60,379-410`. Likely\u2014race test needed regression/duplicate/lost alert consequences.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 49,
+      "id": "SEC-09",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified discovery upsert persists before failed enqueue, while subsequent queries exclude known wallets: `apps/discovery/src/runner.ts:44-55`; `packages/db/src/wallets.ts:44-64`; `packages/db/src/discovery-queries.ts:29-64`. Other recovery paths NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "08-secondary-services",
+      "line": 50,
+      "id": "SEC-10",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Verified Python confinement not enforced: configured absolute/parent paths accepted; roster Solana address not syntax-validated, then used as filesystem component; score deserializes pickle (`pattern-ml/src/pattern_ml/config.py:116-142,159-180`; `pattern-ml/src/pattern_ml/storage.py:89-105`; `pattern-ml/src/pattern_ml/cli.py:623-624`). Needs check untrusted artifact/roster distribution.",
+      "folded_observations": []
+    },
+    {
+      "report": "09-agent-mcp",
+      "line": 26,
+      "id": "MCP-01",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Unauthenticated routes and dispatch: `apps/mcp-server/src/index.ts:123-127,369-399`; mutations: `apps/mcp-server/src/index.ts:264-350`; transaction commit: `packages/db/src/transaction.ts:36-69`; consumers: `apps/signal-engine/src/index.ts:329-363`, `apps/scorer/src/index.ts:317-337`. Protocol exchange, listener access and operational DB/Redis privileges NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "09-agent-mcp",
+      "line": 27,
+      "id": "MCP-02",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "Global SQL-to-output: `apps/mcp-server/src/index.ts:128-140,189-240`; unscoped wrapper: `packages/db/src/client.ts:26-28,65-68`; reviewed RLS target list: `packages/db/sql/064_row_level_security.sql:66-117`. Actual data and exchange NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "09-agent-mcp",
+      "line": 28,
+      "id": "MCP-03",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Shared server/registry is verified source: `apps/mcp-server/src/index.ts:19-30,365-399`. Cross-session disruption depends on excluded SDK behavior; Needs check, protocol isolation NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "10-web-app",
+      "line": 23,
+      "id": "WEB-01",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Public-input keypair and address response: `pda-test-ui/server.mjs:38-41,99-130`; UI funding caller: `pda-test-ui/public/index.html:663-678,709-738`. Funding, active network and transfer NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "10-web-app",
+      "line": 24,
+      "id": "WEB-02",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "Separate unsigned parameters, arbitrary-message verification and signing: `pda-test-ui/server.mjs:202-285`; honest client message: `pda-test-ui/public/index.html:826-863`. Actual transfer NOT VERIFIED; recipient remains owner.",
+      "folded_observations": []
+    },
+    {
+      "report": "10-web-app",
+      "line": 25,
+      "id": "WEB-03",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "Raw sinks: `pda-test-ui/public/index.html:463-470,503-507,586-589,789-805,865-887`; raw server errors: `pda-test-ui/server.mjs:132-135,189-197,299-302`. Needs check: attacker influence over victim-visible text and script execution NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "10-web-app",
+      "line": 27,
+      "id": "WEB-05",
+      "severity": "Low",
+      "confidence": "Likely",
+      "evidence": "Raw destination validation/router call: `apps/web/app/login/page.tsx:25,40-57`. Needs framework check: off-origin navigation NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "10-web-app",
+      "line": 28,
+      "id": "WEB-06",
+      "severity": "Low",
+      "confidence": "Needs check",
+      "evidence": "Application config omission: `apps/web/next.config.ts:19-49`, `apps/web/middleware.ts:56-86`, `pda-test-ui/server.mjs:311-369`. Runtime/proxy headers NOT VERIFIED.",
+      "folded_observations": []
+    },
+    {
+      "report": "11-infrastructure-supply-chain",
+      "line": 17,
+      "id": "INF-01",
+      "severity": "High",
+      "confidence": "Likely",
+      "evidence": "`.woodpecker.yaml:68-90`; `.woodpecker/ci.yaml:68-90`",
+      "folded_observations": []
+    },
+    {
+      "report": "11-infrastructure-supply-chain",
+      "line": 18,
+      "id": "INF-02",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "`DEPLOYMENT.md:304-385`; `deploy/systemd/swat-api.service:8-19`; `deploy/systemd/swat-trade-executor.service:8-23`",
+      "folded_observations": []
+    },
+    {
+      "report": "11-infrastructure-supply-chain",
+      "line": 19,
+      "id": "INF-03",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "evidence": "`docker-compose.yml:13-18,45-50`; `packages/db/src/client.ts:10-27`; `packages/db/sql/064_row_level_security.sql:47-64`",
+      "folded_observations": []
+    },
+    {
+      "report": "11-infrastructure-supply-chain",
+      "line": 20,
+      "id": "INF-04",
+      "severity": "High",
+      "confidence": "Verified",
+      "evidence": "`apps/web/next.config.ts:4-17,24-35`; `.woodpecker.yaml:84-90`",
+      "folded_observations": [
+        "WEB-04"
+      ]
+    },
+    {
+      "report": "11-infrastructure-supply-chain",
+      "line": 21,
+      "id": "INF-05",
+      "severity": "Medium",
+      "confidence": "Needs check",
+      "evidence": "Historical commit `d4d543139755a82560513fef4aa173b2c5b1d327`, `swat.md:1351`; `.gitignore:3-7,25-26,39-40`",
+      "folded_observations": []
+    },
+    {
+      "report": "11-infrastructure-supply-chain",
+      "line": 22,
+      "id": "INF-06",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`pattern-ml/scripts/setup-server.sh:41-48`; `pattern-ml/pyproject.toml:7-40,45-47`; `DEPLOYMENT.md:142-145,393-395`",
+      "folded_observations": []
+    },
+    {
+      "report": "12-test-assurance",
+      "line": 18,
+      "id": "TEST-01",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`vitest.integration.config.ts:1-17`; `tests/integration/chaos.integration.test.ts:53-61,343-345,418`",
+      "folded_observations": []
+    },
+    {
+      "report": "12-test-assurance",
+      "line": 19,
+      "id": "TEST-02",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "evidence": "`tests/integration/helpers/lifecycle-fixture.ts:4-6,20-28,95-115,152-155,195-224`",
+      "folded_observations": []
+    },
+    {
+      "report": "12-test-assurance",
+      "line": 20,
+      "id": "TEST-03",
+      "severity": "Low",
+      "confidence": "Verified",
+      "evidence": "`tests/integration/helpers/schema-guard.ts:25-70,73-76,80-109`",
+      "folded_observations": []
+    }
+  ]
+}
