@@ -31,7 +31,11 @@ function toCsv(rows: Array<Record<string, unknown>>): string {
       .map((header) => {
         const val = row[header];
         if (val === null || val === undefined) return '';
-        const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        let str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        // OWA-08: Neutralize spreadsheet formula injection characters (=, +, -, @, \t, \r)
+        if (/^[=+\-@\t\r]/.test(str)) {
+          str = `'${str}`;
+        }
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
           return `"${str.replace(/"/g, '""')}"`;
         }
@@ -120,6 +124,7 @@ export function registerAdminPortfolioRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid export query' });
     }
     const { type, format } = parsed.data;
+    reply.header('Cache-Control', 'no-store');
     const data = await getAdminPortfolioExportData(undefined, type);
 
     if (format === 'json') {

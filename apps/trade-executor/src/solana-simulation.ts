@@ -1,4 +1,5 @@
 import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { getActiveRpcUrl } from '@swat/shared';
 import type {
   Commitment,
   RpcResponseAndContext,

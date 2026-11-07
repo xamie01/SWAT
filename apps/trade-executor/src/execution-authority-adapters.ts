@@ -605,7 +605,8 @@ export function createExecutionAuthorityAdapters(
   deps: OperatorAuthorityDeps,
   userSolanaOptions?: UserSolanaAuthorityOptions
 ): readonly UserExecutionAuthority[] {
-  const solanaSigner = userSolanaOptions?.signer ?? deps.solana.signer;
+  // Do NOT fall back to operator signer for user authority (EXE-01 / CRY-01)
+  const solanaSigner = userSolanaOptions?.signer;
   return [
     createOperatorSolanaAuthority(deps.solana),
     createUserSolanaAuthority({

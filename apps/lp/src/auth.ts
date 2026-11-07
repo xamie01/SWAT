@@ -53,8 +53,8 @@ export function legacyKeyHash(apiKey: string): Buffer {
 }
 
 export interface LpAuthOptions {
-  /** SHA-256 digest of the legacy shared key (API_KEY). */
-  readonly legacyKeyHash: Buffer;
+  /** SHA-256 digest of the legacy shared key (API_KEY). Optional if unconfigured in development. */
+  readonly legacyKeyHash?: Buffer;
 }
 
 export async function registerLpAuth(app: FastifyInstance, options: LpAuthOptions): Promise<void> {
@@ -84,7 +84,7 @@ export async function registerLpAuth(app: FastifyInstance, options: LpAuthOption
 
     const legacyKey = request.headers['x-api-key'];
     const presented = Array.isArray(legacyKey) ? legacyKey[0] ?? '' : legacyKey ?? '';
-    if (presented && constantTimeMatches(presented, options.legacyKeyHash)) {
+    if (presented && options.legacyKeyHash && constantTimeMatches(presented, options.legacyKeyHash)) {
       request.principal = { kind: 'service' };
       return;
     }

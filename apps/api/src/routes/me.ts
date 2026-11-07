@@ -97,7 +97,8 @@ export function isWalletCoolingOff(
 
 const withdrawRequestOtpSchema = z.object({
   destinationAddress: z.string().trim().min(32).max(120),
-  chainKind: z.enum(['evm', 'solana'])
+  chainKind: z.enum(['evm', 'solana']),
+  amountUsd: z.number().positive().max(100_000).optional()
 });
 
 const withdrawConfirmSchema = z.object({
@@ -445,6 +446,7 @@ export async function registerMeRoutes(
   });
 
   app.post('/v1/me/vault/grant', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const scope = requireUser(request, reply);
     if (!scope) return;
     const bodySchema = z.object({
@@ -457,6 +459,31 @@ export async function registerMeRoutes(
       return reply.code(400).send({ error: 'Bad Request', message: 'Invalid grant payload' });
     }
     const { chain, grantKind, accountAddress } = parsed.data;
+
+    // Strict address format validation per chain (API-07)
+    const normalizedAddress = chain === 'solana' ? accountAddress.trim() : accountAddress.trim().toLowerCase();
+    if (chain === 'solana') {
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(normalizedAddress)) {
+        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid Solana address format' });
+      }
+    } else {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(accountAddress.trim())) {
+        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid EVM address format' });
+      }
+    }
+
+    // Reject reservation if already registered to another user (API-07 / OWA-04)
+    const existingOther = await query<{ user_id: string }>(
+      `SELECT user_id FROM user_execution_grants
+        WHERE chain = $1 AND account_address = $2 AND status = 'active' AND user_id != $3`,
+      [chain, normalizedAddress, scope.userId]
+    );
+    if (existingOther.length > 0) {
+      return reply.code(409).send({
+        error: 'Conflict',
+        message: 'This account address is already registered to another user'
+      });
+    }
 
     // Revoke previous active grant for this kind
     await query(
@@ -474,7 +501,7 @@ export async function registerMeRoutes(
       `INSERT INTO user_execution_grants (user_id, chain, grant_kind, account_address, status, expires_at, created_at)
        VALUES ($1, $2, $3, $4, 'active', $5, NOW())
        RETURNING id`,
-      [scope.userId, chain, grantKind, accountAddress, expiresAt]
+      [scope.userId, chain, grantKind, normalizedAddress, expiresAt]
     );
 
     return reply.send({
@@ -523,6 +550,7 @@ export async function registerMeRoutes(
   });
 
   app.post('/v1/me/vault/polymarket/credentials', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const scope = requireUser(request, reply);
     if (!scope) return;
 
@@ -533,8 +561,9 @@ export async function registerMeRoutes(
 
     const { address, signature, timestampSeconds, nonce } = parsed.data;
 
+    // API-03 / CRY-06 / LEAK-01: Redact raw signature proof from normal log streams
     request.log.info(
-      { address, signature, timestampSeconds, nonce },
+      { address, timestampSeconds },
       '[polymarket-clob] Received credentials derivation request'
     );
 
@@ -622,6 +651,18 @@ export async function registerMeRoutes(
       });
       const sealedSecret = await sealSecret(secretPayload, wrapContext, wrapper);
 
+      // API-03 / OWA-04: Prevent cross-owner account reassignment
+      const existing = await query<{ user_id: string }>(
+        `SELECT user_id FROM user_execution_grants WHERE chain = 'polygon' AND account_address = $1 AND status = 'active'`,
+        [address.toLowerCase()]
+      );
+      if (existing.length > 0 && existing[0].user_id !== scope.userId) {
+        return reply.code(409).send({
+          error: 'Conflict',
+          message: 'Account address is already registered to another user'
+        });
+      }
+
       // 3. Revoke any prior active grant for polygon polymarket_signer
       await query(
         `UPDATE user_execution_grants
@@ -647,15 +688,19 @@ export async function registerMeRoutes(
                 scope_policy = EXCLUDED.scope_policy,
                 status = 'active',
                 revoked_at = NULL
+          WHERE user_execution_grants.user_id = EXCLUDED.user_id
          RETURNING id`,
         [scope.userId, address.toLowerCase(), sealedSecret, JSON.stringify(policy)]
       );
+
+      const apiKeyMasked = creds.apiKey ? `${creds.apiKey.slice(0, 6)}...${creds.apiKey.slice(-4)}` : '';
 
       return reply.send({
         success: true,
         grantId: inserted[0]?.id,
         address,
         apiKey: creds.apiKey,
+        apiKeyMasked,
         message: 'Polymarket L2 credentials derived and activated successfully'
       });
     } catch (err: any) {
@@ -1129,6 +1174,7 @@ export async function registerMeRoutes(
   const withdrawalOtps = options.otpStore ?? new Map<string, StoredWithdrawalOtp>();
 
   app.post('/v1/me/trading/withdraw/request-otp', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const scope = requireUser(request, reply);
     if (!scope) return;
     const principal = request.principal;
@@ -1139,7 +1185,7 @@ export async function registerMeRoutes(
       return reply.code(400).send({ error: 'Invalid payload', details: parsed.error.issues });
     }
 
-    const { destinationAddress, chainKind } = parsed.data;
+    const { destinationAddress, chainKind, amountUsd } = parsed.data;
 
     // S4-12: Destination MUST be a verified linked auth wallet (case-aware matching)
     const linkedWallets = await listAuthWallets(scope);
@@ -1186,6 +1232,7 @@ export async function registerMeRoutes(
       expiresAt,
       destinationAddress,
       chainKind,
+      amountUsd,
       attempts: 0
     });
 
@@ -1213,6 +1260,7 @@ export async function registerMeRoutes(
   });
 
   app.post('/v1/me/trading/withdraw', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const scope = requireUser(request, reply);
     if (!scope) return;
     const principal = request.principal;
@@ -1272,6 +1320,21 @@ export async function registerMeRoutes(
       });
     }
 
+    // API-06 / CRY-07: Verify exact bound amount and chain against stored OTP intent
+    if (storedOtp.amountUsd !== undefined && storedOtp.amountUsd !== amountUsd) {
+      return reply.code(400).send({
+        error: 'amount-mismatch',
+        message: 'Withdrawal code was requested for a different amount'
+      });
+    }
+
+    if (storedOtp.chainKind !== chainKind) {
+      return reply.code(400).send({
+        error: 'chain-mismatch',
+        message: 'Withdrawal code was requested for a different chain'
+      });
+    }
+
     if (!constantTimeCodeMatch(storedOtp.code, otpCode)) {
       storedOtp.attempts += 1;
       const remainingAttempts = 5 - storedOtp.attempts;
@@ -1284,9 +1347,10 @@ export async function registerMeRoutes(
     // Burn OTP immediately (single use)
     withdrawalOtps.delete(scope.userId);
 
+    // API-06: Acknowledge verified authorization accurately (not yet queued for on-chain execution)
     return reply.code(200).send({
       status: 'confirmed',
-      message: 'Withdrawal authorization verified and queued for execution',
+      message: 'Withdrawal authorization verified and authorized',
       withdrawal: {
         userId: scope.userId,
         destinationAddress,

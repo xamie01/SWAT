@@ -285,19 +285,20 @@ async function buildApp(): Promise<FastifyInstance> {
   await (app.register as any)(cors, {
     origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
       if (!origin) return cb(null, true);
-      if (corsOrigins.includes(origin) || origin.endsWith(':3000')) {
+      const isAllowed = corsOrigins.includes(origin) ||
+        origin === 'http://localhost:3000' ||
+        origin === 'http://127.0.0.1:3000';
+      if (isAllowed) {
         return cb(null, true);
       }
-      return cb(null, true);
+      return cb(new Error('Not allowed by CORS'), false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'X-Api-Key', 'x-csrf-token'],
     credentials: true
   });
   await (app.register as any)(cookie);
-  if (apiKey) {
-    await registerLpAuth(app, { legacyKeyHash: legacyKeyHash(apiKey) });
-  }
+  await registerLpAuth(app, { legacyKeyHash: apiKey ? legacyKeyHash(apiKey) : undefined });
   await registerLpRoutes(app, {
     deployGuard,
     executionMode,

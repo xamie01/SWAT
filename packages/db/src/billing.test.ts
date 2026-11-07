@@ -256,14 +256,14 @@ describe('db billing module', () => {
         .mockResolvedValueOnce([
           { id: 'user_expired_1', tier: 'operator', tier_expires_at: new Date('2026-10-25T00:00:00Z') }
         ]) // SELECT expired users
-        .mockResolvedValueOnce([]); // UPDATE users
+        .mockResolvedValueOnce([{ id: 'user_expired_1' }]); // UPDATE users returning id
 
       const result = await runTierDowngradeSweep(fixedNow);
       expect(result.downgradedCount).toBe(1);
       expect(result.downgradedUserIds).toEqual(['user_expired_1']);
       expect(mocks.query).toHaveBeenCalledWith(
         expect.stringContaining("UPDATE users SET tier = 'free'"),
-        ['user_expired_1']
+        ['user_expired_1', expect.any(Date)]
       );
     });
 

@@ -259,6 +259,81 @@ describe('Billing Routes', () => {
       expect(res.statusCode).toBe(409);
       expect(res.json().error).toBe('Conflict');
     });
+
+    it('rejects claim if memo belongs to a different user account', async () => {
+      const { app } = await harness({
+        findPaymentIntentByMemo: vi.fn().mockResolvedValue({
+          userId: 'other-user-uuid',
+          status: 'pending',
+          planId: 'operator_monthly'
+        })
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/billing/crypto/verify',
+        headers: { 'x-test-user': USER_A },
+        payload: {
+          chain: 'solana',
+          txHash: '5NfD9fH2X87qABCDEF1234567890abcdef',
+          planId: 'operator_monthly',
+          memo: 'SWAT-OTHER-USER'
+        }
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe('Forbidden');
+    });
+
+    it('normalizes polygon txHash to lowercase to prevent deduplication defeat (API-02)', async () => {
+      const recordSpy = vi.fn().mockResolvedValue({
+        payment: { id: 'p1', userId: USER_A, chain: 'polygon', txHash: '0xabc123', amountUsdc: 35, tier: 'operator', planId: 'operator_monthly', durationDays: 30, payerAddress: null, treasuryAddress: '0xTreasury', memo: null, status: 'confirmed', confirmedAt: new Date() },
+        updatedTier: 'operator',
+        updatedExpiresAt: new Date()
+      });
+      const { app } = await harness({
+        recordCryptoPaymentAndGrantTier: recordSpy,
+        verifyOnChainPayment: vi.fn().mockResolvedValue({ verified: true, payerAddress: '0xpayer', amountUsdc: 35 }),
+        listAuthWallets: vi.fn().mockResolvedValue([{ address: '0xpayer', chainKind: 'evm' }])
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/billing/crypto/verify',
+        headers: { 'x-test-user': USER_A },
+        payload: {
+          chain: 'polygon',
+          txHash: '0xABC123DEF45678901234567890ABCDEF1234567890ABCDEF1234567890ABCDEF',
+          planId: 'operator_monthly'
+        }
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(recordSpy).toHaveBeenCalledWith(expect.objectContaining({
+        txHash: '0xabc123def45678901234567890abcdef1234567890abcdef1234567890abcdef'
+      }));
+    });
+
+    it('rejects un-memoed payment if sender address is not linked to account (API-01 / OWA-03)', async () => {
+      const { app } = await harness({
+        verifyOnChainPayment: vi.fn().mockResolvedValue({ verified: true, payerAddress: '0xUnlinkedPayer', amountUsdc: 35 }),
+        listAuthWallets: vi.fn().mockResolvedValue([{ address: '0xDifferentWallet', chainKind: 'evm' }])
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/billing/crypto/verify',
+        headers: { 'x-test-user': USER_A },
+        payload: {
+          chain: 'polygon',
+          txHash: '0x1234567890abcdef1234567890abcdef',
+          planId: 'operator_monthly'
+        }
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe('Forbidden');
+    });
   });
 
   describe('POST /v1/admin/billing/sweep', () => {

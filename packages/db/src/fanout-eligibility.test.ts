@@ -358,4 +358,29 @@ describe('planFanout', () => {
     const plan = planFanout([], signal, platform);
     expect(plan).toEqual({ eligible: [], excluded: [], exclusionCounts: {} });
   });
+
+  describe('reducing exits (sells) policy (SIG-05)', () => {
+    const sellSignal: FanoutSignal = {
+      ...signal,
+      direction: 'sell',
+      score: 10 // low score
+    };
+
+    it('admits a sell even when signal score is below user min score', () => {
+      expect(assessFanoutCandidate(of({ minSignalScore: 80 }), sellSignal, platform))
+        .toMatchObject({ kind: 'eligible' });
+    });
+
+    it('admits a sell even when known balance is below minimum or unknown', () => {
+      expect(assessFanoutCandidate(of({ knownBalanceUsd: 0 }), sellSignal, platform))
+        .toMatchObject({ kind: 'eligible' });
+      expect(assessFanoutCandidate(of({ knownBalanceUsd: null }), sellSignal, platform))
+        .toMatchObject({ kind: 'eligible' });
+    });
+
+    it('admits a sell even when user is at position cap', () => {
+      expect(assessFanoutCandidate(of({ openPositionCount: 5, maxConcurrentPositions: 5 }), sellSignal, platform))
+        .toMatchObject({ kind: 'eligible' });
+    });
+  });
 });

@@ -85,22 +85,28 @@ function parseChain(raw: unknown, fallback: WalletChain = 'solana'): WalletChain
 }
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
-// Allow the web UI (any LAN origin / device) to call the API from the browser.
-// CORS_ORIGIN can pin this to a specific origin in production.
+// OWA-06: Strict CORS origin validation to prevent credential theft across origins
 const corsOrigin = process.env.CORS_ORIGIN;
+const configuredOrigins = corsOrigin
+  ? corsOrigin.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+
 await app.register(cors, {
-  origin: corsOrigin ? corsOrigin.split(',').map((o) => o.trim()) : true,
+  origin: (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+    // Direct server-to-server or non-browser callers
+    if (!origin) return cb(null, true);
+    if (configuredOrigins.length > 0) {
+      if (configuredOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error('Not allowed by CORS'), false);
+    }
+    // Fail closed in production if CORS_ORIGIN is not configured
+    if (process.env.NODE_ENV === 'production') {
+      return cb(new Error('CORS origin unconfigured in production'), false);
+    }
+    return cb(null, true);
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  // x-csrf-token is required, not optional: cookie auth means the browser
-  // attaches credentials to cross-site requests automatically, so the API
-  // rejects a cookie-authenticated mutation without the double-submit header.
-  // Omitting it here makes the preflight fail and every login-then-POST break
-  // with a CORS error that looks nothing like the auth problem it is.
   allowedHeaders: ['Content-Type', 'X-Api-Key', 'x-csrf-token'],
-  // Without this the browser discards Set-Cookie on the login response and
-  // never sends the session back, so cookie auth cannot work cross-origin at
-  // all. Note `origin: true` reflects the caller's origin rather than sending
-  // `*`, which is what makes credentialed CORS legal here.
   credentials: true
 });
 
@@ -298,9 +304,9 @@ async function checkSystemHealth(reply: any) {
         latencyMs: redisLatencyMs
       },
       rpc: {
-        solana: { healthy: Boolean(activeSolanaRpc), network: 'solana' },
-        polygon: { healthy: Boolean(activePolygonRpc), network: 'polygon' },
-        robinhood: { healthy: Boolean(activeRobinhoodRpc), network: 'robinhood-chain' }
+        solana: { configured: Boolean(activeSolanaRpc), network: 'solana' },
+        polygon: { configured: Boolean(activePolygonRpc), network: 'polygon' },
+        robinhood: { configured: Boolean(activeRobinhoodRpc), network: 'robinhood-chain' }
       }
     }
   });

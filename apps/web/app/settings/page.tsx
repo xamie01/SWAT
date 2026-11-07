@@ -70,11 +70,11 @@ export default function SettingsPage() {
         maxConcurrentPositions: settings.concurrentPositionCap,
       });
 
-      // Update per-chain slippage
-      await api.put('/v1/me/execution-settings/chains/solana', {
+      // API-08: Update per-chain slippage with correct PATCH method and propagate errors
+      await api.patch('/v1/me/execution-settings/chains/solana', {
         mode: settings.autoExecute ? 'live' : 'paper',
         maxSlippageBps: settings.maxSlippageBps,
-      }).catch(() => null);
+      });
 
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);

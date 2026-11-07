@@ -435,8 +435,11 @@ describe('the full adapter set', () => {
     }
   };
 
-  it('covers every chain for both principals', async () => {
-    const resolve = createExecutionAuthorityRegistry(createExecutionAuthorityAdapters(deps));
+  it('covers every chain for both principals when configured', async () => {
+    const userSigner = fakeSolanaSigner();
+    const resolve = createExecutionAuthorityRegistry(
+      createExecutionAuthorityAdapters(deps, { signer: userSigner })
+    );
 
     for (const chain of ['solana', 'robinhood-chain', 'polygon'] as const) {
       // Every operator request is granted.
@@ -454,6 +457,15 @@ describe('the full adapter set', () => {
         expect(forUser.kind).toBe('denied');
         expect(forUser.kind === 'denied' && forUser.code).not.toBe('authority-adapter-missing');
       }
+    }
+  });
+
+  it('fails closed on user Solana requests when no user signer is configured in adapters (EXE-01 / CRY-01)', async () => {
+    const resolve = createExecutionAuthorityRegistry(createExecutionAuthorityAdapters(deps));
+    const forUser = await resolve(request('solana', ALICE));
+    expect(forUser.kind).toBe('denied');
+    if (forUser.kind === 'denied') {
+      expect(forUser.code).toBe('authority-operator-not-configured');
     }
   });
 

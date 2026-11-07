@@ -62,9 +62,17 @@ export function createSolanaSigner(options: SolanaSignerOptions): SolanaSigner {
     publicKey,
 
     async sign(transactionBase64) {
-      const transaction = VersionedTransaction.deserialize(
-        Buffer.from(transactionBase64, 'base64')
-      );
+      if (!transactionBase64 || typeof transactionBase64 !== 'string') {
+        throw new Error('Transaction base64 payload must be a non-empty string');
+      }
+      const rawBytes = Buffer.from(transactionBase64, 'base64');
+      if (rawBytes.length === 0) {
+        throw new Error('Transaction payload cannot be empty');
+      }
+      const transaction = VersionedTransaction.deserialize(rawBytes);
+      if (!transaction.message || transaction.message.compiledInstructions.length === 0) {
+        throw new Error('Transaction message contains no instructions');
+      }
       // `sign` appends to the existing signature array rather than replacing it,
       // so a partially-signed transaction from Jupiter keeps its other signers.
       transaction.sign([keypair]);

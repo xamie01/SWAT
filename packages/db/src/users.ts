@@ -134,6 +134,8 @@ export async function changePassword(scope: UserScope, newPassword: string): Pro
       [scope.userId]
     );
   });
+  // DB-03: Invalidate session cache after revocation commit
+  invalidateUserSessionCache(scope.userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,20 +269,22 @@ export async function resolveSession(token: string): Promise<ResolvedSession | n
 export async function revokeSession(token: string): Promise<void> {
   const tokenHash = hashToken(token);
   const cacheKey = tokenHash.toString('hex');
-  cachedSessions.delete(cacheKey);
+  // DB-03: Commit DB revocation first then delete cache to prevent race re-population
   await query(
     'UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL',
     [tokenHash]
   );
+  cachedSessions.delete(cacheKey);
 }
 
 export async function revokeAllSessions(scope: UserScope): Promise<number> {
-  invalidateUserSessionCache(scope.userId);
   const rows = await query<{ id: string }>(
     `UPDATE user_sessions SET revoked_at = NOW()
       WHERE user_id = $1 AND revoked_at IS NULL
       RETURNING id`,
     [scope.userId]
   );
+  // DB-03: Invalidate cache after DB commit
+  invalidateUserSessionCache(scope.userId);
   return rows.length;
 }

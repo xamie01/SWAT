@@ -399,7 +399,7 @@ async function deliverSignal(payload: SignalAlertPayload) {
 
     if (payload.signalId) {
       await query(
-        `UPDATE signals SET alerted_at = NOW(), status = 'alerted' WHERE id = $1 AND alerted_at IS NULL`,
+        `UPDATE signals SET alerted_at = NOW(), status = CASE WHEN status = 'pending' THEN 'alerted' ELSE status END WHERE id = $1 AND alerted_at IS NULL`,
         [payload.signalId]
       );
     }

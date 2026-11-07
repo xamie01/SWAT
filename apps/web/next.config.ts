@@ -2,18 +2,24 @@ import type { NextConfig } from 'next';
 import path from 'node:path';
 
 const sanitizeUrl = (url: string | undefined, fallback: string) => {
-  if (!url || url.includes('[SENSITIVE]') || !url.startsWith('http')) return fallback;
-  return url;
+  let target = (!url || url.includes('[SENSITIVE]') || !url.startsWith('http')) ? fallback : url;
+  // INF-04 / WEB-04: Upgrade remote non-loopback rewrite destinations to HTTPS in production
+  if (process.env.NODE_ENV === 'production' && target.startsWith('http://')) {
+    if (!target.includes('localhost') && !target.includes('127.0.0.1')) {
+      target = target.replace(/^http:\/\//, 'https://');
+    }
+  }
+  return target;
 };
 
 const BACKEND_API_INTERNAL_URL = sanitizeUrl(
   process.env.BACKEND_API_INTERNAL_URL || process.env.INTERNAL_API_URL,
-  'http://75.119.151.184:3001'
+  process.env.NODE_ENV === 'production' ? 'https://75.119.151.184:3001' : 'http://localhost:3001'
 );
 
 const BACKEND_LP_INTERNAL_URL = sanitizeUrl(
   process.env.BACKEND_LP_INTERNAL_URL || process.env.INTERNAL_LP_URL,
-  'http://75.119.151.184:3010'
+  process.env.NODE_ENV === 'production' ? 'https://75.119.151.184:3010' : 'http://localhost:3010'
 );
 
 const nextConfig: NextConfig = {

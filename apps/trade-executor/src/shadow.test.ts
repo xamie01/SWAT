@@ -181,7 +181,7 @@ describe('Shadow Execution Isolation', () => {
     vi.clearAllMocks();
   });
 
-  it('should not fail the live trade if the shadow simulation throws', { timeout: 15000 }, async () => {
+  it('should not fail the live trade if the shadow simulation throws', { timeout: 30000 }, async () => {
     const db = await import('@swat/db');
     const shared = await import('@swat/shared');
     

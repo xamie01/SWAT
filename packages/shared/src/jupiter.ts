@@ -200,15 +200,19 @@ export async function getJupiterQuote(
 
     const data = (await response.json()) as JupiterQuote;
 
-    // Minimal shape validation — reject clearly malformed payloads rather than
-    // letting a broken upstream silently produce NaN token amounts downstream.
+    const requestedAmountStr = Math.round(params.amountLamports).toString();
+    // Validate shape, requested direction, mint identities and requested amount binding
     if (
       parsePositiveRawAmount(data.outAmount) === null
       || parsePositiveRawAmount(data.inAmount) === null
       || parsePositiveRawAmount(data.otherAmountThreshold) === null
       || data.swapMode !== requestedSwapMode
+      || (data.inputMint && data.inputMint !== params.inputMint)
+      || (data.outputMint && data.outputMint !== params.outputMint)
+      || (requestedSwapMode === 'ExactIn' && data.inAmount !== requestedAmountStr)
+      || (requestedSwapMode === 'ExactOut' && data.outAmount !== requestedAmountStr)
     ) {
-      console.error('[jupiter] malformed quote response — missing amounts');
+      console.error('[jupiter] malformed or mismatched quote response — missing or mismatched amounts/mints');
       return null;
     }
 

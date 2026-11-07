@@ -65,9 +65,9 @@ async function loadExecutionConfig(): Promise<ExecutionConfigSnapshot> {
   return parseDatabaseConfig(rows[0]?.value);
 }
 
-async function getExecutionConfigSnapshot(): Promise<ExecutionConfigSnapshot> {
+async function getExecutionConfigSnapshot(forceFresh = false): Promise<ExecutionConfigSnapshot> {
   const now = Date.now();
-  if (cachedConfig && now - cachedConfig.timestamp < EXECUTION_CONFIG_CACHE_TTL_MS) {
+  if (!forceFresh && cachedConfig && now - cachedConfig.timestamp < EXECUTION_CONFIG_CACHE_TTL_MS) {
     return cachedConfig.snapshot;
   }
 
@@ -170,10 +170,11 @@ function resolveMode(
  * process-global "current chain".
  */
 export async function resolveChainModes<const Chains extends readonly Chain[]>(
-  chains: Chains
+  chains: Chains,
+  options?: { forceFresh?: boolean }
 ): Promise<Record<Chains[number], ChainModeResolution>> {
   const [snapshot, activeCertifications] = await Promise.all([
-    getExecutionConfigSnapshot(),
+    getExecutionConfigSnapshot(options?.forceFresh),
     getActiveCertifiedChains()
   ]);
   const globalOff = snapshot.config?.['*'] === 'off';
@@ -194,8 +195,11 @@ export async function resolveChainModes<const Chains extends readonly Chain[]>(
 }
 
 /** Resolves one chain using DB, chain env, legacy env, then paper precedence. */
-export async function resolveChainMode(chain: Chain): Promise<ChainModeResolution> {
-  return (await resolveChainModes([chain]))[chain];
+export async function resolveChainMode(
+  chain: Chain,
+  options?: { forceFresh?: boolean }
+): Promise<ChainModeResolution> {
+  return (await resolveChainModes([chain], options))[chain];
 }
 
 /** Atomically changes one requested chain mode and invalidates this process's cache. */

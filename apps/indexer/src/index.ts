@@ -442,8 +442,11 @@ export async function discoverFromToken(mint: string) {
       batch.map((sig) =>
         heliusRpc<HeliusParsedTransaction | null>('getTransaction', [
           sig,
-          { maxSupportedTransactionVersion: 0, commitment: 'confirmed', encoding: 'jsonParsed' }
-        ]).catch(() => null)
+          { maxSupportedTransactionVersion: Number(process.env.SOLANA_MAX_TX_VERSION ?? 1), commitment: 'confirmed', encoding: 'jsonParsed' }
+        ]).catch((err) => {
+          console.warn(`[indexer] getTransaction failed for token buyer sig ${sig}:`, err instanceof Error ? err.message : err);
+          return null;
+        })
       )
     );
     for (const tx of results) {
@@ -534,7 +537,7 @@ export async function backfillWallet(address: string): Promise<IngestionBatchRes
       batch.map((sig) =>
         heliusRpc<HeliusParsedTransaction | null>('getTransaction', [
           sig,
-          { maxSupportedTransactionVersion: 0, commitment: 'confirmed', encoding: 'jsonParsed' }
+          { maxSupportedTransactionVersion: Number(process.env.SOLANA_MAX_TX_VERSION ?? 1), commitment: 'confirmed', encoding: 'jsonParsed' }
         ]).catch((err) => {
           console.warn(`[indexer] getTransaction failed for ${sig}:`, err instanceof Error ? err.message : err);
           failed++;

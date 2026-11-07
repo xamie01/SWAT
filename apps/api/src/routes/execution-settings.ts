@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { chainSchema, type Chain } from '@swat/shared';
 import { requireUser } from '../auth/plugin.js';
@@ -452,6 +452,7 @@ export async function registerExecutionSettingsRoutes(
   app.patch('/v1/me/execution-settings', async (request, reply) => {
     const scope = requireUser(request, reply);
     if (!scope) return;
+    const principal = request.principal;
     const wired = available(reply);
     if (!wired) return;
 
@@ -476,6 +477,19 @@ export async function registerExecutionSettingsRoutes(
       return reply
         .code(400)
         .send({ error: 'Bad Request', message: 'No execution settings fields supplied' });
+    }
+
+    // API-08: Raising maxDailyWithdrawalUsd requires administrator role
+    if (parsed.data.maxDailyWithdrawalUsd !== undefined) {
+      const current = await wired.getUserExecutionSettings(scope);
+      if (parsed.data.maxDailyWithdrawalUsd > (current.maxDailyWithdrawalUsd ?? 0)) {
+        if (principal?.kind !== 'user' || principal.user.role !== 'admin') {
+          return reply.code(403).send({
+            error: 'Forbidden',
+            message: 'Only administrators can increase the maximum daily withdrawal ceiling.'
+          });
+        }
+      }
     }
 
     let settings: StoredExecutionSettings;
@@ -550,7 +564,7 @@ export async function registerExecutionSettingsRoutes(
    * `resolveChainMode` clamps it against `LIVE_ENABLED_CHAINS` and the chain
    * certification before anything executes.
    */
-  app.patch('/v1/me/execution-settings/chains/:chain', async (request, reply) => {
+  const handleChainSettings = async (request: FastifyRequest, reply: FastifyReply) => {
     const scope = requireUser(request, reply);
     if (!scope) return;
     const principal = request.principal;
@@ -605,5 +619,8 @@ export async function registerExecutionSettingsRoutes(
     } catch (error) {
       return sendSettingsError(reply, error);
     }
-  });
+  };
+
+  app.patch('/v1/me/execution-settings/chains/:chain', handleChainSettings);
+  app.put('/v1/me/execution-settings/chains/:chain', handleChainSettings);
 }

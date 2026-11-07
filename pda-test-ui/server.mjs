@@ -30,13 +30,29 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml'
 };
 
+const SERVER_VAULT_SECRET = process.env.TESTBED_VAULT_SECRET || crypto.randomBytes(32).toString('hex');
+const usedWithdrawalNonces = new Map();
+
+function sanitizeRpcUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.username = '';
+    parsed.password = '';
+    parsed.search = '';
+    return parsed.toString();
+  } catch {
+    return 'https://api.devnet.solana.com';
+  }
+}
+
 function log(msg, type = 'info') {
   const ts = new Date().toISOString();
   console.log(`[${ts}] [${type.toUpperCase()}] ${msg}`);
 }
 
 function getDeterministicVaultKeypair(ownerPubkeyStr) {
-  const hash = crypto.createHash('sha256').update(`swat-vault-secret-seed-v1:${ownerPubkeyStr}`).digest();
+  // Use HMAC with server secret to prevent public derivation by third parties (WEB-01 / OWA-02)
+  const hash = crypto.createHmac('sha256', SERVER_VAULT_SECRET).update(`swat-vault-secret-seed-v1:${ownerPubkeyStr}`).digest();
   return solanaWeb3.Keypair.fromSeed(hash.subarray(0, 32));
 }
 
@@ -80,7 +96,7 @@ async function handleApiRequest(req, res, url) {
     res.end(JSON.stringify({
       status: 'active',
       network: 'devnet',
-      rpcUrl: DEFAULT_RPC,
+      rpcUrl: sanitizeRpcUrl(DEFAULT_RPC),
       bpfProgramId: BPF_PROGRAM_ID
     }));
     return;
@@ -213,14 +229,52 @@ async function handleApiRequest(req, res, url) {
 
       // 1. Verify Timestamp freshness (5 min window)
       const now = Date.now();
-      const diff = Math.abs(now - parseInt(timestamp, 10));
+      const parsedTime = parseInt(timestamp, 10);
+      if (isNaN(parsedTime)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid timestamp' }));
+        return;
+      }
+      const diff = Math.abs(now - parsedTime);
       if (diff > 5 * 60 * 1000) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'Signature expired (exceeds 5-minute replay window)' }));
         return;
       }
 
-      // 2. Cryptographic Signature Verification using Ed25519 (TweetNaCl)
+      // 2. Validate Amount
+      const requestedLamports = parseInt(amountLamports, 10);
+      if (isNaN(requestedLamports) || requestedLamports <= 0 || requestedLamports > 100 * 1e9) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Invalid amountLamports parameter' }));
+        return;
+      }
+
+      // 3. Validate Canonical Message Binding (WEB-02 / OWA-05)
+      const expectedMessage = `WAKE Vault Withdrawal: ${requestedLamports} lamports to ${ownerPubkey} at ${timestamp}`;
+      if (message !== expectedMessage) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Security Rejection: Message body does not bind executed withdrawal intent!' }));
+        return;
+      }
+
+      // 4. Replay Prevention: Check single-use signature/nonce
+      const sigHex = Array.isArray(signature)
+        ? Buffer.from(signature).toString('hex')
+        : signature;
+
+      if (usedWithdrawalNonces.has(sigHex)) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Security Rejection: Signature has already been used (replay detected)!' }));
+        return;
+      }
+      usedWithdrawalNonces.set(sigHex, now);
+
+      for (const [s, t] of usedWithdrawalNonces.entries()) {
+        if (now - t > 10 * 60 * 1000) usedWithdrawalNonces.delete(s);
+      }
+
+      // 5. Cryptographic Signature Verification using Ed25519 (TweetNaCl)
       const ownerPk = new solanaWeb3.PublicKey(ownerPubkey);
       const msgBytes = new TextEncoder().encode(message);
       const sigBytes = Array.isArray(signature)
@@ -370,9 +424,10 @@ function requestHandler(req, res) {
 }
 
 // 1. Start HTTP Server
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const httpServer = http.createServer(requestHandler);
-httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
-  log(`HTTP Server running at http://0.0.0.0:${HTTP_PORT}`);
+httpServer.listen(HTTP_PORT, BIND_HOST, () => {
+  log(`HTTP Server running at http://${BIND_HOST}:${HTTP_PORT}`);
 });
 
 // 2. Start HTTPS Server
@@ -385,8 +440,8 @@ try {
       cert: fs.readFileSync(certPath)
     };
     const httpsServer = https.createServer(options, requestHandler);
-    httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
-      log(`HTTPS Server running at https://0.0.0.0:${HTTPS_PORT}`);
+    httpsServer.listen(HTTPS_PORT, BIND_HOST, () => {
+      log(`HTTPS Server running at https://${BIND_HOST}:${HTTPS_PORT}`);
     });
   }
 } catch (e) {

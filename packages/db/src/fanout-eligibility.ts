@@ -232,9 +232,14 @@ export function assessFanoutCandidate(
 
   if (candidate.killed) return excluded(candidate.userId, 'user-killed');
   if (!candidate.autoExecute) return excluded(candidate.userId, 'auto-execute-off');
-  if (!(signal.score >= candidate.minSignalScore)) {
-    // Written as `!(>=)` so a NaN score excludes rather than passes.
-    return excluded(candidate.userId, 'below-user-min-score');
+
+  // Entry checks: score threshold, balance minimums, and concurrent position limits apply to buys only.
+  // Reducing exits (sells) must not be blocked by low score, low buying balance, or position caps.
+  if (signal.direction === 'buy') {
+    if (!(signal.score >= candidate.minSignalScore)) {
+      // Written as `!(>=)` so a NaN score excludes rather than passes.
+      return excluded(candidate.userId, 'below-user-min-score');
+    }
   }
 
   const tier = effectiveTier(candidate.tier, candidate.tierExpiresAt);
@@ -247,15 +252,17 @@ export function assessFanoutCandidate(
     return excluded(candidate.userId, 'chain-execution-off');
   }
 
-  if (candidate.knownBalanceUsd === null) {
-    return excluded(candidate.userId, 'balance-unknown');
-  }
-  if (candidate.knownBalanceUsd < platform.minimumBalanceUsd) {
-    return excluded(candidate.userId, 'balance-below-minimum');
-  }
+  if (signal.direction === 'buy') {
+    if (candidate.knownBalanceUsd === null) {
+      return excluded(candidate.userId, 'balance-unknown');
+    }
+    if (candidate.knownBalanceUsd < platform.minimumBalanceUsd) {
+      return excluded(candidate.userId, 'balance-below-minimum');
+    }
 
-  if (candidate.openPositionCount >= candidate.maxConcurrentPositions) {
-    return excluded(candidate.userId, 'position-cap-reached');
+    if (candidate.openPositionCount >= candidate.maxConcurrentPositions) {
+      return excluded(candidate.userId, 'position-cap-reached');
+    }
   }
 
   if (!platform.capacity) return excluded(candidate.userId, 'capacity-unknown');

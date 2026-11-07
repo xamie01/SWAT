@@ -465,13 +465,17 @@
       const now = new Date().toTimeString().split(' ')[0];
       const div = document.createElement('div');
       div.className = `log-entry log-${type}`;
-      div.innerHTML = `<span class="log-time">[${now}]</span> ${msg}`;
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = `[${now}] `;
+      div.appendChild(timeSpan);
+      div.appendChild(document.createTextNode(String(msg)));
       c.appendChild(div);
       c.scrollTop = c.scrollHeight;
     }
 
     function clearConsole() {
-      document.getElementById('console').innerHTML = '';
+      document.getElementById('console').textContent = '';
     }
 
     function getRpcUrl() {
@@ -503,7 +507,7 @@
     function showConnectionError(msg) {
       const banner = document.getElementById('connectionErrorBanner');
       banner.style.display = 'block';
-      banner.innerHTML = `<strong>Connection Error:</strong> ${msg}`;
+      banner.textContent = `Connection Error: ${msg}`;
     }
 
     function hideConnectionError() {

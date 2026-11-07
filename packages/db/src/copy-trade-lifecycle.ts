@@ -1950,20 +1950,38 @@ export async function claimSourceSignalForCopyExecution(input: {
     let executionBase = requestedBase;
     let executionQuote = requestedQuote;
     if (source.direction === 'sell') {
+      // SIG-02: Size sell against master's attributed lots rather than aggregate inventory
       const availableResult = await client.query<{ requested_base: string | null }>(
-        `SELECT CASE
-                  WHEN confirmed_quantity - reserved_sell_quantity <= 0 THEN NULL
-                  ELSE (
-                    (confirmed_quantity - reserved_sell_quantity) * $4::numeric
+        `WITH pos AS (
+           SELECT id, confirmed_quantity, reserved_sell_quantity
+             FROM copy_positions
+            WHERE target_account = $1
+              AND chain = $2
+              AND token_mint = $3
+              AND user_id IS NOT DISTINCT FROM $5
+            FOR UPDATE
+         ),
+         master_lots AS (
+           SELECT COALESCE(SUM(remaining_quantity), 0) AS total_remaining,
+                  COUNT(*) AS lot_count
+             FROM copy_position_master_lots
+            WHERE position_id = (SELECT id FROM pos)
+              AND master_wallet_address = $6
+         )
+         SELECT CASE
+                  WHEN pos.confirmed_quantity - pos.reserved_sell_quantity <= 0 THEN NULL
+                  WHEN (SELECT lot_count FROM master_lots) > 0 AND (SELECT total_remaining FROM master_lots) <= 0 THEN NULL
+                  ELSE LEAST(
+                    pos.confirmed_quantity - pos.reserved_sell_quantity,
+                    CASE
+                      WHEN (SELECT lot_count FROM master_lots) > 0
+                        THEN (SELECT total_remaining FROM master_lots) * $4::numeric
+                      ELSE (pos.confirmed_quantity - pos.reserved_sell_quantity) * $4::numeric
+                    END
                   )::text
                 END AS requested_base
-         FROM copy_positions
-         WHERE target_account = $1
-           AND chain = $2
-           AND token_mint = $3
-           AND user_id IS NOT DISTINCT FROM $5
-         FOR UPDATE`,
-        [target.prefixed, source.chain, source.token_mint, sourceSellFraction, userId]
+           FROM pos`,
+        [target.prefixed, source.chain, source.token_mint, sourceSellFraction, userId, source.wallet_address]
       );
       executionBase = availableResult.rows[0]?.requested_base ?? null;
       executionQuote = null;

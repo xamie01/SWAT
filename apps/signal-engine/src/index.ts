@@ -470,9 +470,13 @@ async function enqueueSignal(opts: {
   }
 
   if (opts.signalScore < MIN_SIGNAL_SCORE) {
-    console.log(`[signal-engine] signal score ${opts.signalScore} below threshold ${MIN_SIGNAL_SCORE} — logged only`);
-    if (opts.sourceTrade) await markSourceTradeSignalDispatched(signal.id);
-    return;
+    if (opts.sourceTrade?.side === 'sell') {
+      console.log(`[signal-engine] signal score ${opts.signalScore} below threshold ${MIN_SIGNAL_SCORE} — admitting reducing sell exit`);
+    } else {
+      console.log(`[signal-engine] signal score ${opts.signalScore} below threshold ${MIN_SIGNAL_SCORE} — logged only`);
+      if (opts.sourceTrade) await markSourceTradeSignalDispatched(signal.id);
+      return;
+    }
   }
 
   await alertQueue.add('signal-alert', {

@@ -13,6 +13,7 @@ import {
   createPaymentIntent,
   DuplicatePaymentTransactionError,
   getUserBillingStatus,
+  listAuthWallets,
   listUserCryptoPayments,
   recordCryptoPaymentAndGrantTier,
   runTierDowngradeSweep,
@@ -51,7 +52,8 @@ export interface BillingDependencies {
     treasuryAddress: string;
     memo?: string | null;
   }) => Promise<{ verified: boolean; payerAddress: string | null; amountUsdc: number }>;
-  readonly findPaymentIntentByMemo?: (memo: string) => Promise<{ userId: string; status: string } | null>;
+  readonly findPaymentIntentByMemo?: (memo: string) => Promise<{ userId: string; status: string; planId?: string; expiresAt?: Date } | null>;
+  readonly listAuthWallets?: (scope: UserScope) => Promise<Array<{ address: string; chainKind: string }>>;
 }
 
 export const DEFAULT_TREASURY_ADDRESSES = {
@@ -254,13 +256,21 @@ const defaultDependencies: BillingDependencies = {
   listUserCryptoPayments,
   runTierDowngradeSweep,
   verifyOnChainPayment: defaultVerifier,
+  listAuthWallets,
   findPaymentIntentByMemo: async (memo: string) => {
     try {
-      const rows = await query<{ user_id: string; status: string }>(
-        `SELECT user_id, status FROM user_payment_intents WHERE reference_memo = $1`,
+      const rows = await query<{ user_id: string; status: string; plan_id: string; expires_at: Date }>(
+        `SELECT user_id, status, plan_id, expires_at FROM user_payment_intents WHERE reference_memo = $1`,
         [memo]
       );
-      return rows[0] ? { userId: rows[0].user_id, status: rows[0].status } : null;
+      return rows[0]
+        ? {
+            userId: rows[0].user_id,
+            status: rows[0].status,
+            planId: rows[0].plan_id,
+            expiresAt: rows[0].expires_at
+          }
+        : null;
     } catch {
       return null;
     }
@@ -281,7 +291,7 @@ const verifyBodySchema = z
   })
   .transform((data) => ({
     chain: data.chain,
-    txHash: data.txHash,
+    txHash: data.chain === 'polygon' ? data.txHash.trim().toLowerCase() : data.txHash.trim(),
     planId: data.planId,
     memo: data.memo || data.referenceMemo
   }));
@@ -375,15 +385,35 @@ export async function registerBillingRoutes(
       return reply.code(400).send({ error: 'Bad Request', message: `Unknown plan: ${planId}` });
     }
 
-    // H-06: Prevent payment hijacking by checking intent ownership
+    // API-01 / OWA-03: Prevent payment hijacking by binding payment to user intent or linked wallet
     const effectiveMemo = memo?.trim();
-    if (effectiveMemo && deps.findPaymentIntentByMemo) {
-      const intent = await deps.findPaymentIntentByMemo(effectiveMemo);
-      if (intent && intent.userId !== scope.userId) {
-        return reply.code(403).send({
-          error: 'Forbidden',
-          message: 'This payment reference memo belongs to a different user account.'
-        });
+    if (effectiveMemo) {
+      if (deps.findPaymentIntentByMemo) {
+        const intent = await deps.findPaymentIntentByMemo(effectiveMemo);
+        if (!intent || intent.userId !== scope.userId) {
+          return reply.code(403).send({
+            error: 'Forbidden',
+            message: 'This payment reference memo belongs to a different user account or does not exist.'
+          });
+        }
+        if (intent.status && intent.status !== 'pending') {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: `This payment intent has already been processed (status: ${intent.status}).`
+          });
+        }
+        if (intent.planId && intent.planId !== planId) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: `Payment intent plan (${intent.planId}) does not match requested plan (${planId}).`
+          });
+        }
+        if (intent.expiresAt && new Date(intent.expiresAt).getTime() < Date.now()) {
+          return reply.code(400).send({
+            error: 'Bad Request',
+            message: 'This payment intent has expired.'
+          });
+        }
       }
     }
 
@@ -405,8 +435,31 @@ export async function registerBillingRoutes(
       });
     }
 
+    // API-01 / OWA-03: If no intent memo was supplied, require payerAddress to match one of the user's linked auth wallets
+    if (!effectiveMemo && deps.listAuthWallets) {
+      if (!verification.payerAddress) {
+        return reply.code(400).send({
+          error: 'Bad Request',
+          message: 'Payer address could not be identified on-chain and no intent memo was supplied.'
+        });
+      }
+      const linkedWallets = await deps.listAuthWallets(scope);
+      const isLinkedPayer = linkedWallets.some((w) =>
+        chain === 'solana'
+          ? w.address === verification.payerAddress
+          : w.address.toLowerCase() === verification.payerAddress?.toLowerCase()
+      );
+      if (!isLinkedPayer) {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'The transaction sender address does not match any verified linked wallet on this account, and no intent reference memo was provided.'
+        });
+      }
+    }
+
     // 2. Record payment and upgrade tier atomically
     try {
+      reply.header('Cache-Control', 'no-store');
       const result = await deps.recordCryptoPaymentAndGrantTier({
         scope,
         chain,

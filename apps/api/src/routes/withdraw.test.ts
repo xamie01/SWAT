@@ -214,4 +214,47 @@ describe('Trading Withdrawal Routes (S4-12)', () => {
     expect(replayRes.statusCode).toBe(400);
     expect(replayRes.json().error).toBe('invalid-or-expired-otp');
   });
+
+  it('rejects withdrawal if amount does not match the bound OTP intent (API-06 / CRY-07)', async () => {
+    const linkedThreeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+    vi.spyOn(dbModule, 'listAuthWallets').mockResolvedValue([
+      {
+        id: 'wallet-1',
+        userId: USER_ALICE,
+        chainKind: 'evm',
+        address: destinationAddress,
+        verifiedAt: linkedThreeDaysAgo
+      }
+    ]);
+
+    const otpStore = new Map<string, StoredWithdrawalOtp>([
+      [
+        USER_ALICE,
+        {
+          code: '654321',
+          expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+          destinationAddress,
+          chainKind: 'evm',
+          amountUsd: 100,
+          attempts: 0
+        }
+      ]
+    ]);
+
+    const app = buildApp({ userId: USER_ALICE, now, otpStore });
+
+    const mismatchRes = await app.inject({
+      method: 'POST',
+      url: '/v1/me/trading/withdraw',
+      payload: {
+        destinationAddress,
+        chainKind: 'evm',
+        amountUsd: 500, // Different from the bound $100!
+        otpCode: '654321'
+      }
+    });
+
+    expect(mismatchRes.statusCode).toBe(400);
+    expect(mismatchRes.json().error).toBe('amount-mismatch');
+  });
 });

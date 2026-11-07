@@ -313,12 +313,14 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
     if (!result.ok) {
       if (result.retryable) {
         // Genuinely ambiguous: the block engine may have received the bundle.
-        // Recorded as pending with no bundle id so the sweeper investigates
-        // rather than the caller resubmitting blind.
-        //
-        // It is NOT downgraded to a public RPC broadcast (S3-5). Doing so would
-        // silently reintroduce exactly the front-running exposure bundles exist
-        // to remove, and the operator would still believe they were protected.
+        // EXE-06: Record as pending so the sweeper investigates and duplicate redeliveries are blocked.
+        await options.pendingStore.save({
+          clientOrderId: input.clientOrderId,
+          bundleId: 'pending_unknown',
+          lastValidBlockHeight: built.lastValidBlockHeight,
+          expiresAt: new Date(now().getTime() + options.pendingTtlMs),
+          tipLamports
+        });
         return {
           status: 'submission_unknown',
           clientOrderId: input.clientOrderId,

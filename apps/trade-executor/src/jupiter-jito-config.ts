@@ -106,6 +106,14 @@ export function createJupiterJitoRuntimeFromEnvironment(
     return null;
   }
 
+  // EXE-08: Ensure simulation gate is available and not silently omitted
+  const simulationGate = createSolanaSimulationGateFromEnvironment();
+  const simulationRequired = (process.env.SOLANA_SIMULATION_ENABLED ?? 'true') !== 'false';
+  if (simulationRequired && !simulationGate) {
+    setJupiterJitoUnavailable('Solana simulation gate failed to initialize or RPC is unconfigured');
+    return null;
+  }
+
   const runtime = createJupiterJitoRuntime({
     pendingStore: createRedisJupiterJitoStore(redis),
     jito: {
@@ -123,12 +131,7 @@ export function createJupiterJitoRuntimeFromEnvironment(
     tipPercentile: readTipPercentile(),
     pendingTtlMs: readPositiveInt('JITO_PENDING_TTL_MS', DEFAULT_PENDING_TTL_MS),
     jupiterApiKey: process.env.JUPITER_API_KEY,
-    // S4-M15. Without this the runtime's simulation branch is dead code on a live
-    // box: `submit()` guards on `options.simulation` being present, so an absent
-    // gate means every Solana bundle goes out unsimulated exactly as before. The
-    // factory returns null when unconfigured, which is the same
-    // explicitly-disabled shape `createSolanaSignerFromEnvironment` uses.
-    simulation: createSolanaSimulationGateFromEnvironment() ?? undefined
+    simulation: simulationGate ?? undefined
   });
 
   configureJupiterJitoRuntime(runtime, environmentSigner);

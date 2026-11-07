@@ -80,7 +80,7 @@ steps:
     commands:
       - corepack enable
       - corepack prepare pnpm@10.2.0 --activate
-      - npm install -g vercel@latest
+      - npm install -g vercel@65.11.0
       - cd apps/web
       - ln -s ../../node_modules/.pnpm node_modules/.pnpm || true
       - vercel pull --yes --environment=production --token=$VERCEL_TOKEN

@@ -147,7 +147,7 @@ export async function recordCryptoPaymentAndGrantTier(input: {
 
   const now = input.now ?? new Date();
 
-  return await withTransaction(async (client: PoolClient) => {
+  const result = await withTransaction(async (client: PoolClient) => {
     // 1. Fetch current user tier state FOR UPDATE to lock the row against concurrent race conditions
     const userRes = await client.query<{ tier: UserTier; tier_expires_at: Date | null }>(
       'SELECT tier, tier_expires_at FROM users WHERE id = $1 FOR UPDATE',
@@ -216,7 +216,6 @@ export async function recordCryptoPaymentAndGrantTier(input: {
       'UPDATE users SET tier = $2, tier_expires_at = $3, updated_at = NOW() WHERE id = $1',
       [input.scope.userId, extension.tier, extension.expiresAt]
     );
-    invalidateUserSessionCache(input.scope.userId);
 
     // 4. If there was a matching intent, mark it as completed
     if (input.memo) {
@@ -264,6 +263,8 @@ export async function recordCryptoPaymentAndGrantTier(input: {
       updatedExpiresAt: extension.expiresAt
     };
   });
+  invalidateUserSessionCache(input.scope.userId);
+  return result;
 }
 
 /**
@@ -403,10 +404,14 @@ export async function runTierDowngradeSweep(now = new Date()): Promise<{
   const downgradedUserIds: string[] = [];
 
   for (const user of targetUsers) {
-    await query(
-      "UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1",
-      [user.id]
+    // API-04: Atomic conditional update prevents overwriting a newly renewed tier
+    const updated = await query<{ id: string }>(
+      "UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1 AND tier <> 'free' AND tier_expires_at IS NOT NULL AND tier_expires_at < $2 RETURNING id",
+      [user.id, graceCutoff]
     );
+    if (updated.length === 0) {
+      continue;
+    }
     invalidateUserSessionCache(user.id);
 
     downgradedUserIds.push(user.id);

@@ -317,6 +317,7 @@ async function nativeUsdPriceForChain(chain: Chain): Promise<number | null> {
 
 export async function persistTrade(opts: {
   signalId: string;
+  userId?: string | null;
   sourceTradeId?: string | null;
   copyExecutionId?: string | null;
   tokenMint: string;
@@ -379,6 +380,7 @@ export async function persistTrade(opts: {
 
   const tradeInput = {
     signalId: opts.signalId,
+    userId: opts.userId ?? null,
     sourceTradeId: opts.sourceTradeId ?? null,
     copyExecutionId: opts.copyExecutionId ?? null,
     tokenMint: opts.tokenMint,
@@ -710,7 +712,7 @@ function configureRobinhoodOpsAlerts(redisClient: Redis): void {
 }
 
 async function transitionPendingTrade(input: {
-  executor: 'trojan' | 'robinhood-univ3';
+  executor: 'trojan' | 'robinhood-univ3' | 'jupiter-jito';
   signalId?: string;
   signature?: string;
   status: 'filled' | 'failed';
@@ -1183,15 +1185,8 @@ async function prepareCanonicalExecutions(input: {
   direction: 'buy' | 'sell';
   mode: 'paper' | 'live' | 'live+shadow';
   buyQuoteQuantity: number;
-  /**
-   * Where a live copy settles, taken from the granted authority (`S4-P7`).
-   *
-   * The claim's `target_account` and the authority's settlement address are the
-   * same fact, so it is resolved once, above, rather than derived here from
-   * whichever key happens to be configured. A paper-only mode has no live
-   * execution mode in the list and legitimately passes `null`.
-   */
   liveTargetAccount: string | null;
+  userId?: string | null;
 }): Promise<{ executions: CanonicalExecutionSet; reason?: string; shadowReason?: string }> {
   const executions: CanonicalExecutionSet = {};
   let shadowReason: string | undefined;
@@ -1209,6 +1204,7 @@ async function prepareCanonicalExecutions(input: {
       result = await claimSourceSignalForCopyExecution({
         signalId: input.signalId,
         targetAccount,
+        userId: input.userId ?? null,
         executionMode,
         requestedQuoteQuantity: input.direction === 'buy'
           ? input.buyQuoteQuantity.toString()
@@ -1459,8 +1455,8 @@ export async function handleJob(
     throw new UnrecoverableError(`Trade job ${payload.signalId} has an empty token mint`);
   }
 
-  // Resolve execution mode per chain
-  const modeResolution = await resolveChainMode(chain);
+  // Resolve execution mode per chain with authoritative fresh check (DB-04)
+  const modeResolution = await resolveChainMode(chain, { forceFresh: true });
   const startupResolution = clampExecutionModeForStartup(
     chain,
     modeResolution.effectiveMode,
@@ -1551,15 +1547,16 @@ export async function handleJob(
   const dailyExposureUsd = direction === 'buy'
     ? await getRollingExposureUsd(jobUserId, chain)
     : 0;
-  const dailyCapUsd = parseFloat(process.env.DAILY_EXPOSURE_CAP_USD ?? '50000');
+  const rawCap = Number(process.env.DAILY_EXPOSURE_CAP_USD ?? '50000');
+  const dailyCapUsd = Number.isFinite(rawCap) && rawCap > 0 ? rawCap : 50_000;
 
   let thisTradeUsd = size;
   if (chain === 'solana') {
-    const solPrice = await fetchTokenPriceUsd(SOL_MINT) ?? 150;
-    thisTradeUsd = size * solPrice;
+    const solPrice = await fetchTokenPriceUsd(SOL_MINT);
+    thisTradeUsd = size * (solPrice && Number.isFinite(solPrice) && solPrice > 0 ? solPrice : 150);
   } else if (chain === 'robinhood-chain') {
-    const ethPrice = await fetchTokenPriceUsd(WETH_ROBINHOOD) ?? 3000;
-    thisTradeUsd = size * ethPrice;
+    const ethPrice = await fetchTokenPriceUsd(WETH_ROBINHOOD);
+    thisTradeUsd = size * (ethPrice && Number.isFinite(ethPrice) && ethPrice > 0 ? ethPrice : 3000);
   }
 
   if (direction === 'buy' && dailyExposureUsd + thisTradeUsd > dailyCapUsd) {
@@ -1601,6 +1598,12 @@ export async function handleJob(
   // satisfied by the operator's grant would fill a real trade with the operator's
   // key and be indistinguishable from success.
   const principal = resolveExecutionPrincipal(payload);
+  const effectiveUserId = principal.kind === 'user'
+    ? principal.userId
+    : (typeof payload.userId === 'string' && payload.userId.trim() ? payload.userId.trim() : null);
+  const recordTrade = (tradeOpts: Parameters<typeof persistTrade>[0]) =>
+    persistTrade({ userId: effectiveUserId, ...tradeOpts });
+
   let liveAuthority: GrantedExecutionAuthority | null = null;
   if (execMode === 'live' || execMode === 'live+shadow') {
     const verdict = await ports.authorize({
@@ -1623,6 +1626,19 @@ export async function handleJob(
   let canonicalLiveAlreadyConfirmed = false;
   let canonicalLiveTradeId: string | null = null;
   let canonicalShadowReason: string | undefined;
+
+  // SIG-03 / SIG-04: If copyExecutionId is supplied on exit/stop-loss, resolve primary execution
+  if (payload.copyExecutionId) {
+    const loaded = await getCopyExecutionById(payload.copyExecutionId);
+    if (loaded) {
+      if (execMode === 'paper') {
+        canonicalExecutions.paper = loaded;
+      } else {
+        canonicalExecutions.live = loaded;
+      }
+    }
+  }
+
   if (payload.sourceTradeId) {
     // Copy eligibility is the last gate before the one-shot canonical claim.
     // Stop-loss jobs never reach it — they carry no sourceTradeId — which is
@@ -1654,7 +1670,8 @@ export async function handleJob(
       direction,
       mode: execMode,
       buyQuoteQuantity: size,
-      liveTargetAccount: liveAuthority?.settlementAddress ?? null
+      liveTargetAccount: liveAuthority?.settlementAddress ?? null,
+      userId: effectiveUserId
     });
     canonicalExecutions = prepared.executions;
     canonicalShadowReason = prepared.shadowReason;
@@ -1680,16 +1697,16 @@ export async function handleJob(
       );
       canonicalLiveTradeId = linkedTrade[0]?.id ?? null;
     }
-  } else if (!payload.stopLoss) {
+  } else if (!payload.stopLoss && !payload.closeAll) {
     const claimed = await claimSignalForExecution(payload.signalId);
     if (!claimed) {
       console.log(`[trade-executor] SKIPPED: signal is not pending | signalId: ${payload.signalId}`);
       return { status: 'skipped', reason: 'Signal is not pending' };
     }
   }
-  // A stop-loss signal is already 'executed' — its entry filled — so it cannot
-  // pass the pending claim. Its exactly-once guard is the (account, signal) row
-  // in signal_stop_losses, claimed by the scorer before this job was queued.
+  // SIG-03: A stop-loss or close-all exit signal is already 'executed' — its entry filled —
+  // so it cannot pass the pending claim. Its exactly-once guard is the exit reservation
+  // or (account, signal) row in signal_stop_losses / copy_executions claimed before queuing.
 
   // Slippage tolerance for every venue call below (`S4-P4`). Resolved once per
   // job rather than repeated as a literal at each call site, where it appeared as
@@ -1757,6 +1774,13 @@ export async function handleJob(
             canonicalExecution.requestedBaseQuantity,
             decimals
           ).toString();
+        } else if (direction === 'sell' && stopLossSellQuantity !== null) {
+          // SIG-04: Exact lot units for stop-loss / close-all reducing exits
+          const decimals = (await getTokenDecimals(payload.tokenMint, 'solana')) ?? 6;
+          maximumTokenAmountBaseUnits = decimalQuantityToBaseUnits(
+            stopLossSellQuantity.toString(),
+            decimals
+          ).toString();
         }
         const submittedAt = new Date();
 
@@ -1810,7 +1834,7 @@ export async function handleJob(
                 nextReconciliationAt: new Date(Date.now() + 30_000)
               });
             }
-            liveTradeId = await persistTrade({
+            liveTradeId = await recordTrade({
               signalId: payload.signalId,
               sourceTradeId: payload.sourceTradeId,
               copyExecutionId: canonicalExecution?.id,
@@ -1845,7 +1869,7 @@ export async function handleJob(
                 submissionId: outcome.signature
               });
             }
-            liveTradeId = await persistTrade({
+            liveTradeId = await recordTrade({
               signalId: payload.signalId,
               sourceTradeId: payload.sourceTradeId,
               copyExecutionId: canonicalExecution?.id,
@@ -1875,7 +1899,7 @@ export async function handleJob(
               `Jupiter+Jito rejected the request: ${outcome.reason}`,
               'cancelled'
             );
-            liveTradeId = await persistTrade({
+            liveTradeId = await recordTrade({
               signalId: payload.signalId,
               sourceTradeId: payload.sourceTradeId,
               copyExecutionId: canonicalExecution?.id,
@@ -1904,7 +1928,9 @@ export async function handleJob(
           tokenMint: cleanMint,
           amountSol: submissionSize,
           direction,
-          sellProportionBps: direction === 'sell' ? sellProportionBps ?? 10_000 : undefined,
+          sellProportionBps: direction === 'sell'
+            ? (sellProportionBps ?? (stopLossSellQuantity !== null ? undefined : 10_000))
+            : undefined,
           maximumTokenAmountBaseUnits,
           slippageBps
         });
@@ -1931,7 +1957,7 @@ export async function handleJob(
               });
             }
           }
-          liveTradeId = await persistTrade({
+          liveTradeId = await recordTrade({
             signalId: payload.signalId,
             sourceTradeId: payload.sourceTradeId,
             copyExecutionId: canonicalExecution?.id,
@@ -1962,7 +1988,7 @@ export async function handleJob(
             `Trojan rejected the request with HTTP ${result.httpStatus}`,
             'cancelled'
           );
-          liveTradeId = await persistTrade({
+          liveTradeId = await recordTrade({
             signalId: payload.signalId,
             sourceTradeId: payload.sourceTradeId,
             copyExecutionId: canonicalExecution?.id,
@@ -2024,7 +2050,7 @@ export async function handleJob(
                 });
               }
             }
-            liveTradeId = await persistTrade({
+            liveTradeId = await recordTrade({
               signalId: payload.signalId,
               sourceTradeId: payload.sourceTradeId,
               copyExecutionId: canonicalExecution?.id,
@@ -2056,7 +2082,7 @@ export async function handleJob(
                 ? 'Trojan transaction failed on-chain'
                 : resolution.reason;
             await terminateCanonicalExecution(canonicalExecution, errorMessage);
-            liveTradeId = await persistTrade({
+            liveTradeId = await recordTrade({
               signalId: payload.signalId,
               sourceTradeId: payload.sourceTradeId,
               copyExecutionId: canonicalExecution?.id,
@@ -2169,7 +2195,7 @@ export async function handleJob(
               });
             }
           }
-          liveTradeId = await persistTrade({
+          liveTradeId = await recordTrade({
             signalId: payload.signalId,
             sourceTradeId: payload.sourceTradeId,
             copyExecutionId: canonicalExecution?.id,
@@ -2212,7 +2238,7 @@ export async function handleJob(
               });
             }
           }
-          liveTradeId = await persistTrade({
+          liveTradeId = await recordTrade({
             signalId: payload.signalId,
             sourceTradeId: payload.sourceTradeId,
             copyExecutionId: canonicalExecution?.id,
@@ -2250,7 +2276,7 @@ export async function handleJob(
             result.reason,
             result.status === 'skipped' ? 'cancelled' : 'failed'
           );
-          liveTradeId = await persistTrade({
+          liveTradeId = await recordTrade({
             signalId: payload.signalId,
             sourceTradeId: payload.sourceTradeId,
             copyExecutionId: canonicalExecution?.id,
@@ -2308,7 +2334,11 @@ export async function handleJob(
             direction,
             sellShares: canonicalExecution?.direction === 'sell'
               ? Number(canonicalExecution.requestedBaseQuantity)
-              : undefined,
+              : stopLossSellQuantity !== null
+                ? stopLossSellQuantity
+                : payload.sellTokenAmount !== undefined
+                  ? Number(payload.sellTokenAmount)
+                  : undefined,
             mirror,
             sourceEventAt
           });
@@ -2345,7 +2375,7 @@ export async function handleJob(
               : 'pending_confirmation';
           const confirmedFill = executionStatus === 'filled' || executionStatus === 'partial';
 
-          liveTradeId = await persistTrade({
+          liveTradeId = await recordTrade({
             signalId: payload.signalId,
             sourceTradeId: payload.sourceTradeId,
             copyExecutionId: canonicalExecution?.id,
@@ -2384,7 +2414,7 @@ export async function handleJob(
             (error.message.includes('Polymarket Protection') || error.message.includes('No asks'))
           ) {
             console.warn(`[trade-executor] LIVE: Skipped Polymarket trade due to conditions: ${error.message}`);
-            liveTradeId = await persistTrade({
+            liveTradeId = await recordTrade({
               signalId: payload.signalId,
               sourceTradeId: payload.sourceTradeId,
               copyExecutionId: canonicalExecution?.id,
@@ -2605,7 +2635,7 @@ export async function handleJob(
         });
       }
 
-      await persistTrade({
+      await recordTrade({
         signalId: payload.signalId,
         sourceTradeId: payload.sourceTradeId,
         copyExecutionId: paperExecution?.id ?? payload.copyExecutionId,
@@ -2754,6 +2784,25 @@ export async function main() {
                 `[trade-executor] jito sweep resolved ${resolutions.length}: `
                 + resolutions.map((r) => `${r.clientOrderId}=${r.status}`).join(', ')
               );
+              // EXE-07: Transition pending trade rows in DB upon Jito resolution
+              for (const resolution of resolutions) {
+                if (resolution.status === 'filled') {
+                  await transitionPendingTrade({
+                    executor: 'jupiter-jito',
+                    signalId: resolution.clientOrderId,
+                    signature: resolution.signature,
+                    status: 'filled',
+                    confirmedAt: new Date()
+                  });
+                } else if (resolution.status === 'failed') {
+                  await transitionPendingTrade({
+                    executor: 'jupiter-jito',
+                    signalId: resolution.clientOrderId,
+                    status: 'failed',
+                    errorMessage: resolution.reason
+                  });
+                }
+              }
             }
           }
         });
