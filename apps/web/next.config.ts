@@ -14,12 +14,12 @@ const sanitizeUrl = (url: string | undefined, fallback: string) => {
 
 const BACKEND_API_INTERNAL_URL = sanitizeUrl(
   process.env.BACKEND_API_INTERNAL_URL || process.env.INTERNAL_API_URL,
-  process.env.NODE_ENV === 'production' ? 'https://75.119.151.184:3001' : 'http://localhost:3001'
+  'http://127.0.0.1:3001'
 );
 
 const BACKEND_LP_INTERNAL_URL = sanitizeUrl(
   process.env.BACKEND_LP_INTERNAL_URL || process.env.INTERNAL_LP_URL,
-  process.env.NODE_ENV === 'production' ? 'https://75.119.151.184:3010' : 'http://localhost:3010'
+  'http://127.0.0.1:3010'
 );
 
 const nextConfig: NextConfig = {
@@ -48,6 +48,14 @@ const nextConfig: NextConfig = {
       '.jsx': ['.tsx', '.jsx'],
       '.mjs': ['.mts', '.mjs']
     };
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      '@x402/evm': false,
+      '@x402/evm/upto/client': false,
+      '@x402/evm/exact/client': false,
+      '@coinbase/cdp-sdk': false,
+    };
+    config.externals = [...(config.externals || []), '@x402/evm', '@coinbase/cdp-sdk'];
     return config;
   }
 };

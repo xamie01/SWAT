@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono, Inter, JetBrains_Mono } from 'next/font/google';
 import { ThemeProvider } from '../components/ThemeProvider.js';
+import { AppKitProvider } from '../context/appkit.js';
 import './globals.css';
 
 const geistSans = Geist({
@@ -90,7 +91,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="bg-canvas-base text-on-surface min-h-screen font-body antialiased transition-colors duration-200">
         <ThemeProvider>
-          {children}
+          <AppKitProvider>
+            {children}
+          </AppKitProvider>
         </ThemeProvider>
       </body>
     </html>

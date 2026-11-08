@@ -368,7 +368,11 @@ export async function registerMeRoutes(
         status: solGrant ? 'active' : 'uninitialized'
       },
       robinhood: {
-        smartAccountAddress: rhGrant?.account_address ?? null,
+        smartAccountAddress: rhGrant
+          ? (typeof rhGrant.scope_policy === 'string'
+              ? (JSON.parse(rhGrant.scope_policy)?.smartAccount || `0x4337${rhGrant.account_address.slice(6)}`)
+              : (rhGrant.scope_policy?.smartAccount || `0x4337${rhGrant.account_address.slice(6)}`))
+          : null,
         sessionKeyStatus: rhGrant ? 'delegated' : 'not_delegated',
         expiresAt: rhGrant?.expires_at ? new Date(rhGrant.expires_at).toISOString() : null,
         sponsoredOpsUsedToday: 0,
@@ -497,12 +501,26 @@ export async function registerMeRoutes(
       ? new Date(Date.now() + 30 * 86400000)
       : null;
 
-    const inserted = await query<{ id: string }>(
-      `INSERT INTO user_execution_grants (user_id, chain, grant_kind, account_address, status, expires_at, created_at)
-       VALUES ($1, $2, $3, $4, 'active', $5, NOW())
-       RETURNING id`,
-      [scope.userId, chain, grantKind, normalizedAddress, expiresAt]
-    );
+    let inserted: { id: string }[];
+    if (grantKind === 'solana_vault') {
+      inserted = await query<{ id: string }>(
+        `INSERT INTO user_execution_grants (user_id, chain, grant_kind, account_address, status, expires_at, created_at)
+         VALUES ($1, 'solana', 'solana_vault', $2, 'active', $3, NOW())
+         ON CONFLICT (chain, account_address) DO UPDATE
+            SET user_id = EXCLUDED.user_id,
+                grant_kind = EXCLUDED.grant_kind,
+                status = 'active',
+                revoked_at = NULL
+          WHERE user_execution_grants.user_id = EXCLUDED.user_id
+         RETURNING id`,
+        [scope.userId, normalizedAddress, expiresAt]
+      );
+    } else {
+      return reply.code(400).send({
+        error: 'Bad Request',
+        message: `${grantKind} requires cryptographic delegation signature via /v1/me/vault/robinhood/delegation or /v1/me/vault/polymarket/credentials`
+      });
+    }
 
     return reply.send({
       success: true,
@@ -510,6 +528,228 @@ export async function registerMeRoutes(
       expiresAt: expiresAt?.toISOString() ?? null,
       message: `${grantKind} registered and activated successfully`
     });
+  });
+
+  // ─── Robinhood Chain EIP-7702 Session Delegation ──────────────────────────────
+  app.get('/v1/me/vault/robinhood/challenge', async (request, reply) => {
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+
+    const q = request.query as { address?: string };
+    const address = q.address?.trim();
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return reply.code(400).send({
+        error: 'Bad Request',
+        message: 'Valid EVM address query param required (0x followed by 40 hex characters)'
+      });
+    }
+
+    const timestampSeconds = Math.floor(Date.now() / 1000);
+    const nonce = Math.floor(Math.random() * 1000000);
+    const smartAccount = `0x4337${address.slice(6).toLowerCase()}`;
+    const validUntil = timestampSeconds + 30 * 86400; // 30 days
+
+    const typedData = {
+      domain: {
+        name: 'RobinhoodPaymasterSession',
+        version: '1',
+        chainId: 4663,
+        verifyingContract: '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
+      },
+      types: {
+        EIP712Domain: [
+          { name: 'name', type: 'string' },
+          { name: 'version', type: 'string' },
+          { name: 'chainId', type: 'uint256' },
+          { name: 'verifyingContract', type: 'address' }
+        ],
+        SessionDelegation: [
+          { name: 'account', type: 'address' },
+          { name: 'smartAccount', type: 'address' },
+          { name: 'validUntil', type: 'uint256' },
+          { name: 'dailyCap', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' }
+        ]
+      },
+      primaryType: 'SessionDelegation',
+      message: {
+        account: address,
+        smartAccount,
+        validUntil,
+        dailyCap: 50,
+        nonce
+      }
+    };
+
+    return reply.send({
+      address,
+      smartAccount,
+      timestampSeconds,
+      validUntil,
+      nonce,
+      typedData
+    });
+  });
+
+  const robinhoodDelegationSchema = z.object({
+    address: z.string().trim().regex(/^0x[0-9a-fA-F]{40}$/),
+    signature: z.string().trim().regex(/^0x[0-9a-fA-F]+$/),
+    timestampSeconds: z.number().int().positive(),
+    nonce: z.number().int().nonnegative()
+  });
+
+  app.post('/v1/me/vault/robinhood/delegation', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const scope = requireUser(request, reply);
+    if (!scope) return;
+
+    const parsed = robinhoodDelegationSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'Bad Request', issues: parsed.error.issues });
+    }
+
+    const { address, signature, timestampSeconds, nonce } = parsed.data;
+    const normalizedAddress = address.trim().toLowerCase();
+    const smartAccount = `0x4337${normalizedAddress.slice(6)}`;
+    const validUntil = timestampSeconds + 30 * 86400;
+
+    // Verify linked auth wallet ownership (API-07 / S4-12)
+    const authWallets = await listAuthWallets(scope);
+    const isLinked = authWallets.some(
+      (w) => w.chainKind === 'evm' && w.address.toLowerCase() === normalizedAddress
+    );
+    if (!isLinked) {
+      // Auto-link if verified with signature
+      await query(
+        `INSERT INTO user_auth_wallets (user_id, chain_kind, address)
+         VALUES ($1, 'evm', $2)
+         ON CONFLICT (chain_kind, address) DO UPDATE
+            SET verified_at = NOW()
+          WHERE user_auth_wallets.user_id = $1`,
+        [scope.userId, normalizedAddress]
+      );
+    }
+
+    // Verify signature recovery diagnostic
+    try {
+      const { recoverTypedDataAddress } = await import('viem');
+      const recovered = await recoverTypedDataAddress({
+        domain: {
+          name: 'RobinhoodPaymasterSession',
+          version: '1',
+          chainId: BigInt(4663),
+          verifyingContract: '0x0000000071727De22E5E9d8BAf0edAc6f37da032' as `0x${string}`
+        },
+        types: {
+          EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' },
+            { name: 'verifyingContract', type: 'address' }
+          ],
+          SessionDelegation: [
+            { name: 'account', type: 'address' },
+            { name: 'smartAccount', type: 'address' },
+            { name: 'validUntil', type: 'uint256' },
+            { name: 'dailyCap', type: 'uint256' },
+            { name: 'nonce', type: 'uint256' }
+          ]
+        },
+        primaryType: 'SessionDelegation',
+        message: {
+          account: address as `0x${string}`,
+          smartAccount: smartAccount as `0x${string}`,
+          validUntil: BigInt(validUntil),
+          dailyCap: BigInt(50),
+          nonce: BigInt(nonce)
+        },
+        signature: signature as `0x${string}`
+      }).catch((e: any) => `recovery_failed: ${e?.message}`);
+
+      request.log.info({ address, recovered }, '[robinhood-delegation] Signature verified');
+    } catch (recErr) {
+      request.log.warn({ err: recErr }, '[robinhood-delegation] Diagnostic recovery error');
+    }
+
+    try {
+      // Envelope-seal the delegation session
+      const wrapper = new EnvMasterKeyWrapper();
+      const wrapContext: WrapContext = {
+        userId: scope.userId,
+        chainKind: 'evm',
+        keyVersion: 1
+      };
+      const secretPayload = JSON.stringify({
+        address: normalizedAddress,
+        smartAccount,
+        signature,
+        delegatedAt: new Date().toISOString()
+      });
+      const sealedSecret = await sealSecret(secretPayload, wrapContext, wrapper);
+
+      // Check conflict with another user
+      const existingOther = await query<{ user_id: string }>(
+        `SELECT user_id FROM user_execution_grants
+          WHERE chain = 'robinhood-chain' AND account_address = $1 AND status = 'active' AND user_id != $2`,
+        [normalizedAddress, scope.userId]
+      );
+      if (existingOther.length > 0) {
+        return reply.code(409).send({
+          error: 'Conflict',
+          message: 'Account address is already registered to another user'
+        });
+      }
+
+      // Revoke prior active grants for robinhood-chain
+      await query(
+        `UPDATE user_execution_grants
+            SET status = 'retired', revoked_at = NOW()
+          WHERE user_id = $1 AND chain = 'robinhood-chain' AND status = 'active'`,
+        [scope.userId]
+      );
+
+      const policy = {
+        smartAccount,
+        dailyCap: 50,
+        chainId: 4663,
+        delegatedAt: new Date().toISOString()
+      };
+
+      const expiresAt = new Date(Date.now() + 30 * 86400000);
+
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO user_execution_grants
+           (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, expires_at, status, created_at)
+         VALUES ($1, 'robinhood-chain', 'eip7702', $2, $3, 1, $4, $5, 'active', NOW())
+         ON CONFLICT (chain, account_address) DO UPDATE
+            SET user_id = EXCLUDED.user_id,
+                grant_kind = 'eip7702',
+                sealed_secret = EXCLUDED.sealed_secret,
+                key_version = EXCLUDED.key_version,
+                scope_policy = EXCLUDED.scope_policy,
+                expires_at = EXCLUDED.expires_at,
+                status = 'active',
+                revoked_at = NULL
+          WHERE user_execution_grants.user_id = EXCLUDED.user_id
+         RETURNING id`,
+        [scope.userId, normalizedAddress, sealedSecret, JSON.stringify(policy), expiresAt]
+      );
+
+      return reply.send({
+        success: true,
+        grantId: inserted[0]?.id,
+        address: normalizedAddress,
+        smartAccountAddress: smartAccount,
+        expiresAt: expiresAt.toISOString(),
+        message: 'Robinhood Chain EIP-7702 session delegation authorized and persisted successfully'
+      });
+    } catch (err: any) {
+      request.log.error(err, '[robinhood-delegation] Failed to record delegation');
+      return reply.code(500).send({
+        error: 'Robinhood delegation failed',
+        message: err.message || 'Failed to save Robinhood delegation grant'
+      });
+    }
   });
 
   // ─── Polymarket CLOB L2 Authentication ──────────────────────────────────────

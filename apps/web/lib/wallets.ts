@@ -353,3 +353,58 @@ export async function signPolymarketClobAuth(
     }
   }
 }
+
+/**
+ * Prompts the connected EVM wallet (MetaMask, Rabby, Trust Wallet) to sign the
+ * Robinhood Chain EIP-7702 SessionDelegation typed data via eth_signTypedData_v4.
+ */
+export async function signRobinhoodDelegation(
+  provider: any,
+  address: string,
+  typedData: any
+): Promise<string> {
+  const activeProvider = provider || (typeof window !== 'undefined' ? (window as any).ethereum : null);
+  if (!activeProvider) {
+    throw new Error('No EVM wallet provider available to sign Robinhood delegation.');
+  }
+
+  const payload = {
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      ...typedData.types,
+    },
+  };
+
+  try {
+    return await activeProvider.request({
+      method: 'eth_signTypedData_v4',
+      params: [address, JSON.stringify(payload)],
+    });
+  } catch (err: any) {
+    if (err?.code === 4001) {
+      throw new Error('Robinhood delegation signature rejected by user.');
+    }
+    try {
+      return await activeProvider.request({
+        method: 'eth_signTypedData_v4',
+        params: [address, payload],
+      });
+    } catch (err2: any) {
+      if (err2?.code === 4001) {
+        throw new Error('Robinhood delegation signature rejected by user.');
+      }
+      // Mobile wallet personal_sign fallback
+      const message = `Robinhood Chain Session Delegation\nChain ID: 4663\nAccount: ${address}\nValid: 30 Days\nDaily Cap: 50 Ops\nNonce: ${typedData?.message?.nonce ?? 0}`;
+      return await activeProvider.request({
+        method: 'personal_sign',
+        params: [message, address],
+      });
+    }
+  }
+}

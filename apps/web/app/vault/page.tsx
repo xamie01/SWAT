@@ -4,12 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { SaaSNav } from '../../components/SaaSNav.js';
 import { AdminNav } from '../../components/AdminNav.js';
 import { ChainBadge, LoadingSkeleton, ErrorBanner } from '../../components/UIPrimitives.js';
+import { WalletConnectModalButton } from '../../components/WalletConnectModalButton.js';
 import { api } from '../../lib/api.js';
 import {
   connectSolanaWallet,
   connectEvmWallet,
   linkWalletWithSignature,
   signPolymarketClobAuth,
+  signRobinhoodDelegation,
   getSolanaProvider,
   getEvmProvider,
   deriveSolanaAnchorPda,
@@ -89,6 +91,8 @@ export default function VaultPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showWalletConnectModal, setShowWalletConnectModal] = useState<boolean>(false);
   const [actionSuccessNotice, setActionSuccessNotice] = useState<string | null>(null);
+  const [delegatingRh, setDelegatingRh] = useState<boolean>(false);
+  const [rhDelegationError, setRhDelegationError] = useState<string | null>(null);
 
   const triggerCopy = (text: string, key: string) => {
     const ok = copyToClipboard(text);
@@ -130,36 +134,27 @@ export default function VaultPage() {
 
       const resolvedData: VaultData = vaultRes || {
         solana: {
-          pdaAddress: '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS',
+          pdaAddress: '',
           rentLamports: 2039280,
           solGasReserve: 0.12,
           solGasUsd: 19.8,
           solMinGasUsd: 10.0,
           hasMinimumGas: true,
-          status: 'active',
+          status: 'uninitialized',
         },
         robinhood: {
-          smartAccountAddress: '0x4337d11111111111111111111111111111114337',
-          sessionKeyStatus: 'delegated',
-          expiresAt: new Date(Date.now() + 14 * 86400000).toISOString(),
-          sponsoredOpsUsedToday: 4,
+          smartAccountAddress: '',
+          sessionKeyStatus: 'not_delegated',
+          expiresAt: null as any,
+          sponsoredOpsUsedToday: 0,
           dailyCap: 50,
         },
         polymarket: {
-          depositAddress: '0x7739d22222222222222222222222222222227739',
+          depositAddress: '',
           geoEligible: true,
           geoExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
         },
-        linkedWallets: initialLinkedWallets.length > 0 ? initialLinkedWallets : [
-          {
-            address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU',
-            chain: 'solana',
-            verified: true,
-            linkedAt: new Date(Date.now() - 48 * 3600000).toISOString(),
-            spendableAt: new Date(Date.now() - 24 * 3600000).toISOString(),
-            isCoolingOff: false,
-          },
-        ],
+        linkedWallets: initialLinkedWallets,
       };
 
       setData(resolvedData);
@@ -197,6 +192,13 @@ export default function VaultPage() {
         // Compute Real Solana Anchor Execution PDA
         const { pdaAddress: derivedPda } = deriveSolanaAnchorPda(address, detectedCluster);
 
+        // Persist Solana execution grant in DB
+        await api.post('/v1/me/vault/grant', {
+          chain: 'solana',
+          grantKind: 'solana_vault',
+          accountAddress: derivedPda,
+        }).catch((err) => console.warn('Could not register solana grant in DB:', err));
+
         setData((prev) =>
           prev
             ? {
@@ -221,7 +223,7 @@ export default function VaultPage() {
             : prev
         );
 
-        setWalletConnectSuccess(`Connected to ${walletName} (${detectedCluster.toUpperCase()})! Address ${address.slice(0, 4)}...${address.slice(-4)} cryptographically linked. Anchor Execution PDA derived: ${derivedPda}`);
+        setWalletConnectSuccess(`Connected to ${walletName} (${detectedCluster.toUpperCase()})! Address ${address.slice(0, 4)}...${address.slice(-4)} cryptographically linked and saved. Anchor PDA: ${derivedPda}`);
       } else if (chain === 'robinhood-chain') {
         const { address, provider, walletName } = await connectEvmWallet();
         setDetectedEvm(walletName);
@@ -242,8 +244,6 @@ export default function VaultPage() {
                 robinhood: {
                   ...prev.robinhood,
                   smartAccountAddress: derivedSmartAccount,
-                  sessionKeyStatus: 'delegated',
-                  expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
                 },
                 linkedWallets: [
                   ...prev.linkedWallets.filter((w) => w.address.toLowerCase() !== address.toLowerCase()),
@@ -260,7 +260,7 @@ export default function VaultPage() {
             : prev
         );
 
-        setWalletConnectSuccess(`Connected to ${walletName}! Address ${address.slice(0, 6)}...${address.slice(-4)} verified. Robinhood 4337 Smart Account active: ${derivedSmartAccount}`);
+        setWalletConnectSuccess(`Connected to ${walletName}! Address ${address.slice(0, 6)}...${address.slice(-4)} linked. Click "Authorize 7702" below to sign the 30-day session delegation.`);
       } else {
         // Polymarket (Polygon)
         const { address, provider, walletName } = await connectEvmWallet('0x89');
@@ -580,44 +580,68 @@ export default function VaultPage() {
     }
   };
 
+  const handleConfirmRobinhoodDelegation = async () => {
+    setDelegatingRh(true);
+    setRhDelegationError(null);
+    try {
+      const rhWallet = data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain');
+      const evmAddress = rhWallet?.address || (typeof window !== 'undefined' ? (window as any).ethereum?.selectedAddress : null);
+      if (!evmAddress) {
+        throw new Error('Please connect your Robinhood / EVM wallet first before delegating.');
+      }
+
+      // 1. Request EIP-712 challenge
+      const challenge = await api.get<{
+        address: string;
+        smartAccount: string;
+        timestampSeconds: number;
+        nonce: number;
+        typedData: any;
+      }>(`/v1/me/vault/robinhood/challenge?address=${evmAddress}`);
+
+      // 2. Prompt wallet to sign
+      const provider = getEvmProvider()?.provider || (typeof window !== 'undefined' ? (window as any).ethereum : null);
+      const signature = await signRobinhoodDelegation(provider, evmAddress, challenge.typedData);
+
+      // 3. Post signature to backend to store in DB
+      await api.post('/v1/me/vault/robinhood/delegation', {
+        address: evmAddress,
+        signature,
+        timestampSeconds: challenge.timestampSeconds,
+        nonce: challenge.nonce,
+      });
+
+      setActiveModal(null);
+      setActionSuccessNotice('Robinhood Chain EIP-7702 delegation signed and saved to database! 30-day active session.');
+      setTimeout(() => setActionSuccessNotice(null), 4000);
+      await fetchVault();
+    } catch (err: any) {
+      setRhDelegationError(err?.message || 'Failed to sign EIP-7702 delegation');
+    } finally {
+      setDelegatingRh(false);
+    }
+  };
+
   const handleRevokeRobinhoodSession = async () => {
     try {
-      if (data?.robinhood.sessionKeyStatus === 'revoked') {
-        const rhWallet = data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain');
-        const smartAddr = rhWallet ? `0x4337${rhWallet.address.slice(2)}` : (data?.robinhood.smartAccountAddress || '0x4337000000000000000000000000000000000000');
-        await api.post('/v1/me/vault/grant', {
-          chain: 'robinhood-chain',
-          grantKind: 'eip7702',
-          accountAddress: smartAddr
-        });
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                robinhood: {
-                  ...prev.robinhood,
-                  sessionKeyStatus: 'delegated',
-                  smartAccountAddress: smartAddr,
-                },
-              }
-            : prev
-        );
-        setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation restored. Automated trading resumed.');
-      } else {
-        await api.post('/v1/me/vault/revoke', { chain: 'robinhood-chain' });
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                robinhood: {
-                  ...prev.robinhood,
-                  sessionKeyStatus: 'revoked',
-                },
-              }
-            : prev
-        );
-        setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
+      if (data?.robinhood.sessionKeyStatus === 'revoked' || data?.robinhood.sessionKeyStatus === 'not_delegated') {
+        setActiveModal('robinhood-delegate');
+        return;
       }
+
+      await api.post('/v1/me/vault/revoke', { chain: 'robinhood-chain' });
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              robinhood: {
+                ...prev.robinhood,
+                sessionKeyStatus: 'revoked',
+              },
+            }
+          : prev
+      );
+      setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
       setTimeout(() => setActionSuccessNotice(null), 4000);
     } catch (err: any) {
       alert(`Action failed: ${err.message || 'Could not update delegation state'}`);
@@ -867,6 +891,16 @@ export default function VaultPage() {
                     </div>
 
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+                      {/* Universal WalletConnect / Mobile QR Code Button */}
+                      <WalletConnectModalButton
+                        chainKind={linkChain}
+                        onLinked={() => {
+                          fetchVault();
+                          setActionSuccessNotice(`Wallet connected & linked via WalletConnect for ${linkChain.toUpperCase()}!`);
+                          setTimeout(() => setActionSuccessNotice(null), 4000);
+                        }}
+                      />
+
                       {linkChain === 'solana' ? (
                         detectedSolana ? (
                           <button
@@ -1193,9 +1227,15 @@ export default function VaultPage() {
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
                         data?.robinhood.sessionKeyStatus === 'revoked'
                           ? 'bg-status-error/15 text-status-error'
-                          : 'bg-status-success/15 text-status-success'
+                          : data?.robinhood.sessionKeyStatus === 'delegated'
+                            ? 'bg-status-success/15 text-status-success'
+                            : 'bg-on-surface-variant/15 text-on-surface-variant'
                       }`}>
-                        {data?.robinhood.sessionKeyStatus === 'revoked' ? 'REVOKED (PAUSED)' : 'DELEGATED (ACTIVE)'}
+                        {data?.robinhood.sessionKeyStatus === 'revoked'
+                          ? 'REVOKED (PAUSED)'
+                          : data?.robinhood.sessionKeyStatus === 'delegated'
+                            ? 'DELEGATED (ACTIVE)'
+                            : 'NOT DELEGATED'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -1213,18 +1253,24 @@ export default function VaultPage() {
                     className="w-full py-2.5 bg-[#FFB800] hover:bg-[#E5A700] text-black font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                   >
                     <span className="material-symbols-outlined text-sm">key</span>
-                    <span>Delegate EIP-7702 Session (30 Days)</span>
+                    <span>{data?.robinhood.sessionKeyStatus === 'delegated' ? 'Extend Delegation (30 Days)' : 'Delegate EIP-7702 Session (30 Days)'}</span>
                   </button>
-                  <button
-                    onClick={handleRevokeRobinhoodSession}
-                    className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
-                      data?.robinhood.sessionKeyStatus === 'revoked'
-                        ? 'bg-[#FFB800]/10 border-[#FFB800] text-[#B45309] dark:text-[#FFB800] hover:bg-[#FFB800]/20'
-                        : 'bg-surface-container hover:bg-surface-container-high border-border-subtle text-on-surface-variant'
-                    }`}
-                  >
-                    {data?.robinhood.sessionKeyStatus === 'revoked' ? 'Re-delegate 30-Day Session' : 'Revoke Delegation'}
-                  </button>
+                  {data?.robinhood.sessionKeyStatus === 'delegated' && (
+                    <button
+                      onClick={handleRevokeRobinhoodSession}
+                      className="w-full py-2 rounded-lg text-xs font-semibold transition-colors border bg-surface-container hover:bg-surface-container-high border-border-subtle text-on-surface-variant"
+                    >
+                      Revoke Delegation
+                    </button>
+                  )}
+                  {data?.robinhood.sessionKeyStatus === 'revoked' && (
+                    <button
+                      onClick={() => setActiveModal('robinhood-delegate')}
+                      className="w-full py-2 rounded-lg text-xs font-semibold transition-colors border bg-[#FFB800]/10 border-[#FFB800] text-[#B45309] dark:text-[#FFB800] hover:bg-[#FFB800]/20"
+                    >
+                      Re-delegate 30-Day Session
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1518,17 +1564,33 @@ export default function VaultPage() {
                   <span className="text-on-surface-variant">Permitted Venues:</span>
                   <span className="font-bold text-primary">Robinhood Chain (Chain ID: 4663)</span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-on-surface-variant">Delegating Wallet:</span>
+                  <span className="font-bold text-[#FFB800] text-[11px] truncate max-w-[200px]">
+                    {data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain')?.address || 'No EVM wallet connected'}
+                  </span>
+                </div>
               </div>
 
+              {rhDelegationError && (
+                <div className="p-3 mb-4 rounded-xl bg-status-error/10 border border-status-error/20 text-status-error text-xs">
+                  {rhDelegationError}
+                </div>
+              )}
+
               <button
-                onClick={() => {
-                  alert('EIP-7702 delegation signed and registered with Robinhood Paymaster.');
-                  setActiveModal(null);
-                  fetchVault();
-                }}
-                className="w-full py-2.5 bg-[#FFB800] hover:bg-[#E5A700] text-black font-bold rounded-xl text-sm transition-colors mb-2"
+                onClick={handleConfirmRobinhoodDelegation}
+                disabled={delegatingRh || !data?.linkedWallets?.some((w) => w.chain === 'robinhood-chain')}
+                className="w-full py-2.5 bg-[#FFB800] hover:bg-[#E5A700] text-black font-bold rounded-xl text-sm transition-colors mb-2 disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                Confirm Delegation Signature
+                {delegatingRh ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                    <span>Signing EIP-7702 Delegation...</span>
+                  </>
+                ) : (
+                  <span>Sign &amp; Authorize 30-Day Delegation</span>
+                )}
               </button>
             </div>
           </div>
