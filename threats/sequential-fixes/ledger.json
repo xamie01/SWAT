@@ -237,7 +237,7 @@
         "IDX-08",
         "RUN-03"
       ],
-      "seams": "Source event construction, provider pagination and canonical evidence",
+      "seams": "Source observation identity/finality containment, bounded provider metadata/polling and truthful ingestion evidence",
       "status": "in-progress",
       "evidence": [
         "threats/sequential-fixes/package11-notes.md",
@@ -280,14 +280,46 @@
         "threats/sequential-fixes/package11-polygon-attribution-red-complete.json",
         "threats/sequential-fixes/package11-polygon-attribution-green.json",
         "threats/sequential-fixes/package11-polygon-full-guarded.json",
-        "threats/sequential-fixes/package11-polygon-typecheck-640.log"
+        "threats/sequential-fixes/package11-polygon-typecheck-640.log",
+        "threats/sequential-fixes/package11-aspect-identity-report.md",
+        "threats/sequential-fixes/package11-aspect-finality-report.md",
+        "threats/sequential-fixes/package11-aspect-metadata-report.md",
+        "threats/sequential-fixes/package11-aspect-polling-report.md",
+        "threats/sequential-fixes/package11-aspect-health-report.md",
+        "threats/sequential-fixes/package11-aspect-acceptance-report.md",
+        "threats/sequential-fixes/package11-identity-reviewed-focused.json",
+        "threats/sequential-fixes/package11-identity-typecheck-640.log",
+        "threats/sequential-fixes/package11-finality-final-neighbors.json",
+        "threats/sequential-fixes/package11-finality-reviewed-typecheck-640.log",
+        "threats/sequential-fixes/package11-metadata2-final-neighbors-green.json",
+        "threats/sequential-fixes/package11-metadata2-final-typecheck-640.log",
+        "threats/sequential-fixes/package11-polling-release-deadline-green.json",
+        "threats/sequential-fixes/package11-polling-final-typecheck-640.log",
+        "threats/sequential-fixes/package11-health-reviewed-neighbors.json",
+        "threats/sequential-fixes/package11-health-reviewed-typecheck-640.log",
+        "threats/sequential-fixes/package11-acceptance-runtime-capability-green.json",
+        "threats/sequential-fixes/package11-integration-poll-schema-red.json",
+        "threats/sequential-fixes/package11-integration-poll-schema-green.json",
+        "threats/sequential-fixes/package11-integration-alert-evidence-red.json",
+        "threats/sequential-fixes/package11-integration-alert-evidence-green.json",
+        "threats/sequential-fixes/package11-integration-focused-green.json",
+        "threats/sequential-fixes/package11-integration-source-tests-typecheck-640.log",
+        "threats/sequential-fixes/package11-integration-type-fixtures-green.json",
+        "threats/sequential-fixes/package11-integration-source-tests-typecheck-green-640.log",
+        "threats/sequential-fixes/package11-integration-final-guarded.json",
+        "threats/sequential-fixes/package11-integration-final-guarded.log",
+        "threats/sequential-fixes/package11-integration-ledger-validation.log",
+        "threats/sequential-fixes/package11-integration-authority-ledger-validation.log"
       ],
       "notes": [
         "Proceeding in the existing order: bounded provider pagination first, then truthful finality, stable identity, wallet-net quantities and unknown market context. No runtime/provider certification implied.",
         "2026-11-13 checkpoint: bounded paging/individual metadata requests, exact Robinhood wallet-net canonical quantities, and observation quarantine in Solana/Polymarket/Robinhood callers. Current guarded selection 255 passed/30 files/0 failed/0 skipped; selected current source typecheck640 passed. Narrow static containment review found no introduced bugs; original broad Standards/Spec reviews provider-blocked. See package11-notes.md for all red/green evidence. Confirmation promotion/reversal, historical confirmed rows, stable fill identity/exact Polymarket quantities, metadata provenance/global operation bounds, generic Polygon and health readiness remain unresolved. Containment withholds copying; no runtime certification or package closure.",
         "2026-11-13 exact-decimal checkpoint: bounded authoritative size/price text, exact atomic conversion and BigInt notional, original JSON numeric lexemes, equivalent-spelling observation identity. Four preserved red/green regressions; reviewed permitted selection304passed/31files/0failed/0skipped and focused source typecheck640exit0. Bounded Standards0hard violations/1duplication smell addressed; bounded Spec0findings including cleanup. Quarantine unchanged; native fill identity/finality/historical data/metadata global budget and freshness/generic Polygon/health/runtime gates remain open. No live operations, commits or pushes; package11 in-progress.",
         "2026-11-13 metadata checkpoint: shared backfill request/monotonic-time/streamed-byte limits, terminal budget errors, late-success refusal and cancellation. Resolution caller compiler regression and review-stage prefix starvation reproduced/corrected; polling retains fresh per-market budgets, whole-scan bounds/continuation explicitly open. Final permitted selection 320 passed/31 files/0 failed/0 skipped; focused source typecheck640 exit0. Final bounded Standards 0 hard violations/0 new smells/1 inherited low heuristic; Spec 0 remaining findings after resolving 2 polling findings. DB waits not actively cancelled; provenance/freshness/native identity/finality/history/generic Polygon/health/runtime remain open. Quarantine unchanged; no live operations, commits or pushes. Package11 in-progress.",
-        "2026-11-13 generic Polygon checkpoint: public EVM backfill explicitly unavailable before invocation-level RPC/DB/pricing/legacy publication, containing unsupported transfer classification; separate Polymarket and reviewed Robinhood routes preserved. Initial incomplete-fixture red retained; complete-fixture red inserted1, guard green19/3files. Current permitted selection321passed/31files/0failed/0skipped; focused source typecheck640exit0. Bounded Standards0hard violations/0new smells; Spec0findings and callers traced. Module-level Redis initialization is outside invocation guarantee. Functional Polygon classifier/history repair/native identity/finality/metadata freshness and DB/poll bounds/health/runtime remain open; package11 in-progress. No live operations, commits or pushes."
+        "2026-11-13 generic Polygon checkpoint: public EVM backfill explicitly unavailable before invocation-level RPC/DB/pricing/legacy publication, containing unsupported transfer classification; separate Polymarket and reviewed Robinhood routes preserved. Initial incomplete-fixture red retained; complete-fixture red inserted1, guard green19/3files. Current permitted selection321passed/31files/0failed/0skipped; focused source typecheck640exit0. Bounded Standards0hard violations/0new smells; Spec0findings and callers traced. Module-level Redis initialization is outside invocation guarantee. Functional Polygon classifier/history repair/native identity/finality/metadata freshness and DB/poll bounds/health/runtime remain open; package11 in-progress. No live operations, commits or pushes.",
+        "2026-11-13 end-to-end source integration checkpoint: six aspect artifacts are handoff snapshots, not independent integrated verdicts. Public Polymarket resolution polling now uses the durable fenced SQL store with bounded shared metadata reader/budget and no economic writes, rejecting partial coverage and blocked economic resolution even when metadata coverage completes. Alert display distinguishes UNREADY, displays readiness/completeness/confirmation and nullable observed/quarantined/accepted counters, and keeps nonhealthy stale reservation compatibility. Missing-schema public seam red1failed then green1passed/63filteredskips; alert display red1failed3passed then green4passed. Focused integration104passed/6files followed by contract-fixture/actual-counter checks77passed/3files; these are separate checkpoints, not summed. Expanded source/test noEmit640 first exit2 with8test-fixture diagnostics, then exit0 after minimal mock corrections. ONE final permitted combined guarded selection package11-integration-final-guarded:444passed/42resultfiles/0failed/0skipped, exit0, finished2026-11-13T22:36:51.890603+00:00; not fullrepo/build/runtime acceptance. Original red evidence, malformed commands.jsonl line11 and repeated historical labels preserved. Independent Standards/Spec review remains pending.",
+        "Package11 remains IN-PROGRESS: containment withholds new source eligibility/copying and economic resolution, not completed financial functionality. No trusted confirmation verifier/promotion/reversal, native fill identity/durable correction linkage, functional Polygon classifier, historical repair/downstream reconciliation, artifact/deployed Node compatibility, installed schema/least-privilege global capabilities/topology/real transaction and transport acceptance or venue certification established. Poll-progress/evidence DDL and SQL070 remain UNAPPLIED; no auto migration/fallback. Existing-execution early-return retry is an explicitly later-package dependency, not rewritten. Legacy Polymarket precision/key/projection and fee-schema/rawSQL authority gates retained. Package01-10 qualified statuses unchanged and12-29pending. No installs/live services/providers/DB/Redis/credentials/signing/orders/funds/deployments/commits/pushes/resets/clean performed by this integration agent; inherited dirty/untracked evidence preserved.",
+        "2026-11-13 authority drift observed after checks: baselineHead remains8905505595802c21053118b5fab3fd53a8a1654c, but read-only history now shows externally created5d0558d5530ae7af3ecea2edfb3bda43d0cbccec at22:34:22Z and99c0e16469934b235372df342de8abc8a2c1a155 at22:35:11Z. This integration agent issued no git mutation/commit/push/reset/clean. Integrated source/config matches current HEAD byte-for-byte; final combined gate ran across this external history change. Normal Vitest temporary/cache effects remain, including externally tracked temporary SSR files now deleted by test cleanup; no manual recovery attempted. Do not claim checkout-wide no commits or treat external commits as authorized release acceptance. Coordinator notified; independent review must retain baseline and account for drift."
       ]
     },
     {

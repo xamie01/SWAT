@@ -1,6 +1,6 @@
 # Package 11 — ingestion remediation checkpoint
 
-Date: 2026-11-13. Baseline `8905505595802c21053118b5fab3fd53a8a1654c`; work remains uncommitted on the existing remediation checkout. **Status: in-progress.** This is a source/offline checkpoint, not a production or venue acceptance claim.
+Date: 2026-11-13. Authority baseline `8905505595802c21053118b5fab3fd53a8a1654c`; external shared-checkout commits advanced observed HEAD to `99c0e16469934b235372df342de8abc8a2c1a155` during final integration checks. **Status: in-progress.** Latest integrated offline gate: **444 passed / 42 files, zero failures/skips**, focused source-and-test noEmit640 exit 0. See [integrated report](package11-integration-report.md) and the latest checkpoint below. Prior sections are historical source/evidence checkpoints, not current aggregate verdicts. No production or venue acceptance is claimed.
 
 ## Corrected source behavior
 
@@ -140,3 +140,24 @@ Static containment review passed. Both incoming and stored state are required by
 Selected containment and terminal-pagination requirements passed static review. Explicit null cursor terminates full envelopes; missing/contradictory object metadata and full bare-array ambiguity refuse. The reviewer retained package11 as in progress and called out confirmation/reversal, historical rows, content-hash identity/numeric quantities, metadata provenance/global bounds and generic Polygon as unresolved—not closures. Only Read tools were used; the reviewer did not verify tests or diff attribution.
 
 Result: no findings in the narrow Standards axis or narrow Spec axis; both broader original axes remain review-incomplete. Green source checks and this bounded review do not establish runtime or full package acceptance.
+
+## Concurrent aspects and end-to-end integration — latest 2026-11-13 checkpoint
+
+Six agents owned identity, confirmation/history, metadata, whole polling, health/readiness and acceptance gates concurrently in separate files. Compiler/test processes remained serialized under the shared flock on CPU0. A separate integrator connected their contracts. Main reviewed final reports, not duplicate source implementations.
+
+Current source supersedes several historical open-scope statements above:
+
+- The economic/time identity hash is replaced by an explicitly ambiguous transaction/wallet group. Native fill uniqueness still is not available; changed immutable payload refuses rather than becoming another fill.
+- Unavailable-verifier fences now refuse applied/reversed intake, confirmation advancement and fresh downstream eligibility even for stored historical applied labels. Observation replay never reapplies/rebuilds source positions. Historical rows and existing execution retries are not repaired.
+- Historical complete caches are not trusted; backfills retrieve provider evidence and reuse only operation-local per-asset snapshots. Persisted mapping/risk/tick/end-date/lifecycle comparison, explicit CLOB condition, unique mapping and scalar tick evidence precede continuation. This is not cryptographic or trade-time provenance.
+- Whole polling uses finite-keyset durable lease/cursor storage, bounded shared network work and pessimistic pre-network attempt reservations. Missing UNAPPLIED schema fails closed. Price-derived winners are removed; even complete metadata enumeration has blocked economic resolution and the public wrapper rejects. Hard DB/transport cancellation remains unproven.
+- Health now exposes observation/quarantine/acceptance attempt evidence and coverage/withheld confirmation. Recent observations are unready; absent optional JSONB schema is unknown/null. Fatal errors downgrade completeness to partial. Alert display explicitly says UNREADY and unknown counters.
+
+**Latest actual integrated checks:** `package11-integration-final-guarded` **444 passed / 42 files, zero failed/skipped, exit0**, finished `2026-11-13T22:36:51.890603Z`; `package11-integration-source-tests-typecheck-green-640` focused source-and-test noEmit **exit0**. Public missing-schema and alert-evidence reds were retained; the initial expanded typecheck had eight fixture diagnostics, corrected minimally with separate evidence. Never add aspect/historical pass totals. This is the permitted offline/mock selection, not full repository or operational acceptance.
+
+Reports: `package11-integration-report.md` and `package11-aspect-{identity,finality,metadata,polling,health,acceptance}-report.md`. Aspect self-reviews are not independent approval. Stable integrated independent Standards/Spec review is pending at this checkpoint.
+
+**Still open:** trusted native identity/verifier/promotion/reversal/republication, historical repair/downstream reconciliation, functional generic Polygon ingestion, dormant accepted legacy identity/precision/fee/rawSQL authority boundaries, actual schema/global role capabilities/pool topology/transaction and transport acceptance, artifacts/full safe builds/runtime/provider compatibility, venue/legal/funded custody certification, and later-package existing-execution retry bypass. Poll/evidence DDL and SQL070 are UNAPPLIED. Package11 remains in-progress;12–29pending.
+
+**Shared-checkout drift:** external commits `5d0558d5530ae7af3ecea2edfb3bda43d0cbccec` (22:34:22Z) and `99c0e16469934b235372df342de8abc8a2c1a155` (22:35:11Z) appeared during verification. Integrator reported its source/config identical to current HEAD. Temporary SSR files tracked externally were later removed by normal Vitest cleanup; no manual recovery. This session performed no commit/push/reset/clean, so earlier no-commit statements describe earlier checkpoints, not the entire final checkout. No live providers/DB/Redis/services/credentials/signing/orders/funds/migrations/deployment by this session.
+
