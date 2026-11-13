@@ -1,0 +1,47 @@
+__vite_ssr_exportName__("PublicKey", () => { try { return __vite_ssr_import_0__.PublicKey } catch {} });
+__vite_ssr_exportName__("Keypair", () => { try { return __vite_ssr_import_0__.Keypair } catch {} });
+__vite_ssr_exportName__("chainSchema", () => { try { return chainSchema } catch {} });
+__vite_ssr_exportName__("walletAddressSchema", () => { try { return walletAddressSchema } catch {} });
+__vite_ssr_exportName__("evmAddressSchema", () => { try { return evmAddressSchema } catch {} });
+__vite_ssr_exportName__("isValidAddressForChain", () => { try { return isValidAddressForChain } catch {} });
+__vite_ssr_exportName__("walletInputSchema", () => { try { return walletInputSchema } catch {} });
+__vite_ssr_exportName__("isValidSolanaAddress", () => { try { return isValidSolanaAddress } catch {} });
+const __vite_ssr_import_0__ = await __vite_ssr_import__("/node_modules/.pnpm/@solana+web3.js@1.98.4_bufferutil@4.1.0_typescript@5.9.3_utf-8-validate@6.0.6/node_modules/@solana/web3.js/lib/index.cjs.js", {"importedNames":["PublicKey","Keypair"]});
+const __vite_ssr_import_1__ = await __vite_ssr_import__("zod", {"importedNames":["z"]});
+
+
+
+const chainSchema = __vite_ssr_import_1__.z.enum(["solana", "polygon", "robinhood-chain", "base", "ethereum", "bsc"]);
+const walletAddressSchema = __vite_ssr_import_1__.z.string().min(32).max(44).refine((value) => {
+  try {
+    new __vite_ssr_import_0__.PublicKey(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, "Invalid Solana wallet address");
+const evmAddressSchema = __vite_ssr_import_1__.z.string().regex(/^0x[a-fA-F0-9]{40}$/, "Invalid EVM wallet address");
+function isValidAddressForChain(address, chain) {
+  if (chain === "solana") return walletAddressSchema.safeParse(address).success;
+  return evmAddressSchema.safeParse(address).success;
+};
+const walletInputSchema = __vite_ssr_import_1__.z.object({
+  address: __vite_ssr_import_1__.z.string(),
+  chain: chainSchema.default("solana"),
+  source: __vite_ssr_import_1__.z.enum(["shiller", "manual", "discovered"]).default("manual"),
+  nickname: __vite_ssr_import_1__.z.string().max(100).optional()
+}).superRefine((value, ctx) => {
+  if (!isValidAddressForChain(value.address, value.chain)) {
+    ctx.addIssue({
+      code: __vite_ssr_import_1__.z.ZodIssueCode.custom,
+      path: ["address"],
+      message: value.chain === "solana" ? "Invalid Solana wallet address" : "Invalid EVM wallet address"
+    });
+  }
+});
+function isValidSolanaAddress(address) {
+  return walletAddressSchema.safeParse(address).success;
+}
+
+//# sourceMappingSource=vite-node
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6Ijs7Ozs7Ozs7QUFBQTtBQUNBOzs7O0FBSU8sTUFBTSxjQUFjLHdCQUFFLEtBQUssQ0FBQyxVQUFVLFdBQVcsbUJBQW1CLFFBQVEsWUFBWSxLQUFLLENBQUM7QUFFOUYsTUFBTSxzQkFBc0Isd0JBQ2hDLE9BQU8sRUFDUCxJQUFJLEVBQUUsRUFDTixJQUFJLEVBQUUsRUFDTixPQUFPLENBQUMsVUFBVTtBQUNqQixNQUFJO0FBQ0YsUUFBSSxnQ0FBVSxLQUFLO0FBQ25CLFdBQU87QUFBQSxFQUNULFFBQVE7QUFDTixXQUFPO0FBQUEsRUFDVDtBQUNGLEdBQUcsK0JBQStCO0FBRTdCLE1BQU0sbUJBQW1CLHdCQUM3QixPQUFPLEVBQ1AsTUFBTSx1QkFBdUIsNEJBQTRCO0FBRXJELFNBQVMsdUJBQXVCLFNBQWlCLE9BQTZDO0FBQ25HLE1BQUksVUFBVSxTQUFVLFFBQU8sb0JBQW9CLFVBQVUsT0FBTyxFQUFFO0FBQ3RFLFNBQU8saUJBQWlCLFVBQVUsT0FBTyxFQUFFO0FBQzdDO0FBRU8sTUFBTSxvQkFBb0Isd0JBQUUsT0FBTztBQUFBLEVBQ3hDLFNBQVMsd0JBQUUsT0FBTztBQUFBLEVBQ2xCLE9BQU8sWUFBWSxRQUFRLFFBQVE7QUFBQSxFQUNuQyxRQUFRLHdCQUFFLEtBQUssQ0FBQyxXQUFXLFVBQVUsWUFBWSxDQUFDLEVBQUUsUUFBUSxRQUFRO0FBQUEsRUFDcEUsVUFBVSx3QkFBRSxPQUFPLEVBQUUsSUFBSSxHQUFHLEVBQUUsU0FBUztBQUN6QyxDQUFDLEVBQUUsWUFBWSxDQUFDLE9BQU8sUUFBUTtBQUM3QixNQUFJLENBQUMsdUJBQXVCLE1BQU0sU0FBUyxNQUFNLEtBQUssR0FBRztBQUN2RCxRQUFJLFNBQVM7QUFBQSxNQUNYLE1BQU0sd0JBQUUsYUFBYTtBQUFBLE1BQ3JCLE1BQU0sQ0FBQyxTQUFTO0FBQUEsTUFDaEIsU0FBUyxNQUFNLFVBQVUsV0FBVyxrQ0FBa0M7QUFBQSxJQUN4RSxDQUFDO0FBQUEsRUFDSDtBQUNGLENBQUM7QUFJTSxTQUFTLHFCQUFxQixTQUEwQjtBQUM3RCxTQUFPLG9CQUFvQixVQUFVLE9BQU8sRUFBRTtBQUNoRCIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsidmFsaWRhdGlvbi50cyJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyBQdWJsaWNLZXksIEtleXBhaXIgfSBmcm9tICdAc29sYW5hL3dlYjMuanMnO1xuaW1wb3J0IHsgeiB9IGZyb20gJ3pvZCc7XG5cbmV4cG9ydCB7IFB1YmxpY0tleSwgS2V5cGFpciB9O1xuXG5leHBvcnQgY29uc3QgY2hhaW5TY2hlbWEgPSB6LmVudW0oWydzb2xhbmEnLCAncG9seWdvbicsICdyb2Jpbmhvb2QtY2hhaW4nLCAnYmFzZScsICdldGhlcmV1bScsICdic2MnXSk7XG5cbmV4cG9ydCBjb25zdCB3YWxsZXRBZGRyZXNzU2NoZW1hID0gelxuICAuc3RyaW5nKClcbiAgLm1pbigzMilcbiAgLm1heCg0NClcbiAgLnJlZmluZSgodmFsdWUpID0+IHtcbiAgICB0cnkge1xuICAgICAgbmV3IFB1YmxpY0tleSh2YWx1ZSk7XG4gICAgICByZXR1cm4gdHJ1ZTtcbiAgICB9IGNhdGNoIHtcbiAgICAgIHJldHVybiBmYWxzZTtcbiAgICB9XG4gIH0sICdJbnZhbGlkIFNvbGFuYSB3YWxsZXQgYWRkcmVzcycpO1xuXG5leHBvcnQgY29uc3QgZXZtQWRkcmVzc1NjaGVtYSA9IHpcbiAgLnN0cmluZygpXG4gIC5yZWdleCgvXjB4W2EtZkEtRjAtOV17NDB9JC8sICdJbnZhbGlkIEVWTSB3YWxsZXQgYWRkcmVzcycpO1xuXG5leHBvcnQgZnVuY3Rpb24gaXNWYWxpZEFkZHJlc3NGb3JDaGFpbihhZGRyZXNzOiBzdHJpbmcsIGNoYWluOiB6LmluZmVyPHR5cGVvZiBjaGFpblNjaGVtYT4pOiBib29sZWFuIHtcbiAgaWYgKGNoYWluID09PSAnc29sYW5hJykgcmV0dXJuIHdhbGxldEFkZHJlc3NTY2hlbWEuc2FmZVBhcnNlKGFkZHJlc3MpLnN1Y2Nlc3M7XG4gIHJldHVybiBldm1BZGRyZXNzU2NoZW1hLnNhZmVQYXJzZShhZGRyZXNzKS5zdWNjZXNzO1xufVxuXG5leHBvcnQgY29uc3Qgd2FsbGV0SW5wdXRTY2hlbWEgPSB6Lm9iamVjdCh7XG4gIGFkZHJlc3M6IHouc3RyaW5nKCksXG4gIGNoYWluOiBjaGFpblNjaGVtYS5kZWZhdWx0KCdzb2xhbmEnKSxcbiAgc291cmNlOiB6LmVudW0oWydzaGlsbGVyJywgJ21hbnVhbCcsICdkaXNjb3ZlcmVkJ10pLmRlZmF1bHQoJ21hbnVhbCcpLFxuICBuaWNrbmFtZTogei5zdHJpbmcoKS5tYXgoMTAwKS5vcHRpb25hbCgpXG59KS5zdXBlclJlZmluZSgodmFsdWUsIGN0eCkgPT4ge1xuICBpZiAoIWlzVmFsaWRBZGRyZXNzRm9yQ2hhaW4odmFsdWUuYWRkcmVzcywgdmFsdWUuY2hhaW4pKSB7XG4gICAgY3R4LmFkZElzc3VlKHtcbiAgICAgIGNvZGU6IHouWm9kSXNzdWVDb2RlLmN1c3RvbSxcbiAgICAgIHBhdGg6IFsnYWRkcmVzcyddLFxuICAgICAgbWVzc2FnZTogdmFsdWUuY2hhaW4gPT09ICdzb2xhbmEnID8gJ0ludmFsaWQgU29sYW5hIHdhbGxldCBhZGRyZXNzJyA6ICdJbnZhbGlkIEVWTSB3YWxsZXQgYWRkcmVzcydcbiAgICB9KTtcbiAgfVxufSk7XG5cbmV4cG9ydCB0eXBlIFdhbGxldElucHV0ID0gei5pbmZlcjx0eXBlb2Ygd2FsbGV0SW5wdXRTY2hlbWE+O1xuXG5leHBvcnQgZnVuY3Rpb24gaXNWYWxpZFNvbGFuYUFkZHJlc3MoYWRkcmVzczogc3RyaW5nKTogYm9vbGVhbiB7XG4gIHJldHVybiB3YWxsZXRBZGRyZXNzU2NoZW1hLnNhZmVQYXJzZShhZGRyZXNzKS5zdWNjZXNzO1xufVxuIl0sImZpbGUiOiIvcGFja2FnZXMvc2hhcmVkL3NyYy92YWxpZGF0aW9uLnRzIn0=
