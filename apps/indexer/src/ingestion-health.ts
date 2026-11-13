@@ -1,5 +1,5 @@
 import type { RecordIngestionBatchInput } from '@swat/db';
-import type { Chain } from '@swat/shared';
+import { parseIngestionEvidence, type Chain, type IngestionEvidence } from '@swat/shared';
 
 export type IngestionBatchResult = {
   fetched: number;
@@ -7,7 +7,22 @@ export type IngestionBatchResult = {
   skipped: number;
   failed: number;
   lastEventAt: Date | null;
+  evidence?: IngestionEvidence;
 };
+
+export function observedIngestionEvidence(
+  observed: number,
+  quarantined: number,
+  accepted: number,
+  completeness: IngestionEvidence['completeness'],
+  scope: IngestionEvidence['scope']
+): IngestionEvidence {
+  const evidence = parseIngestionEvidence({
+    observed, quarantined, accepted, completeness, scope, confirmation: 'withheld'
+  });
+  if (!evidence) throw new Error('Invalid ingestion evidence counters or scope');
+  return evidence;
+}
 
 export class IngestionBatchError extends Error {
   constructor(
@@ -17,6 +32,9 @@ export class IngestionBatchError extends Error {
   ) {
     super(message, options);
     this.name = 'IngestionBatchError';
+    this.result = result.evidence
+      ? { ...result, evidence: { ...result.evidence, completeness: 'partial' } }
+      : result;
   }
 }
 
@@ -36,7 +54,7 @@ export async function runTrackedIngestion(
   try {
     result = await input.run();
   } catch (error) {
-    const failedResult = error instanceof IngestionBatchError
+    const failedResult: IngestionBatchResult = error instanceof IngestionBatchError
       ? error.result
       : {
           fetched: 0,
@@ -55,6 +73,9 @@ export async function runTrackedIngestion(
         inserted: failedResult.inserted,
         skipped: failedResult.skipped,
         failed: Math.max(1, failedResult.failed),
+        evidence: failedResult.evidence
+          ? { ...failedResult.evidence, completeness: 'partial' }
+          : undefined,
         errorMessage: error instanceof Error ? error.message : String(error)
       });
     } catch (recordError) {
@@ -73,7 +94,8 @@ export async function runTrackedIngestion(
     lastEventAt: result.lastEventAt,
     inserted: result.inserted,
     skipped: result.skipped,
-    failed: result.failed
+    failed: result.failed,
+    evidence: result.evidence
   });
   return result;
 }

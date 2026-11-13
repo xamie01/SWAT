@@ -1,0 +1,40 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@swat/shared": ["packages/shared/src/index.ts"],
+      "@swat/db": ["packages/db/src/index.ts"]
+    }
+  },
+  "files": [
+    "../../apps/indexer/src/index.ts",
+    "../../apps/indexer/src/polymarket.ts",
+    "../../apps/indexer/src/polymarket-helpers.ts",
+    "../../apps/indexer/src/robinhood-ingestion.ts",
+    "../../apps/indexer/src/evm.ts",
+    "../../apps/indexer/src/source-trade-lifecycle.ts",
+    "../../apps/indexer/src/polymarket-resolution-polling.ts",
+    "../../packages/db/src/polymarket-resolution-polling.ts",
+    "../../apps/alert-service/src/ingestion-health.ts",
+    "../../apps/indexer/src/polymarket.test.ts",
+    "../../apps/indexer/src/polymarket-helpers.test.ts",
+    "../../apps/indexer/src/source-trade-lifecycle.test.ts",
+    "../../apps/indexer/src/source-trade-lifecycle.sequential.test.ts",
+    "../../apps/indexer/src/polymarket-identity.sequential.test.ts",
+    "../../apps/indexer/src/polymarket.sequential.test.ts",
+    "../../apps/indexer/src/polymarket-resolution-polling.sequential.test.ts",
+    "../../apps/indexer/src/package11-acceptance-runtime-capability.sequential.test.ts",
+    "../../apps/indexer/src/ingestion-health.test.ts",
+    "../../apps/indexer/src/ingestion-health.sequential.test.ts",
+    "../../packages/db/src/copy-trade-lifecycle.sequential.test.ts",
+    "../../packages/db/src/polymarket-resolution-polling.sequential.test.ts",
+    "../../packages/db/src/ingestion-health.test.ts",
+    "../../packages/db/src/ingestion-health.sequential.test.ts",
+    "../../packages/shared/src/ingestion-health.test.ts",
+    "../../packages/shared/src/ingestion-health.sequential.test.ts",
+    "../../apps/alert-service/src/ingestion-health.test.ts"
+  ]
+}

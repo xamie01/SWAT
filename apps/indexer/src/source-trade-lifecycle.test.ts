@@ -50,8 +50,8 @@ const polymarketBuy: ConfirmedPolymarketTrade = {
   timestamp: new Date('2026-01-01T12:01:00.000Z'),
   conditionId: `0x${'b'.repeat(64)}`,
   asset: '1234567890123456789012345678901234567890',
-  size: 12.5,
-  price: 0.64,
+  size: '12.5',
+  price: '0.64',
   side: 'BUY',
   transactionHash: TRANSACTION_HASH,
   outcome: 'Yes',
@@ -61,8 +61,8 @@ const polymarketBuy: ConfirmedPolymarketTrade = {
 const polymarketSell: ConfirmedPolymarketTrade = {
   ...polymarketBuy,
   side: 'SELL',
-  size: 4,
-  price: 0.7
+  size: '4',
+  price: '0.7'
 };
 
 describe('production source-trade lifecycle adapters', () => {
@@ -90,8 +90,8 @@ describe('production source-trade lifecycle adapters', () => {
       amountUsd: '25',
       priceUsd: null,
       eventAt: new Date('2026-01-01T12:00:00.000Z'),
-      confirmationState: 'confirmed',
-      confirmationEvidenceId: 'solana-backfill:solana-buy-signature:351000000'
+      confirmationState: 'observed',
+      confirmationEvidenceId: 'solana-observation:solana-backfill:solana-buy-signature:351000000'
     });
   });
 
@@ -105,7 +105,7 @@ describe('production source-trade lifecycle adapters', () => {
       quantity: '5000000',
       amountUsd: null,
       priceUsd: null,
-      confirmationEvidenceId: 'solana-webhook:solana-buy-signature:351000000'
+      confirmationEvidenceId: 'solana-observation:solana-webhook:solana-buy-signature:351000000'
     });
   });
 
@@ -136,16 +136,16 @@ describe('production source-trade lifecycle adapters', () => {
     expect(prefixed.walletAddress).toBe(raw.walletAddress);
   });
 
-  it('content-addresses a Polymarket venue fill while retaining its native transaction identity', () => {
+  it('groups ambiguous Polymarket reports without claiming an independent native fill identity', () => {
     const first = buildPolymarketSourceTradeInput({
       trade: polymarketBuy,
       quantity: '12500000',
-      amountUsd: 8
+      amountUsd: '8'
     });
     const replay = buildPolymarketSourceTradeInput({
       trade: polymarketBuy,
       quantity: '12500000',
-      amountUsd: 8
+      amountUsd: '8'
     });
     const mixedCaseReplay = buildPolymarketSourceTradeInput({
       trade: {
@@ -155,7 +155,7 @@ describe('production source-trade lifecycle adapters', () => {
         transactionHash: `0x${polymarketBuy.transactionHash.slice(2).toUpperCase()}`
       },
       quantity: '012500000',
-      amountUsd: 8
+      amountUsd: '8'
     });
 
     expect(replay).toEqual(first);
@@ -169,33 +169,44 @@ describe('production source-trade lifecycle adapters', () => {
       tokenMint: polymarketBuy.asset,
       side: 'buy',
       quantity: '12500000',
-      amountUsd: 8,
-      priceUsd: 0.64,
-      confirmationState: 'confirmed'
+      amountUsd: '8',
+      priceUsd: '0.64',
+      confirmationState: 'observed'
     });
-    expect(first.sourceEventIndex).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.sourceEventIndex).toBe(`ambiguous-data-api-wallet-v1:${EVM_WALLET}`);
   });
 
-  it('maps a Polymarket SELL and distinguishes separate fills in one transaction', () => {
+  it('converges equivalent exact decimal spellings into one Polymarket observation', () => {
+    const first = buildPolymarketSourceTradeInput({
+      trade: { ...polymarketBuy, size: '12.5', price: '0.64' }, quantity: '12500000', amountUsd: '8'
+    });
+    const replay = buildPolymarketSourceTradeInput({
+      trade: { ...polymarketBuy, size: '0012.5000', price: '6.400e-1' }, quantity: '12500000', amountUsd: '08.000'
+    });
+    expect(replay).toEqual(first);
+    expect(first).toMatchObject({ quantity: '12500000', amountUsd: '8', priceUsd: '0.64', confirmationState: 'observed' });
+  });
+
+  it('maps a Polymarket SELL without claiming changed economics prove separate fills', () => {
     const sell = buildPolymarketSourceTradeInput({
       trade: polymarketSell,
       quantity: '4000000',
-      amountUsd: 2.8
+      amountUsd: '2.8'
     });
-    const separateFill = buildPolymarketSourceTradeInput({
-      trade: { ...polymarketSell, size: 5 },
+    const changedReport = buildPolymarketSourceTradeInput({
+      trade: { ...polymarketSell, size: '5' },
       quantity: '5000000',
-      amountUsd: 3.5
+      amountUsd: '3.5'
     });
 
     expect(sell).toMatchObject({
       sourceEventId: TRANSACTION_HASH,
       side: 'sell',
       quantity: '4000000',
-      amountUsd: 2.8,
-      priceUsd: 0.7
+      amountUsd: '2.8',
+      priceUsd: '0.7'
     });
-    expect(separateFill.sourceEventIndex).not.toBe(sell.sourceEventIndex);
+    expect(changedReport.sourceEventIndex).toBe(sell.sourceEventIndex);
   });
 
   it('maps a reviewed Robinhood receipt to exact target-token quantity', () => {
@@ -220,8 +231,8 @@ describe('production source-trade lifecycle adapters', () => {
       amountUsd: null,
       priceUsd: null,
       eventAt: new Date('2026-01-01T12:02:00.000Z'),
-      confirmationState: 'confirmed',
-      confirmationEvidenceId: `robinhood-receipt:${TRANSACTION_HASH}:1234`
+      confirmationState: 'observed',
+      confirmationEvidenceId: `robinhood-receipt-observation:${TRANSACTION_HASH}:1234`
     });
   });
 
@@ -250,7 +261,7 @@ describe('production source-trade lifecycle adapters', () => {
     });
   });
 
-  it('passes accepted events from all three chains to the DB lifecycle', async () => {
+  it('passes observations from all three chains to the DB lifecycle', async () => {
     await persistSolanaSourceTrade({
       event: solanaBuy,
       source: 'solana-webhook'
@@ -258,7 +269,7 @@ describe('production source-trade lifecycle adapters', () => {
     await persistPolymarketSourceTrade({
       trade: polymarketSell,
       quantity: '4000000',
-      amountUsd: 2.8
+      amountUsd: '2.8'
     });
     await persistRobinhoodSourceTrade({
       transactionHash: TRANSACTION_HASH,
@@ -275,6 +286,28 @@ describe('production source-trade lifecycle adapters', () => {
       .toEqual(['solana', 'polygon', 'robinhood-chain']);
   });
 
+  it.each(['observed', 'confirmed', 'finalized', 'reversed'] as const)('does not promote observations when storage returns %s', async (confirmationState) => {
+    vi.mocked(recordSourceTradeEvent).mockResolvedValue({
+      event: { id: 'stored-source', confirmationState }
+    } as Awaited<ReturnType<typeof recordSourceTradeEvent>>);
+    const results = [
+      await persistSolanaSourceTrade({ event: solanaBuy, source: 'solana-webhook' }),
+      await persistPolymarketSourceTrade({ trade: polymarketBuy, quantity: '12500000', amountUsd: '8' }),
+      await persistRobinhoodSourceTrade({
+        transactionHash: TRANSACTION_HASH, walletAddress: EVM_WALLET, tokenMint: EVM_TOKEN,
+        side: 'buy', quantity: '5000', eventAt: solanaBuy.occurredAt, blockNumber: 1234n
+      })
+    ];
+    for (const result of results) {
+      expect(result.event.confirmationState).toBe(confirmationState);
+      expect(result.eligibleForCopy).toBe(false);
+    }
+    expect(recordSourceTradeEvent).toHaveBeenCalledTimes(3);
+    for (const [input] of vi.mocked(recordSourceTradeEvent).mock.calls) {
+      expect(input.confirmationState).toBe('observed');
+    }
+  });
+
   it.each([
     ['solana', () => persistSolanaSourceTrade({
       event: solanaBuy,
@@ -283,7 +316,7 @@ describe('production source-trade lifecycle adapters', () => {
     ['polygon', () => persistPolymarketSourceTrade({
       trade: polymarketBuy,
       quantity: '12500000',
-      amountUsd: 8
+      amountUsd: '8'
     })],
     ['robinhood-chain', () => persistRobinhoodSourceTrade({
       transactionHash: TRANSACTION_HASH,

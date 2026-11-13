@@ -85,7 +85,8 @@ describe('reviewed Robinhood receipt classification', () => {
   it('decodes BUY and SELL direction from reviewed pool deltas and wallet transfers', () => {
     const buy = classifyRobinhoodReceipt(receipt([
       swapLog(1_000n, -5_000n),
-      transferLog(token, pool, wallet, 5_000n, 2)
+      transferLog(token, pool, wallet, 5_000n, 2),
+      transferLog(base, wallet, pool, 1_000n, 3)
     ]), wallet, config);
     expect(buy).toMatchObject({
       status: 'classified',
@@ -98,7 +99,8 @@ describe('reviewed Robinhood receipt classification', () => {
 
     const sell = classifyRobinhoodReceipt(receipt([
       swapLog(-800n, 4_000n),
-      transferLog(token, wallet, pool, 4_000n, 2)
+      transferLog(token, wallet, pool, 4_000n, 2),
+      transferLog(base, pool, wallet, 800n, 3)
     ]), wallet, config);
     expect(sell).toMatchObject({
       status: 'classified',
@@ -114,7 +116,7 @@ describe('reviewed Robinhood receipt classification', () => {
     const swap = swapLog(1_000n, -5_000n);
     const transfer = transferLog(token, pool, wallet, 5_000n, 2);
     const result = classifyRobinhoodReceipt(
-      receipt([swap, transfer, { ...swap }, { ...transfer }]),
+      receipt([swap, transfer, transferLog(base, wallet, pool, 1_000n, 3), { ...swap }, { ...transfer }]),
       wallet,
       config
     );
@@ -173,7 +175,7 @@ describe('Robinhood reviewed-fixture metrics', () => {
       name: 'reviewed buy',
       reviewed: true,
       wallet,
-      receipt: receipt([swapLog(1_000n, -5_000n), transferLog(token, pool, wallet, 5_000n, 2)]),
+      receipt: receipt([swapLog(1_000n, -5_000n), transferLog(token, pool, wallet, 5_000n, 2), transferLog(base, wallet, pool, 1_000n, 3)]),
       expected: 'classify',
       expectedDirection: 'buy'
     },

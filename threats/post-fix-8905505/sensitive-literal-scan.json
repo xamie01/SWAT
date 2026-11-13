@@ -1,0 +1,1001 @@
+{
+  "checkedUtc": "2026-11-08T18:47:08.583050+00:00",
+  "cpuAffinity": [
+    0
+  ],
+  "files": [
+    {
+      "path": "apps/web/middleware.ts",
+      "origin": "source",
+      "bytes": 3929,
+      "sha256": "0b81d42b6731c3a185f8fc4393d8352867c2935d4e3a40f77eb719e6be06d8aa",
+      "mtimeNs": 1794151556487595268
+    },
+    {
+      "path": "apps/web/next-env.d.ts",
+      "origin": "source",
+      "bytes": 262,
+      "sha256": "85ae5aee75f011967cf2d25cbc342f62d69314e9d925f7f4aa3456fc2cffcca6",
+      "mtimeNs": 1778844447886608186
+    },
+    {
+      "path": "apps/web/next.config.ts",
+      "origin": "source",
+      "bytes": 1979,
+      "sha256": "adad34d8ee248bbb49ba15b717315e0ed344140b00b347206107253a8e437f79",
+      "mtimeNs": 1794151556488595283
+    },
+    {
+      "path": "apps/web/postcss.config.js",
+      "origin": "source",
+      "bytes": 83,
+      "sha256": "fa650b380adfabb151a0b352f7135e107e6352345f899060f1c5c231228f94bf",
+      "mtimeNs": 1793960881510037538
+    },
+    {
+      "path": "apps/web/tailwind.config.ts",
+      "origin": "source",
+      "bytes": 5601,
+      "sha256": "91f1680c4d35f07cc52c526393cda60ed4710b396ad3ef6a5bb35c1c93b6d3f5",
+      "mtimeNs": 1793960881560036981
+    },
+    {
+      "path": "apps/web/app/layout.tsx",
+      "origin": "source",
+      "bytes": 3034,
+      "sha256": "7f44869599cd982661fd37019ceff1e473b0a5946a3e7cbf05018d6a02b7bd01",
+      "mtimeNs": 1794151556414594122
+    },
+    {
+      "path": "apps/web/app/page.tsx",
+      "origin": "source",
+      "bytes": 70842,
+      "sha256": "7dba8e2615aaa6d1951a0d89062f057d23174b616ec78dd153935526212ea583",
+      "mtimeNs": 1793960881452038184
+    },
+    {
+      "path": "apps/web/app/admin/page.tsx",
+      "origin": "source",
+      "bytes": 122,
+      "sha256": "f64a72a292cd46a60cc861dacac912d10c0c9202a60d5d0ac370d8bf745824d2",
+      "mtimeNs": 1793960881430038429
+    },
+    {
+      "path": "apps/web/app/admin/portfolio/page.tsx",
+      "origin": "source",
+      "bytes": 40225,
+      "sha256": "2d9d850e7f5a36f344b04a125c95c5fec40416df2543ac1f56c4690d4f821dba",
+      "mtimeNs": 1793960881433038396
+    },
+    {
+      "path": "apps/web/app/admin/revenue/page.tsx",
+      "origin": "source",
+      "bytes": 16818,
+      "sha256": "89d838323d201a83e74f6173c00161bfcccb60cc4d8ccbf1c56cce71244dce83",
+      "mtimeNs": 1793960881435038373
+    },
+    {
+      "path": "apps/web/app/billing/page.tsx",
+      "origin": "source",
+      "bytes": 23670,
+      "sha256": "f8fae543c5ffeb3ceaf526a015006ca2de0c5512a7a2c421f96fa47cc83b674a",
+      "mtimeNs": 1793960881437038351
+    },
+    {
+      "path": "apps/web/app/clusters/page.tsx",
+      "origin": "source",
+      "bytes": 7533,
+      "sha256": "4c6cebc52a627c069ed3f87e5798c236f98672b5ad429fbf22bb7793b350994a",
+      "mtimeNs": 1793960881437038351
+    },
+    {
+      "path": "apps/web/app/dashboard/page.tsx",
+      "origin": "source",
+      "bytes": 51315,
+      "sha256": "ae124df2ddd1587433c5cead2aea50c248009431ce17dbdf135fd7439f5edb54",
+      "mtimeNs": 1793960881440038318
+    },
+    {
+      "path": "apps/web/app/learn/page.tsx",
+      "origin": "source",
+      "bytes": 109260,
+      "sha256": "0383b88686548b6258ce20589eb2930275d470e7796cd035a7c4a2003102e848",
+      "mtimeNs": 1793960881445038262
+    },
+    {
+      "path": "apps/web/app/login/page.tsx",
+      "origin": "source",
+      "bytes": 5557,
+      "sha256": "0dbf7caa694495ae8f419b7ab40f884766898a4b6c0f7791f99ad812c9939ada",
+      "mtimeNs": 1793960881446038251
+    },
+    {
+      "path": "apps/web/app/logs/page.tsx",
+      "origin": "source",
+      "bytes": 17715,
+      "sha256": "fc9ce7f1e74b6be21fc6d376a7cd054c90cc8072a6beea14a3c8fbfb02e007c6",
+      "mtimeNs": 1793960881447038240
+    },
+    {
+      "path": "apps/web/app/lp/layout.tsx",
+      "origin": "source",
+      "bytes": 4717,
+      "sha256": "e81b09a3edd6347fe6c33d471e4c6f39f96323419c0deded4a9d99941c95a287",
+      "mtimeNs": 1793960881449038218
+    },
+    {
+      "path": "apps/web/app/lp/page.tsx",
+      "origin": "source",
+      "bytes": 391,
+      "sha256": "8e85857730f36ff1bc85a07cd44028f85b55eac7fcf2080e114eb1c4867985ab",
+      "mtimeNs": 1793960881449038218
+    },
+    {
+      "path": "apps/web/app/lp/builder/page.tsx",
+      "origin": "source",
+      "bytes": 16074,
+      "sha256": "c88687e1ef87ae0306ea8c3d2631a97093720b8f6babb58627643e6e27ad9045",
+      "mtimeNs": 1793960881448038229
+    },
+    {
+      "path": "apps/web/app/lp/copy/page.tsx",
+      "origin": "source",
+      "bytes": 30605,
+      "sha256": "c918742170a953248756097f40a84b2be1a5de2ec03380b6a995728886314379",
+      "mtimeNs": 1793960881449038218
+    },
+    {
+      "path": "apps/web/app/lp/discover/page.tsx",
+      "origin": "source",
+      "bytes": 15950,
+      "sha256": "e6391041115ebac6f1318dafa7feac1434f18741333aeb41054b02959baf536f",
+      "mtimeNs": 1793960881449038218
+    },
+    {
+      "path": "apps/web/app/lp/positions/page.tsx",
+      "origin": "source",
+      "bytes": 15840,
+      "sha256": "13bbf713812c6ddb17baddf6b80f222c035fb33a7550bdd0914bf9ee78e48340",
+      "mtimeNs": 1793960881450038206
+    },
+    {
+      "path": "apps/web/app/lp/whales/page.tsx",
+      "origin": "source",
+      "bytes": 24919,
+      "sha256": "80c8256176a51cd928da40956b8fdc62f4581c200353a56fbea06670c16fc87d",
+      "mtimeNs": 1793960881450038206
+    },
+    {
+      "path": "apps/web/app/performance/page.tsx",
+      "origin": "source",
+      "bytes": 11846,
+      "sha256": "def145c16add618f14e862ad56c95dd77f4a03412747b39d09fcb3293c2adffa",
+      "mtimeNs": 1793960881452038184
+    },
+    {
+      "path": "apps/web/app/positions/page.tsx",
+      "origin": "source",
+      "bytes": 27993,
+      "sha256": "3dc1090f4ec5d3b83b554f05d5555db7d75eb505daa61c397bfe44c7b98044af",
+      "mtimeNs": 1793960881452038184
+    },
+    {
+      "path": "apps/web/app/settings/page.tsx",
+      "origin": "source",
+      "bytes": 12998,
+      "sha256": "370d993ccbe591c05fdf28810b63aa06630ba7defa375b248a9f5b624447afa8",
+      "mtimeNs": 1794151556437594483
+    },
+    {
+      "path": "apps/web/app/setup/page.tsx",
+      "origin": "source",
+      "bytes": 18935,
+      "sha256": "efcc495c6fa887bb7af0f3bcb46ee918bdbcb1326834e4d6ac788ad56fca8135",
+      "mtimeNs": 1793960881453038173
+    },
+    {
+      "path": "apps/web/app/signals/page.tsx",
+      "origin": "source",
+      "bytes": 4844,
+      "sha256": "5d5845fc5dd418f4c0380b623929ef2ae31726ec059fdead41ec9e44af2d55de",
+      "mtimeNs": 1793960881454038162
+    },
+    {
+      "path": "apps/web/app/signup/page.tsx",
+      "origin": "source",
+      "bytes": 12879,
+      "sha256": "902e11206594481be1ceabbb223b5c62ce19300a43d1c3481981ffa2bfd02012",
+      "mtimeNs": 1793960881454038162
+    },
+    {
+      "path": "apps/web/app/vault/page.tsx",
+      "origin": "source",
+      "bytes": 82120,
+      "sha256": "444098f44a6a992fd2c61c9ff327e91ddae1b6d85b23fcf65b63a9d224f1fcd7",
+      "mtimeNs": 1794151556482595189
+    },
+    {
+      "path": "apps/web/app/wallets/page.tsx",
+      "origin": "source",
+      "bytes": 29093,
+      "sha256": "d64ce468ae257d38292fb64d3d4a4a72931c50d1fda23c99d6ad52d53eb07111",
+      "mtimeNs": 1793960881456038140
+    },
+    {
+      "path": "apps/web/app/workspace/page.tsx",
+      "origin": "source",
+      "bytes": 8294,
+      "sha256": "25f178cc06781605fbe853fdce6653e9bea1322dc46259a3199db837fec656f0",
+      "mtimeNs": 1793960881456038140
+    },
+    {
+      "path": "apps/web/app/workspace/views/AttributionView.tsx",
+      "origin": "source",
+      "bytes": 16936,
+      "sha256": "fc64fd237dce3a39ef69740af4749b6c6c9f070c326f0a5e3431af724eec1bec",
+      "mtimeNs": 1793960881460038095
+    },
+    {
+      "path": "apps/web/app/workspace/views/CommandCenterView.tsx",
+      "origin": "source",
+      "bytes": 15625,
+      "sha256": "e0b221a1282c04b357306678b0dcb268bbef39bb8930376da0a08711367bc878",
+      "mtimeNs": 1793960881460038095
+    },
+    {
+      "path": "apps/web/app/workspace/views/HealthView.tsx",
+      "origin": "source",
+      "bytes": 20596,
+      "sha256": "85444ba536a83017ffed54e873c737b4969e0f8170fdf9532e61aa70b09a9885",
+      "mtimeNs": 1793960881461038084
+    },
+    {
+      "path": "apps/web/app/workspace/views/LpView.tsx",
+      "origin": "source",
+      "bytes": 48333,
+      "sha256": "e412ebc43a00dffea7d93d9456c1408fbc31bac1735c968490bd9a96730c3e2a",
+      "mtimeNs": 1793960881461038084
+    },
+    {
+      "path": "apps/web/app/workspace/views/RiskExecutionView.tsx",
+      "origin": "source",
+      "bytes": 12993,
+      "sha256": "069c309aee0e6a634c05061cc369a4a02354497bfca1f408e672cec8113e3869",
+      "mtimeNs": 1793960881462038073
+    },
+    {
+      "path": "apps/web/app/workspace/views/SignalsView.tsx",
+      "origin": "source",
+      "bytes": 24690,
+      "sha256": "084d9803500503a73f9de81b86571aa2d2ef40d41300a089dae7ad406a32921d",
+      "mtimeNs": 1793960881463038062
+    },
+    {
+      "path": "apps/web/app/workspace/views/WalletIntelView.tsx",
+      "origin": "source",
+      "bytes": 18550,
+      "sha256": "a38901bf60e795f0f24d0dc3e874700e1c7a735235dd9761bd59ff752fde80de",
+      "mtimeNs": 1793960881464038050
+    },
+    {
+      "path": "apps/web/app/workspace/views/WorkspaceView.tsx",
+      "origin": "source",
+      "bytes": 26076,
+      "sha256": "68dbe2cc9266a5e0f5eb97a637cdc7edbecddb0499ba22a230f1d14107d6407d",
+      "mtimeNs": 1793960881466038028
+    },
+    {
+      "path": "apps/web/app/workspace/views/attribution-model.ts",
+      "origin": "source",
+      "bytes": 4388,
+      "sha256": "fd9708417c1c82665b437b4fd44bb9c4798dff78b914609818ff160c48bea68f",
+      "mtimeNs": 1785876204634159012
+    },
+    {
+      "path": "apps/web/components/AdminNav.tsx",
+      "origin": "source",
+      "bytes": 8708,
+      "sha256": "188dea4aeae482aae01476725a4dc7099f9531e4fe7bf646ec3d823082e850e2",
+      "mtimeNs": 1793960881466038028
+    },
+    {
+      "path": "apps/web/components/SaaSNav.tsx",
+      "origin": "source",
+      "bytes": 7414,
+      "sha256": "c82fe5ee68b6650381fc5197a90ff41d9e39720ca209f7845440a9d296d76011",
+      "mtimeNs": 1793960881467196858
+    },
+    {
+      "path": "apps/web/components/StatusPill.tsx",
+      "origin": "source",
+      "bytes": 1358,
+      "sha256": "49d4344060332facf887464c12c50f68773467ec0595af5e38d296e04a140825",
+      "mtimeNs": 1793960881467196858
+    },
+    {
+      "path": "apps/web/components/ThemeProvider.tsx",
+      "origin": "source",
+      "bytes": 1987,
+      "sha256": "76fbecc2c6fa33e9b95a4eab89669aa788815af5e06fbde8b995da3cf0ad9da9",
+      "mtimeNs": 1793960881467196858
+    },
+    {
+      "path": "apps/web/components/ThemeToggle.tsx",
+      "origin": "source",
+      "bytes": 1694,
+      "sha256": "b2910bd5c9d459d29662177ab8c837c5bdbcebc7ae6c655d0107e9540913c6eb",
+      "mtimeNs": 1793960881467196858
+    },
+    {
+      "path": "apps/web/components/UIPrimitives.tsx",
+      "origin": "source",
+      "bytes": 4481,
+      "sha256": "073c3f588194af8e5b4703894ebc1b8d3dd0f3419c4b3490fbc2b7d63875abd0",
+      "mtimeNs": 1793960881467196858
+    },
+    {
+      "path": "apps/web/components/WakeLogo.tsx",
+      "origin": "source",
+      "bytes": 1396,
+      "sha256": "87bc652598d4f9932de97c299d93d7649a421b7109062b1de092d8528d400966",
+      "mtimeNs": 1793960881468038006
+    },
+    {
+      "path": "apps/web/components/WalletConnectModalButton.tsx",
+      "origin": "source",
+      "bytes": 7171,
+      "sha256": "4e0faa0c7825633e02862574896c8d0e73c5a747446baea86ae8a3e7b8f11240",
+      "mtimeNs": 1794151556482595189
+    },
+    {
+      "path": "apps/web/context/appkit.tsx",
+      "origin": "source",
+      "bytes": 2375,
+      "sha256": "81b1d0ab81e9e21e2238d096204f8610a0fcba4672fdf1bb29d93b9d5c971ba0",
+      "mtimeNs": 1794151556484595221
+    },
+    {
+      "path": "apps/web/lib/api-error-message.ts",
+      "origin": "source",
+      "bytes": 2950,
+      "sha256": "032d33536cad52351b85ffad04cd214dadc9e07fd7fc9a36f2824ecb692b9c9b",
+      "mtimeNs": 1793960881508037560
+    },
+    {
+      "path": "apps/web/lib/api-server.ts",
+      "origin": "source",
+      "bytes": 2647,
+      "sha256": "c0dd9625592d13afa841b6a7be1cb5420d04147fd5a123b89ed393fb3d2fe81f",
+      "mtimeNs": 1793960881509037549
+    },
+    {
+      "path": "apps/web/lib/api.ts",
+      "origin": "source",
+      "bytes": 11158,
+      "sha256": "0d8d6180d74d8172c929279a9d2b14e98c4e5c9455f6da70ac4a2d6c0f27410f",
+      "mtimeNs": 1793960881509037549
+    },
+    {
+      "path": "apps/web/lib/route-access.ts",
+      "origin": "source",
+      "bytes": 4413,
+      "sha256": "3e48d8a2a28be7eeea54cb57b057f6cd994e558c6330d9a1f9076941fb331be1",
+      "mtimeNs": 1793960881509037549
+    },
+    {
+      "path": "apps/web/lib/wallets.ts",
+      "origin": "source",
+      "bytes": 13516,
+      "sha256": "a3fb4aa5303b9b7da8021ad4de825e941bc90d955781f9bb8c5072db98f20f7b",
+      "mtimeNs": 1794151556485595236
+    },
+    {
+      "path": "apps/api/src/attribution-routes.ts",
+      "origin": "source",
+      "bytes": 2382,
+      "sha256": "e6447c3f98a983dadee516a2721eb727334149cd6bffcb428b71c755ef625851",
+      "mtimeNs": 1785876204412136174
+    },
+    {
+      "path": "apps/api/src/index.ts",
+      "origin": "source",
+      "bytes": 38729,
+      "sha256": "e19d4435eb1fc8ca3b8961ebc27aadb90df7c6217d09bb464188ea93a2fde9f4",
+      "mtimeNs": 1794151555841585140
+    },
+    {
+      "path": "apps/api/src/trading-control.ts",
+      "origin": "source",
+      "bytes": 1493,
+      "sha256": "47619cbd1a01602b07eec9fa637c2fe2e1cab3bad48d1622bfae1095118cbdf5",
+      "mtimeNs": 1793960880243051717
+    },
+    {
+      "path": "apps/api/src/auth/plugin.ts",
+      "origin": "source",
+      "bytes": 10414,
+      "sha256": "e3e7aca8fc64c2e184387bdff5266be3df681966a310714a3d2e84df6972a548",
+      "mtimeNs": 1793960880215936627
+    },
+    {
+      "path": "apps/api/src/auth/routes.ts",
+      "origin": "source",
+      "bytes": 13036,
+      "sha256": "8cf45d4d3504ef1dd2f0f510170894aa4ccc4639301a22281ddda0aaf1597068",
+      "mtimeNs": 1793960880215936627
+    },
+    {
+      "path": "apps/api/src/auth/wallet-signature.ts",
+      "origin": "source",
+      "bytes": 5973,
+      "sha256": "55850f6ca5ff56794e7df8f03d0614afe58f2283f9bb67dcc2c369e9ae349966",
+      "mtimeNs": 1793960880216052020
+    },
+    {
+      "path": "apps/api/src/cron/billing-sweep.ts",
+      "origin": "source",
+      "bytes": 1429,
+      "sha256": "21534ea01b7f928768de981cc3df9057f0b993a66a38af0818852a15268fbe82",
+      "mtimeNs": 1793960880217286258
+    },
+    {
+      "path": "apps/api/src/routes/admin-portfolio.ts",
+      "origin": "source",
+      "bytes": 5151,
+      "sha256": "2aa6d031535d7cf829b4629161f653032124420485aef3221ab44ec95c7f2dec",
+      "mtimeNs": 1794151555893585953
+    },
+    {
+      "path": "apps/api/src/routes/billing.ts",
+      "origin": "source",
+      "bytes": 17221,
+      "sha256": "e25c8484cb2521a93b3b6e6c95b30bc2a648ac12f7c0fcdbd2755f090352569d",
+      "mtimeNs": 1794151555895585985
+    },
+    {
+      "path": "apps/api/src/routes/execution-settings.ts",
+      "origin": "source",
+      "bytes": 25933,
+      "sha256": "ad9198d5f1d5f00cff5bf80e68f19006c9589269fd966aaef31263661030ff50",
+      "mtimeNs": 1794151555896586000
+    },
+    {
+      "path": "apps/api/src/routes/me.ts",
+      "origin": "source",
+      "bytes": 61376,
+      "sha256": "8a2711519ae00883e724e2de807c68a8b1127d8e7d5a2313fb695e07a3c4491c",
+      "mtimeNs": 1794151555897586016
+    },
+    {
+      "path": "apps/lp/src/auth.ts",
+      "origin": "source",
+      "bytes": 4121,
+      "sha256": "7594154b6f6c5a97374f9bbce9a774ef7fda0a606e11d43c858cc62fd6206a9d",
+      "mtimeNs": 1794151556024588003
+    },
+    {
+      "path": "apps/lp/src/index.ts",
+      "origin": "source",
+      "bytes": 18327,
+      "sha256": "b4a53d8a91199437c5511ce1e8af158cc9c10d7e0e5c6c0848d4b54d11fb7105",
+      "mtimeNs": 1794151556026588035
+    },
+    {
+      "path": "apps/lp/src/routes.ts",
+      "origin": "source",
+      "bytes": 23361,
+      "sha256": "fbdc53a8ce066fa7d0609464129985b7f9a4e29b21c5608f268b4064b98fa088",
+      "mtimeNs": 1793960880565048102
+    },
+    {
+      "path": "apps/lp/src/builder/build-position.ts",
+      "origin": "source",
+      "bytes": 8384,
+      "sha256": "ce13287cf141a19f2677b636c010860944de9eae9de36713241321a1d1df55f5",
+      "mtimeNs": 1793960880370050291
+    },
+    {
+      "path": "apps/lp/src/builder/evm-ladder.ts",
+      "origin": "source",
+      "bytes": 4571,
+      "sha256": "1712917bcbf961ff2530c31cdd0f71edf1bebc4450d012c0f749919cfc733e97",
+      "mtimeNs": 1793960880382050156
+    },
+    {
+      "path": "apps/lp/src/builder/ladder-plan.ts",
+      "origin": "source",
+      "bytes": 9610,
+      "sha256": "139782c17e01f25042c9054507f1fb5a06e23692d59f7792e400984ae1b194b8",
+      "mtimeNs": 1793960880385050123
+    },
+    {
+      "path": "apps/lp/src/builder/live-context.ts",
+      "origin": "source",
+      "bytes": 3663,
+      "sha256": "fe0700cbc970d0e9643fc45b0e0522be3d222045ead6f4a192b8d5fae5fc748c",
+      "mtimeNs": 1793960880385050123
+    },
+    {
+      "path": "apps/lp/src/builder/live-preview.ts",
+      "origin": "source",
+      "bytes": 7974,
+      "sha256": "f94c599e19ec8c535979cd62e63f55e6dc916a0e6474e32fa51dc29a5a81f9db",
+      "mtimeNs": 1793960880405049898
+    },
+    {
+      "path": "apps/lp/src/builder/meteora-ladder.ts",
+      "origin": "source",
+      "bytes": 3723,
+      "sha256": "56c1473179d80879542b4e0876d255513835d364478963d20ef4c7dc1da6ad58",
+      "mtimeNs": 1793960880406049887
+    },
+    {
+      "path": "apps/lp/src/builder/plan-ports.ts",
+      "origin": "source",
+      "bytes": 1052,
+      "sha256": "1b5f52fd52bb82eb49b51cde33feae465b3627b302e18549625f6fbb8b896c48",
+      "mtimeNs": 1793960880429049629
+    },
+    {
+      "path": "apps/lp/src/builder/templates.ts",
+      "origin": "source",
+      "bytes": 3606,
+      "sha256": "fb67d1edb6de10eb5dfa117bdb1e64cdcbc9200e9e80f333def2d1f480eb9083",
+      "mtimeNs": 1793960880430049617
+    },
+    {
+      "path": "apps/lp/src/copy/copy-worker.ts",
+      "origin": "source",
+      "bytes": 3343,
+      "sha256": "e965288c5a9eb90093ca7cceb16abc913bf4a044ce3b50012cceeec877e7695a",
+      "mtimeNs": 1793960880431049606
+    },
+    {
+      "path": "apps/lp/src/copy/master-listener.ts",
+      "origin": "source",
+      "bytes": 4279,
+      "sha256": "0bd54313adad03759bb24732e57b03db453b3d473bbbf9bf2cdfa43970225073",
+      "mtimeNs": 1793960880431049606
+    },
+    {
+      "path": "apps/lp/src/copy/sizing.ts",
+      "origin": "source",
+      "bytes": 3971,
+      "sha256": "73dab13d4766dea1d9fc45ec65a7740aeb540f2a9150094fe107e465cac34f31",
+      "mtimeNs": 1793960880431049606
+    },
+    {
+      "path": "apps/lp/src/domain/net-lp-result.ts",
+      "origin": "source",
+      "bytes": 2755,
+      "sha256": "54f794313332e14c1c4f8ad1c6a5278b25510cbd0ad799ff07e13e1ba6882163",
+      "mtimeNs": 1793960880462049258
+    },
+    {
+      "path": "apps/lp/src/guardrails/deploy-guard.ts",
+      "origin": "source",
+      "bytes": 2253,
+      "sha256": "bac6e8c21d950716d02a106fd45959a9b27439532635009a643f49fbfa2e3e26",
+      "mtimeNs": 1793960880484049011
+    },
+    {
+      "path": "apps/lp/src/guardrails/exposure-cap.ts",
+      "origin": "source",
+      "bytes": 3847,
+      "sha256": "7e0860af284f2e15a66795aca24b37e02a768d866a6aeaa79eb9e3139a78f814",
+      "mtimeNs": 1793960880485049000
+    },
+    {
+      "path": "apps/lp/src/guardrails/profit-bank.ts",
+      "origin": "source",
+      "bytes": 3381,
+      "sha256": "86c6bc00d231af57ef80cb4fd5e29061876ee78c561e6b43e7a00b0515e5d830",
+      "mtimeNs": 1793960880486048989
+    },
+    {
+      "path": "apps/lp/src/guardrails/reserve-vault.ts",
+      "origin": "source",
+      "bytes": 2565,
+      "sha256": "6cabb42f85498bb774df3a49d0d666cbbfabb4c8343e2dbd4f102a3d4a240055",
+      "mtimeNs": 1793960880487048978
+    },
+    {
+      "path": "apps/lp/src/monitor/classifier.ts",
+      "origin": "source",
+      "bytes": 1756,
+      "sha256": "457b5cfe424bdb1801b2ee9493726e28909cda7c0c28a38d34c63ceedda8ab90",
+      "mtimeNs": 1793960880494048899
+    },
+    {
+      "path": "apps/lp/src/monitor/economic-check.ts",
+      "origin": "source",
+      "bytes": 2200,
+      "sha256": "639b937fc74356b9549f2c24983ce86893b97b68c564825c0e88428e25263ae3",
+      "mtimeNs": 1793960880507048753
+    },
+    {
+      "path": "apps/lp/src/monitor/evm-rebalance.ts",
+      "origin": "source",
+      "bytes": 1873,
+      "sha256": "587d36e546e1d5b702fe4acc82794747a6bec2bc8339233e0d4d3351147b80f1",
+      "mtimeNs": 1793960880507048753
+    },
+    {
+      "path": "apps/lp/src/monitor/meteora-rebalance.ts",
+      "origin": "source",
+      "bytes": 2139,
+      "sha256": "3e2118b3dfed0aadca4ebd055d9713f9ab21d06857578d071eae812159310bf3",
+      "mtimeNs": 1793960880507048753
+    },
+    {
+      "path": "apps/lp/src/monitor/monitor-job.ts",
+      "origin": "source",
+      "bytes": 5762,
+      "sha256": "d65d2fcc19bef620c31922318bd7e7a1b5b5599a7a96fadbcf5609ba1a50bcd7",
+      "mtimeNs": 1793960880522048585
+    },
+    {
+      "path": "apps/lp/src/risk/bundled-wallets.ts",
+      "origin": "source",
+      "bytes": 3231,
+      "sha256": "bef35e4dba3cd7fae6db60011bd8416e8858a24644094800eec99358a34f8013",
+      "mtimeNs": 1793960880532048473
+    },
+    {
+      "path": "apps/lp/src/risk/evm-checks.ts",
+      "origin": "source",
+      "bytes": 5241,
+      "sha256": "b6bb1abca8c24b817da5b097f7ebb7d72663d9d2e9cdb71daada1653b7006d57",
+      "mtimeNs": 1793960880532048473
+    },
+    {
+      "path": "apps/lp/src/risk/risk-pass.ts",
+      "origin": "source",
+      "bytes": 2655,
+      "sha256": "ae5340bcbb91696ac4893d9a2d3521dc5fdf59ea911f20c54426565b089c8d97",
+      "mtimeNs": 1793960880561048147
+    },
+    {
+      "path": "apps/lp/src/risk/score.ts",
+      "origin": "source",
+      "bytes": 2282,
+      "sha256": "612984b242710f8d245819088479619d881ee90d64f769d3f3ba1ddb004b8f9f",
+      "mtimeNs": 1793960880561048147
+    },
+    {
+      "path": "apps/lp/src/risk/solana-checks.ts",
+      "origin": "source",
+      "bytes": 6919,
+      "sha256": "846eef22a4a1fd3a014b1ffb9717da064b69f0f78308426b0e9d5b6532879b26",
+      "mtimeNs": 1793960880563048125
+    },
+    {
+      "path": "apps/lp/src/risk/solana-rpc.ts",
+      "origin": "source",
+      "bytes": 2097,
+      "sha256": "01e80b52b5117101956c97d287a27875df5249e89ae0b88a238d29911d846957",
+      "mtimeNs": 1793960880563048125
+    },
+    {
+      "path": "apps/lp/src/risk/types.ts",
+      "origin": "source",
+      "bytes": 1639,
+      "sha256": "6de3b53ffdf5ddc86faf0237149a832216708acf529ead2001a2210a335c7649",
+      "mtimeNs": 1793960880564048113
+    },
+    {
+      "path": "apps/lp/src/scanner/active-tvl.ts",
+      "origin": "source",
+      "bytes": 6056,
+      "sha256": "b535bcd2c84a0cff373c1be92ebf91d211f0baa0b4b40dc40d53f47e59e65091",
+      "mtimeNs": 1793960880566048091
+    },
+    {
+      "path": "apps/lp/src/scanner/evm-clmm-pools.ts",
+      "origin": "source",
+      "bytes": 14017,
+      "sha256": "50b8f26132cc4a592edb357a65d3f4947e51d78989143ee13094622ac0c08ad1",
+      "mtimeNs": 1793960880567048080
+    },
+    {
+      "path": "apps/lp/src/scanner/evm-clmm-registry.ts",
+      "origin": "source",
+      "bytes": 3425,
+      "sha256": "5bb8bf8180d95975fd626d8b09a10b7f89f5109c123dee76d51fbbe18657c53f",
+      "mtimeNs": 1793960880567048080
+    },
+    {
+      "path": "apps/lp/src/scanner/fee-apr.ts",
+      "origin": "source",
+      "bytes": 1604,
+      "sha256": "0b21d82eb9bffc13bb7c887eb984a7364f866051e38bce29d60820e68e25a8db",
+      "mtimeNs": 1793960880584047889
+    },
+    {
+      "path": "apps/lp/src/scanner/meteora-pools.ts",
+      "origin": "source",
+      "bytes": 8478,
+      "sha256": "d2d4cc88e4b1bfdf004ff53136e3380c2a3e055f0aa08ccdedf85b6cf31bcb43",
+      "mtimeNs": 1793960880586047866
+    },
+    {
+      "path": "apps/lp/src/scanner/new-launches.ts",
+      "origin": "source",
+      "bytes": 3574,
+      "sha256": "7686358e029cfa38cd46e8f29cca17928df38be7ae2f72fd9cc60168cffbcefc",
+      "mtimeNs": 1793960880586047866
+    },
+    {
+      "path": "apps/lp/src/scanner/ranking.ts",
+      "origin": "source",
+      "bytes": 2129,
+      "sha256": "66a660882b8a6a75a4214c354bbb7fdfa6abe7c8ce9f736510d65b3976e7a2fd",
+      "mtimeNs": 1793960880587047855
+    },
+    {
+      "path": "apps/lp/src/scanner/raydium-clmm.ts",
+      "origin": "source",
+      "bytes": 7152,
+      "sha256": "d8378653b1ac725c9711bd391d1c7b11ea9faca9906767a6e960516caa2be30a",
+      "mtimeNs": 1793960880587047855
+    },
+    {
+      "path": "apps/lp/src/scanner/robinhood-pools.ts",
+      "origin": "source",
+      "bytes": 1211,
+      "sha256": "6c1abbba0368ef55cf7a80e09368c43c36b3283ece4162d7a6a7bed6a0bed5ab",
+      "mtimeNs": 1793960880588047844
+    },
+    {
+      "path": "apps/lp/src/scanner/scan-job.ts",
+      "origin": "source",
+      "bytes": 2857,
+      "sha256": "21feb9d435dca4e42ffa8e63378ced534c481df05ad90682f052791fdca3c552",
+      "mtimeNs": 1793960880590047821
+    },
+    {
+      "path": "apps/lp/src/scanner/solana-bins.ts",
+      "origin": "source",
+      "bytes": 8589,
+      "sha256": "11e4a04097e17c15259f5c7e833663a525d12adeb22c277037d11147732dcd8c",
+      "mtimeNs": 1793960880591047810
+    },
+    {
+      "path": "apps/lp/src/scanner/types.ts",
+      "origin": "source",
+      "bytes": 2253,
+      "sha256": "6c1b20153a2d17859275b67efe020c72dbb053de801c09b21f464ac87dcb8d8c",
+      "mtimeNs": 1793960880591047810
+    },
+    {
+      "path": "apps/lp/src/wallets/evm-positions.ts",
+      "origin": "source",
+      "bytes": 3009,
+      "sha256": "84a6b359856d4d80e51aee8d360b299ff8b42443e64ba3aea1b99240a1e3931f",
+      "mtimeNs": 1793960880622047463
+    },
+    {
+      "path": "apps/lp/src/wallets/pnl.ts",
+      "origin": "source",
+      "bytes": 2572,
+      "sha256": "e7dc16c48a9096c8283554d40bfbad55ebf651e1de26a88c5c67ee591f4ac9c3",
+      "mtimeNs": 1793960880623047452
+    },
+    {
+      "path": "apps/lp/src/wallets/solana-positions.ts",
+      "origin": "source",
+      "bytes": 3074,
+      "sha256": "0b26320f0cbcd584e1bab74741b21fb9d02c5365e5fcdc87fb3e8ca36c62ee78",
+      "mtimeNs": 1793960880649047159
+    },
+    {
+      "path": "apps/lp/src/wallets/types.ts",
+      "origin": "source",
+      "bytes": 1260,
+      "sha256": "01a829c94feccdc46a1112236c46ddb6999511f24424dddac5f66170cb1f38ec",
+      "mtimeNs": 1793960880650047148
+    },
+    {
+      "path": "apps/lp/src/wallets/wallet-indexer.ts",
+      "origin": "source",
+      "bytes": 4266,
+      "sha256": "f68ba8df0953ceb43e4c527b9da025c6ed18c3189219f1bfc908c07177abe8bc",
+      "mtimeNs": 1793960880651047137
+    },
+    {
+      "path": "pda-test-ui/server.mjs",
+      "origin": "source",
+      "bytes": 15467,
+      "sha256": "1514a73cde257c2c16a66068a0252ad6778ef1dfcc9e82d593b2e10809ea1995",
+      "mtimeNs": 1794151556589596868
+    },
+    {
+      "path": "pda-test-ui/public/index.html",
+      "origin": "source",
+      "bytes": 34178,
+      "sha256": "23c26a00fbe046110294cecc4c4e2212f7a5edf8e69b6f668c39850f61432576",
+      "mtimeNs": 1794151556589596868
+    },
+    {
+      "path": "pda-test-ui/public/nacl-fast.min.js",
+      "origin": "source",
+      "bytes": 32110,
+      "sha256": "3ec535c004aeeb225785d8e93fb33bf99f52e399bd7dfc01969b5629baea5131",
+      "mtimeNs": 1793960882225958614
+    },
+    {
+      "path": "pda-test-ui/public/solanaWeb3.min.js",
+      "origin": "source",
+      "bytes": 459806,
+      "sha256": "89c3d6c27cae93882d78153ef7f23c8d50f53f5e3f0b72666bb909c6a4dc9fac",
+      "mtimeNs": 1793960882228029560
+    },
+    {
+      "path": "apps/web/.next/static/chunks/1403cfaa-6db8521358bcd91a.js",
+      "origin": "existing-client-build",
+      "bytes": 173019,
+      "sha256": "04aad24058eb79a8fabc557bf7a129d12ed09dc841f415d2fbc23cc30b25005f",
+      "mtimeNs": 1786222976641323671
+    },
+    {
+      "path": "apps/web/.next/static/chunks/159-562cdab042031441.js",
+      "origin": "existing-client-build",
+      "bytes": 173340,
+      "sha256": "8cab1127fe990fe4d3fcef77f99f131ffc17217f40687e9b864cb356edcc0ea3",
+      "mtimeNs": 1786222976641323671
+    },
+    {
+      "path": "apps/web/.next/static/chunks/339-e03ce52693c79260.js",
+      "origin": "existing-client-build",
+      "bytes": 8535,
+      "sha256": "cee2835b8d4940c4b0173c27010d29e98df7ec7a1f7524c0b99f4c051d629599",
+      "mtimeNs": 1786222976641323671
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/_not-found/page-2a0a8d2a0e16434f.js",
+      "origin": "existing-client-build",
+      "bytes": 2668,
+      "sha256": "2a842a0a0e578948c801b9c7bbba3a2ff2deafad4cc0a541de36458a1178340c",
+      "mtimeNs": 1786222976639323702
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/clusters/page-aa5a3b190719de8b.js",
+      "origin": "existing-client-build",
+      "bytes": 4637,
+      "sha256": "71f7fb401bc1a0ec40fc09ced522995f314b59444f425a86128c906c68551abc",
+      "mtimeNs": 1786222976639323702
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/layout-1550031164f61f56.js",
+      "origin": "existing-client-build",
+      "bytes": 193,
+      "sha256": "b31d20a562d68870053b83392c156a072b704189b3dbd119175a3162dd0aca44",
+      "mtimeNs": 1786222976638323718
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/logs/page-564755a165ed7622.js",
+      "origin": "existing-client-build",
+      "bytes": 7587,
+      "sha256": "bfca8e595307e924ffcc5783c6477c86f460c845bacc6b17ad1524b6f1c7ef4b",
+      "mtimeNs": 1786222976638323718
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/page-f8e996e5d5560057.js",
+      "origin": "existing-client-build",
+      "bytes": 30858,
+      "sha256": "0537bd7b8ace77e6bfea6cdb54b67f1df8c9b010ece07b0483afde5d51c96bf4",
+      "mtimeNs": 1786222976639323702
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/performance/page-ff8802a0c4afb811.js",
+      "origin": "existing-client-build",
+      "bytes": 135,
+      "sha256": "18cabdc85ffdbb75f0b4d44bb0f1d8ac213dd48a0f86585c5499e6cfa9d512fb",
+      "mtimeNs": 1786222976640323686
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/setup/page-288b17911eaa702f.js",
+      "origin": "existing-client-build",
+      "bytes": 11322,
+      "sha256": "86d1eb359b9ff761b1c438ffaf56b8225b00f870b8e4ce534d02586c49279a94",
+      "mtimeNs": 1786222976639323702
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/signals/page-ff8802a0c4afb811.js",
+      "origin": "existing-client-build",
+      "bytes": 135,
+      "sha256": "18cabdc85ffdbb75f0b4d44bb0f1d8ac213dd48a0f86585c5499e6cfa9d512fb",
+      "mtimeNs": 1786222976640323686
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/wallets/page-2d5799a1f771e296.js",
+      "origin": "existing-client-build",
+      "bytes": 9163,
+      "sha256": "29e702c4e0268d0126bdae1ec8791bdabf88c591beede188db23bd186ddd3aef",
+      "mtimeNs": 1786222976639323702
+    },
+    {
+      "path": "apps/web/.next/static/chunks/app/workspace/page-5393ad33eefeb986.js",
+      "origin": "existing-client-build",
+      "bytes": 117416,
+      "sha256": "ada54eb1852b7596c468e4ae4a80c498f2fc5cfc4fafaf415c2f668587b44395",
+      "mtimeNs": 1786222976639323702
+    },
+    {
+      "path": "apps/web/.next/static/chunks/framework-36fdc7d8f35ef658.js",
+      "origin": "existing-client-build",
+      "bytes": 189764,
+      "sha256": "53fc9ee6514ccacef9db8b5bac679d38b458bf32e5e6a447482fa757e5ce3d7e",
+      "mtimeNs": 1786222976640323686
+    },
+    {
+      "path": "apps/web/.next/static/chunks/main-000c239328141e5d.js",
+      "origin": "existing-client-build",
+      "bytes": 128284,
+      "sha256": "63604bf729cac43c7c6c6903958b6c1616923c961818773a82c1bb068e15340a",
+      "mtimeNs": 1786222976637323734
+    },
+    {
+      "path": "apps/web/.next/static/chunks/main-app-98bb1818cd34e01a.js",
+      "origin": "existing-client-build",
+      "bytes": 555,
+      "sha256": "631ed4440b20c1bb85c7c33feb2564e489388a1205895e3611cdeda47c1018d8",
+      "mtimeNs": 1786222976637323734
+    },
+    {
+      "path": "apps/web/.next/static/chunks/pages/_app-c29bd852ea78b7d0.js",
+      "origin": "existing-client-build",
+      "bytes": 236,
+      "sha256": "e8eef4ce20be70f93fd822fcff3fa1b01eed69e8c241201acbb2be92ea5c103d",
+      "mtimeNs": 1786222976637323734
+    },
+    {
+      "path": "apps/web/.next/static/chunks/pages/_error-5d4135090fb54e41.js",
+      "origin": "existing-client-build",
+      "bytes": 215,
+      "sha256": "d861f0b70ceadd1ef344d8bcc10c3841fba1457e2ec34b1c208017faca7882f8",
+      "mtimeNs": 1786222976637323734
+    },
+    {
+      "path": "apps/web/.next/static/chunks/polyfills-42372ed130431b0a.js",
+      "origin": "existing-client-build",
+      "bytes": 112594,
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683",
+      "mtimeNs": 1786222976636323749
+    },
+    {
+      "path": "apps/web/.next/static/chunks/webpack-563f8a4f1fffe63d.js",
+      "origin": "existing-client-build",
+      "bytes": 3404,
+      "sha256": "7c2a38b3ac85792c59203301c8230a03ae6b4c5c4a39904097a77a24bf3ad4e7",
+      "mtimeNs": 1786222976640323686
+    },
+    {
+      "path": "apps/web/.next/static/lYMk3pzWZCCduZBPXTd57/_buildManifest.js",
+      "origin": "existing-client-build",
+      "bytes": 775,
+      "sha256": "53c3a1979324da17eb9bbabb69dce666bbb5b61c41a6d8d3867b6e389e3981b3",
+      "mtimeNs": 1786222976637323734
+    },
+    {
+      "path": "apps/web/.next/static/lYMk3pzWZCCduZBPXTd57/_ssgManifest.js",
+      "origin": "existing-client-build",
+      "bytes": 80,
+      "sha256": "678f6ce2cb80b1fe72fc67e7412be6e2ab6ada083111b64f7c40d35e3cba5e00",
+      "mtimeNs": 1786222997637994591
+    }
+  ],
+  "candidates": [],
+  "publicEnvironmentVariableNames": [
+    "NEXT_PUBLIC_API_KEY",
+    "NEXT_PUBLIC_API_URL",
+    "NEXT_PUBLIC_APP_URL",
+    "NEXT_PUBLIC_LP_API_URL",
+    "NEXT_PUBLIC_PROJECT_ID",
+    "NEXT_PUBLIC_REOWN_PROJECT_ID",
+    "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID"
+  ],
+  "scope": "Bounded heuristic literal scan of current frontend/API/LP/PDA source and existing local client .next/static artifacts. Does not read server bundles, dotenv, actual secrets, logs or live responses.",
+  "limits": "Existing client artifacts are not proven built from current HEAD. Heuristics cannot detect all formats, obfuscation, runtime injection, response leakage, or secret validity. Public keys/project IDs are not private credentials.",
+  "noCandidateValuesEmitted": true
+}

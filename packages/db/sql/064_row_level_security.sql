@@ -15,7 +15,9 @@
 --   4. Role 'swat_app':
 --      - Least-privilege application role with NOSUPERUSER NOBYPASSRLS for production application pools.
 --
--- Idempotent: Replays cleanly on migrate.ts.
+-- Historical schema step: never replay on an installed database.
+-- Package09 narrowly removes credential/membership provisioning for fresh installs;
+-- existing installations adopt their audited old checksum and upgrade via 070.
 
 -- 1. Helper Functions
 CREATE OR REPLACE FUNCTION current_app_user_id() RETURNS uuid STABLE AS $$
@@ -44,15 +46,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 2. Create swat_app role if it doesn't already exist
+-- 2. Require separately provisioned runtime identity; no password in migrations
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'swat_app') THEN
-    CREATE ROLE swat_app WITH LOGIN PASSWORD 'swat_app' NOSUPERUSER NOBYPASSRLS;
+    RAISE EXCEPTION 'Provision swat_app with deploy/postgres/roles.sql before initializing';
   END IF;
 END $$;
 
-GRANT swat_app TO swat WITH SET TRUE;
 DO $$
 BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO swat_app', current_database());

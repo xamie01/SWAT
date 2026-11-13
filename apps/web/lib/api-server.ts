@@ -36,7 +36,9 @@ export async function serverApiGet<T = unknown>(path: string): Promise<T | null>
   const session = jar.get(SESSION_COOKIE);
   if (!session) return null;
 
+  if (!path.startsWith('/v1/') || path.includes('\\') || /[\r\n]/.test(path)) throw new Error('Invalid API path');
   const response = await fetch(`${resolveApiBase(null)}${path}`, {
+    redirect: 'error',
     // Forwarding only the session cookie, not the whole jar. Nothing else the
     // browser holds is ours to relay to the API, and a narrow forward cannot
     // leak a third-party cookie into our own logs.

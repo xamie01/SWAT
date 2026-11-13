@@ -108,6 +108,21 @@ export function resolveRouteAccess(input: RouteAccessInput): RouteAccess {
   return { decision: 'allow' };
 }
 
+export function resolveLoginDestination(next: string | null, role: string | undefined): string {
+  const fallback = role === 'admin' ? '/admin/portfolio' : '/dashboard';
+  if (!next) return fallback;
+  try {
+    const decoded = decodeURIComponent(next);
+    if (!next.startsWith('/') || next.startsWith('//') || /[\\\u0000-\u0020]/.test(decoded)
+      || decoded.startsWith('//') || /%[0-9a-f]{2}/i.test(decoded)) return fallback;
+    const url = new URL(decoded, 'https://navigation.invalid');
+    if (url.origin !== 'https://navigation.invalid') return fallback;
+    if (role !== 'admin' && classifyRoute(url.pathname) === 'admin') return '/dashboard';
+    const original = new URL(next, 'https://navigation.invalid');
+    return `${original.pathname}${original.search}${original.hash}`;
+  } catch { return fallback; }
+}
+
 /** True when middleware needs to ask the API for the role at all. */
 export function requiresRoleCheck(pathname: string, hasSession: boolean): boolean {
   return hasSession && classifyRoute(pathname) === 'admin';

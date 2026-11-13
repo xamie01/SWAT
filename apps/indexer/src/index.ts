@@ -27,6 +27,8 @@ import {
   extractFundingTransfers,
   extractTokenBuyers,
   parseCanonicalSolanaSwapEvent,
+  findWalletSwapInstruction,
+  SWAP_PROGRAM_IDS,
   baseUnitsToFloat,
   SOL_MINT,
   type HeliusParsedTransaction
@@ -36,6 +38,7 @@ import { createPolymarketBookRuntimeOnRedis } from './polymarket-book-runtime.js
 import { backfillPolymarketWallet, pollPolymarketResolutions } from './polymarket.js';
 import {
   IngestionBatchError,
+  observedIngestionEvidence,
   type IngestionBatchResult
 } from './ingestion-health.js';
 import { parseSeedWalletAddresses } from './seed-wallets.js';
@@ -52,14 +55,6 @@ const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-const SWAP_PROGRAM_IDS = new Set([
-  '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium AMM
-  'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CLMM
-  'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Orca Whirlpool
-  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', // Jupiter v6
-  '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun
-  'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo' // Meteora DLMM
-]);
 
 const heliusApiKey = process.env.HELIUS_API_KEY;
 const heliusRpcUrl = heliusApiKey ? `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}` : null;
@@ -154,14 +149,6 @@ async function fetchTokenMintInfo(mint: string): Promise<{ decimals: number; min
   }
 }
 
-function extractProgramId(tx: HeliusParsedTransaction): string | null {
-  const instructions = tx.transaction?.message?.instructions ?? [];
-  const ids = instructions
-    .map((i) => i.programId)
-    .filter((id): id is string => typeof id === 'string');
-
-  return ids.find((id) => SWAP_PROGRAM_IDS.has(id)) ?? ids[0] ?? null;
-}
 
 // ─── SOL Price Cache ──────────────────────────────────────────────────────────
 
@@ -251,10 +238,21 @@ async function enrichTransactionUsd(
 export async function processTransaction(
   tx: HeliusParsedTransaction,
   address: string,
-  source: SolanaIngestionSource = 'solana-backfill'
+  source: SolanaIngestionSource = 'solana-backfill',
+  onEvidence?: (outcome: 'quarantined' | 'accepted') => void
 ): Promise<'inserted' | 'skipped'> {
   const canonicalEvent = parseCanonicalSolanaSwapEvent(tx, address);
   if (!canonicalEvent) return 'skipped';
+  const sourceTrade = await persistSolanaSourceTrade({
+    event: canonicalEvent,
+    source
+  });
+  if (!sourceTrade.eligibleForCopy) {
+    onEvidence?.('quarantined');
+    return 'skipped';
+  }
+  onEvidence?.('accepted');
+
   const parsed = canonicalEvent;
   const signature = canonicalEvent.transactionIdentity;
 
@@ -293,15 +291,10 @@ export async function processTransaction(
     amountOutUsd,
     direction: parsed.direction,
     targetToken: parsed.targetToken,
-    programId: extractProgramId(tx),
+    programId: findWalletSwapInstruction(tx, address)?.programId ?? null,
     slot: tx.slot ?? null,
     timestamp,
     blockTime
-  });
-
-  const sourceTrade = await persistSolanaSourceTrade({
-    event: canonicalEvent,
-    source
   });
 
   if (persisted) {
@@ -518,7 +511,8 @@ export async function backfillWallet(address: string): Promise<IngestionBatchRes
       inserted: 0,
       skipped: 0,
       failed: 0,
-      lastEventAt: null
+      lastEventAt: null,
+      evidence: observedIngestionEvidence(0, 0, 0, 'unknown', 'requested-window')
     };
   }
 
@@ -551,6 +545,9 @@ export async function backfillWallet(address: string): Promise<IngestionBatchRes
 
   let inserted = 0;
   let skipped = 0;
+  let observed = 0;
+  let quarantined = 0;
+  let accepted = 0;
   let latestBlockTime: number | null = null;
   let lastEventAt: Date | null = null;
   let sourceTradeFailure: SourceTradePersistenceError | null = null;
@@ -567,7 +564,11 @@ export async function backfillWallet(address: string): Promise<IngestionBatchRes
     }
 
     try {
-      const result = await processTransaction(tx, address);
+      const result = await processTransaction(tx, address, 'solana-backfill', (outcome) => {
+        observed++;
+        if (outcome === 'quarantined') quarantined++;
+        else accepted++;
+      });
       if (result === 'inserted') {
         inserted++;
         if (tx.blockTime && (!latestBlockTime || tx.blockTime > latestBlockTime)) {
@@ -593,7 +594,10 @@ export async function backfillWallet(address: string): Promise<IngestionBatchRes
     inserted,
     skipped,
     failed,
-    lastEventAt
+    lastEventAt,
+    evidence: observedIngestionEvidence(observed, quarantined, accepted,
+      failed > 0 || signatures.length >= sigLimit || txs.some((tx) => tx === null)
+        ? 'partial' : 'unknown', 'requested-window')
   };
 
   try {

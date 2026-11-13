@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "rootDir": "../..",
+    "noEmit": true,
+    "incremental": false,
+    "paths": {
+      "@swat/shared": ["packages/shared/src/index.ts"],
+      "@swat/db": ["packages/db/src/index.ts"]
+    }
+  },
+  "include": [
+    "../../apps/api/src/**/*.ts",
+    "../../apps/trade-executor/src/**/*.ts",
+    "../../apps/indexer/src/**/*.ts",
+    "../../apps/signal-engine/src/**/*.ts",
+    "../../packages/shared/src/**/*.ts",
+    "../../packages/db/src/**/*.ts"
+  ],
+  "exclude": [
+    "../../**/*.test.ts",
+    "../../**/node_modules/**",
+    "../../**/dist/**"
+  ]
+}

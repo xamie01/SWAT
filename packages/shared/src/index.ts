@@ -5,6 +5,7 @@ export * from './constants.js';
 export * from './prices.js';
 export * from './jupiter.js';
 export * from './logger.js';
+export * from './redaction.js';
 export * from './address.js';
 export * from './queues.js';
 export * from './starter-pack.js';

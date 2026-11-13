@@ -1,0 +1,2300 @@
+{
+  "head": "8905505595802c21053118b5fab3fd53a8a1654c",
+  "counts": {
+    "partial": 33,
+    "open": 43,
+    "not-verified": 7,
+    "closed(source)": 10,
+    "surface-removed": 4
+  },
+  "overlapWarning": "97 tracked IDs = 76 retained +15 overlapping focused OWASP +6 runtime; not 97 unique vulnerabilities",
+  "items": [
+    {
+      "id": "API-01",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "388-471",
+          "observation": "Owned intent and optional no-memo linked-payer controls do not bind memo to transaction."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "84-115,198-224",
+          "observation": "Polygon interprets log positions without event signature validation; Solana uses treasury balance deltas and first signer, not memo verification."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "611-671",
+          "observation": "New Robinhood route can poison the linked-wallet prerequisite used by billing without signature enforcement."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/app/billing/page.tsx",
+          "lines": "186-207",
+          "observation": "UI reads the wrong intent response shape and invents a reference on errors."
+        }
+      ],
+      "reason": "Prior payment attribution issue persists with improved partial checks. PF-WEB-01/02/03 trace stronger current failure conditions; PF-WEB-20 retains the real-client exchange-payment logic failure. Exact transaction uniqueness does not establish rightful credit.",
+      "testGap": "Added mocked tests do not cover actual receipt decoding, chain-visible binding, fabricated wallet verification, UI response shape, exchange-payer flow or locked intent consumption.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-02",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "284-297",
+          "observation": "Polygon request hash is trimmed/lowercased and Solana case is preserved; validation remains generic string length."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts",
+          "lines": "188-203",
+          "observation": "Ledger writer still inserts input.txHash verbatim."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.test.ts",
+          "lines": "288-314",
+          "observation": "Added test verifies route lowercase forwarding with mocked verifier/recorder."
+        }
+      ],
+      "reason": "The current browser/API writer closes the direct route casing variant. Canonicalization is not enforced in the shared writer, strict chain-format validation is absent, and historical ledger normalization was not checked. These residuals are not evidence of a demonstrated duplicate-credit exploit or of real RPC casing acceptance.",
+      "testGap": "No direct-recorder/canonical-constraint tests, historical collision inventory, valid full hash/signature format fixtures or real receipt-equivalence checks.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-03",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "769-790,804-808,810-877",
+          "observation": "Explicit proof tuple logging removed; challenge remains stateless with nonce zero and recovery remains diagnostic before venue verification."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "894-944",
+          "observation": "Same-owner upsert prevents reassignment but replacement is nontransactional and zero-row result can report success."
+        }
+      ],
+      "reason": "Original explicit proof log and unsafe cross-owner overwrite are closed in source, not every component of enrollment authorization. Stored user-bound challenge/replay policy is absent and PF-WEB-08 retains state-integrity failures. Venue create/derive verification and replay windows are not reverified; diagnostic-only local recovery alone is not evidence that the Polymarket route accepts arbitrary proofs.",
+      "testGap": "No new enrollment route regression tests, external venue replay tests, exception serialization checks or atomic replacement/conflict tests.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Likely",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-04",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts",
+          "lines": "391-430",
+          "observation": "Downgrade UPDATE rechecks nonfree tier, nonnull expiry and grace cutoff, and counts only returned rows."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts",
+          "lines": "220-267",
+          "observation": "Payment audit is called before transaction completion, while cache invalidation now follows the transaction."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/audit-log.ts",
+          "lines": "30-45,75-76",
+          "observation": "Strict audit still uses independent global query."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+          "lines": "43-60",
+          "observation": "Mutation transaction commits using a dedicated PoolClient not passed to the audit helper."
+        }
+      ],
+      "reason": "The sweep-overwrites-renewal core defect is closed in source. The explicitly associated detached-audit defect is still open (PF-WEB-16); cache invalidation movement is not an audit transaction fix.",
+      "testGap": "Changed test only adjusts successful returned ID and parameters; no renewal interleaving, zero-row update, audit-failure or payment-commit rollback test.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-05",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "54,132-173",
+          "observation": "Fastify lacks trustProxy configuration; limiter numbers come directly from Number(env), and account key generator reads body without an explicit hook."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md",
+          "lines": "96",
+          "observation": "Spec claims positive-finite limit and trusted-proxy validation, which the inspected setup does not implement."
+        }
+      ],
+      "reason": "Existing limiters are present, but claimed phase/proxy/validation remedies are not established (PF-WEB-17). Shared ingress IP grouping and parsed-body availability depend on configuration/library defaults; no exact bypass is claimed.",
+      "testGap": "Installed limiter hook/defaults, proxy topology, forwarded-header policy, malformed limits and post-parse account normalization were not tested or exhaustively inspected.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-06",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "98-109,1414-1499,1563-1601",
+          "observation": "Amount is optional at issuance and checked only if present. Chain kind is checked but not exact chain/asset. OTP is local Map; email errors can still report sent; confirmation is authorization-only without durable execution."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx",
+          "lines": "492-525",
+          "observation": "Actual UI omits amount on OTP request and collapses both EVM venues to evm; execution/queued fallback wording remains."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/withdraw.test.ts",
+          "lines": "145-215,218-258",
+          "observation": "Old success test uses an unbound amount; new mismatch test manually supplies an amount-bound Map entry."
+        }
+      ],
+      "reason": "Chain-kind and optional-amount checks improve one path and API wording no longer claims queueing. Exact intent/durable single-use authorization and honest end-to-end execution UI remain partial (PF-WEB-10). No withdrawal transaction or theft demonstrated.",
+      "testGap": "No real UI issuance-confirmation test, required amount/asset/chain test, replica/restart/email-failure test or durable handoff test.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-07",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "452-531",
+          "observation": "Format and active conflict checks added; arbitrary Solana address still lacks ownership/derivation proof, chain-kind is not jointly validated, and unsupported keyed operation can revoke before rejecting."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "594-744",
+          "observation": "New Robinhood delegation writes auth-wallet linkage before proof and does not gate on signature recovery; active replacement is independent SQL with optional returned grant ID."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql",
+          "lines": "69-113",
+          "observation": "Kind/chain enumerations and secret shape checks do not establish owned or on-chain authorized accounts."
+        }
+      ],
+      "reason": "Same-owner upserts and format/collision guards prevent some corruption, not unauthorized reservation or invalid delegation. New PF-WEB-01 and PF-WEB-04 through 09 are introduced/retained authority and lifecycle problems. No executor or on-chain spending capability is inferred from a database row.",
+      "testGap": "No newly added Robinhood signature/challenge/provider tests or grant route atomicity/chain-kind/PDA ownership tests; actual downstream execution excluded.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "API-08",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/execution-settings.ts",
+          "lines": "482-509,532-547",
+          "observation": "Sequential nonadmin ceiling increases are rejected, but check is outside the locked mutation and no audit call occurs in these routes."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/user-execution-settings.ts",
+          "lines": "389-473",
+          "observation": "Settings and kill-switch helpers persist values without audit; settings lock does not carry the earlier role/ceiling decision."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/sql/049_user_execution_settings.sql",
+          "lines": "44-53",
+          "observation": "Raising cap is specified as audited admin action; kill-switch requires an identifiable audit event."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/app/settings/page.tsx",
+          "lines": "61-99",
+          "observation": "UI now uses PATCH and propagates chain-save failures, but ignores returned authoritative settings and does not reconcile partial two-request saves."
+        }
+      ],
+      "reason": "The main sequential privilege check and wrong-method/suppressed-error UI defects are fixed. Audit/transactional authority and authoritative partial-save presentation remain incomplete (PF-WEB-16 and Spec section). Actual downstream cap enforcement is excluded.",
+      "testGap": "No added regression for nonadmin increase/admin audit, concurrent ceiling changes, kill-switch audit, returned clamp values or partial save reconciliation.",
+      "assessmentArtifact": "api-web-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "01-api",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-01",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:235-329 \u2014 executor supplies max_in, min_out and CPI bytes; checks enforce chosen deltas, not owner economic policy",
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:450-515 \u2014 global executor Signer and vault-owned token accounts; per-vault state contains only owner, bump and revoked",
+        "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md:11-18 \u2014 scoped, expiring authority is required at contract/protocol layer"
+      ],
+      "reason": "PF-SEC-01, High. Compromised authorized executor remains able to select economically destructive bounds/mints subject to supported Jupiter routes. Application quote validation does not bind direct on-chain authorization. Deployed holdings and concrete malicious routes not assessed.",
+      "testGap": "No execution performed. Add real-instruction/CPI tests rejecting disallowed mint, expired policy, cumulative allowance exhaustion and owner-policy-inconsistent output even when caller-selected deltas pass. Fix requires owner-defined on-chain policy and atomic allowance consumption.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-02",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx:536-575 \u2014 HTTP-only revoke/restore claims on-chain registration and refunded rent",
+        "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:405-449 \u2014 endpoint updates user_execution_grants only",
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:163-172,399-409 \u2014 actual revoke/restore requires owner signer and toggles a reversible flag",
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:202-221 \u2014 SOL withdrawal preserves rent"
+      ],
+      "reason": "PF-SEC-02, High. Source contradicts claimed presentation fix. DB deactivation is not on-chain revoke; no owner transaction or chain confirmation is present in the traced path. Revoke neither closes the account nor refunds rent and is owner-reversible.",
+      "testGap": "Assert HTTP success alone cannot announce on-chain revocation/refund; rejected chain transaction leaves unknown/local-paused status; confirmed owner revoke blocks actual swaps and owner-only restore works. Clarify local operation or implement confirmed owner-signed instructions.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-03",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:35-79,339-367 \u2014 pinned initializer, has_one admin Signer updates global executor immediately, no admin transfer argument",
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:493-515 \u2014 no staged governance or recovery state",
+        "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md:124 \u2014 closure cites upgrade-authority deployment guidelines"
+      ],
+      "reason": "PF-SEC-16, Medium. Runtime config admin is a signer, not intrinsic threshold/delay enforcement; no in-program admin succession. It may be a governance PDA in deployment, which was not inspected. Upgrade-authority guidelines do not establish config-admin protection.",
+      "testGap": "Validate intended governance invocation and staged admin/executor changes with real instruction dispatch; test succession/recovery without bypassing user revoke/withdraw. Runtime governance and upgrade authority remain outside assessment.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-04",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:273-315 \u2014 extra writable-account scan checks only legacy token-program owners, then supplies vault PDA signer to CPI",
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:471-486 \u2014 named token accounts and program are legacy Token types; Jupiter ID pinned",
+        "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md:125 \u2014 executor preflight checks are the claimed fix"
+      ],
+      "reason": "Legacy-only scan directly verified, but no supported Jupiter route/Token2022 resource mutation or deployed holding was established. Client checks do not close the contract boundary; do not promote the conditional exploit to Verified or mark it closed.",
+      "testGap": "Use controlled real-runtime CPI fixtures with additional writable nonlegacy vault-controlled accounts, reject unsupported programs/extensions or account for their complete effects. Actual Jupiter/Token2022 route behavior was not read or executed.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Needs check",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-05",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs:635-729 \u2014 helper assertions; initializer compares public keys and prefund test evaluates booleans",
+        "/home/xahmie/Documents/SWAT/programs/wake-vault/trident-tests/fuzz_0/src/lib.rs:1-143 \u2014 synthetic FuzzVaultState and helper calls, not Anchor instruction/CPI dispatch",
+        "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md:126 \u2014 claims real-handler-constraint fixtures"
+      ],
+      "reason": "PF-SEC-17, Medium. Inspected tests still cannot exercise account metadata, PDA/program ownership, signer constraints or rollback. Limited tracked program-test query did not establish coverage elsewhere; no suite was run.",
+      "testGap": "Add program-runtime tests invoking real initialize, prefunded initialize, withdrawal, revoke/restore and swap instructions with malformed account metas and a controlled CPI fixture. Keep helper tests as supplemental rather than runtime proof.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-06",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts:12-29 \u2014 derivation exception returns program ID and bump 255",
+        "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx:135-158 \u2014 initial fallback is now empty/uninitialized",
+        "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx:192-209,539-559 \u2014 helper result registered and presented active; registration error can be swallowed"
+      ],
+      "reason": "PF-SEC-03, Medium. Initial placeholder improvement is real, but current helper still produces a false address-shaped success and connection/restore consumers trust it. Actual funding transaction behavior was not traced.",
+      "testGap": "Invalid owner/cluster/program derivation must return typed failure, never register an address or mark active; rejected grant persistence cannot become active. Verify valid derivation and chain state before activation.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CHAIN-07",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/programs/pda-vault-minimal/src/lib.rs:14-79 \u2014 tag-0 checks signer, own destination, canonical PDA, amount and balance before System transfer CPI",
+        "/home/xahmie/Documents/SWAT/programs/pda-vault-minimal/src/lib.rs:100-116 \u2014 demo attacker tag and unknown tags fail"
+      ],
+      "reason": "PF-SEC-18, Low hardening only. Explicit System owner/empty-data, writable and supplied program-account checks remain absent. Normal runtime/System-program enforcement should reject incompatible input; no bypass was established. Client-side checks do not change this contract boundary.",
+      "testGap": "Invoke actual tag-0 dispatch with wrong owner/data, nonwritable metas and substituted System account; require rejection without state change. State the intended System-PDA model and verify valid owner withdrawal. Deployment/callers outside the handler not assessed.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Low",
+      "originalConfidence": "Verified",
+      "originalReport": "04-on-chain-programs",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CRY-02",
+      "status": "open",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/key-wrapper.ts",
+          "lines": "7-28,71-107",
+          "observation": "AAD is exactly userId, broad chainKind and keyVersion."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/envelope.ts",
+          "lines": "27-59,70-129",
+          "observation": "Seal/open use that context; no full resource/grant domain is added."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/execution-grants.ts",
+          "lines": "315-327",
+          "observation": "Secret load returns ciphertext/version from an owner-scoped row, without a full authenticated grant identity."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql",
+          "lines": "31-66",
+          "observation": "Stored grants distinguish concrete chain, account, grant kind and lifecycle that are absent from helper AAD."
+        }
+      ],
+      "reason": "The actual helper remains too narrowly domain-bound; existing user binding predates the claim and is not a fix for same-user cross-resource substitution. No production decrypt-and-use consumer was found in the bounded executor/signal/DB reference crosscheck, so application exploitation remains conditional.",
+      "testGap": "Same-user different network/account/grant/purpose envelope swaps, explicit v2 migration, restore and legacy-envelope refusal. Use generated local keys only.",
+      "findingIds": [
+        "PF-EXE-15"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "03-crypto-authority",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CRY-03",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/api/src/routes/me.ts:674-688,876-893",
+        "packages/shared/src/authority/key-wrapper.ts:42-107",
+        "packages/shared/src/authority/envelope.ts:86-118"
+      ],
+      "reason": "Current API itself instantiates symmetric wrapping/unwrapping authority; exact wrapper-id opening does not implement multi-version rotation.",
+      "testGap": "No actual master key inspected; verify separate wrap-only identity and audited rotation with throwaway keys.",
+      "findingIds": [
+        "PF-DATA-19"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "03-crypto-authority",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CRY-04",
+      "status": "open",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/withdrawal-authorization.ts",
+          "lines": "4-11,34-43,55-149",
+          "observation": "Message has chain/owner/recipient/amount/time/nonce; verifier checks age and signature but has no nonce issuance/consumption or deployment/program/vault/asset identity."
+        }
+      ],
+      "reason": "OTP changes elsewhere do not remediate this separate signature helper. A time window is not single-use replay defense. No production consumer of the helper was identified in the bounded execution partition, so live withdrawal exploitation remains conditional and API behavior was not duplicated.",
+      "testGap": "Synthetic one-time intent consumption, concurrent replay and cross-deployment/network/vault/asset substitution; retries must reuse one durable withdrawal rather than verify the same signature as a new authorization.",
+      "findingIds": [
+        "PF-EXE-16"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "03-crypto-authority",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "CRY-05",
+      "status": "open",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.ts",
+          "lines": "636-768,797-845,1105-1194",
+          "observation": "Signed-struct allowance validation accepts any address operation and any amount-bound operation; contract allowance validation uses configured functionName, while rule matching uses target/selector."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+          "lines": "417-467,604-619",
+          "observation": "Default per-user Robinhood authority still denies, rather than adopting this helper as a live signing boundary."
+        }
+      ],
+      "reason": "The semantic compiler/evaluator weakness remains in current source; no mandatory spender/actual-amount/recipient schema is established by the inspected checks. Full field decoder composition and a production policy-gated signer were not verified, so this is a latent helper finding, not a proven user-live bypass.",
+      "testGap": "Reject Permit policies that constrain token plus nonce but omit spender/amount, approval selector/name aliases, missing own-recipient/economic bounds and post-evaluation payload substitution. Exercise full compiler-decoder-signer composition with synthetic data.",
+      "findingIds": [
+        "PF-EXE-17"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "03-crypto-authority",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "DB-01",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "packages/db/src/evm-nonce.ts:87-126",
+        "packages/db/src/migrate.ts:18-37",
+        "deploy/pgbouncer/pgbouncer.ini:23"
+      ],
+      "reason": "Session-lock SQL still uses the general connection pool; documented transaction pooling does not preserve backend affinity, and false unlock results are ignored.",
+      "testGap": "No real pooler/database tests; require session-pinned/direct connection and isolated multi-backend test.",
+      "findingIds": [
+        "PF-DATA-09"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "02-database",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "DB-02",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "packages/db/sql/064_row_level_security.sql:29-45,89-114",
+        "packages/db/src/tenancy.ts:72-110",
+        "packages/db/src/client.ts:10-27,65-68",
+        "packages/db/src/users.ts:105-115,242-255"
+      ],
+      "reason": "RLS is still conditional on role and tenant settings; non-swat_app unscoped policies permit rows, while blindly switching unscoped auth calls to strict role breaks access. Actual role unknown.",
+      "testGap": "Isolated actual application-role login/tenant/admin denial matrix required.",
+      "findingIds": [
+        "PF-DATA-10"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "02-database",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "DB-03",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "packages/db/src/users.ts:125-138,182-239,242-288",
+        "session-invariants.test.ts:15-26"
+      ],
+      "reason": "Post-commit local invalidation improved, but a synthetic pre-revoke resolution repopulated the cache afterward. No distributed invalidation or expiry check on cached identity.",
+      "testGap": "Synthetic race failed; full multi-process real-DB/session expiry tests not run.",
+      "findingIds": [
+        "PF-DATA-11"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "02-database",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "DB-04",
+      "status": "partial",
+      "severity": "Medium",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/execution-config.ts",
+          "lines": "68-89,172-203,225-243",
+          "observation": "forceFresh bypasses completed cache but reuses current-generation in-flight query; emergency mutation only clears local generation."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1458-1466,1805-1820",
+          "observation": "Worker requests fresh platform mode once, before asynchronous authority/claim/quote/signing work."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+          "lines": "238-311",
+          "observation": "Reviewed final Jito build/simulate/sign/send path has no control epoch check."
+        }
+      ],
+      "reason": "Ordinary completed-cache TTL exposure is improved, but the claimed emergency epoch/fleet halt is not implemented in the reviewed path. In-flight stale results and post-check/pre-submit changes remain possible. API response semantics and actual fleet timing were deliberately not reviewed here.",
+      "testGap": "Two isolated config contexts with pre-stop query held in flight, plus barriers before signing/send. Define acknowledgement semantics and assert no new submission after the stop barrier without losing reconciliation of already-sent work.",
+      "findingIds": [
+        "PF-EXE-12"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "02-database",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "DB-05",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "packages/db/sql/064_row_level_security.sql:47-64"
+      ],
+      "reason": "Predictable source-default LOGIN credential and broad present/future grants remain; no runtime credentials read.",
+      "testGap": "Fresh and existing-role provisioning with constrained grants/attributes required.",
+      "findingIds": [
+        "PF-DATA-12"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Low",
+      "originalConfidence": "Verified",
+      "originalReport": "02-database",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "DB-06",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "packages/db/src/migrate.ts:21-32",
+        "packages/db/sql/066_lp_dashboard.sql:168-193",
+        "packages/db/sql/067_lp_auto_rebalance.sql:24-44"
+      ],
+      "reason": "Replaying separately committed files transiently reinstalls the narrower transition function before restoring active-to-rebalancing.",
+      "testGap": "No live migration; isolated replay/concurrent LP fixture needed.",
+      "findingIds": [
+        "PF-DATA-13"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Low",
+      "originalConfidence": "Likely",
+      "originalReport": "02-database",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-01",
+      "status": "closed(source)",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+          "lines": "498-568,604-619",
+          "observation": "Default user Solana factory no longer inherits the operator signer; a venue-trade request without a user signer denies."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1127-1164,1600-1622,2940-2950",
+          "observation": "Production constructs the default factory without user signer options and returns on denial before canonical claims or venue dispatch."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts",
+          "lines": "328-399",
+          "observation": "Registry selects the matching principal/chain adapter and checks the returned principal, user and chain."
+        }
+      ],
+      "reason": "The specifically reported default operator-signer fallback is source-closed by containment. This is NOT completed delegated execution: default user-live Solana, Robinhood and Polymarket routes deny. The optional Solana adapter still synthesizes a settlement identity and is not grant-bound; operator Jupiter final-byte authorization remains PF-EXE-02. No assertion of deployed vault security or successful user execution is made.",
+      "testGap": "The added adapter test proves default denial locally, not production factory-to-signer isolation. Add a synthetic production-port job asserting zero operator signatures/transports for an unresolved user, plus explicit-signer tests requiring real vault/grant identity and scoped final bytes.",
+      "findingIds": [
+        "PF-EXE-02"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-02",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "318-411,1204-1213,1600-1605,1666-1675,2638-2654",
+          "observation": "Principal-derived userId now reaches the reviewed canonical claim and all located handleJob trade writes through recordTrade."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "1834-1870,2575-2616,2718-2728",
+          "observation": "Claim/evidence tenancy is explicit, but the first confirmed execution terminalizes the shared signal and later new tenant claims reject executed status."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts",
+          "lines": "140-179,193-249,341-353",
+          "observation": "Trade values normalize the provided tenant; the fill writer terminalizes the shared signal, and re-buy cooldown remains global."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts",
+          "lines": "242-255,349-359",
+          "observation": "Distinct user jobs are queued operator-first."
+        }
+      ],
+      "reason": "The original omitted-userId plumbing was repaired at reviewed writes, so it is not reported as unchanged. End-to-end tenant execution remains incomplete: first-tenant/operator confirmation suppresses later tenants through shared source state, and explicit exit IDs are loaded without expected-tenant validation. A generic persistTrade caller still has an optional tenant parameter; this review did not certify all consumers outside the partition.",
+      "testGap": "Actual worker plus faithful DB contracts for operator and two users, same paper source, sequential completion and cooldown disabled; assert separate claims, trades and lots. Also reject a mismatched explicit exit execution before evidence.",
+      "findingIds": [
+        "PF-EXE-05",
+        "PF-EXE-07"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-03",
+      "status": "partial",
+      "severity": "High",
+      "currentResidualSeverity": "Medium (default user-live denial contains live widening)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-candidates.ts",
+          "lines": "203-289",
+          "observation": "Enumeration reads global user settings and balances, not per-chain user mode/slippage."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.ts",
+          "lines": "273-278",
+          "observation": "Eligible verdict uses platform effectiveMode."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts",
+          "lines": "242-253",
+          "observation": "Job carries executionMode/mirrors but not the effective per-user slippage."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1408-1432,1458-1466,1608-1622,1714-1717,2330-2343,2500-2505",
+          "observation": "Worker refreshes platform mode but ignores queued mode/mirrors; Polymarket does not receive slippage, while paper Jupiter uses 150."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket.ts",
+          "lines": "740-746",
+          "observation": "Polymarket uses environment maxSlippageBps."
+        }
+      ],
+      "reason": "forceFresh improves platform cache behavior but does not implement current tenant/subscription policy resolution, queued mode constraints, policy revision or cross-venue slippage continuity. Current user-live adapters deny, so direct unintended user-live signing is contained rather than demonstrated; intended paper jobs can instead be skipped on a live platform.",
+      "testGap": "Queue under paper/off or a 50-bps user preference, change user kill/subscription state before dequeue, and exercise each venue with synthetic ports. Assert no scope widening, live transport or default-tolerance substitution.",
+      "findingIds": [
+        "PF-EXE-11",
+        "PF-EXE-12"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-04",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "354-369,1547-1578,2940-2950",
+          "observation": "Finite cap parsing now falls back to 50000; missing/invalid prices still use fixed guesses, unvalued fills can write zero, and admission is a read/compare before execution."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts",
+          "lines": "408-434",
+          "observation": "Exposure sums only filled/partial buys, omits pending/unknown liabilities and combines paper/live."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/trade-workers.ts",
+          "lines": "39-99",
+          "observation": "Per-chain configurable concurrency and legacy drain worker exist; no spending reservation is supplied by this scheduler."
+        }
+      ],
+      "reason": "The NaN cap bypass is locally repaired, but finite fallback/guessed pricing is not fail-closed risk valuation and the limit remains non-atomic confirmed history rather than reserved spending. Actual over-cap financial effects require pending/concurrent successful trades; no tests or live configuration were inspected.",
+      "testGap": "Cap 100 with two pending buys of 60, sequential and concurrent; unknown price, invalid cap, paper/live separation and unknown submission retention. Assert transactional reservation prevents the second effect.",
+      "findingIds": [
+        "PF-EXE-10"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Likely",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-05",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter.ts",
+          "lines": "166-219",
+          "observation": "ExactIn/ExactOut amount and present mint identity comparisons were added; quote slippage is not bound to the requested limit."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter-swap.ts",
+          "lines": "135-266",
+          "observation": "Builder consumes quote slippage and accepts preassembled bytes or supplied instructions/lookup-table contents without economic intent inspection."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+          "lines": "238-311",
+          "observation": "Build, optional simulation and operator signing lead to bundle submission."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts",
+          "lines": "117-134",
+          "observation": "Runtime signs through environmentSigner.sign, not a grant-bound final-artifact authorization capability."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-signer.ts",
+          "lines": "64-79",
+          "observation": "New signer validation checks nonempty decodable transaction/instructions, then signs."
+        }
+      ],
+      "reason": "Useful quote binding and structural checks do not constrain the final message's transfers, recipients, approvals, account owners, debit/credit bounds, fees or resolved ALT identities. Successful simulation is not intent authorization. Missing quote mints alone are not asserted as a live exploit because the builder rejects missing mints.",
+      "testGap": "Generated offline transactions with extra transfer/approval, wrong recipient, malicious ALT or widened minimum-output/tolerance must refuse before signing even with a passing simulation stub.",
+      "findingIds": [
+        "PF-EXE-02"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-06",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+          "lines": "108-175,221-235,294-344,383-455",
+          "observation": "Read-then-submit has no atomic ownership; saves still occur after POST and retryable errors use pending_unknown instead of a recoverable signed identity."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1339-1346,2677-2685",
+          "observation": "Outer errors attempt to terminate canonical executions."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "2127-2182",
+          "observation": "Failed/cancelled transitions release reserved quantity and may terminate the shared source signal."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.test.ts",
+          "lines": "147-171",
+          "observation": "Inspected tests cover sequential pending redelivery and returned submission_unknown label, not write-ahead/CAS/crash recovery."
+        }
+      ],
+      "reason": "The new post-error save contains clean repeat deliveries but is not write-ahead. Crash/store errors can leave a submitted trade without durable identity; concurrent callers can both pass checks. Querying a placeholder bundle ID and later expiry cannot establish whether the original accepted bundle already landed. Actual duplicates/loss require controlled fault/race testing.",
+      "testGap": "Barrier concurrent submitters and inject failures before/after POST and save. Require one owner, pre-POST exact signed identity, retained unknown reservations and no rebuild or false failed classification after an accepted/lost response.",
+      "findingIds": [
+        "PF-EXE-03"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Likely",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-07",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "1159-1192",
+          "observation": "Canonical client order ID is swat- plus a SHA-256 digest, not a UUID."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "714-763,1805-1853,2781-2804",
+          "observation": "Sweep passes clientOrderId as signalId to $2::uuid; pending trade writes have no actual fill amounts, and the transition only changes status/signature/timestamps."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts",
+          "lines": "390-411,448-455",
+          "observation": "Landed status produces a signature/tip result and Redis is resolved before the SQL consumer runs."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/reconciliation-venues.ts",
+          "lines": "30-50,95-118",
+          "observation": "Canonical fallback cannot reconstruct an absent submission identity or missing quantities."
+        }
+      ],
+      "reason": "A consumer was connected but the canonical identifier is incompatible with its SQL filter, causing a current source-level settlement regression. Redis acknowledgement precedes database success. For legacy UUID jobs the status-only update still does not produce receipt quantities, fees, canonical fill evidence or lots.",
+      "testGap": "Actual canonical swat-prefixed IDs through sweep and SQL; DB failure after Redis observation; restart/replay; attributable exact receipt amounts and fee application once. Assert neither UUID casts nor unquantified filled trades.",
+      "findingIds": [
+        "PF-EXE-01"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "EXE-08",
+      "status": "closed(source)",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts",
+          "lines": "91-138",
+          "observation": "Factory now refuses readiness when simulation is required and no gate initializes."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-simulation.ts",
+          "lines": "452-505",
+          "observation": "Default simulation is enabled; missing explicit RPC/Helius configuration returns a null gate."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "450-467,1792-1820,2727-2741",
+          "observation": "Production constructs and selects configured Jito runtime; readiness still accepts either Solana venue."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-executor-selection.ts",
+          "lines": "57-64",
+          "observation": "An unavailable Jito runtime cannot be selected as Jupiter/Jito."
+        }
+      ],
+      "reason": "The original accidental Jito-ready-with-missing-default-simulator condition is source-closed. Explicit SOLANA_SIMULATION_ENABLED=false remains supported. Selected-route fallback to Trojan, simulation of a replaced blockhash, and final-message authorization are separate limitations; this is not a claim of mandatory simulation for every live venue or verified runtime behavior.",
+      "testGap": "Add missing-simulation-endpoint with signer shared-RPC fallback and selected-Jito/Trojan-ready cases. Existing inspected factory wiring tests check gate presence and explicit disablement, not the new missing-gate refusal across route selection.",
+      "findingIds": [],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "07-trade-executor",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-01",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/parse.ts:183-209,234-260",
+        "apps/indexer/src/index.ts:157-164,251-305"
+      ],
+      "reason": "Parser still treats opposing balances as supported successful swap evidence. Missing-provenance and failed-status synthetic assertions failed.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-01"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-02",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/parse.ts:138-155,179-209",
+        "apps/indexer/src/source-trade-lifecycle.ts:81-105"
+      ],
+      "reason": "Mixed raw-unit maxima still choose target/quote; ambiguous multi-asset fixture was accepted.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-02"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-03",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/webhook-helpers.ts:102-133",
+        "apps/indexer/src/webhook.ts:64-75",
+        "apps/indexer/src/parse.ts:162-176"
+      ],
+      "reason": "Enhanced adapter makes nonpayer index zero; synthetic fixture received another account fee refund.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-03"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-04",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "apps/indexer/src/source-trade-lifecycle.ts:92-105,148-163,188-203",
+        "apps/indexer/src/evm.ts:166-195",
+        "packages/db/src/copy-trade-lifecycle.ts:719-746"
+      ],
+      "reason": "Builders still assert confirmed evidence; bounded production search found no confirmation-advance caller. Actual reversal incidence unverified.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-04"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-05",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "apps/indexer/src/source-trade-lifecycle.ts:116-163",
+        "packages/db/src/transactions.ts:110-132",
+        "apps/indexer/src/polymarket.ts:355-399"
+      ],
+      "reason": "Canonical economic-content fill identity differs from legacy transaction/wallet/token identity; provider split/correction guarantees remain unknown.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-05"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-06",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/robinhood-ingestion.ts:190-262",
+        "apps/indexer/src/evm.ts:455-488"
+      ],
+      "reason": "Pool totals and gross received/sent wallet quantity remain inconsistent with net attributable inventory.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-06"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-07",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/polymarket.ts:152-157,180-185,199-209,245-272"
+      ],
+      "reason": "Missing risk/end/tick metadata still becomes false/current-time/default-size context.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-07"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "IDX-08",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/polymarket.ts:67-128,314-317"
+      ],
+      "reason": "Only immediate repeated cursor is stopped; production omits total cap and operation deadline.",
+      "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+      "findingIds": [
+        "PF-DATA-08"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "05-indexer-parsers",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "INF-01",
+      "status": "partial",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/.woodpecker.yaml:68-90 \u2014 deploy step still installs vercel@65.11.0 at line 83 alongside credential-reference environment",
+        "/home/xahmie/Documents/SWAT/.woodpecker/ci.yaml:68-90 \u2014 same exact version pin and step arrangement; sensitive lines redacted"
+      ],
+      "reason": "PF-SEC-13, High retained supply-chain priority. Top-level unversioned CLI issue repaired. Registry acquisition still shares deployment trust domain; no source evidence of credential-free acquisition stage. Published CLI transitive/shrinkwrap behavior, CI secrets and actual privilege were not assessed; no malicious release asserted.",
+      "testGap": "Lock/verify tooling in a credential-free stage; prohibit install commands after deployment secret references become available. Static CI assertions plus separate operator privilege review required; no CI/package execution.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Likely",
+      "originalReport": "11-infrastructure-supply-chain",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "INF-02",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/DEPLOYMENT.md:304-332 \u2014 API and web service examples use User=root",
+        "/home/xahmie/Documents/SWAT/deploy/systemd/swat-api.service:8-20 \u2014 User=swat with /root/SWAT execution and ProtectHome=true",
+        "/home/xahmie/Documents/SWAT/deploy/systemd/swat-trade-executor.service:8-24 \u2014 same protected code-path conflict"
+      ],
+      "reason": "PF-SEC-12, High. Claimed unprivileged-template remediation does not resolve root runbook or inaccessible hardened path. Installed units, filesystem permissions and operator choices not assessed.",
+      "testGap": "Use one canonical unprivileged runbook/template and move executable code outside protected homes. Disposable validation must show code is accessible with hardening intact; never require root or disabling ProtectHome to start. No daemon run.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "11-infrastructure-supply-chain",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "INF-03",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/docker-compose.yml:13-18,45-58 \u2014 PostgreSQL bootstrap user and PgBouncer DB user share POSTGRES_USER configuration/default",
+        "/home/xahmie/Documents/SWAT/packages/db/src/client.ts:10-27 \u2014 pool created from configured database URL",
+        "/home/xahmie/Documents/SWAT/packages/db/sql/064_row_level_security.sql:47-64 \u2014 application role creation/grants alone do not establish selected runtime role"
+      ],
+      "reason": "Source defaults still provide no demonstrated runtime/migrator separation. Effective role flags, connection initialization, SET ROLE policy and deployed credentials outside this partition; do not certify closure or production superuser use from defaults alone. Coordinate with main DB review.",
+      "testGap": "In a separately authorized isolated DB, inspect actual runtime role and enforce neither superuser nor BYPASSRLS nor ability to become migrator/admin. Runtime permissions/configuration were explicitly not assessed here.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "11-infrastructure-supply-chain",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "INF-04",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/web/next.config.ts:4-23,30-40 \u2014 HTTP production upgrade but whole-string localhost/127.0.0.1 exception",
+        "/home/xahmie/Documents/SWAT/apps/web/middleware.ts:21-34,46-55 \u2014 same substring policy; middleware now forwards only session cookie"
+      ],
+      "reason": "PF-SEC-15, Medium residual, deduplicate with main browser review. Ordinary remote HTTP/default behavior and cookie minimization improved; loopback-looking remote host/path bypasses upgrade. Configuration-controlled prerequisite, not proved request SSRF; actual TLS/deployment forwarding unassessed.",
+      "testGap": "Parse URL and apply exact allowed-host/scheme policy. Assert remote hostname suffix, path, userinfo and scheme-casing examples cannot bypass HTTPS; only explicit local origins may remain HTTP. Synthetic assertions not run.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "11-infrastructure-supply-chain",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "INF-05",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/threats/security-review/11-infrastructure-supply-chain.md:21 \u2014 retained historical opaque-material question, read only as prior finding table",
+        "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md:204 \u2014 claim concerns current example/secret-script checks, not provenance or rotation"
+      ],
+      "reason": "No historical credential values or real credential files were scanned. Placeholder example claims cannot resolve provenance, validity, exposure or owner-led rotation of opaque historical material. No live leak alleged.",
+      "testGap": "Owner must decide provenance/rotation with redacted evidence and authorized history gating. Do not probe validity or retrieve secret bytes as part of this source review.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Needs check",
+      "originalReport": "11-infrastructure-supply-chain",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "INF-06",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/pattern-ml/scripts/setup-server.sh:41-48 \u2014 unversioned pip upgrade and editable dev/service install",
+        "/home/xahmie/Documents/SWAT/pattern-ml/pyproject.toml:7-40,45-47 \u2014 open dependency/build-tool lower bounds",
+        "/home/xahmie/Documents/SWAT/DEPLOYMENT.md:393-395 \u2014 unversioned global PM2 installation",
+        "/home/xahmie/Documents/SWAT/package.json:4 \u2014 real pnpm version pin does not govern these installation paths"
+      ],
+      "reason": "PF-SEC-14, Medium. Retained Python/operator reproducibility boundary remains open despite pnpm-only closure claim. No compromised package, resolved inventory or vulnerability assessment asserted.",
+      "testGap": "Deploy hash-locked Python/tool artifacts with fixed build tooling and unprivileged runtime. Offline repeat-install assertion should resolve identical inputs and forbid unconstrained acquisition. No installer or build run.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "11-infrastructure-supply-chain",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-01",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "802-808,862-867",
+          "observation": "The explicit normal-info enrollment log now carries address and timestamp, not the raw signature/nonce tuple. Recovery diagnostics remain."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "52-54",
+          "observation": "Fastify logger is enabled; it must not be conflated with shared console interception."
+        }
+      ],
+      "reason": "Original explicit proof logging is removed from the inspected statement. This does not certify diagnostic error serialization, all log transports, old log retention or removal of historical proofs. No root key or complete CLOB tuple disclosure was established.",
+      "testGap": "No log capture/redaction regression tests; library exception serialization and downstream logging configuration remain Needs check.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-02",
+      "status": "partial",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/middleware.ts",
+          "lines": "21-55",
+          "observation": "Middleware now forwards only the session and upgrades ordinary remote HTTP in production, with substring-based loopback exceptions."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/next.config.ts",
+          "lines": "4-23",
+          "observation": "Rewrites default to loopback and attempt HTTPS upgrades; loopback recognition uses whole-string inclusion."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/lib/api.ts",
+          "lines": "124-151",
+          "observation": "SSR API/LP resolution still permits configured HTTP and remote HTTP production fallback."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/lib/api-server.ts",
+          "lines": "34-47",
+          "observation": "Session cookie is forwarded to the independently resolved SSR origin."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts",
+          "lines": "101-124",
+          "observation": "Secure cookie flag remains conditional, including explicit configuration override."
+        }
+      ],
+      "reason": "Cookie scoping is fixed in middleware, but production HTTPS enforcement is inconsistent across SSR and proxy code and cookie security remains deployment-dependent. PF-WEB-15. No real session interception was observed.",
+      "testGap": "No SSR transport/header tests, parsed-host edge cases, actual TLS/proxy topology or production cookie issuance checks.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-03",
+      "status": "partial",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "19,36-45,94-101,426-444",
+          "observation": "Status strips userinfo and query from the configured RPC URL but retains path/fragment; bind default is loopback. The module has the separate parse error."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "305-331",
+          "observation": "Ordinary health returns nonsecret configured flags; RPC diagnostics still serialize whole probe results."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts",
+          "lines": "100-123",
+          "observation": "RPC diagnostics is an admin/service surface, not an anonymous health response."
+        }
+      ],
+      "reason": "Public status URL minimization is incomplete for path tokens (PF-WEB-18). The original shared pool producer and shared console/error-log flow are not reverified in this partition. Default public URLs, public addresses and project IDs are not secrets. No configured credential was read.",
+      "testGap": "Need fixture URL redaction for userinfo/path/query/fragment and a separate review of shared RPC/log producers and diagnostics serialization; actual deployment reachability and tokens unverified.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-04",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "746-751,946-951",
+          "observation": "Robinhood and Polymarket route-local catches return raw exception messages."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "359-363",
+          "observation": "Intent creation catch returns error.message."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "205-213,353-356",
+          "observation": "Standalone response paths return raw exception messages, currently dormant due to parse failure."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/lib/api.ts",
+          "lines": "201-213",
+          "observation": "API message/error and response body become ApiError for UI consumers."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "185-205",
+          "observation": "Generic global unexpected-500 handling does not cover route-local catches."
+        }
+      ],
+      "reason": "Producer-to-client error reflection persists and the new Robinhood route adds another example (PF-WEB-19). Exact secret-bearing exception contents are unverified. MCP component was removed; LP business-route catches and shared venue-helper error internals were excluded. No full CLOB secret/passphrase response leak established.",
+      "testGap": "No exception fixture tests asserting stable public codes, absence of confidential URL/SQL fields, and redacted diagnostic logging.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-05",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "225-230,146-151",
+          "observation": "Admin ticket issuance has 60-second Redis TTL; ticket consumption callback uses atomic DEL."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/app/logs/page.tsx",
+          "lines": "139-166",
+          "observation": "Ticket is placed in the EventSource query URL."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts",
+          "lines": "135-175",
+          "observation": "Cookie authentication precedes the SSE ticket-consumption branch."
+        }
+      ],
+      "reason": "Bearer authorization remains in a potentially logged URL (PF-WEB-21), with short lifetime/admin issuance/single-use mitigations. No actual URL logging, theft, browser-history or referrer disclosure was observed.",
+      "testGap": "Need request/ingress query redaction and same-origin cookie/SSE tests; no deployed diagnostics inspected.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-06",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "333-402,453,602,793,1417,1503",
+          "observation": "Selected sensitive mutations set no-store, while inspected vault GET does not."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "320-335,462",
+          "observation": "Payment success sets no-store; billing status/history handlers do not."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/admin-portfolio.ts",
+          "lines": "120-138",
+          "observation": "Admin export now sets no-store."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "915-925",
+          "observation": "SSE still sets no-cache rather than no-store; focused header scan found no central no-store hook in this file."
+        }
+      ],
+      "reason": "The explicit policy gap is narrower but remains for sensitive reads/auth responses (PF-WEB-22). SSR no-store fetches do not prove browser/edge response policy. No cross-user cache leak is demonstrated.",
+      "testGap": "No response-header assertions or deployed browser/edge cache inspection; application-wide/plugin header behavior not exhaustively verified.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "LEAK-07",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "385-387,886-892,914-943",
+          "observation": "Secret/passphrase are placed in a sealed server payload; API-key identifier remains plaintext policy and an own-user response property."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx",
+          "lines": "288-299,1323",
+          "observation": "Browser retains the full identifier while displaying a masked representation."
+        }
+      ],
+      "reason": "Original low-severity minimization recommendation is not implemented (PF-WEB-23). This is the user's own CLOB API-key identifier, not a complete CLOB tuple, unauthorized disclosure or evidence of authentication using identifier alone.",
+      "testGap": "Need deliberate response contract decision and projection tests for enrollment/vault GET; no credential use or real values tested.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "MCP-01",
+      "status": "surface-removed",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/mcp-server \u2014 no current tracked paths; reviewed diff metadata deletes source, package and tsconfig",
+        "/home/xahmie/Documents/SWAT/package.json:5-30 \u2014 no MCP launch script",
+        "/home/xahmie/Documents/SWAT/pnpm-workspace.yaml:1-3 \u2014 generic app/package globs; focused safe source/manifest search found no apps/mcp-server or @swat/mcp-server references"
+      ],
+      "reason": "Original unauthenticated administrative listener implementation removed from tracked source. This is not proof an existing deployed listener is stopped or its DB/Redis privileges revoked. Names-only check found excluded generated/dependency directories in the old app directory.",
+      "testGap": "Fresh-checkout source/package assertion should prove no launchable MCP app. Operators must separately verify deployed listener/process removal and privilege revocation; no process/network/artifact-content inspection performed.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "09-agent-mcp",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "MCP-02",
+      "status": "surface-removed",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/mcp-server/src/index.ts \u2014 not present among current tracked paths; old global-read definitions removed with package",
+        "/home/xahmie/Documents/SWAT/package.json:5-30 \u2014 no MCP task; focused source/reference scan has zero MCP hits"
+      ],
+      "reason": "Original unscoped tool-read source surface is removed, not replaced by a verified principal-scoped implementation. Existing deployments and effective DB privileges cannot be certified by repository deletion.",
+      "testGap": "Assert fresh workspace contains no old operational-read tool or launchable package; perform separately authorized deployed inventory/permission revocation review. SDK and generated artifacts excluded.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "09-agent-mcp",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "MCP-03",
+      "status": "surface-removed",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/mcp-server \u2014 no tracked implementation; names-only current directory entries were .turbo, dist and node_modules",
+        "/home/xahmie/Documents/SWAT/pnpm-workspace.yaml:1-3 \u2014 generic workspace inclusion, no tracked MCP manifest remains"
+      ],
+      "reason": "Shared server/session-registry lifecycle is absent from tracked source. Existing generated code contents, running processes and dependency transport behavior remain unassessed; do not convert source deletion into runtime isolation certification.",
+      "testGap": "Fresh artifact inventory should exclude retired MCP launchables. Authorized deployment cleanup/termination check is required; no SDK session protocol or compiled artifact was read or executed here.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "09-agent-mcp",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-01",
+      "status": "surface-removed",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/mcp-server/src/index.ts",
+          "lines": null,
+          "observation": "Tracked source is deleted in git diff --name-status d5852a0...HEAD -- apps/mcp-server; the package, source test and tsconfig are also deleted. No current handler remains to cite."
+        }
+      ],
+      "reason": "The reviewed unauthenticated MCP source surface is removed. This is source removal only, not proof that deployed listeners, images, credentials or operational access have been decommissioned.",
+      "testGap": "No deployment inventory, listener check, network request or credential-rotation verification; no deleted source was executed.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-02",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "33,53-56",
+          "observation": "Interactive signing account now derives from HMAC with a server secret, randomly generated when configuration is absent, rather than from public inputs alone."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "118-128,298-337",
+          "observation": "Actual PDA derivation remains distinct from the interactive signing account used for balances and transfers."
+        }
+      ],
+      "reason": "The original public-only key derivation is removed. PF-WEB-12 separately identifies loss of interactive-account continuity with the ephemeral fallback. PF-WEB-11 prevents this exact server source from parsing. Neither actual PDA key compromise nor funding was established.",
+      "testGap": "No persistence/restart/migration test or configured-secret inspection; no real accounts derived or balances checked.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-03",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "388-429,438-471",
+          "observation": "An owned pending unexpired intent is checked, but a supplied memo skips linked-payer ownership verification."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts",
+          "lines": "67-124,157-249",
+          "observation": "Neither verifier checks an on-chain intent reference; Polygon ignores memo entirely and Solana does not inspect a memo instruction."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts",
+          "lines": "150-225",
+          "observation": "Credit locks the user and enforces transaction uniqueness but does not lock/revalidate intent ownership state, plan, expiry or affected completion row."
+        }
+      ],
+      "reason": "Rejecting foreign/unknown intents and unlinked no-memo payers is an improvement, but an owned memo still authorizes claiming an unrelated otherwise-accepted transaction. PF-WEB-02 retains attribution risk; PF-WEB-03 separately finds event-type validation inadequate.",
+      "testGap": "Added tests mock the verifier and omit owned-memo/unrelated-transaction, actual chain reference, concurrent intent consumption and expiry-during-verification cases.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-04",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+          "lines": "894-904,920-933",
+          "observation": "Polymarket checks active other-owner conflicts and, decisively, the ON CONFLICT update is conditional on matching user_id."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql",
+          "lines": "110-127",
+          "observation": "Global chain/account uniqueness and one-active-grant index remain."
+        }
+      ],
+      "reason": "The unsafe current-source cross-tenant reassignment is prevented by the SQL same-owner predicate, including races and inactive conflicts. This does not mean all enrollment behavior is fixed: empty RETURNING can still be reported as success after revoking the caller's old grant (PF-WEB-08).",
+      "testGap": "No newly added route tests cover same-owner idempotency, inactive other-owner conflict, concurrent conflict, or preservation of the prior active grant. External proof replay acceptance was not checked.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-05",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "230-284",
+          "observation": "Canonical message now binds parsed amount, owner and timestamp; replay Map keys are raw signature strings while verification decodes hex bytes."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html",
+          "lines": "830-866",
+          "observation": "Client signs the canonical intent and sends its signature in hex."
+        }
+      ],
+      "reason": "Unsigned parallel-field substitution is fixed in source. Equivalent signature encodings still bypass string-key replay identity, and storage is process-local (PF-WEB-13). Recipient remains owner. The handler is currently dormant because PF-WEB-11 is a parse-time failure.",
+      "testGap": "No executed or added PDA tests for canonical substitution, equivalent encodings, concurrency, restart/replica replay, invalid-proof consumption or syntax validity.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-06",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+          "lines": "90-110",
+          "observation": "Configured origins are matched explicitly and missing allowlist denies browser origins in production."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts",
+          "lines": "277-301",
+          "observation": "The old disallowed-origin success fallthrough now returns false/error. Localhost/127.0.0.1 exceptions remain unconditional."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/lp/src/auth.ts",
+          "lines": "60-103",
+          "observation": "Session and service principals remain distinct; cookie mutations require CSRF, and requireUser rejects tenantless service principals."
+        }
+      ],
+      "reason": "The specific production-wide arbitrary-origin fallback and LP ineffective-list bug are fixed. Development reflection and explicit hardcoded LP loopback exceptions are narrower residual policy concerns, not equivalent to the prior arbitrary-origin behavior.",
+      "testGap": "No CORS/browser requests, production cookie/topology validation or new CORS tests; production intent for always-trusted loopback origins needs a documented decision.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-07",
+      "status": "partial",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html",
+          "lines": "463-474,507-510",
+          "observation": "Log and connection-error sinks now use text nodes/textContent."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html",
+          "lines": "793-806,869-887",
+          "observation": "Unauthorized-result error and successful response/link fields still enter innerHTML."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "190-212,353-356",
+          "observation": "API responses can originate from RPC and exception text."
+        }
+      ],
+      "reason": "Some dynamic sinks are fixed, not all. Provider/API influence over victim-visible text and actual browser execution remain unverified; exact-server parse failure currently blocks the response paths. PF-WEB-14.",
+      "testGap": "No hostile response/provider-text browser tests or URL-scheme assertions; static literal innerHTML is distinguished from dynamic untrusted fields.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "OWA-08",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/admin-portfolio.ts",
+          "lines": "25-46,120-139",
+          "observation": "CSV adds an apostrophe before formula-leading characters; export remains admin-only and now adds no-store."
+        }
+      ],
+      "reason": "The specific missing formula-neutralization control has been added. CSV syntax escaping and admin authorization remain. This is not a spreadsheet compatibility/normalization certification or an anonymous-data-exposure finding.",
+      "testGap": "Existing export test names and changed-path inventory show no new formula regression test; full spreadsheet interpretation, Unicode/whitespace and CSV round-trip behavior were not tested.",
+      "assessmentArtifact": "api-web-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "RUN-01",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "packages/db/src/client.ts:10-27",
+        "packages/db/sql/064_row_level_security.sql:29-64"
+      ],
+      "reason": "Prior local superuser observation was not remeasured after fixes. Source does not validate actual pool role flags.",
+      "testGap": "Current isolated and deployment runtime role interrogation not performed.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "RUN-02",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "packages/db/src/migrate.ts:10-32",
+        "tests/integration/helpers/schema-guard.ts:26-70"
+      ],
+      "reason": "No database schema connected or migrated in this pass; historical completion claim does not establish present schema.",
+      "testGap": "Fresh full-profile migration plus current-schema digest/constraint comparison required.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "RUN-03",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/indexer/src/index.ts:442-452,537-548"
+      ],
+      "reason": "Two RPC reads now request SOLANA_MAX_TX_VERSION or default 1 and report failures; value lacks bounded-integer validation and no real version-1 success was replayed here.",
+      "testGap": "Synthetic version/error handling and bounded public/fork replay would be separate checks.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "RUN-04",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/web/context/appkit.tsx:4-9",
+        "apps/web/components/WalletConnectModalButton.tsx:4-5",
+        "web-source-typecheck.log"
+      ],
+      "reason": "Current source no-emit typecheck fails with ten unresolved-module diagnostics, including newly added AppKit/Wagmi/query dependencies and existing web3/tailwind. This is installed-checkout evidence, not proof the declared packages are absent from manifest.",
+      "testGap": "No dependency install or full production build; current clean install/build not certified.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "RUN-05",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "apps/api/src/index.ts:284-331",
+        "packages/shared/src/rpc-failover.ts:267-302",
+        "sensitive-flow-invariants.test.ts:33-36"
+      ],
+      "reason": "Public health accurately renamed URL booleans configured, removing the specific false healthy label. It still checks only DB/Redis overall. Dedicated RPC probe accepts null result as healthy in a synthetic test.",
+      "testGap": "No actual endpoint requests or stalled-body test; require strict result validation and full deadline.",
+      "findingIds": [
+        "PF-DATA-20"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "RUN-06",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "apps/web/package.json:13-24",
+        "pnpm-lock.yaml"
+      ],
+      "reason": "Dependency declarations/lockfile changed and MCP source was removed, but no fresh registry advisory/reachability audit was run. Earlier advisory counts are not current closure evidence.",
+      "testGap": "Fresh pinned inventory and context-specific advisory triage required; no package installation or network audit here.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-01",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts:277-299 \u2014 CORS exact list plus explicit local origins; unlisted origins rejected"
+      ],
+      "reason": "Original arbitrary-origin reflection with credentials is removed. This is a source closure, not a claim that all production origin choices or browser cookie behavior were audited. No duplicate LP authentication finding raised.",
+      "testGap": "No browser/server test run. Synthetic checks should reject an unrelated origin, accept intended configured origin and retain CSRF enforcement for session mutations; assess deployment origin list separately.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-02",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts:300-302 \u2014 auth always registered, optional key hash",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/auth.ts:55-103 \u2014 session resolution and CSRF independent of optional service key; requireUser rejects service-only principal"
+      ],
+      "reason": "The keyless-development auth-hook omission is repaired in current source. Session identity remains required on tenant paths and service identity is not a tenant substitute. Operational session/cache behavior belongs to the main auth review.",
+      "testGap": "Boot an isolated synthetic keyless development app; valid active session succeeds, anonymous fails, mutation without CSRF fails, optional service key cannot invoke user-only routes. Tests not run here.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-03",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/lp/src/routes.ts:403-408,467-505 \u2014 service-only registry management but user subscription calls the same writer before subscription creation",
+        "/home/xahmie/Documents/SWAT/packages/db/src/lp-tracked-wallets.ts:64-80 \u2014 default cadence 300; ON CONFLICT overwrites label and cadence"
+      ],
+      "reason": "PF-SEC-04, Medium. An authenticated subscriber can overwrite global operator registry metadata, even if creating its own subscription subsequently fails. Subscription ownership checks do not authorize global settings changes.",
+      "testGap": "Existing operator label/cadence must survive subscription attempts and forced subscription failure. Separate insert-only controlled onboarding from service-authorized metadata updates; test quota and transaction/outbox behavior.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-04",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/lp/src/routes.ts:218-249,274-291 \u2014 deposit amount/asset passed to builder",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/builder/build-position.ts:151-201 \u2014 pre-insert guard and later raw amount insertion",
+        "/home/xahmie/Documents/SWAT/packages/db/src/lp-positions.ts:188-205,401-426 \u2014 deposit_amount stored and summed without asset valuation",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/guardrails/deploy-guard.ts:38-48 \u2014 raw sums and requested amount labeled USD",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/guardrails/exposure-cap.ts:68-83 \u2014 post-deploy ratio",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts:392-395 \u2014 live worker refuses broadcast"
+      ],
+      "reason": "PF-SEC-05, Medium. Normalization claim is contradicted by raw mixed-asset sums. Guard reads and later creation are not one atomic exposure reservation; concurrency consequence Likely, not executed. Live liquidity loss not established because reviewed live submission fails closed.",
+      "testGap": "Test denomination-invariant trusted USD decisions, missing/stale price refusal, and two concurrent top-ups against one cap. Use atomic per-user reservations including in-flight exposure and appropriate paper/live separation.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-05",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/lp/src/routes.ts:316-350 \u2014 manual enqueue then rebalancing state",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts:331-338,370-395 \u2014 real queue wiring and successful nonlive no-op without final transition; live refuses",
+        "/home/xahmie/Documents/SWAT/packages/db/src/lp-positions.ts:275-293 \u2014 monitor excludes rebalancing/building",
+        "/home/xahmie/Documents/SWAT/apps/lp/src/builder/build-position.ts:189-243 \u2014 initial paper plan becomes active but live remains building; SDK work follows row creation"
+      ],
+      "reason": "PF-SEC-06, Medium. Successful manual rebalance transition plus worker completion can leave an unmonitored rebalancing position. Initial paper-build transition is real but does not repair this path. Broader recovery callers not exhaustively traced.",
+      "testGap": "Process an accepted manual paper job using production adapter logic; require a documented terminal/monitorable outcome. Preserve concurrent close state; fail unsupported live capability before recording misleading pending work; cover SDK failure after insertion.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-06",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket-perps.ts:97-99,172-217 \u2014 zero fallback, unchecked numeric comparisons, omitted client identity/leverage in payload, external order before DB record",
+        "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket-perps.test.ts \u2014 only observed importer/caller of executePerpsOrder in bounded tracked apps/packages symbol search"
+      ],
+      "reason": "PF-SEC-11, Medium latent risk. Arithmetic/order-lifecycle defects directly observed, but no production order caller found; dormant/testing-only in observed wiring. Session principal ownership, SDK validation and duplicate venue effects not verified. Dormancy is not a code repair.",
+      "testGap": "Keep live enablement fail-closed. Assert zero remains zero, malformed/negative/nonfinite inputs never submit, session matches user, and post-submit uncertainty reconciles a durable prewritten client ID. No venue/session accessed.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-07",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts:1613-1619,1634-1642 \u2014 open-only portfolio and registered close route returning 404 on false",
+        "/home/xahmie/Documents/SWAT/packages/db/src/polymarket-perps.ts:276-283 \u2014 UPDATE status closed without RETURNING then checks result.length",
+        "/home/xahmie/Documents/SWAT/packages/db/src/client.ts:65-67 \u2014 query returns rows, not rowCount"
+      ],
+      "reason": "PF-SEC-07, Medium. An owned open row can be closed and hidden while response reports not found. No venue reducing action is in this path. Presence of live positions/venue exposure unverified; registered API path is not removed by dormant executor helper.",
+      "testGap": "Separate archive from financial close; use RETURNING/rowCount for legitimate local updates, and durable reduce-only venue confirmation before financial closure. Assert owned row success cannot mutate then 404 and foreign-user rows cannot change.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-08",
+      "status": "partial",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/alert-service/src/index.ts:400-404 \u2014 CASE changes only pending status and alerted_at IS NULL guard",
+        "/home/xahmie/Documents/SWAT/apps/alert-service/src/index.ts:379-411 \u2014 unowned TTL60 claim, send before DB stamp, unconditional DEL",
+        "/home/xahmie/Documents/SWAT/apps/alert-service/src/index.ts:40-60,415-421 \u2014 no fetch deadline and real worker adapter"
+      ],
+      "reason": "PF-SEC-08, Medium residual. Prior execution-status regression is genuinely fixed. Lease expiry, old-owner deletion and post-send persistence failure can still produce duplicate/uncertain delivery; consequences Likely and not runtime tested.",
+      "testGap": "Use bounded delivery and durable notification state with token-owned claim release. Fake clock plus delayed sender must prove old worker cannot delete renewed/new claim; executing/executed/failed signal state must be preserved; define post-send DB failure reconciliation.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Likely",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-09",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/apps/discovery/src/runner.ts:44-55 \u2014 upsert then enqueue and log failure",
+        "/home/xahmie/Documents/SWAT/apps/discovery/src/index.ts:24-51,75-77 \u2014 production persistence/queue wiring and triggers",
+        "/home/xahmie/Documents/SWAT/packages/db/src/wallets.ts:44-64 \u2014 independent durable upsert",
+        "/home/xahmie/Documents/SWAT/packages/db/src/discovery-queries.ts:29-64 \u2014 existing wallets excluded from both discovery selectors",
+        "/home/xahmie/Documents/SWAT/apps/discovery/src/runner.test.ts:57-79 \u2014 failure fixture rejects upsert rather than enqueue after commit"
+      ],
+      "reason": "PF-SEC-09, Medium. Queue outage after persistence can permanently remove eligibility from these discovery retries without scheduling indexing. Transactional-enqueue remediation claim not reflected in traced implementation. Other global recovery paths not certified absent.",
+      "testGap": "Persist wallet plus durable indexing intent transactionally; inject enqueue failure after commit and assert an independent retry recovers one logical backfill without rediscovering the wallet. No tests run.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SEC-10",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py:116-142,159-180,197-223 \u2014 configured external/parent paths permitted and Solana roster values lack address syntax validation",
+        "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py:89-105 \u2014 unchecked roster component used for directory creation and parquet output",
+        "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:177-219 \u2014 pull --kols passes address to storage only for nonempty source result",
+        "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:587-624 \u2014 local ranker pickle writer and score pickle.load sink"
+      ],
+      "reason": "PF-SEC-10, Medium. Unsafe model deserialization and lack of path confinement remain. Operator/untrusted artifact distribution prerequisite, not demonstrated remote RCE. Invalid roster producing a real nonempty source frame was not verified, so reliable traversal exploitation is conditional.",
+      "testGap": "Reject path-like/invalid chain addresses before mocked source results reach storage; enforce resolved-root/symlink policy or document intentional operator privilege. Use non-executable validated model format or strict trusted-artifact provenance. No malicious artifact executed.",
+      "assessmentArtifact": "secondary-contract-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "08-secondary-services",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-02",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "1942-2054",
+          "observation": "New master-lot sum improves the common case, but zero master lot rows use aggregate fallback; master pending reservations are not subtracted from the sum."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "1341-1352,1695-1722,2350-2383",
+          "observation": "Reservations roll up at aggregate level; explicit lot exits use a separate active-lot guard; actual source fill allocation is master-scoped and rejects excess after submission."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1666-1675,1760-1783,1805-1819,2330-2343",
+          "observation": "Actual worker claims and submits the requested quantity."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/docs/adr/0007-master-attributed-inventory.md",
+          "lines": "59-68,95-121",
+          "observation": "Requires no order without attributable lots and compatible master/aggregate reservations."
+        }
+      ],
+      "reason": "The new query does not satisfy no-cross-master or pending reservation invariants. A master with no lot rows can size against another master's balance. Distinct pending sells can reserve more than a master's remaining inventory while staying under aggregate availability; post-fill refusal is too late to prevent an external over-sale.",
+      "testGap": "Actual claim SQL for A with no lots/B with 100, and A=10/B=90 with A's first 8 reserved followed by another A sell or explicit lot exit. Assert no borrowed inventory and combined reservations at most 10.",
+      "findingIds": [
+        "PF-EXE-06"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-03",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/scorer/src/close-all.ts",
+          "lines": "46-70",
+          "observation": "Producer carries exitLotId and a claimed copyExecutionId."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1630-1640,1700-1709,1760-1763,2108-2110,2459-2488,2612-2654",
+          "observation": "Old pending-entry gate is exempted, but explicit execution is loaded without expected identity/mode checks, live Solana/Robinhood require a source fraction, and trade persistence drops exitLotId."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts",
+          "lines": "7-130",
+          "observation": "TradeInsert and INSERT omit exit_lot_id."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/sql/061_copy_position_lot_exits.sql",
+          "lines": "19-29,45-91",
+          "observation": "Lot exits must have null source fraction; source-less exit trades require exit_lot_id and consistent execution identity."
+        }
+      ],
+      "reason": "The original pending-signal obstruction is locally removed but the actual exit path still fails its schema contract. Paper canonical evidence can commit before trade insertion fails; live lot exits are presently contained by user authority denial and also mismatch Solana/Robinhood fraction guards. Current mode may silently paper-complete an existing live lot.",
+      "testGap": "Actual close-all payload and executed acquisition signal against migration 061, multiple lots, complete accounting, restart after partial persistence, wrong tenant/mode, and every venue's source-less exit contract.",
+      "findingIds": [
+        "PF-EXE-04",
+        "PF-EXE-05",
+        "PF-EXE-09"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-04",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts",
+          "lines": "300-321",
+          "observation": "MTM snapshot supplies lot positionKey and quantity."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts",
+          "lines": "225-277",
+          "observation": "Claim uses positionKey but queue payload omits it and a canonical lot exit execution."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts",
+          "lines": "85-123",
+          "observation": "Trigger claim inserts a guard only; it does not reserve inventory and is released only for enqueue failure."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1501-1513,1758-1783,2104-2135,2330-2343,2612-2653",
+          "observation": "Solana/Polygon receive stop-loss quantities, but Solana guesses six decimals when unknown, Robinhood receives no exact stop-loss amount, and absent canonical execution means no lot evidence."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/robinhood.ts",
+          "lines": "744-757,855-900,1166-1201",
+          "observation": "Undefined exact sell amount with default 10000 bps uses wallet balance and encodes it into swap handoff."
+        }
+      ],
+      "reason": "Solana raw cap and Polygon shares are real partial fixes; lot identity, reservations and evidence continuity remain missing. Robinhood full-wallet sizing is established through quote/calldata handoff, but submitAndWait internals and actual external effects were not reverified, so financial over-sale confidence is Likely. Default user-live denial limits direct user funds exposure.",
+      "testGap": "Breached lot 10 of wallet 100 through actual producer and each fake venue; require exact quantity, known decimals, canonical reservation/evidence and retry safety. Include races with mirrored sells and two lots from the same signal.",
+      "findingIds": [
+        "PF-EXE-09",
+        "PF-EXE-14"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-05",
+      "status": "partial",
+      "severity": "High",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.ts",
+          "lines": "204-277",
+          "observation": "New buy-only score/balance/position checks are useful; explicit kills and tier checks remain."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts",
+          "lines": "472-477,509-591",
+          "observation": "Early sell exception still reaches final score >=80 and safety gate before enqueue, then dispatched marking."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "858-879",
+          "observation": "Source candidate query still requires active wallet and non-null score."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1477-1489",
+          "observation": "Ordinary mirrored sells remain subject to entry-style auto-execute score gate."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.test.ts",
+          "lines": "362-386",
+          "observation": "New tests exercise only pure assessor, not final producer/worker gates."
+        }
+      ],
+      "reason": "The helper fix does not reach all actual gates. Low-scoring/deteriorating/paused sources still lose reducing exits, so the claim that follower exits are never blocked is unsupported. Explicit intentional kill switches should remain effective.",
+      "testGap": "Full producer-to-worker winding-down sell with held lot, score 10, paused source, low purchase balance and full cap; prove owned exits are distinct from new buys and explicit kills.",
+      "findingIds": [
+        "PF-EXE-08"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-06",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "packages/db/src/scoring-queries.ts:19-115",
+        "packages/shared/src/scoring.ts:44-59",
+        "apps/scorer/src/index.ts:96-101"
+      ],
+      "reason": "Score still consumes legacy aggregates without verified independent-counterparty/attributable-quality inputs. Real manipulation economics not tested.",
+      "testGap": "Confirmed attributable round-trip and adversarial historical-data fixtures needed.",
+      "findingIds": [
+        "PF-DATA-14"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-07",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "packages/db/src/clustering-queries.ts:34-44",
+        "packages/db/src/independence.ts:288-317",
+        "packages/db/src/independence-queries.ts:32-98",
+        "apps/api/src/routes/me.ts:1114-1125"
+      ],
+      "reason": "SQL admission still differs from positive-label pure policy; no membership and not-blacklisted are not measured independence.",
+      "testGap": "Unassessed hub and multiple-membership fixtures required.",
+      "findingIds": [
+        "PF-DATA-15"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-08",
+      "status": "open",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts",
+          "lines": "544-578",
+          "observation": "Capacity ledger writing still follows enqueue."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/capacity-inputs.ts",
+          "lines": "421-447,641-655,670-702",
+          "observation": "Entries are unpriced; writer catches failures; wholly unassessable primary capacity uses skip."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/master-capacity.ts",
+          "lines": "721-747,815-839,1596-1605,1666-1685",
+          "observation": "Partial notional is a lower bound; accrual is UPDATE-only and explicitly reports missing row."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1314-1335",
+          "observation": "Post-fill accrual failure is swallowed and logged."
+        }
+      ],
+      "reason": "Current inspected callers and sinks still permit lost/unpriced obligations and unrepaired missing accrual rows. The claimed pre-enqueue capacity reservation is not implemented in these paths. This is not a claim that every unknown-capacity input fails open: wholly unassessable primary capacity correctly skips.",
+      "testGap": "Fail cohort write and race fill-before-row creation, then restart. Confirm conservative pending commitments, repair of missing rows, idempotent accrual and no false headroom for partly unpriced obligations.",
+      "findingIds": [
+        "PF-EXE-13"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "SIG-09",
+      "status": "open",
+      "severity": "Medium",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts",
+          "lines": "239-313,544-591",
+          "observation": "Enumeration error returns null; caller emits operator-only plan and later marks source dispatched."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts",
+          "lines": "225-255,349-359",
+          "observation": "Adds are sequential with queue retries; successful jobs are removed."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "lines": "871-879",
+          "observation": "Undispatched retry enumeration depends on shared eligible/alerted state."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts",
+          "lines": "245-277",
+          "observation": "Release happens on enqueue failure, not a later clean skip/failure."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+          "lines": "1616-1619,2953-2957",
+          "observation": "Authority denial returns skipped; worker failure hooks only log in the reviewed path."
+        }
+      ],
+      "reason": "Queue retries are not a durable per-user delivery ledger. Enumeration-null success, shared source state, and retained stop-loss triggers still leave missing user/exit execution without a reviewed repair obligation. Later authority containment can manifest as an accepted-but-skipped exit.",
+      "testGap": "Enumeration exception, mid-cohort queue failure with first execution completing, accepted exit then authority denial/clean skip/exhausted retry. Require durable, visible repair without blindly resending unknown submissions.",
+      "findingIds": [
+        "PF-EXE-07",
+        "PF-EXE-14"
+      ],
+      "assessmentArtifact": "execution-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "06-signals-scorer",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "TEST-01",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "vitest.integration.config.ts:1-17",
+        "tests/integration/chaos.integration.test.ts:45-61,343-345,415-418"
+      ],
+      "reason": "Test-name suffix does not isolate endpoints; chaos still terminates other PostgreSQL and all normal Redis clients.",
+      "testGap": "Integration and chaos intentionally not run; isolated fixture/control tests proposed.",
+      "findingIds": [
+        "PF-DATA-16"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "12-test-assurance",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "TEST-02",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "tests/integration/helpers/lifecycle-fixture.ts:5-7,18-29,97-115,197-224"
+      ],
+      "reason": "Solana fixtures still share fixed addresses and account-wide cleanup.",
+      "testGap": "Integration and chaos intentionally not run; isolated fixture/control tests proposed.",
+      "findingIds": [
+        "PF-DATA-17"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Verified",
+      "originalReport": "12-test-assurance",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "TEST-03",
+      "status": "open",
+      "confidence": "Verified",
+      "currentEvidence": [
+        "tests/integration/helpers/schema-guard.ts:26-70,73-109"
+      ],
+      "reason": "Selected object-existence checks do not prove current policies/constraints/profile or latest required tables.",
+      "testGap": "Integration and chaos intentionally not run; isolated fixture/control tests proposed.",
+      "findingIds": [
+        "PF-DATA-18"
+      ],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Low",
+      "originalConfidence": "Verified",
+      "originalReport": "12-test-assurance",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "WEB-01",
+      "status": "closed(source)",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "33,53-56",
+          "observation": "Interactive signing account now derives from HMAC with a server secret, randomly generated when configuration is absent, rather than from public inputs alone."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "118-128,298-337",
+          "observation": "Actual PDA derivation remains distinct from the interactive signing account used for balances and transfers."
+        }
+      ],
+      "reason": "The original public-only key derivation is removed. PF-WEB-12 separately identifies loss of interactive-account continuity with the ephemeral fallback. PF-WEB-11 prevents this exact server source from parsing. Neither actual PDA key compromise nor funding was established.",
+      "testGap": "No persistence/restart/migration test or configured-secret inspection; no real accounts derived or balances checked.",
+      "assessmentArtifact": "api-web-review.md",
+      "aliasEvidenceFrom": "OWA-02",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "10-web-app",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "WEB-02",
+      "status": "partial",
+      "confidence": "Verified",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "230-284",
+          "observation": "Canonical message now binds parsed amount, owner and timestamp; replay Map keys are raw signature strings while verification decodes hex bytes."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html",
+          "lines": "830-866",
+          "observation": "Client signs the canonical intent and sends its signature in hex."
+        }
+      ],
+      "reason": "Unsigned parallel-field substitution is fixed in source. Equivalent signature encodings still bypass string-key replay identity, and storage is process-local (PF-WEB-13). Recipient remains owner. The handler is currently dormant because PF-WEB-11 is a parse-time failure.",
+      "testGap": "No executed or added PDA tests for canonical substitution, equivalent encodings, concurrency, restart/replica replay, invalid-proof consumption or syntax validity.",
+      "assessmentArtifact": "api-web-review.md",
+      "aliasEvidenceFrom": "OWA-05",
+      "originalSeverity": "High",
+      "originalConfidence": "Verified",
+      "originalReport": "10-web-app",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "WEB-03",
+      "status": "partial",
+      "confidence": "Likely",
+      "currentEvidence": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html",
+          "lines": "463-474,507-510",
+          "observation": "Log and connection-error sinks now use text nodes/textContent."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html",
+          "lines": "793-806,869-887",
+          "observation": "Unauthorized-result error and successful response/link fields still enter innerHTML."
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs",
+          "lines": "190-212,353-356",
+          "observation": "API responses can originate from RPC and exception text."
+        }
+      ],
+      "reason": "Some dynamic sinks are fixed, not all. Provider/API influence over victim-visible text and actual browser execution remain unverified; exact-server parse failure currently blocks the response paths. PF-WEB-14.",
+      "testGap": "No hostile response/provider-text browser tests or URL-scheme assertions; static literal innerHTML is distinguished from dynamic untrusted fields.",
+      "assessmentArtifact": "api-web-review.md",
+      "aliasEvidenceFrom": "OWA-07",
+      "originalSeverity": "Medium",
+      "originalConfidence": "Likely",
+      "originalReport": "10-web-app",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "WEB-05",
+      "status": "open",
+      "confidence": "Likely",
+      "currentEvidence": [
+        "apps/web/app/login/page.tsx:44-55"
+      ],
+      "reason": "Relative-leading-slash check remains string-only and excludes only literal double slash. Browser/framework normalization edge cases were not tested.",
+      "testGap": "Isolated browser backslash/encoded-separator navigation tests required before exploitation claim.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Low",
+      "originalConfidence": "Likely",
+      "originalReport": "10-web-app",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    },
+    {
+      "id": "WEB-06",
+      "status": "not-verified",
+      "confidence": "Needs check",
+      "currentEvidence": [
+        "apps/web/next.config.ts:25-63"
+      ],
+      "reason": "Inspected Next config contains no security-header policy despite closure claim; actual edge/browser headers unknown.",
+      "testGap": "No deployed or rendered browser header inspection; cannot certify CSP/HSTS/framing controls.",
+      "findingIds": [],
+      "assessmentArtifact": "data-indexer-review.md",
+      "originalSeverity": "Low",
+      "originalConfidence": "Needs check",
+      "originalReport": "10-web-app",
+      "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+    }
+  ]
+}

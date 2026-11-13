@@ -1,32 +1,24 @@
 import type { NextConfig } from 'next';
 import path from 'node:path';
 
-const sanitizeUrl = (url: string | undefined, fallback: string) => {
-  let target = (!url || url.includes('[SENSITIVE]') || !url.startsWith('http')) ? fallback : url;
-  // INF-04 / WEB-04: Upgrade remote non-loopback rewrite destinations to HTTPS in production
-  if (process.env.NODE_ENV === 'production' && target.startsWith('http://')) {
-    if (!target.includes('localhost') && !target.includes('127.0.0.1')) {
-      target = target.replace(/^http:\/\//, 'https://');
-    }
-  }
-  return target;
-};
+import { resolveBackendTarget } from './lib/backend-target';
 
-const BACKEND_API_INTERNAL_URL = sanitizeUrl(
-  process.env.BACKEND_API_INTERNAL_URL || process.env.INTERNAL_API_URL,
-  'http://127.0.0.1:3001'
-);
-
-const BACKEND_LP_INTERNAL_URL = sanitizeUrl(
-  process.env.BACKEND_LP_INTERNAL_URL || process.env.INTERNAL_LP_URL,
-  'http://127.0.0.1:3010'
-);
+const BACKEND_API_INTERNAL_URL = resolveBackendTarget('api');
+const BACKEND_LP_INTERNAL_URL = resolveBackendTarget('lp');
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: process.env.VERCEL
     ? path.resolve(__dirname, '.')
     : path.resolve(__dirname, '../../'),
+  async headers() {
+    return [{ source: '/:path*', headers: [
+      { key: 'Content-Security-Policy', value: "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'" },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'Referrer-Policy', value: 'no-referrer' }
+    ] }];
+  },
   async rewrites() {
     const apiTarget = BACKEND_API_INTERNAL_URL.replace(/\/+$/, '');
     const lpTarget = BACKEND_LP_INTERNAL_URL.replace(/\/+$/, '');

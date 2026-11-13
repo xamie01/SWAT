@@ -1,6 +1,8 @@
 import type { Chain } from '@swat/shared';
 import { resolveChainAddress } from '@swat/shared';
 import { query } from './client.js';
+import { withTransaction } from './transaction.js';
+import { recordAuditEventStrict } from './audit-log.js';
 import { isCrossTenant, type UserScope } from './tenancy.js';
 
 /**
@@ -229,8 +231,14 @@ export function normalizeGrantAccountAddress(chain: Chain, accountAddress: strin
  */
 export async function recordExecutionGrant(
   scope: UserScope,
-  input: RecordExecutionGrantInput
+  input: RecordExecutionGrantInput,
+  options: { replace?: boolean } = {}
 ): Promise<ExecutionGrant> {
+  const validPair = input.grantKind === 'solana_vault' ? input.chain === 'solana'
+    : input.grantKind === 'polymarket_signer' ? input.chain === 'polygon'
+    : input.chain === 'robinhood-chain';
+  if (!validPair) throw new InvalidExecutionGrantError('Unsupported chain/grant-kind pair');
+  if (input.expiresAt && !(input.expiresAt.getTime() > Date.now())) throw new InvalidExecutionGrantError('Grant is expired');
   assertGrantSecretMatchesKind(input);
   if (grantKindRequiresExpiry(input.grantKind) && !input.expiresAt) {
     throw new InvalidExecutionGrantError(
@@ -240,6 +248,37 @@ export async function recordExecutionGrant(
   const accountAddress = normalizeGrantAccountAddress(input.chain, input.accountAddress);
 
   try {
+    if (options.replace) return await withTransaction(async (client) => {
+      const owner = await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [scope.userId]);
+      if (owner.rows.length !== 1) throw new ExecutionGrantConflictError();
+      const existing = await client.query<{ user_id: string; status: string }>(`SELECT user_id, status FROM user_execution_grants
+        WHERE chain = $1 AND (CASE WHEN chain = 'solana' THEN account_address ELSE lower(account_address) END) = $2 FOR UPDATE`,
+        [input.chain, accountAddress]);
+      if (existing.rows.length > 1 || existing.rows.some(g => g.user_id !== scope.userId || g.status === 'compromised')) throw new ExecutionGrantConflictError();
+      // Reserve/update the owned replacement in a non-active state BEFORE
+      // revoking anything. An empty guarded upsert is an error, not success.
+      const staged = await client.query<GrantRow>(`INSERT INTO user_execution_grants
+        (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, expires_at, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'retired')
+        ON CONFLICT (chain, account_address) DO UPDATE SET
+          grant_kind = EXCLUDED.grant_kind, sealed_secret = EXCLUDED.sealed_secret,
+          key_version = EXCLUDED.key_version, scope_policy = EXCLUDED.scope_policy,
+          expires_at = EXCLUDED.expires_at, status = 'retired'
+        WHERE user_execution_grants.user_id = EXCLUDED.user_id AND user_execution_grants.status <> 'compromised'
+        RETURNING ${GRANT_COLUMNS}`, [scope.userId, input.chain, input.grantKind, accountAddress,
+          input.sealedSecret ?? null, input.keyVersion ?? null, input.scopePolicy === undefined ? null : JSON.stringify(input.scopePolicy), input.expiresAt ?? null]);
+      if (staged.rows.length !== 1) throw new ExecutionGrantConflictError();
+      const id = staged.rows[0]!.id;
+      await client.query(`UPDATE user_execution_grants SET status = 'revoked', revoked_at = NOW()
+        WHERE user_id = $1 AND chain = $2 AND grant_kind = $3 AND id <> $4 AND status = 'active'`,
+        [scope.userId, input.chain, input.grantKind, id]);
+      const active = await client.query<GrantRow>(`UPDATE user_execution_grants SET status = 'active', revoked_at = NULL
+        WHERE id = $1 AND user_id = $2 AND status = 'retired' RETURNING ${GRANT_COLUMNS}`, [id, scope.userId]);
+      if (active.rows.length !== 1) throw new ExecutionGrantConflictError();
+      await recordAuditEventStrict({ actorType: 'user', actorId: scope.userId, event: 'grant.locally_replaced',
+        targetType: 'execution_grant', targetId: id, metadata: { chain: input.chain, grantKind: input.grantKind, localOnly: true } }, client);
+      return toGrant(active.rows[0]!);
+    });
     const rows = await query<GrantRow>(
       `INSERT INTO user_execution_grants
          (user_id, chain, grant_kind, account_address, sealed_secret, key_version,
@@ -257,6 +296,7 @@ export async function recordExecutionGrant(
         input.expiresAt ?? null
       ]
     );
+    if (rows.length !== 1) throw new ExecutionGrantConflictError();
     return toGrant(rows[0]!);
   } catch (error) {
     // 23505 is a unique violation. Both the partial active index and the global
@@ -292,7 +332,9 @@ export async function findActiveExecutionGrant(
   const rows = await query<GrantRow>(
     `SELECT ${GRANT_COLUMNS}
        FROM user_execution_grants
-      WHERE user_id = $1 AND chain = $2 AND grant_kind = $3 AND status = 'active'`,
+      WHERE user_id = $1 AND chain = $2 AND grant_kind = $3 AND status = 'active'
+         AND (expires_at IS NULL OR expires_at > NOW())
+         AND grant_kind NOT IN ('solana_vault', 'eip7702', 'session_key_4337')`,
     [scope.userId, chain, grantKind]
   );
   return rows[0] ? toGrant(rows[0]) : null;

@@ -55,9 +55,9 @@ const swapEvent = parseAbiItem(
   'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)'
 );
 
-function receiptTransfer(from: string, to: string, value: bigint, logIndex: number) {
+function receiptTransfer(from: string, to: string, value: bigint, logIndex: number, address = token) {
   return {
-    address: token,
+    address,
     topics: encodeEventTopics({
       abi: [transferEvent],
       eventName: 'Transfer',
@@ -109,9 +109,9 @@ function clientFor(
     ? parsedTransfer(pool, wallet, targetQuantity)
     : parsedTransfer(wallet, pool, targetQuantity);
   const receiptLogs = direction === 'buy'
-    ? [receiptSwap(1_000n, -5_000n), receiptTransfer(pool, wallet, targetQuantity, 2)]
+    ? [receiptSwap(1_000n, -5_000n), receiptTransfer(pool, wallet, targetQuantity, 2), receiptTransfer(wallet, pool, 1_000n, 3, base)]
     : direction === 'sell'
-      ? [receiptSwap(-800n, 4_000n), receiptTransfer(wallet, pool, targetQuantity, 2)]
+      ? [receiptSwap(-800n, 4_000n), receiptTransfer(wallet, pool, targetQuantity, 2), receiptTransfer(pool, wallet, 800n, 3, base)]
       : [receiptTransfer(pool, wallet, targetQuantity, 2)];
 
   return {
@@ -161,10 +161,39 @@ describe('Robinhood backfill source lifecycle', () => {
     vi.unstubAllEnvs();
   });
 
+  it('refuses generic Polygon transfer-only backfills before reads, writes or publication', async () => {
+    const client = { ...clientFor('buy'), getTransaction: vi.fn(async () => ({ value: 0n })) };
+    await expect(backfillEvmWallet(wallet, 'polygon', { client: client as never }))
+      .rejects.toThrow(/Polygon.*reviewed swap attribution/i);
+    expect(client.getBlockNumber).not.toHaveBeenCalled();
+    expect(client.getLogs).not.toHaveBeenCalled();
+    expect(client.getTransactionReceipt).not.toHaveBeenCalled();
+    expect(client.readContract).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+    expect(upsertToken).not.toHaveBeenCalled();
+    expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(refreshWalletActivity).not.toHaveBeenCalled();
+    expect(updateTokenLaunchTimestamp).not.toHaveBeenCalled();
+    expect(mocks.fetchTokenPriceUsd).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it('quarantines receipt observations before legacy trade persistence or swap publication', async () => {
+    const result = await backfillEvmWallet(wallet, 'robinhood-chain', { client: clientFor('buy') as never });
+    expect(recordSourceTradeEvent).toHaveBeenCalledWith(expect.objectContaining({ confirmationState: 'observed', quantity: '5000' }));
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ fetched: 1, inserted: 0, skipped: 1, failed: 0,
+      evidence: { observed: 1, quarantined: 1, accepted: 0,
+        completeness: 'unknown', scope: 'requested-window', confirmation: 'withheld' }
+    });
+  });
+
   it.each([
     ['buy', '5000'],
     ['sell', '4000']
-  ] as const)('persists a reviewed confirmed %s with exact target quantity', async (direction, quantity) => {
+  ] as const)('persists a reviewed %s observation with exact target quantity', async (direction, quantity) => {
     const result = await backfillEvmWallet(wallet, 'robinhood-chain', {
       client: clientFor(direction) as never
     });
@@ -177,25 +206,44 @@ describe('Robinhood backfill source lifecycle', () => {
       tokenMint: token,
       side: direction,
       quantity,
-      confirmationState: 'confirmed'
+      confirmationState: 'observed'
     }));
-    expect(mocks.publish).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.stringContaining('source-robinhood-1')
-    );
-    expect(result).toMatchObject({ fetched: 1, inserted: 1, skipped: 0, failed: 0 });
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(mocks.fetchTokenPriceUsd).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ fetched: 1, inserted: 0, skipped: 1, failed: 0 });
   });
 
-  it('uses the wallet target-token transfer when it differs from the pool delta', async () => {
+  it('refuses an unexplained wallet receipt that differs from reviewed pool economics', async () => {
     const result = await backfillEvmWallet(wallet, 'robinhood-chain', {
       client: clientFor('buy', 4_900n) as never
     });
 
-    expect(recordSourceTradeEvent).toHaveBeenCalledWith(expect.objectContaining({
-      side: 'buy',
-      quantity: '4900'
-    }));
-    expect(result).toMatchObject({ fetched: 1, inserted: 1, skipped: 0, failed: 0 });
+    expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ fetched: 1, inserted: 0, skipped: 1, failed: 0 });
+  });
+
+  it('persists the net target quantity for offsetting reviewed swaps', async () => {
+    const client = clientFor('buy');
+    client.getTransactionReceipt.mockResolvedValue({
+      status: 'success', from: wallet, to: router,
+      logs: [
+        receiptSwap(1_000n, -5_000n),
+        { ...receiptSwap(-900n, 4_500n), logIndex: 4 },
+        receiptTransfer(pool, wallet, 5_000n, 2), receiptTransfer(wallet, pool, 4_500n, 5),
+        receiptTransfer(wallet, pool, 1_000n, 3, base), receiptTransfer(pool, wallet, 900n, 6, base)
+      ]
+    });
+    client.getLogs.mockImplementation(async (input) => input.args?.to
+      ? [parsedTransfer(pool, wallet, 5_000n)]
+      : [{ ...parsedTransfer(wallet, pool, 4_500n), logIndex: 5 }]);
+    const result = await backfillEvmWallet(wallet, 'robinhood-chain', { client: client as never });
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(recordSourceTradeEvent).toHaveBeenCalledWith(expect.objectContaining({ quantity: '500', confirmationState: 'observed' }));
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ inserted: 0, skipped: 1, failed: 0 });
   });
 
   it('creates no source event for a rejected receipt', async () => {

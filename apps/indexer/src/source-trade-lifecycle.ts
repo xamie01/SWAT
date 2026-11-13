@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
 import {
   recordSourceTradeEvent,
   type SourceTradeEventInput
 } from '@swat/db';
 import {
+  isAppliedSourceConfirmation,
   resolveChainAddress,
   resolveChainValue
 } from '@swat/shared';
@@ -12,7 +12,7 @@ import {
   USDT_MINT,
   type CanonicalSolanaSwapEvent
 } from './parse.js';
-import type { ConfirmedPolymarketTrade } from './polymarket-helpers.js';
+import { normalizePolymarketDecimal, normalizePolymarketPrice, type ConfirmedPolymarketTrade } from './polymarket-helpers.js';
 
 export type SolanaIngestionSource = 'solana-backfill' | 'solana-webhook';
 
@@ -29,7 +29,12 @@ export class SourceTradePersistenceError extends Error {
 
 async function persistSourceTrade(input: SourceTradeEventInput) {
   try {
-    return await recordSourceTradeEvent(input);
+    const result = await recordSourceTradeEvent(input);
+    return {
+      ...result,
+      eligibleForCopy: isAppliedSourceConfirmation(input.confirmationState)
+        && isAppliedSourceConfirmation(result.event.confirmationState)
+    };
   } catch (cause) {
     throw new SourceTradePersistenceError(input.chain, { cause });
   }
@@ -101,8 +106,8 @@ export function buildSolanaSourceTradeInput(input: {
     quantity,
     ...pricing,
     eventAt: event.occurredAt,
-    confirmationState: 'confirmed',
-    confirmationEvidenceId: `${input.source}:${event.transactionIdentity}:${event.slot ?? 'unknown-slot'}`
+    confirmationState: 'observed',
+    confirmationEvidenceId: `solana-observation:${input.source}:${event.transactionIdentity}:${event.slot ?? 'unknown-slot'}`
   };
 }
 
@@ -113,38 +118,26 @@ export async function persistSolanaSourceTrade(input: {
   return persistSourceTrade(buildSolanaSourceTradeInput(input));
 }
 
-function polymarketFillIndex(trade: ConfirmedPolymarketTrade, quantity: string): string {
-  const identity = [
-    trade.transactionHash,
-    trade.proxyWallet,
-    trade.conditionId,
-    trade.asset,
-    trade.side,
-    quantity,
-    String(trade.price),
-    trade.timestamp.toISOString()
-  ].join('\u0000');
-  return createHash('sha256').update(identity).digest('hex');
-}
-
 export function buildPolymarketSourceTradeInput(input: {
   trade: ConfirmedPolymarketTrade;
   quantity: string;
-  amountUsd: number;
+  amountUsd: string;
 }): SourceTradeEventInput {
   const { trade } = input;
   const transactionHash = normalizeEvmHash(trade.transactionHash, 'Polymarket transaction hash');
-  const conditionId = normalizeEvmHash(trade.conditionId, 'Polymarket condition ID');
+  normalizeEvmHash(trade.conditionId, 'Polymarket condition ID');
   const wallet = resolveChainAddress(trade.proxyWallet, 'polygon');
   const token = resolveChainValue(trade.asset, 'polygon');
   const quantity = normalizeAtomicQuantity(input.quantity);
-  const sourceEventIndex = polymarketFillIndex({
-    ...trade,
-    transactionHash,
-    conditionId,
-    proxyWallet: wallet.raw,
-    asset: token.raw
-  }, quantity);
+  const price = normalizePolymarketPrice(trade.price);
+  const amountUsd = normalizePolymarketDecimal(input.amountUsd, 'trade notional', 42);
+  // The locally reviewed Data API schema has no independent fill/log ID.
+  // This is a wallet/transaction observation GROUP, never a unique fill.
+  // Economics, token, side and time stay in the immutable payload: changed
+  // reports collide and are refused by persistence, not counted as new fills.
+  // Even identical reports may be independent fills; this namespace must
+  // remain observed and must never receive applied confirmation certificates.
+  const sourceEventIndex = `ambiguous-data-api-wallet-v1:${wallet.raw}`;
   return {
     chain: 'polygon',
     sourceEventType: 'venue_trade',
@@ -155,18 +148,18 @@ export function buildPolymarketSourceTradeInput(input: {
     tokenMint: token.raw,
     side: trade.side === 'BUY' ? 'buy' : 'sell',
     quantity,
-    amountUsd: input.amountUsd,
-    priceUsd: trade.price,
+    amountUsd,
+    priceUsd: price,
     eventAt: trade.timestamp,
-    confirmationState: 'confirmed',
-    confirmationEvidenceId: `polymarket-data-api:${transactionHash}:${sourceEventIndex}`
+    confirmationState: 'observed',
+    confirmationEvidenceId: `polymarket-data-api-observation:${transactionHash}:${sourceEventIndex}`
   };
 }
 
 export async function persistPolymarketSourceTrade(input: {
   trade: ConfirmedPolymarketTrade;
   quantity: string;
-  amountUsd: number;
+  amountUsd: string;
 }) {
   return persistSourceTrade(buildPolymarketSourceTradeInput(input));
 }
@@ -198,8 +191,8 @@ export function buildRobinhoodSourceTradeInput(input: {
     amountUsd: null,
     priceUsd: null,
     eventAt: input.eventAt,
-    confirmationState: 'confirmed',
-    confirmationEvidenceId: `robinhood-receipt:${transactionHash}:${input.blockNumber}`
+    confirmationState: 'observed',
+    confirmationEvidenceId: `robinhood-receipt-observation:${transactionHash}:${input.blockNumber}`
   };
 }
 

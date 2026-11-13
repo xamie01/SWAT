@@ -16,6 +16,8 @@ import {
   clampConcurrentPositionCap
 } from './position-cap.js';
 import type { UserScope } from './tenancy.js';
+import type { UserRole } from './users.js';
+import { recordAuditEventStrict } from './audit-log.js';
 
 /**
  * Per-user risk and execution preferences (`S4-9`, migration `049`).
@@ -215,6 +217,19 @@ export class InvalidExecutionSettingsError extends Error {
   }
 }
 
+/** A ceiling increase needs privileged authority from the trusted caller. */
+export class WithdrawalCeilingAuthorizationError extends Error {
+  constructor() {
+    super('Only administrators can increase the maximum daily withdrawal ceiling.');
+    this.name = 'WithdrawalCeilingAuthorizationError';
+  }
+}
+
+export interface ExecutionSettingsAuthority {
+  /** From the authenticated principal, never a request payload. Omission is unprivileged. */
+  readonly role: UserRole;
+}
+
 /** The user's tier does not permit live execution on this chain. Maps to 403. */
 export class LiveExecutionNotEntitledError extends Error {
   constructor(
@@ -382,7 +397,8 @@ function definedOnly<T extends object>(patch: T): Partial<T> {
  */
 export async function upsertUserExecutionSettings(
   scope: UserScope,
-  patch: UserExecutionSettingsPatch
+  patch: UserExecutionSettingsPatch,
+  authority?: ExecutionSettingsAuthority
 ): Promise<UserExecutionSettings> {
   assertValidExecutionSettingsPatch(patch);
 
@@ -398,8 +414,15 @@ export async function upsertUserExecutionSettings(
         FOR UPDATE`,
       [scope.userId]
     );
+    if (current.rows.length !== 1) throw new Error('Settings row missing under lock');
+    const previous = toSettings(current.rows[0]!);
+    if (patch.maxDailyWithdrawalUsd !== undefined
+      && patch.maxDailyWithdrawalUsd > previous.maxDailyWithdrawalUsd
+      && authority?.role !== 'admin') {
+      throw new WithdrawalCeilingAuthorizationError();
+    }
     const merged: UserExecutionSettings = {
-      ...toSettings(current.rows[0]!),
+      ...previous,
       // Only *defined* keys override. A plain spread would let an explicit
       // `{ killed: undefined }` — which a hand-built patch object produces easily —
       // overwrite a stored value with undefined, which `pg` sends as NULL and the
@@ -445,7 +468,22 @@ export async function upsertUserExecutionSettings(
         merged.killed
       ]
     );
-    return toSettings(updated.rows[0]!);
+    if (updated.rows.length !== 1) throw new Error('Settings update returned no row');
+    const result = toSettings(updated.rows[0]!);
+    if (result.maxDailyWithdrawalUsd !== previous.maxDailyWithdrawalUsd) {
+      await recordAuditEventStrict({
+        actorType: authority?.role === 'admin' ? 'admin' : 'user', actorId: scope.userId,
+        event: 'execution.withdrawal_ceiling_changed', targetType: 'user', targetId: scope.userId,
+        metadata: { previousUsd: previous.maxDailyWithdrawalUsd, maxDailyWithdrawalUsd: result.maxDailyWithdrawalUsd }
+      }, client);
+    }
+    if (patch.killed !== undefined) {
+      await recordAuditEventStrict({ actorType: 'user', actorId: scope.userId,
+        event: 'execution.kill_switch_changed', targetType: 'user', targetId: scope.userId,
+        metadata: { killed: result.killed }
+      }, client);
+    }
+    return result;
   });
 }
 
@@ -462,15 +500,24 @@ export async function setUserKillSwitch(
   scope: UserScope,
   killed: boolean
 ): Promise<UserExecutionSettings> {
-  const rows = await query<SettingsRow>(
-    `INSERT INTO user_execution_settings (user_id, killed)
-     VALUES ($1, $2)
-     ON CONFLICT (user_id) DO UPDATE
-       SET killed = EXCLUDED.killed, updated_at = NOW()
-     RETURNING ${SETTINGS_COLUMNS}`,
-    [scope.userId, killed]
-  );
-  return toSettings(rows[0]!);
+  if (typeof killed !== 'boolean') throw new InvalidExecutionSettingsError('killed must be boolean');
+  return withTransaction(async (client) => {
+    const updated = await client.query<SettingsRow>(
+      `INSERT INTO user_execution_settings (user_id, killed)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE
+         SET killed = EXCLUDED.killed, updated_at = NOW()
+       RETURNING ${SETTINGS_COLUMNS}`,
+      [scope.userId, killed]
+    );
+    if (updated.rows.length !== 1) throw new Error('Kill switch update returned no row');
+    const settings = toSettings(updated.rows[0]!);
+    await recordAuditEventStrict({ actorType: 'user', actorId: scope.userId,
+      event: 'execution.kill_switch_changed', targetType: 'user', targetId: scope.userId,
+      metadata: { killed: settings.killed }
+    }, client);
+    return settings;
+  });
 }
 
 export async function listUserChainExecutionSettings(

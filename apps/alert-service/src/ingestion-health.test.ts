@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { INGESTION_CHAINS, type Chain, type RawIngestionHealth } from '@swat/shared';
+import { INGESTION_CHAINS, buildIngestionHealthSnapshots, type Chain, type RawIngestionHealth } from '@swat/shared';
 import {
   checkIngestionHealth,
   formatIngestionOpsMessage
@@ -66,7 +66,39 @@ function createStatefulReservations() {
 }
 
 describe('ingestion health alert monitor', () => {
-  it('deduplicates stale alerts and sends one recovery transition', async () => {
+  it('displays fresh but unready evidence without converting missing counters into zero', () => {
+    const health = buildIngestionHealthSnapshots([row('solana', '2026-07-19T11:59:00.000Z')], NOW)[0]!;
+    const message = formatIngestionOpsMessage(health, 'stale');
+    expect(message).toContain('<b>State:</b> UNREADY');
+    expect(message).toContain('<b>Readiness:</b> unknown');
+    expect(message).toContain('<b>Completeness:</b> unknown');
+    expect(message).toContain('<b>Confirmation:</b> unknown');
+    expect(message).toContain('<b>24h observed:</b> unknown');
+    expect(message).toContain('<b>24h quarantined:</b> unknown');
+    expect(message).toContain('<b>24h accepted:</b> unknown');
+  });
+
+  it('displays withheld confirmation and actual attempt counters separately from legacy inserts', () => {
+    const health = buildIngestionHealthSnapshots([{
+      ...row('solana', '2026-07-19T11:59:00.000Z'),
+      evidenceTotals: { observed: 3, quarantined: 3, accepted: 0 },
+      sourceEvidence: [{ source: 'solana-webhook', batchAt: NOW, evidence: {
+        observed: 3, quarantined: 3, accepted: 0,
+        completeness: 'complete', scope: 'delivery', confirmation: 'withheld'
+      } }]
+    }], NOW)[0]!;
+    const message = formatIngestionOpsMessage(health, 'stale');
+    expect(message).toContain('<b>State:</b> UNREADY');
+    expect(message).toContain('<b>Readiness:</b> blocked');
+    expect(message).toContain('<b>Completeness:</b> complete');
+    expect(message).toContain('<b>Confirmation:</b> withheld');
+    expect(message).toContain('<b>24h observed:</b> 3');
+    expect(message).toContain('<b>24h quarantined:</b> 3');
+    expect(message).toContain('<b>24h accepted:</b> 0');
+    expect(message).toContain('<b>24h inserted:</b> 9');
+  });
+
+  it('deduplicates nonhealthy alerts and never fabricates recovery from recent events', async () => {
     const state = createStatefulReservations();
     const send = vi.fn().mockResolvedValue(undefined);
     let rows = rowsWith(row('solana', '2026-07-19T11:50:00.000Z'));
@@ -83,17 +115,21 @@ describe('ingestion health alert monitor', () => {
     await checkIngestionHealth(dependencies);
     await checkIngestionHealth(dependencies);
 
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(INGESTION_CHAINS.length);
     expect(send.mock.calls[0][0]).toContain('SWAT INGESTION OPS ALERT');
-    expect(send.mock.calls[1][0]).toContain('SWAT INGESTION RECOVERY');
+    expect(send.mock.calls.every(([message]) => !String(message).includes('SWAT INGESTION RECOVERY'))).toBe(true);
+    expect(state.reserve.mock.calls.every(([, target]) => target === 'stale')).toBe(true);
   });
 
   it('releases an unsent reservation so the next poll can retry', async () => {
     const state = createStatefulReservations();
-    const send = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('Telegram unavailable'))
-      .mockResolvedValueOnce(undefined);
+    let polygonFailure = true;
+    const send = vi.fn(async (message: string) => {
+      if (polygonFailure && message.includes('<b>Chain:</b> polygon')) {
+        polygonFailure = false;
+        throw new Error('Telegram unavailable');
+      }
+    });
     const dependencies = {
       ...state,
       loadHealth: async () => rowsWith(row('polygon', null)),
@@ -110,21 +146,10 @@ describe('ingestion health alert monitor', () => {
   });
 
   it('formats empty state as an explicit no-data incident', () => {
-    const message = formatIngestionOpsMessage({
-      chain: 'robinhood-chain',
-      status: 'empty',
-      lastEventAt: null,
-      lastBatchAt: null,
-      lastSuccessAt: null,
-      lagSeconds: null,
-      batchLagSeconds: null,
-      staleAfterSeconds: 900,
-      targetLagSeconds: 900,
-      inserted24h: 0,
-      skipped24h: 0,
-      failed24h: 1,
-      insertRatio: null
-    }, 'stale');
+    const health = buildIngestionHealthSnapshots([{
+      ...row('robinhood-chain', null), inserted24h: 0, skipped24h: 0, failed24h: 1
+    }], NOW).find(item => item.chain === 'robinhood-chain')!;
+    const message = formatIngestionOpsMessage(health, 'stale');
 
     expect(message).toContain('<b>State:</b> NO DATA');
     expect(message).toContain('<b>Last event:</b> never');

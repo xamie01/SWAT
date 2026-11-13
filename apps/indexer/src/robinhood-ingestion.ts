@@ -48,7 +48,8 @@ export type RobinhoodRejectedReceipt = {
     | 'unreviewed_router'
     | 'no_reviewed_pool_swap'
     | 'ambiguous_route'
-    | 'missing_wallet_transfer';
+    | 'missing_wallet_transfer'
+    | 'wallet_flow_mismatch';
 };
 
 export type RobinhoodReceiptClassification =
@@ -237,6 +238,17 @@ export function classifyRobinhoodReceipt(
   );
   if (!hasWalletTargetTransfer) {
     return { status: 'rejected', reason: 'missing_wallet_transfer' };
+  }
+  const walletDeltas = new Map<string, bigint>();
+  for (const transfer of transfers) {
+    const delta = (transfer.to === wallet ? transfer.amount : 0n)
+      - (transfer.from === wallet ? transfer.amount : 0n);
+    walletDeltas.set(transfer.token, (walletDeltas.get(transfer.token) ?? 0n) + delta);
+  }
+  if (walletDeltas.get(targetToken) !== -targetDelta
+      || walletDeltas.get(config.baseAsset) !== -baseDelta
+      || [...walletDeltas].some(([token, delta]) => delta !== 0n && token !== targetToken && token !== config.baseAsset)) {
+    return { status: 'rejected', reason: 'wallet_flow_mismatch' };
   }
 
   return isBuy

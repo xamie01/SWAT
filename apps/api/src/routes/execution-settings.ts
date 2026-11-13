@@ -124,7 +124,8 @@ export interface ExecutionSettingsDependencies {
   readonly getUserExecutionSettings: (scope: ScopeLike) => Promise<StoredExecutionSettings>;
   readonly upsertUserExecutionSettings: (
     scope: ScopeLike,
-    patch: ExecutionSettingsPatchInput
+    patch: ExecutionSettingsPatchInput,
+    authority?: { readonly role: 'user' | 'admin' }
   ) => Promise<StoredExecutionSettings>;
   readonly setUserKillSwitch: (
     scope: ScopeLike,
@@ -315,6 +316,7 @@ export function settingsErrorStatus(error: unknown): 400 | 403 | null {
   if (error.name === 'InvalidExecutionSettingsError') return 400;
   if (error.name === 'InvalidPositionCapError') return 400;
   if (error.name === 'LiveExecutionNotEntitledError') return 403;
+  if (error.name === 'WithdrawalCeilingAuthorizationError') return 403;
   return null;
 }
 
@@ -479,22 +481,11 @@ export async function registerExecutionSettingsRoutes(
         .send({ error: 'Bad Request', message: 'No execution settings fields supplied' });
     }
 
-    // API-08: Raising maxDailyWithdrawalUsd requires administrator role
-    if (parsed.data.maxDailyWithdrawalUsd !== undefined) {
-      const current = await wired.getUserExecutionSettings(scope);
-      if (parsed.data.maxDailyWithdrawalUsd > (current.maxDailyWithdrawalUsd ?? 0)) {
-        if (principal?.kind !== 'user' || principal.user.role !== 'admin') {
-          return reply.code(403).send({
-            error: 'Forbidden',
-            message: 'Only administrators can increase the maximum daily withdrawal ceiling.'
-          });
-        }
-      }
-    }
-
+    if (principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
+    // The writer compares against the actual row under lock; no stale pre-read.
     let settings: StoredExecutionSettings;
     try {
-      settings = await wired.upsertUserExecutionSettings(scope, parsed.data);
+      settings = await wired.upsertUserExecutionSettings(scope, parsed.data, { role: principal.user.role });
     } catch (error) {
       return sendSettingsError(reply, error);
     }

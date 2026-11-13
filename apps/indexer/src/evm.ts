@@ -28,6 +28,7 @@ import {
 } from '@swat/shared';
 import {
   IngestionBatchError,
+  observedIngestionEvidence,
   type IngestionBatchResult
 } from './ingestion-health.js';
 import {
@@ -154,11 +155,18 @@ async function getEvmTokenMetadata(client: any, tokenAddress: `0x${string}`, cha
   return meta;
 }
 
+function requireReviewedEvmBackfill(chain: WalletChain): void {
+  if (chain !== 'robinhood-chain') {
+    throw new Error('Generic Polygon backfill is unavailable without reviewed swap attribution and canonical evidence');
+  }
+}
+
 export async function backfillEvmWallet(
   address: string,
   chain: 'polygon' | 'robinhood-chain',
   dependencies: EvmBackfillDependencies = {}
 ): Promise<IngestionBatchResult> {
+  requireReviewedEvmBackfill(chain);
   const normalizedAddress = resolveChainValue(address, chain).raw;
   const client = dependencies.client ?? getPublicClient(chain);
   const publish = dependencies.publish
@@ -220,6 +228,9 @@ export async function backfillEvmWallet(
 
   let inserted = 0;
   let skipped = 0;
+  let observed = 0;
+  let quarantined = 0;
+  let accepted = 0;
   let failed = 0;
   let latestBlockTime: number | null = null;
   let lastEventAt: Date | null = null;
@@ -280,6 +291,27 @@ export async function backfillEvmWallet(
           }
           reviewedRobinhoodSwap = classification;
         }
+
+        const sourceTrade = reviewedRobinhoodSwap
+          ? await persistRobinhoodSourceTrade({
+            transactionHash: hash,
+            walletAddress: normalizedAddress,
+            tokenMint: reviewedRobinhoodSwap.targetToken,
+            side: reviewedRobinhoodSwap.direction,
+            quantity: (reviewedRobinhoodSwap.direction === 'buy'
+              ? reviewedRobinhoodSwap.amountOut
+              : reviewedRobinhoodSwap.amountIn).toString(),
+            eventAt: timestamp,
+            blockNumber
+          })
+          : null;
+        if (sourceTrade) observed++;
+        if (sourceTrade && !sourceTrade.eligibleForCopy) {
+          quarantined++;
+          skipped++;
+          return;
+        }
+        if (sourceTrade) accepted++;
 
         // Separate user's transfers
         const userSent: Array<{ token: string; amount: bigint; decimals: number; symbol: string; name: string }> = [];
@@ -470,24 +502,6 @@ export async function backfillEvmWallet(
           blockTime
         });
 
-        const walletTargetQuantity = (direction === 'buy' ? userReceived : userSent)
-          .filter((transfer) => transfer.token === targetToken)
-          .reduce((total, transfer) => total + transfer.amount, 0n);
-        if (reviewedRobinhoodSwap && walletTargetQuantity <= 0n) {
-          throw new Error('Reviewed Robinhood swap has no target-token wallet transfer');
-        }
-        const sourceTrade = reviewedRobinhoodSwap
-          ? await persistRobinhoodSourceTrade({
-            transactionHash: hash,
-            walletAddress: normalizedAddress,
-            tokenMint: targetToken,
-            side: direction,
-            quantity: walletTargetQuantity.toString(),
-            eventAt: timestamp,
-            blockNumber
-          })
-          : null;
-
         if (persisted) {
           inserted++;
           if (!latestBlockTime || blockTime > latestBlockTime) {
@@ -528,7 +542,9 @@ export async function backfillEvmWallet(
     inserted,
     skipped,
     failed,
-    lastEventAt
+    lastEventAt,
+    evidence: observedIngestionEvidence(observed, quarantined, accepted,
+      failed > 0 ? 'partial' : 'unknown', 'requested-window')
   };
 
   try {

@@ -1,0 +1,488 @@
+[
+  {
+    "id": "DB-01",
+    "status": "open",
+    "confidence": "Likely",
+    "currentEvidence": [
+      "packages/db/src/evm-nonce.ts:87-126",
+      "packages/db/src/migrate.ts:18-37",
+      "deploy/pgbouncer/pgbouncer.ini:23"
+    ],
+    "reason": "Session-lock SQL still uses the general connection pool; documented transaction pooling does not preserve backend affinity, and false unlock results are ignored.",
+    "testGap": "No real pooler/database tests; require session-pinned/direct connection and isolated multi-backend test.",
+    "findingIds": [
+      "PF-DATA-09"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Likely",
+    "originalReport": "02-database",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "DB-02",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "packages/db/sql/064_row_level_security.sql:29-45,89-114",
+      "packages/db/src/tenancy.ts:72-110",
+      "packages/db/src/client.ts:10-27,65-68",
+      "packages/db/src/users.ts:105-115,242-255"
+    ],
+    "reason": "RLS is still conditional on role and tenant settings; non-swat_app unscoped policies permit rows, while blindly switching unscoped auth calls to strict role breaks access. Actual role unknown.",
+    "testGap": "Isolated actual application-role login/tenant/admin denial matrix required.",
+    "findingIds": [
+      "PF-DATA-10"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "02-database",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "DB-03",
+    "status": "partial",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "packages/db/src/users.ts:125-138,182-239,242-288",
+      "session-invariants.test.ts:15-26"
+    ],
+    "reason": "Post-commit local invalidation improved, but a synthetic pre-revoke resolution repopulated the cache afterward. No distributed invalidation or expiry check on cached identity.",
+    "testGap": "Synthetic race failed; full multi-process real-DB/session expiry tests not run.",
+    "findingIds": [
+      "PF-DATA-11"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Likely",
+    "originalReport": "02-database",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "DB-05",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "packages/db/sql/064_row_level_security.sql:47-64"
+    ],
+    "reason": "Predictable source-default LOGIN credential and broad present/future grants remain; no runtime credentials read.",
+    "testGap": "Fresh and existing-role provisioning with constrained grants/attributes required.",
+    "findingIds": [
+      "PF-DATA-12"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Low",
+    "originalConfidence": "Verified",
+    "originalReport": "02-database",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "DB-06",
+    "status": "open",
+    "confidence": "Likely",
+    "currentEvidence": [
+      "packages/db/src/migrate.ts:21-32",
+      "packages/db/sql/066_lp_dashboard.sql:168-193",
+      "packages/db/sql/067_lp_auto_rebalance.sql:24-44"
+    ],
+    "reason": "Replaying separately committed files transiently reinstalls the narrower transition function before restoring active-to-rebalancing.",
+    "testGap": "No live migration; isolated replay/concurrent LP fixture needed.",
+    "findingIds": [
+      "PF-DATA-13"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Low",
+    "originalConfidence": "Likely",
+    "originalReport": "02-database",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-01",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/parse.ts:183-209,234-260",
+      "apps/indexer/src/index.ts:157-164,251-305"
+    ],
+    "reason": "Parser still treats opposing balances as supported successful swap evidence. Missing-provenance and failed-status synthetic assertions failed.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-01"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "High",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-02",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/parse.ts:138-155,179-209",
+      "apps/indexer/src/source-trade-lifecycle.ts:81-105"
+    ],
+    "reason": "Mixed raw-unit maxima still choose target/quote; ambiguous multi-asset fixture was accepted.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-02"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "High",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-03",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/webhook-helpers.ts:102-133",
+      "apps/indexer/src/webhook.ts:64-75",
+      "apps/indexer/src/parse.ts:162-176"
+    ],
+    "reason": "Enhanced adapter makes nonpayer index zero; synthetic fixture received another account fee refund.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-03"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-04",
+    "status": "open",
+    "confidence": "Likely",
+    "currentEvidence": [
+      "apps/indexer/src/source-trade-lifecycle.ts:92-105,148-163,188-203",
+      "apps/indexer/src/evm.ts:166-195",
+      "packages/db/src/copy-trade-lifecycle.ts:719-746"
+    ],
+    "reason": "Builders still assert confirmed evidence; bounded production search found no confirmation-advance caller. Actual reversal incidence unverified.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-04"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-05",
+    "status": "open",
+    "confidence": "Likely",
+    "currentEvidence": [
+      "apps/indexer/src/source-trade-lifecycle.ts:116-163",
+      "packages/db/src/transactions.ts:110-132",
+      "apps/indexer/src/polymarket.ts:355-399"
+    ],
+    "reason": "Canonical economic-content fill identity differs from legacy transaction/wallet/token identity; provider split/correction guarantees remain unknown.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-05"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Likely",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-06",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/robinhood-ingestion.ts:190-262",
+      "apps/indexer/src/evm.ts:455-488"
+    ],
+    "reason": "Pool totals and gross received/sent wallet quantity remain inconsistent with net attributable inventory.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-06"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-07",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/polymarket.ts:152-157,180-185,199-209,245-272"
+    ],
+    "reason": "Missing risk/end/tick metadata still becomes false/current-time/default-size context.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-07"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "IDX-08",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/polymarket.ts:67-128,314-317"
+    ],
+    "reason": "Only immediate repeated cursor is stopped; production omits total cap and operation deadline.",
+    "testGap": "See data-indexer-review.md for bounded source coverage and exact synthetic or proposed contract-specific regression.",
+    "findingIds": [
+      "PF-DATA-08"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "05-indexer-parsers",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "SIG-06",
+    "status": "open",
+    "confidence": "Likely",
+    "currentEvidence": [
+      "packages/db/src/scoring-queries.ts:19-115",
+      "packages/shared/src/scoring.ts:44-59",
+      "apps/scorer/src/index.ts:96-101"
+    ],
+    "reason": "Score still consumes legacy aggregates without verified independent-counterparty/attributable-quality inputs. Real manipulation economics not tested.",
+    "testGap": "Confirmed attributable round-trip and adversarial historical-data fixtures needed.",
+    "findingIds": [
+      "PF-DATA-14"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Likely",
+    "originalReport": "06-signals-scorer",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "SIG-07",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "packages/db/src/clustering-queries.ts:34-44",
+      "packages/db/src/independence.ts:288-317",
+      "packages/db/src/independence-queries.ts:32-98",
+      "apps/api/src/routes/me.ts:1114-1125"
+    ],
+    "reason": "SQL admission still differs from positive-label pure policy; no membership and not-blacklisted are not measured independence.",
+    "testGap": "Unassessed hub and multiple-membership fixtures required.",
+    "findingIds": [
+      "PF-DATA-15"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "06-signals-scorer",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "CRY-03",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/api/src/routes/me.ts:674-688,876-893",
+      "packages/shared/src/authority/key-wrapper.ts:42-107",
+      "packages/shared/src/authority/envelope.ts:86-118"
+    ],
+    "reason": "Current API itself instantiates symmetric wrapping/unwrapping authority; exact wrapper-id opening does not implement multi-version rotation.",
+    "testGap": "No actual master key inspected; verify separate wrap-only identity and audited rotation with throwaway keys.",
+    "findingIds": [
+      "PF-DATA-19"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "03-crypto-authority",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "TEST-01",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "vitest.integration.config.ts:1-17",
+      "tests/integration/chaos.integration.test.ts:45-61,343-345,415-418"
+    ],
+    "reason": "Test-name suffix does not isolate endpoints; chaos still terminates other PostgreSQL and all normal Redis clients.",
+    "testGap": "Integration and chaos intentionally not run; isolated fixture/control tests proposed.",
+    "findingIds": [
+      "PF-DATA-16"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "12-test-assurance",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "TEST-02",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "tests/integration/helpers/lifecycle-fixture.ts:5-7,18-29,97-115,197-224"
+    ],
+    "reason": "Solana fixtures still share fixed addresses and account-wide cleanup.",
+    "testGap": "Integration and chaos intentionally not run; isolated fixture/control tests proposed.",
+    "findingIds": [
+      "PF-DATA-17"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Medium",
+    "originalConfidence": "Verified",
+    "originalReport": "12-test-assurance",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "TEST-03",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "tests/integration/helpers/schema-guard.ts:26-70,73-109"
+    ],
+    "reason": "Selected object-existence checks do not prove current policies/constraints/profile or latest required tables.",
+    "testGap": "Integration and chaos intentionally not run; isolated fixture/control tests proposed.",
+    "findingIds": [
+      "PF-DATA-18"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Low",
+    "originalConfidence": "Verified",
+    "originalReport": "12-test-assurance",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "WEB-05",
+    "status": "open",
+    "confidence": "Likely",
+    "currentEvidence": [
+      "apps/web/app/login/page.tsx:44-55"
+    ],
+    "reason": "Relative-leading-slash check remains string-only and excludes only literal double slash. Browser/framework normalization edge cases were not tested.",
+    "testGap": "Isolated browser backslash/encoded-separator navigation tests required before exploitation claim.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Low",
+    "originalConfidence": "Likely",
+    "originalReport": "10-web-app",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "WEB-06",
+    "status": "not-verified",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      "apps/web/next.config.ts:25-63"
+    ],
+    "reason": "Inspected Next config contains no security-header policy despite closure claim; actual edge/browser headers unknown.",
+    "testGap": "No deployed or rendered browser header inspection; cannot certify CSP/HSTS/framing controls.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "originalSeverity": "Low",
+    "originalConfidence": "Needs check",
+    "originalReport": "10-web-app",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "RUN-01",
+    "status": "not-verified",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      "packages/db/src/client.ts:10-27",
+      "packages/db/sql/064_row_level_security.sql:29-64"
+    ],
+    "reason": "Prior local superuser observation was not remeasured after fixes. Source does not validate actual pool role flags.",
+    "testGap": "Current isolated and deployment runtime role interrogation not performed.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "RUN-02",
+    "status": "not-verified",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      "packages/db/src/migrate.ts:10-32",
+      "tests/integration/helpers/schema-guard.ts:26-70"
+    ],
+    "reason": "No database schema connected or migrated in this pass; historical completion claim does not establish present schema.",
+    "testGap": "Fresh full-profile migration plus current-schema digest/constraint comparison required.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "RUN-03",
+    "status": "partial",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/indexer/src/index.ts:442-452,537-548"
+    ],
+    "reason": "Two RPC reads now request SOLANA_MAX_TX_VERSION or default 1 and report failures; value lacks bounded-integer validation and no real version-1 success was replayed here.",
+    "testGap": "Synthetic version/error handling and bounded public/fork replay would be separate checks.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "RUN-04",
+    "status": "open",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/web/context/appkit.tsx:4-9",
+      "apps/web/components/WalletConnectModalButton.tsx:4-5",
+      "web-source-typecheck.log"
+    ],
+    "reason": "Current source no-emit typecheck fails with ten unresolved-module diagnostics, including newly added AppKit/Wagmi/query dependencies and existing web3/tailwind. This is installed-checkout evidence, not proof the declared packages are absent from manifest.",
+    "testGap": "No dependency install or full production build; current clean install/build not certified.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "RUN-05",
+    "status": "partial",
+    "confidence": "Verified",
+    "currentEvidence": [
+      "apps/api/src/index.ts:284-331",
+      "packages/shared/src/rpc-failover.ts:267-302",
+      "sensitive-flow-invariants.test.ts:33-36"
+    ],
+    "reason": "Public health accurately renamed URL booleans configured, removing the specific false healthy label. It still checks only DB/Redis overall. Dedicated RPC probe accepts null result as healthy in a synthetic test.",
+    "testGap": "No actual endpoint requests or stalled-body test; require strict result validation and full deadline.",
+    "findingIds": [
+      "PF-DATA-20"
+    ],
+    "assessmentArtifact": "data-indexer-review.md",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  },
+  {
+    "id": "RUN-06",
+    "status": "not-verified",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      "apps/web/package.json:13-24",
+      "pnpm-lock.yaml"
+    ],
+    "reason": "Dependency declarations/lockfile changed and MCP source was removed, but no fresh registry advisory/reachability audit was run. Earlier advisory counts are not current closure evidence.",
+    "testGap": "Fresh pinned inventory and context-specific advisory triage required; no package installation or network audit here.",
+    "findingIds": [],
+    "assessmentArtifact": "data-indexer-review.md",
+    "currentStatusScope": "Source-level unless explicitly accompanied by isolated test evidence; not production closure"
+  }
+]

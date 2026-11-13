@@ -46,7 +46,7 @@ function fakeClient(behaviour: Partial<Record<string, () => Promise<unknown>>> =
       statements.push(text);
       const override = behaviour[text];
       if (override) return override();
-      return { rows: [] };
+      return { rows: [], command: text === 'COMMIT' ? 'COMMIT' : text };
     }),
     release: vi.fn((destroy?: boolean) => {
       released.push(destroy);
@@ -92,10 +92,10 @@ describe('withTransaction', () => {
     const client = fakeClient();
     connect.mockResolvedValue(client);
 
-    await withTransaction(async () => {
+    await expect(withTransaction(async () => {
       expect(client.listenerCount('error')).toBe(1);
       expect(() => client.emit('error', new Error('terminating connection'))).not.toThrow();
-    });
+    })).rejects.toThrow('terminating connection');
   });
 
   it('removes its listener once the transaction is over', async () => {
@@ -153,5 +153,23 @@ describe('withTransaction', () => {
 
     expect(client.release).toHaveBeenCalledTimes(1);
     expect(client.listenerCount('error')).toBe(0);
+  });
+});
+
+
+describe('package09 transaction acknowledgement', () => {
+  it('does not report success when COMMIT was answered with ROLLBACK', async () => {
+    const client = fakeClient({ COMMIT: async () => ({ rows: [], command: 'ROLLBACK' }) });
+    connect.mockResolvedValue(client);
+    await expect(withTransaction(async () => 'not committed')).rejects.toThrow(/commit/i);
+  });
+  it('rejects an asynchronous session failure before commit and discards the client', async () => {
+    const client = fakeClient(); connect.mockResolvedValue(client);
+    await expect(withTransaction(async () => {
+      client.emit('error', new Error('session lost'));
+      return 'not committed';
+    })).rejects.toThrow('session lost');
+    expect(client.statements).not.toContain('COMMIT');
+    expect(client.released).toEqual([true]);
   });
 });

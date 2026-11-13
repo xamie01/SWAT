@@ -144,17 +144,17 @@ async function ingestSourceTrade(fixture: LifecycleFixture, eventAt: Date): Prom
         timestamp: eventAt,
         conditionId: fixtureHash(fixture, 'condition-buy'),
         asset: fixture.tokenMint,
-        size: BUY_QUANTITY,
+        size: String(BUY_QUANTITY),
         // Polymarket prices are probabilities, so the entry is 20c rather than
         // the $2 the other chains use.
-        price: 0.2,
+        price: '0.2',
         side: 'BUY',
         transactionHash: fixtureHash(fixture, 'tx-buy'),
         outcome: 'Yes',
         title: 'pipeline integration market'
       },
       quantity: String(BUY_QUANTITY),
-      amountUsd: BUY_QUANTITY * 0.2
+      amountUsd: String(BUY_QUANTITY * 0.2)
     });
     return persisted.event.id;
   }

@@ -1,5 +1,5 @@
 import type { Chain } from '@swat/shared';
-import { pool } from './client.js';
+import { withDirectAdvisoryLock } from './direct-session.js';
 
 /**
  * Per-account EVM nonce serialisation (`S4-M12`).
@@ -76,7 +76,8 @@ export type EvmNonceLockOutcome<T> =
  * queue re-delivers the job after the current holder has submitted and the
  * node's pending nonce has advanced.
  *
- * Errors from `run` propagate unchanged, after the lock is released.
+ * Errors from `run` propagate after checked unlock. Cleanup failures also reject;
+ * callers must reconcile uncertain submission instead of blindly resubmitting.
  */
 export async function withEvmNonceLock<T>(input: {
   chain: Chain;
@@ -84,45 +85,5 @@ export async function withEvmNonceLock<T>(input: {
   run: () => Promise<T>;
 }): Promise<EvmNonceLockOutcome<T>> {
   const key = evmNonceLockKey(input.chain, input.account);
-  const client = await pool.connect();
-
-  // Registered before the first statement, for the same reason
-  // `withTransaction` does it: a checked-out client is not covered by the pool's
-  // error handler, and an EventEmitter that emits 'error' with no listener
-  // throws — so a database restart mid-trade would take the process down rather
-  // than failing the one trade in flight.
-  const swallowClientError = (): void => {};
-  client.on('error', swallowClientError);
-
-  let connectionBroken = false;
-  let held = false;
-  try {
-    const locked = await client.query<{ locked: boolean }>(
-      `SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`,
-      [key]
-    );
-    held = locked.rows[0]?.locked === true;
-    if (!held) return { acquired: false };
-    return { acquired: true, result: await input.run() };
-  } catch (error) {
-    // A failure here must not return the connection to the pool still holding
-    // the lock; the finally below handles that. Rethrow so the caller fails the
-    // trade rather than proceeding unserialised.
-    throw error;
-  } finally {
-    if (held) {
-      try {
-        await client.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [key]);
-      } catch {
-        // The unlock failed, so this session may still hold the lock. Destroying
-        // the client ends the session, and a session-scoped advisory lock dies
-        // with it. Returning it to the pool instead would leak the lock for the
-        // life of that pooled connection and wedge the account indefinitely —
-        // the one outcome worse than failing this trade.
-        connectionBroken = true;
-      }
-    }
-    client.off('error', swallowClientError);
-    client.release(connectionBroken);
-  }
+  return withDirectAdvisoryLock('runtime', key, () => input.run());
 }

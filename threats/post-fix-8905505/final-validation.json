@@ -1,0 +1,69 @@
+{
+  "checkedUtc": "2026-11-08T19:27:41.279772+00:00",
+  "head": "8905505595802c21053118b5fab3fd53a8a1654c",
+  "cpuAffinity": [
+    0
+  ],
+  "sourceFilesHashed": 778,
+  "changedSourceFiles": [],
+  "trackedChanges": [
+    "threats/README.md"
+  ],
+  "gitStatus": "M threats/README.md\n?? threats/07-post-remediation-review.md\n?? threats/__pycache__/\n?? threats/evidence/__pycache__/\n?? threats/post-fix-8905505/\n?? threats/runtime/web-snapshot/app/apple-icon.png\n?? threats/runtime/web-snapshot/app/favicon.ico\n?? threats/runtime/web-snapshot/app/icon.png\n?? threats/runtime/web-snapshot/node_modules\n?? threats/runtime/web-snapshot/public/apple-icon.png\n?? threats/runtime/web-snapshot/public/campaign/\n?? threats/runtime/web-snapshot/public/favicon.ico\n?? threats/runtime/web-snapshot/public/icon.png\n?? threats/runtime/web-snapshot/public/wake-logo-dark.png\n?? threats/runtime/web-snapshot/public/wake-logo-original.jpg\n?? threats/runtime/web-snapshot/public/wake-logo-white.png\n?? threats/runtime/web-snapshot/public/wake-logo.png",
+  "explicitCitationOccurrencesChecked": 523,
+  "localLinksChecked": 25,
+  "closureCounts": {
+    "partial": 33,
+    "open": 43,
+    "not-verified": 7,
+    "closed(source)": 10,
+    "surface-removed": 4
+  },
+  "testRunsUsedForUniqueCounts": [
+    {
+      "label": "existing-pure-regressions",
+      "passed": 74,
+      "failed": 0,
+      "total": 74
+    },
+    {
+      "label": "existing-changed-regressions",
+      "passed": 102,
+      "failed": 0,
+      "total": 102
+    },
+    {
+      "label": "api-invariants-offline",
+      "passed": 0,
+      "failed": 4,
+      "total": 4
+    },
+    {
+      "label": "parser-session-invariants",
+      "passed": 1,
+      "failed": 5,
+      "total": 6
+    },
+    {
+      "label": "sensitive-flow-invariants",
+      "passed": 0,
+      "failed": 4,
+      "total": 4
+    },
+    {
+      "label": "jito-invariants-stateful",
+      "passed": 0,
+      "failed": 3,
+      "total": 3
+    }
+  ],
+  "coverage": {
+    "recordedRequestedReadFiles": 148,
+    "recordedRequestedRanges": 336,
+    "qualification": "Helper requested ranges only, not proof of untruncated complete reads. See partition coverage for direct reads/searches and truncation caveats."
+  },
+  "literalScanFiles": 140,
+  "literalScanCandidates": 0,
+  "limitations": "Structural/source consistency only. Not an exploitability, production privilege, clean-current-bundle or OWASP-compliance attestation.",
+  "issues": []
+}

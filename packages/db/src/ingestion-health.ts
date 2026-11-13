@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   INGESTION_CHAINS,
+  parseIngestionEvidence,
+  type IngestionEvidence,
   type Chain,
   type RawIngestionHealth
 } from '@swat/shared';
@@ -16,6 +18,7 @@ export type RecordIngestionBatchInput = {
   skipped?: number;
   failed?: number;
   errorMessage?: string | null;
+  evidence?: IngestionEvidence;
 };
 
 export type IngestionAlertTarget = 'healthy' | 'stale';
@@ -42,14 +45,29 @@ export async function recordIngestionBatch(input: RecordIngestionBatchInput) {
   const batchAt = input.batchAt ?? new Date();
   const lastEventAt = input.lastEventAt ?? null;
   const errorMessage = input.errorMessage?.slice(0, 2000) ?? null;
+  const evidence = input.evidence === undefined ? null : parseIngestionEvidence(input.evidence);
+  if (input.evidence !== undefined && (!evidence || evidence.quarantined > skipped)) {
+    throw new Error('Invalid ingestion evidence or quarantine exceeds skipped');
+  }
 
   await withTransaction(async (client) => {
+    // Deploy-compatible: no evidence column is assumed. Missing schema keeps
+    // legacy counters available; the reader then explicitly projects unknown.
+    const capability = evidence ? await client.query<{ available: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM pg_attribute
+         WHERE attrelid = 'ingestion_health_batches'::regclass
+           AND attname = 'evidence' AND NOT attisdropped
+           AND atttypid = 'jsonb'::regtype
+       ) AS available`
+    ) : null;
+    const hasEvidence = capability?.rows[0]?.available === true;
     await client.query(
       `INSERT INTO ingestion_health_batches (
          chain, source, batch_at, last_event_at,
-         inserted_count, skipped_count, failed_count, error_message
+         inserted_count, skipped_count, failed_count, error_message${hasEvidence ? ', evidence' : ''}
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8${hasEvidence ? ', $9::jsonb' : ''})`,
       [
         input.chain,
         input.source,
@@ -58,7 +76,8 @@ export async function recordIngestionBatch(input: RecordIngestionBatchInput) {
         inserted,
         skipped,
         failed,
-        errorMessage
+        errorMessage,
+        ...(hasEvidence ? [JSON.stringify(evidence)] : [])
       ]
     );
     await client.query(
@@ -113,6 +132,8 @@ export async function getIngestionHealth24h(): Promise<RawIngestionHealth[]> {
     inserted_24h: string;
     skipped_24h: string;
     failed_24h: string;
+    evidence_batches: unknown[] | null;
+    source_evidence: RawIngestionHealth['sourceEvidence'];
   }>(`
     SELECT
       h.chain,
@@ -121,7 +142,16 @@ export async function getIngestionHealth24h(): Promise<RawIngestionHealth[]> {
       h.last_success_at,
       COALESCE(SUM(b.inserted_count), 0)::text AS inserted_24h,
       COALESCE(SUM(b.skipped_count), 0)::text AS skipped_24h,
-      COALESCE(SUM(b.failed_count), 0)::text AS failed_24h
+      COALESCE(SUM(b.failed_count), 0)::text AS failed_24h,
+      JSONB_AGG(to_jsonb(b)->'evidence') FILTER (WHERE b.id IS NOT NULL) AS evidence_batches,
+      (SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+         'source', latest.source, 'batchAt', latest.batch_at, 'evidence', latest.evidence
+       )) FROM (
+         SELECT DISTINCT ON (source) source, batch_at, to_jsonb(b)->'evidence' AS evidence
+         FROM ingestion_health_batches b
+         WHERE b.chain = h.chain
+         ORDER BY source, batch_at DESC, id DESC
+       ) latest) AS source_evidence
     FROM ingestion_health h
     LEFT JOIN ingestion_health_batches b
       ON b.chain = h.chain
@@ -134,15 +164,31 @@ export async function getIngestionHealth24h(): Promise<RawIngestionHealth[]> {
     END
   `);
 
-  return rows.map((row) => ({
-    chain: row.chain,
-    lastEventAt: row.last_event_at,
-    lastBatchAt: row.last_batch_at,
-    lastSuccessAt: row.last_success_at,
-    inserted24h: row.inserted_24h,
-    skipped24h: row.skipped_24h,
-    failed24h: row.failed_24h
-  }));
+  return rows.map((row) => {
+    const batches = row.evidence_batches?.map(parseIngestionEvidence) ?? [];
+    const totals = batches.length > 0 && batches.every((item) => item !== null)
+      ? batches.reduce((sum, item) => ({
+        observed: sum.observed + item!.observed,
+        quarantined: sum.quarantined + item!.quarantined,
+        accepted: sum.accepted + item!.accepted
+      }), { observed: 0, quarantined: 0, accepted: 0 }) : null;
+    const safeTotals = totals && parseIngestionEvidence({ ...totals,
+      completeness: 'unknown', scope: 'delivery', confirmation: 'unknown'
+    });
+    return {
+      chain: row.chain,
+      lastEventAt: row.last_event_at,
+      lastBatchAt: row.last_batch_at,
+      lastSuccessAt: row.last_success_at,
+      inserted24h: row.inserted_24h,
+      skipped24h: row.skipped_24h,
+      failed24h: row.failed_24h,
+      evidenceTotals: safeTotals ? totals : null,
+      sourceEvidence: (row.source_evidence ?? []).map((item) => ({
+        ...item, evidence: parseIngestionEvidence(item.evidence)
+      }))
+    };
+  });
 }
 
 export async function reserveIngestionHealthAlert(

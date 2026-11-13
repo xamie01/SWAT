@@ -18,7 +18,9 @@ describe('ingestion health snapshots', () => {
     ], NOW);
 
     expect(solana).toMatchObject({
-      status: 'healthy',
+      status: 'unready',
+      eventFreshness: 'fresh',
+      readiness: 'blocked',
       lagSeconds: 120,
       batchLagSeconds: 60,
       inserted24h: 9,
@@ -53,7 +55,8 @@ describe('ingestion health snapshots', () => {
       }
     ], NOW).find((item) => item.chain === 'polygon');
 
-    expect(boundary?.status).toBe('healthy');
+    expect(boundary?.eventFreshness).toBe('fresh');
+    expect(boundary?.status).toBe('unready');
     expect(stale?.status).toBe('stale');
   });
 

@@ -18,20 +18,7 @@ import { SESSION_COOKIE } from './lib/api.js';
  * data 403s.
  */
 
-const rawApiBase =
-  process.env.INTERNAL_API_URL ??
-  process.env.BACKEND_API_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  (process.env.NODE_ENV === 'production' ? 'https://75.119.151.184:3001' : 'http://localhost:3001');
-
-// INF-04 / WEB-04: Enforce HTTPS for non-loopback remote endpoints in production
-const API_BASE =
-  process.env.NODE_ENV === 'production' &&
-  rawApiBase.startsWith('http://') &&
-  !rawApiBase.includes('localhost') &&
-  !rawApiBase.includes('127.0.0.1')
-    ? rawApiBase.replace(/^http:\/\//, 'https://')
-    : rawApiBase;
+import { resolveBackendTarget } from './lib/backend-target.js';
 
 /**
  * Asks the API who this session belongs to.
@@ -48,8 +35,9 @@ async function fetchRole(request: NextRequest): Promise<Role | null> {
   const sessionToken = request.cookies.get(SESSION_COOKIE)?.value;
   if (!sessionToken) return null;
   try {
-    const response = await fetch(`${API_BASE}/v1/auth/me`, {
+    const response = await fetch(`${resolveBackendTarget('api')}/v1/auth/me`, {
       headers: { cookie: `${SESSION_COOKIE}=${sessionToken}` },
+      redirect: 'error',
       // Middleware must never serve a cached identity: a stale 200 would keep a
       // revoked session admitted for as long as the cache lived.
       cache: 'no-store'

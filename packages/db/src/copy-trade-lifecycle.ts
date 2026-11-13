@@ -280,6 +280,21 @@ const COPY_EXECUTION_COLUMNS = `
   source_position_before_quantity::text AS source_position_before_quantity,
   source_sell_fraction::text AS source_sell_fraction`;
 
+/** Source-only containment, not a chain finality or runtime certification. */
+export function getSourceConfirmationReadiness(): Readonly<{
+  ready: false;
+  reason: 'source-confirmation-verifier-unavailable';
+}> {
+  return { ready: false, reason: 'source-confirmation-verifier-unavailable' };
+}
+
+function assertSourceConfirmationReady(): void {
+  // Deliberately no env flag or caller-supplied certificate can restore trust.
+  if (!getSourceConfirmationReadiness().ready) {
+    throw new Error('Source confirmation verifier is unavailable');
+  }
+}
+
 function assertIdentifier(name: string, value: string, maximumLength = 256): string {
   if (!value || value.trim() !== value || value.length > maximumLength) {
     throw new Error(`${name} must be non-empty, trimmed, and at most ${maximumLength} characters`);
@@ -422,190 +437,17 @@ function isStaleConfirmation(
   return current === 'confirmed' && proposed === 'observed';
 }
 
-async function ensureSourcePosition(client: PoolClient, source: SourceTradeDbRow): Promise<void> {
-  await client.query(
-    `INSERT INTO wallet_positions (wallet_address, chain, token_mint)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (wallet_address, chain, token_mint) DO NOTHING`,
-    [source.wallet_address, source.chain, source.token_mint]
-  );
-  await client.query(
-    `SELECT wallet_address
-       FROM wallet_positions
-      WHERE wallet_address = $1 AND chain = $2 AND token_mint = $3
-      FOR UPDATE`,
-    [source.wallet_address, source.chain, source.token_mint]
-  );
-}
-
-async function rebuildSourcePosition(
-  client: PoolClient,
-  source: SourceTradeDbRow
-): Promise<PositionRecord> {
-  const result = await client.query<QueryResultRow & {
-    wallet_address: string;
-    chain: Chain;
-    token_mint: string;
-    confirmed_quantity: string;
-    cost_basis_usd: string;
-    total_acquired_quantity: string;
-    total_reduced_quantity: string;
-    unmatched_reduction_quantity: string;
-    last_event_at: Date | null;
-  }>(
-    `WITH RECURSIVE ordered_events AS (
-       SELECT
-         ROW_NUMBER() OVER (ORDER BY st.event_at, st.id)::bigint AS sequence,
-         st.direction,
-         st.token_amount,
-         st.amount_usd,
-         st.price_usd,
-         st.event_at
-       FROM source_position_applications spa
-       JOIN source_trades st ON st.id = spa.source_trade_id
-       WHERE spa.wallet_address = $1
-         AND spa.chain = $2
-         AND spa.token_mint = $3
-         AND spa.active
-     ), ledger AS (
-       SELECT
-         0::bigint AS sequence,
-         wp.opening_balance AS quantity,
-         wp.opening_cost_basis_usd AS cost_basis,
-         0::numeric AS acquired,
-         0::numeric AS reduced,
-         0::numeric AS unmatched
-       FROM wallet_positions wp
-       WHERE wp.wallet_address = $1 AND wp.chain = $2 AND wp.token_mint = $3
-
-       UNION ALL
-
-       SELECT
-         event.sequence,
-         CASE
-           WHEN event.direction IN ('buy', 'transfer_in') THEN ledger.quantity + event.token_amount
-           ELSE GREATEST(0, ledger.quantity - event.token_amount)
-         END,
-         CASE
-           WHEN event.direction IN ('buy', 'transfer_in') THEN
-             ledger.cost_basis + COALESCE(event.amount_usd, event.token_amount * event.price_usd, 0)
-           WHEN ledger.quantity = 0 THEN 0
-           ELSE GREATEST(
-             0,
-             ledger.cost_basis - (ledger.cost_basis / ledger.quantity) * LEAST(ledger.quantity, event.token_amount)
-           )
-         END,
-         ledger.acquired + CASE WHEN event.direction IN ('buy', 'transfer_in') THEN event.token_amount ELSE 0 END,
-         ledger.reduced + CASE WHEN event.direction IN ('sell', 'transfer_out') THEN event.token_amount ELSE 0 END,
-         ledger.unmatched + CASE
-           WHEN event.direction IN ('sell', 'transfer_out') THEN GREATEST(0, event.token_amount - ledger.quantity)
-           ELSE 0
-         END
-       FROM ledger
-       JOIN ordered_events event ON event.sequence = ledger.sequence + 1
-     ), final AS (
-       SELECT * FROM ledger ORDER BY sequence DESC LIMIT 1
-     ), last_event AS (
-       SELECT MAX(event_at) AS event_at FROM ordered_events
-     )
-     UPDATE wallet_positions position
-        SET balance = final.quantity,
-            cost_basis_usd = final.cost_basis,
-            total_acquired_quantity = final.acquired,
-            total_reduced_quantity = final.reduced,
-            unmatched_reduction_quantity = final.unmatched,
-            last_event_at = last_event.event_at,
-            updated_at = NOW()
-       FROM final, last_event
-      WHERE position.wallet_address = $1
-        AND position.chain = $2
-        AND position.token_mint = $3
-     RETURNING
-       position.wallet_address,
-       position.chain,
-       position.token_mint,
-       position.balance::text AS confirmed_quantity,
-       position.cost_basis_usd::text AS cost_basis_usd,
-       position.total_acquired_quantity::text AS total_acquired_quantity,
-       position.total_reduced_quantity::text AS total_reduced_quantity,
-       position.unmatched_reduction_quantity::text AS unmatched_reduction_quantity,
-       position.last_event_at`,
-    [source.wallet_address, source.chain, source.token_mint]
-  );
-  const row = result.rows[0];
-  if (!row) throw new Error('Source position rebuild did not return a row');
-  return {
-    walletAddress: row.wallet_address,
-    chain: row.chain,
-    tokenMint: row.token_mint,
-    confirmedQuantity: row.confirmed_quantity,
-    costBasisUsd: row.cost_basis_usd,
-    totalAcquiredQuantity: row.total_acquired_quantity,
-    totalReducedQuantity: row.total_reduced_quantity,
-    unmatchedReductionQuantity: row.unmatched_reduction_quantity,
-    lastEventAt: row.last_event_at
-  };
-}
-
-async function applySourceConfirmation(
-  client: PoolClient,
-  source: SourceTradeDbRow,
-  proposedState: SourceConfirmationState,
-  evidenceId: string,
-  evidenceObservedAt: Date
-): Promise<{ source: SourceTradeDbRow; position: PositionRecord }> {
-  let current = source;
-  if (current.confirmation_state !== proposedState) {
-    if (canTransitionSourceConfirmation(current.confirmation_state, proposedState)) {
-      const updated = await client.query<SourceTradeDbRow>(
-        `UPDATE source_trades
-            SET confirmation_state = $2::text,
-                status = $2::text,
-                confirmation_updated_at = $3
-          WHERE id = $1
-        RETURNING ${SOURCE_TRADE_COLUMNS}`,
-        [current.id, proposedState, evidenceObservedAt]
-      );
-      current = updated.rows[0] as SourceTradeDbRow;
-    } else if (!isStaleConfirmation(current.confirmation_state, proposedState)) {
-      throw new Error(
-        `Invalid source confirmation transition: ${current.confirmation_state} -> ${proposedState}`
-      );
-    }
-  }
-
-  await client.query(
-    `INSERT INTO source_trade_confirmation_history (
-       source_trade_id, confirmation_state, evidence_id, observed_at
-     ) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (source_trade_id, confirmation_state, evidence_id) DO NOTHING`,
-    [current.id, proposedState, evidenceId, evidenceObservedAt]
-  );
-
-  await ensureSourcePosition(client, current);
-  await client.query(
-    `INSERT INTO source_position_applications (
-       source_trade_id, wallet_address, chain, token_mint, active
-     ) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (source_trade_id) DO UPDATE
-       SET active = EXCLUDED.active,
-           updated_at = NOW()`,
-    [
-      current.id,
-      current.wallet_address,
-      current.chain,
-      current.token_mint,
-      isAppliedSourceConfirmation(current.confirmation_state)
-    ]
-  );
-  return { source: current, position: await rebuildSourcePosition(client, current) };
-}
-
 export async function recordSourceTradeEvent(input: SourceTradeEventInput): Promise<{
   event: CanonicalSourceTrade;
-  position: PositionRecord;
+  position: PositionRecord | null;
   inserted: boolean;
+  eligibleForCopy: false;
 }> {
+  // Evidence IDs describe provenance only. No legitimate source-confirmation
+  // verifier is wired; accepting caller-labelled finality would invent authority.
+  if (input.confirmationState !== 'observed') {
+    assertSourceConfirmationReady();
+  }
   const wallet = resolveChainAddress(input.walletAddress, input.chain);
   const token = resolveChainValue(input.tokenMint, input.chain);
   const sourceEventId = assertIdentifier('sourceEventId', input.sourceEventId);
@@ -673,6 +515,7 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
                 AND amount_usd IS NOT DISTINCT FROM $10::numeric
                 AND price_usd IS NOT DISTINCT FROM $11::numeric
                 AND event_at = $12
+                AND fee_usd IS NOT DISTINCT FROM $13::numeric
               ) AS payload_matches
          FROM source_trades
         WHERE chain = $1
@@ -692,7 +535,8 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
         quantity,
         amountUsd,
         priceUsd,
-        eventAt
+        eventAt,
+        feeUsd
       ]
     );
     const source = selected.rows[0];
@@ -701,17 +545,20 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
       throw new Error('Source event identity collision with a different immutable payload');
     }
 
-    const applied = await applySourceConfirmation(
-      client,
-      source,
-      input.confirmationState,
-      confirmationEvidenceId,
-      observedAt
+    // Intake provenance is not confirmation authority. In particular, replaying
+    // an observation must not re-activate or rebuild historical applications.
+    await client.query(
+      `INSERT INTO source_trade_confirmation_history (
+         source_trade_id, confirmation_state, evidence_id, observed_at
+       ) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (source_trade_id, confirmation_state, evidence_id) DO NOTHING`,
+      [source.id, input.confirmationState, confirmationEvidenceId, observedAt]
     );
     return {
-      event: mapSourceTrade(applied.source),
-      position: applied.position,
-      inserted: inserted.rowCount === 1
+      event: mapSourceTrade(source),
+      position: null,
+      inserted: inserted.rowCount === 1,
+      eligibleForCopy: false
     };
   });
 }
@@ -722,28 +569,10 @@ export async function advanceSourceTradeConfirmation(input: {
   evidenceId: string;
   observedAt?: Date;
 }): Promise<{ event: CanonicalSourceTrade; position: PositionRecord }> {
-  const sourceTradeId = assertIdentifier('sourceTradeId', input.sourceTradeId, 128);
-  const evidenceId = assertIdentifier('evidenceId', input.evidenceId);
-  const observedAt = assertDate('observedAt', input.observedAt ?? new Date());
-  return inTransaction(async (client) => {
-    const selected = await client.query<SourceTradeDbRow>(
-      `SELECT ${SOURCE_TRADE_COLUMNS}
-         FROM source_trades
-        WHERE id = $1
-        FOR UPDATE`,
-      [sourceTradeId]
-    );
-    const source = selected.rows[0];
-    if (!source) throw new Error(`Source trade ${sourceTradeId} does not exist`);
-    const applied = await applySourceConfirmation(
-      client,
-      source,
-      input.confirmationState,
-      evidenceId,
-      observedAt
-    );
-    return { event: mapSourceTrade(applied.source), position: applied.position };
-  });
+  // A state label/evidence ID is not a verifier. Keep this legacy public seam
+  // unavailable until authority-bound evidence, replay and reversal are reviewed.
+  // Observation intake belongs to recordSourceTradeEvent, not this transition.
+  throw new Error('Source confirmation verifier is unavailable');
 }
 
 /**
@@ -816,88 +645,16 @@ export async function listSourceTradeSignalCandidates(input: {
   limit?: number;
   now?: Date;
 }): Promise<SourceTradeSignalCandidate[]> {
-  const sourceTradeId = input.sourceTradeId
-    ? assertIdentifier('sourceTradeId', input.sourceTradeId, 128)
-    : null;
-  const maxEventAgeMs = boundedDuration('maxEventAgeMs', input.maxEventAgeMs);
+  if (input.sourceTradeId) assertIdentifier('sourceTradeId', input.sourceTradeId, 128);
+  boundedDuration('maxEventAgeMs', input.maxEventAgeMs);
   const limit = input.limit ?? 100;
   if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
     throw new Error('limit must be an integer between 1 and 1000');
   }
-  const now = assertDate('now', input.now ?? new Date());
-  const rows = await query<QueryResultRow & {
-    source_trade_id: string;
-    chain: Chain;
-    wallet_address: string;
-    token_mint: string;
-    direction: 'buy' | 'sell';
-    quantity: string;
-    amount_usd: string | null;
-    price_usd: string | null;
-    event_at: Date;
-    wallet_score: string;
-    wallet_tier: string | null;
-    cluster_id: string | null;
-    cluster_confidence: string;
-  }>(
-    `SELECT
-       source.id AS source_trade_id,
-       source.chain,
-       source.wallet_address,
-       source.token_mint,
-       source.direction,
-       source.token_amount::text AS quantity,
-       source.amount_usd::text AS amount_usd,
-       source.price_usd::text AS price_usd,
-       source.event_at,
-       wallet.composite_score::text AS wallet_score,
-       wallet.tier AS wallet_tier,
-       selected_cluster.cluster_id,
-       COALESCE(selected_cluster.confidence, wallet.composite_score / 100, 0)::text
-         AS cluster_confidence
-     FROM source_trades source
-     JOIN wallets wallet
-       ON wallet.address = source.wallet_address
-      AND wallet.status = 'active'
-      AND wallet.composite_score IS NOT NULL
-     LEFT JOIN LATERAL (
-       SELECT membership.cluster_id, cluster.confidence
-       FROM cluster_memberships membership
-       JOIN wallet_clusters cluster ON cluster.id = membership.cluster_id
-       WHERE membership.wallet_address = source.wallet_address
-       ORDER BY cluster.confidence DESC, membership.cluster_id
-       LIMIT 1
-     ) selected_cluster ON TRUE
-     LEFT JOIN signals signal ON signal.source_trade_id = source.id
-     WHERE source.confirmation_state IN ('confirmed', 'finalized')
-       AND source.direction IN ('buy', 'sell')
-       AND (
-         signal.id IS NULL
-         OR (signal.source_dispatched_at IS NULL AND signal.status IN ('eligible', 'alerted'))
-       )
-       AND ($1::uuid IS NULL OR source.id = $1)
-       AND source.event_at >= $2::timestamptz - ($3::bigint * INTERVAL '1 millisecond')
-       AND source.event_at <= $2::timestamptz + INTERVAL '30 seconds'
-     ORDER BY source.event_at, source.id
-     LIMIT $4`,
-    [sourceTradeId, now, maxEventAgeMs, limit]
-  );
-  return rows.map((row) => ({
-    sourceTradeId: row.source_trade_id,
-    chain: row.chain,
-    walletAddress: row.wallet_address,
-    tokenMint: row.token_mint,
-    side: row.direction,
-    quantity: row.quantity,
-    amountUsd: row.amount_usd,
-    priceUsd: row.price_usd,
-    feeUsd: row.fee_usd ?? null,
-    eventAt: row.event_at,
-    walletScore: Number(row.wallet_score),
-    walletTier: row.wallet_tier,
-    clusterId: row.cluster_id,
-    clusterConfidence: Number(row.cluster_confidence)
-  }));
+  assertDate('now', input.now ?? new Date());
+  // Historical state labels are not certificates. There is no trusted verifier
+  // or promotion/republication worker; withhold candidates without touching rows.
+  return [];
 }
 
 export async function markSourceTradeSignalDispatched(signalId: string, dispatchedAt = new Date()): Promise<boolean> {
@@ -1046,6 +803,7 @@ export async function insertSourceTradeSignal(input: {
     );
     const source = sourceResult.rows[0];
     if (!source) throw new Error(`Source trade ${sourceTradeId} does not exist`);
+    assertSourceConfirmationReady();
     if (!isAppliedSourceConfirmation(source.confirmation_state)) {
       throw new Error(`Source trade ${sourceTradeId} is not confirmed`);
     }
@@ -1483,6 +1241,7 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
     );
     const source = sourceResult.rows[0];
     if (!source) throw new Error(`Source trade ${sourceTradeId} does not exist`);
+    assertSourceConfirmationReady();
     if (!isAppliedSourceConfirmation(source.confirmation_state)) {
       throw new Error(`Source trade ${sourceTradeId} is not confirmed`);
     }
@@ -1847,6 +1606,18 @@ export async function claimSourceSignalForCopyExecution(input: {
         throw new Error('Copy execution source identity is linked to a different signal');
       }
       return { execution: mapCopyExecution(existing), created: false, claimed: false };
+    }
+
+    // Existing-execution replay above is intentionally unchanged here; its
+    // retry/submission guard belongs to the separately ordered execution work.
+    // Fresh claims must not trust historical confirmation labels.
+    if (!getSourceConfirmationReadiness().ready) {
+      return {
+        execution: null,
+        created: false,
+        claimed: false,
+        reason: 'Source confirmation verifier is unavailable'
+      };
     }
 
     // Deliberately NOT tenant-scoped. A signal is a shared detection, not a

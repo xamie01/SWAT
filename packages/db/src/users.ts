@@ -179,102 +179,49 @@ export interface ResolvedSession {
   readonly user: UserRecord;
 }
 
-export const SESSION_CACHE_TTL_MS = 60_000;
-export const SESSION_CACHE_MAX_ENTRIES = 10_000;
-
-interface CachedSession {
-  readonly session: ResolvedSession;
-  readonly timestamp: number;
-}
-
-const cachedSessions = new Map<string, CachedSession>();
-
-function pruneSessionCache(now: number): void {
-  for (const [key, entry] of cachedSessions) {
-    if (now - entry.timestamp >= SESSION_CACHE_TTL_MS) cachedSessions.delete(key);
-  }
-  if (cachedSessions.size <= SESSION_CACHE_MAX_ENTRIES) return;
-  const excess = cachedSessions.size - SESSION_CACHE_MAX_ENTRIES;
-  let removed = 0;
-  for (const key of cachedSessions.keys()) {
-    if (removed >= excess) break;
-    cachedSessions.delete(key);
-    removed += 1;
-  }
-}
-
-export function clearSessionCache(): void {
-  cachedSessions.clear();
-}
-
-export function sessionCacheSize(): number {
-  return cachedSessions.size;
-}
-
-export function invalidateUserSessionCache(userId: string): void {
-  for (const [key, entry] of cachedSessions) {
-    if (entry.session.user.id === userId) {
-      cachedSessions.delete(key);
-    }
-  }
-}
+// Compatibility hooks for existing callers; authorization is never cached.
+export const SESSION_CACHE_TTL_MS = 0;
+export const SESSION_CACHE_MAX_ENTRIES = 0;
+export function clearSessionCache(): void {}
+export function sessionCacheSize(): number { return 0; }
+export function invalidateUserSessionCache(_userId: string): void {}
 
 /**
- * Resolves a presented token to its session and user, or null.
- *
- * Both expiry rules live in the WHERE clause, so a stale session cannot be
- * resolved by a caller that forgets to check one of them, and `last_seen_at` is
- * advanced in the same statement so the idle window slides on use.
- *
- * Reads are cached in an in-memory bounded LRU map for 60 seconds to prevent
- * write-amplification (an UPDATE on every GET) from saturating Postgres under load.
- * Revocations invalidate the cache immediately.
+ * Every request uses authoritative database state. The second statement obtains
+ * a fresh snapshot after the touch: a pre-revocation lookup cannot restore a
+ * grant after a committed revoke/password change/deactivation. A revoke after
+ * this final snapshot may overlap an already-authorized request; this does not
+ * claim linearization of downstream business operations beyond their own DB
+ * transactions. Do not run these reads against an asynchronously lagging replica.
  */
 export async function resolveSession(token: string): Promise<ResolvedSession | null> {
   const tokenHash = hashToken(token);
-  const cacheKey = tokenHash.toString('hex');
-  const now = Date.now();
-  const cached = cachedSessions.get(cacheKey);
-  if (cached && now - cached.timestamp < SESSION_CACHE_TTL_MS) {
-    return cached.session;
-  }
-
-  const rows = await query<UserRow & { session_id: string }>(
-    `WITH touched AS (
-       UPDATE user_sessions
-          SET last_seen_at = NOW()
-        WHERE token_hash = $1
-          AND revoked_at IS NULL
-          AND expires_at > NOW()
-          AND last_seen_at > NOW() - ($2::bigint * interval '1 millisecond')
-        RETURNING id AS session_id, user_id
-     )
-     SELECT touched.session_id, ${USER_COLUMNS}
-       FROM touched
-       JOIN users ON users.id = touched.user_id`,
+  const touched = await query<{ session_id: string }>(
+    `UPDATE user_sessions SET last_seen_at = NOW()
+      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()
+        AND last_seen_at > NOW() - ($2::bigint * interval '1 millisecond')
+      RETURNING id AS session_id`,
     [tokenHash, SESSION_IDLE_TTL_MS]
   );
-  const row = rows?.[0];
-  if (!row) {
-    cachedSessions.delete(cacheKey);
-    return null;
-  }
-
-  const resolved: ResolvedSession = { sessionId: row.session_id, user: toUser(row) };
-  cachedSessions.set(cacheKey, { session: resolved, timestamp: now });
-  pruneSessionCache(now);
-  return resolved;
+  if (!touched[0]) return null;
+  const rows = await query<UserRow & { session_id: string }>(
+    `SELECT s.id AS session_id, ${USER_COLUMNS.split(', ').map(c => `u.${c}`).join(', ')}
+       FROM user_sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.id = $1 AND s.token_hash = $2 AND s.revoked_at IS NULL
+        AND s.expires_at > NOW()
+        AND s.last_seen_at > NOW() - ($3::bigint * interval '1 millisecond')
+        AND u.status = 'active'`,
+    [touched[0].session_id, tokenHash, SESSION_IDLE_TTL_MS]
+  );
+  const row = rows[0];
+  return row?.status === 'active' ? { sessionId: row.session_id, user: toUser(row) } : null;
 }
 
 export async function revokeSession(token: string): Promise<void> {
-  const tokenHash = hashToken(token);
-  const cacheKey = tokenHash.toString('hex');
-  // DB-03: Commit DB revocation first then delete cache to prevent race re-population
   await query(
     'UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL',
-    [tokenHash]
+    [hashToken(token)]
   );
-  cachedSessions.delete(cacheKey);
 }
 
 export async function revokeAllSessions(scope: UserScope): Promise<number> {

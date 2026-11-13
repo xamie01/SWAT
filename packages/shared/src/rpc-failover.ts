@@ -13,6 +13,7 @@
  */
 
 import type { Chain } from './types.js';
+import { diagnosticEndpoint } from './redaction.js';
 
 export interface RpcEndpointState {
   readonly url: string;
@@ -188,7 +189,7 @@ export function recordRpcFailure(url: string, error: unknown, now: number = Date
   const state = getOrCreateEndpointState(url);
   state.consecutiveFailures += 1;
   state.lastFailureAt = now;
-  state.lastError = error instanceof Error ? error.message : String(error);
+  state.lastError = 'RPC request failed';
 
   const delayMs = Math.min(
     DEFAULT_COOLDOWN_BASE_MS * Math.pow(2, state.consecutiveFailures - 1),
@@ -237,8 +238,8 @@ export async function executeWithRpcFailover<T>(options: {
     } catch (err) {
       recordRpcFailure(candidateUrl, err, getNow());
       failureLog.push({
-        url: candidateUrl,
-        error: err instanceof Error ? err.message : String(err)
+        url: diagnosticEndpoint(candidateUrl),
+        error: 'RPC request failed'
       });
     }
   }
@@ -257,49 +258,36 @@ export async function probeRpcEndpoint(
 ): Promise<RpcEndpointProbe> {
   const start = Date.now();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('RPC timeout')); }, timeoutMs);
+  });
+  const endpoint = diagnosticEndpoint(url);
   try {
-    const body = chain === 'solana'
-      ? JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSlot' })
-      : JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] });
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      signal: controller.signal
-    });
-
-    clearTimeout(timer);
+    const operation = async () => {
+      const body = chain === 'solana'
+        ? JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSlot' })
+        : JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] });
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal });
+      if (!response.ok) throw new Error('RPC HTTP failure');
+      const json = await response.json() as { result?: unknown; error?: unknown } | null;
+      if (!json || json.error || !Object.prototype.hasOwnProperty.call(json, 'result')) throw new Error('RPC malformed result');
+      const result = json.result;
+      const height = chain === 'solana' && typeof result === 'number' ? result
+        : chain !== 'solana' && typeof result === 'string' && /^0x[0-9a-f]+$/i.test(result) ? Number(BigInt(result)) : NaN;
+      if (!Number.isSafeInteger(height) || height < 0) throw new Error('RPC malformed height');
+      return height;
+    };
+    const blockHeight = await Promise.race([operation(), timeout]);
     const latencyMs = Date.now() - start;
-
-    if (!res.ok) {
-      recordRpcFailure(url, `HTTP ${res.status}: ${res.statusText}`);
-      return { url, healthy: false, latencyMs, error: `HTTP ${res.status}` };
-    }
-
-    const json = (await res.json()) as { result?: number | string; error?: { message: string } };
-    if (json.error) {
-      recordRpcFailure(url, json.error.message);
-      return { url, healthy: false, latencyMs, error: json.error.message };
-    }
-
-    let blockHeight: number | undefined;
-    if (typeof json.result === 'number') {
-      blockHeight = json.result;
-    } else if (typeof json.result === 'string') {
-      blockHeight = parseInt(json.result, 16);
-    }
-
     recordRpcSuccess(url, latencyMs);
-    return { url, healthy: true, latencyMs, blockHeight };
-  } catch (err) {
-    clearTimeout(timer);
+    return { url: endpoint, healthy: true, latencyMs, blockHeight };
+  } catch {
     const latencyMs = Date.now() - start;
-    const msg = err instanceof Error ? err.message : String(err);
-    recordRpcFailure(url, msg);
-    return { url, healthy: false, latencyMs, error: msg };
+    recordRpcFailure(url, 'RPC probe failed');
+    return { url: endpoint, healthy: false, latencyMs, error: 'RPC probe failed' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -311,10 +299,11 @@ export async function probeRpcPool(
   env: Record<string, string | undefined> = process.env
 ): Promise<RpcPoolReport> {
   const urls = resolveConfiguredRpcUrls(chain, env);
-  const probes = await Promise.all(urls.map((u) => probeRpcEndpoint(u, chain)));
+  const probes: RpcEndpointProbe[] = [];
+  for (const url of urls) probes.push(await probeRpcEndpoint(url, chain));
 
-  const endpoints = probes.map((probe) => {
-    const state = getOrCreateEndpointState(probe.url);
+  const endpoints = probes.map((probe, index) => {
+    const state = getOrCreateEndpointState(urls[index]!);
     return {
       ...probe,
       consecutiveFailures: state.consecutiveFailures
@@ -322,12 +311,12 @@ export async function probeRpcPool(
   });
 
   const prioritized = prioritizeRpcEndpoints(urls);
-  const activeHealthyUrl = prioritized[0] ?? urls[0];
+  const activeHealthyUrl = prioritized.find(url => probes[urls.indexOf(url)]?.healthy);
 
   return {
     chain,
-    primaryUrl: urls[0],
-    activeHealthyUrl,
+    primaryUrl: urls[0] ? diagnosticEndpoint(urls[0]) : '',
+    activeHealthyUrl: activeHealthyUrl ? diagnosticEndpoint(activeHealthyUrl) : '',
     endpoints
   };
 }

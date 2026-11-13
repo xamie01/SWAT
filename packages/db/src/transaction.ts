@@ -43,17 +43,19 @@ export async function withTransaction<T>(
   const client = await pool.connect();
   // Registered before the first statement: the backend can die at any point
   // after checkout, including before BEGIN is acknowledged.
-  const swallowClientError = (): void => {
-    // The rejected query already carries this error to the caller. Its only
-    // other job here is to keep Node from treating it as unhandled.
-  };
+  let sessionError: Error | undefined;
+  const swallowClientError = (error: Error): void => { sessionError ??= error; };
   client.on('error', swallowClientError);
 
   let connectionBroken = false;
   try {
     await client.query(begin);
+    if (sessionError) throw sessionError;
     const result = await operation(client);
-    await client.query('COMMIT');
+    if (sessionError) throw sessionError;
+    const commit = await client.query('COMMIT');
+    if (commit.command !== 'COMMIT') throw new Error('Transaction did not commit');
+    if (sessionError) throw sessionError;
     return result;
   } catch (error) {
     try {
@@ -66,6 +68,6 @@ export async function withTransaction<T>(
     throw error;
   } finally {
     client.off('error', swallowClientError);
-    client.release(connectionBroken);
+    client.release(connectionBroken || sessionError !== undefined);
   }
 }

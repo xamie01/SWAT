@@ -27,6 +27,41 @@ describe('parsePolymarketTimestamp', () => {
 });
 
 describe('confirmed Polymarket trade parsing', () => {
+  it.each([
+    { proxy_wallet: `0x${'d'.repeat(40)}` },
+    { transaction_hash: `0x${'d'.repeat(64)}` }
+  ])('refuses conflicting aliases of source observation identity %j', (override) => {
+    expect(() => parseConfirmedPolymarketTrade({
+      proxyWallet: PROXY_WALLET, timestamp: 1719397500, conditionId: CONDITION_ID,
+      asset: TOKEN_YES, size: '12.5', price: '0.64', side: 'BUY', transactionHash: TRANSACTION_HASH,
+      outcome: 'Yes', title: 'Fixture', ...override
+    })).toThrow(/Conflicting Polymarket/);
+  });
+
+  it('converges equivalent identity aliases while ignoring unreviewed fill/log/confirmation claims', () => {
+    const raw = {
+      proxyWallet: PROXY_WALLET, timestamp: 1719397500, conditionId: CONDITION_ID,
+      asset: TOKEN_YES, size: '12.5', price: '0.64', side: 'BUY', transactionHash: TRANSACTION_HASH,
+      outcome: 'Yes', title: 'Fixture'
+    };
+    const parsed = parseConfirmedPolymarketTrade({
+      ...raw, proxy_wallet: PROXY_WALLET.toUpperCase(), transaction_hash: TRANSACTION_HASH.toUpperCase(),
+      id: 'claimed-fill', trade_id: 'claimed-trade', logIndex: 17, status: 'CONFIRMED',
+      confirmationState: 'finalized', confirmationEvidenceId: 'claimed-certificate'
+    });
+    expect(parsed).toEqual(parseConfirmedPolymarketTrade(raw));
+  });
+
+  it.each([
+    { proxy_wallet: null }, { proxy_wallet: '' }, { transaction_hash: null }, { transaction_hash: '' }
+  ])('refuses malformed explicit aliases instead of falling back to an alternate identity %j', (override) => {
+    expect(() => parseConfirmedPolymarketTrade({
+      proxyWallet: PROXY_WALLET, timestamp: 1719397500, conditionId: CONDITION_ID,
+      asset: TOKEN_YES, size: '12.5', price: '0.64', side: 'BUY', transactionHash: TRANSACTION_HASH,
+      outcome: 'Yes', title: 'Fixture', ...override
+    })).toThrow(/Invalid Polymarket/);
+  });
+
   it('preserves the exact proxy wallet and full outcome token ID', () => {
     const trade = parseConfirmedPolymarketTrade({
       proxyWallet: PROXY_WALLET.toUpperCase(),
@@ -46,10 +81,37 @@ describe('confirmed Polymarket trade parsing', () => {
       conditionId: CONDITION_ID,
       asset: TOKEN_YES,
       transactionHash: TRANSACTION_HASH,
-      size: 12.5,
-      price: 0.64,
+      size: '12.5',
+      price: '0.64',
       side: 'BUY'
     });
+  });
+
+  it.each([
+    ['0012.5000', '6.400e-1', '12.5', '0.64'],
+    ['1e-6', '1.000000000000000000', '0.000001', '1'],
+    ['9007199254.740993', '0.640000000000000001', '9007199254.740993', '0.640000000000000001']
+  ])('normalizes exact decimal size %s and price %s', (size, price, expectedSize, expectedPrice) => {
+    expect(parseConfirmedPolymarketTrade({
+      proxyWallet: PROXY_WALLET, timestamp: 1719397500, conditionId: CONDITION_ID,
+      asset: TOKEN_YES, size, price, side: 'BUY', transactionHash: TRANSACTION_HASH,
+      outcome: 'Yes', title: 'Fixture'
+    })).toMatchObject({ size: expectedSize, price: expectedPrice });
+  });
+
+  it.each([
+    { size: true }, { size: null }, { size: {} }, { size: [] },
+    { size: '0' }, { size: '-1' }, { size: '+1' }, { size: ' 1' }, { size: '1 ' },
+    { size: '0x10' }, { size: '1e999999999' }, { size: '1e37' }, { size: '1e-37' },
+    { size: '1'.repeat(129) }, { size: '1'.repeat(79) },
+    { price: '1.000000000000000001' }, { price: '0' }, { price: 'NaN' }, { price: Infinity },
+    { price: `0.${'0'.repeat(36)}1` }
+  ])('refuses malformed, over-limit or non-positive decimal fields %j', (override) => {
+    expect(() => parseConfirmedPolymarketTrade({
+      proxyWallet: PROXY_WALLET, timestamp: 1719397500, conditionId: CONDITION_ID,
+      asset: TOKEN_YES, size: '12.5', price: '0.64', side: 'BUY', transactionHash: TRANSACTION_HASH,
+      outcome: 'Yes', title: 'Fixture', ...override
+    })).toThrow(/Invalid Polymarket/);
   });
 
   it.each([

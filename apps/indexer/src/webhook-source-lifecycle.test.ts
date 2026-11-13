@@ -33,6 +33,27 @@ describe('Solana webhook source lifecycle failure handling', () => {
     vi.mocked(recordIngestionBatch).mockResolvedValue();
   });
 
+  it('records delivered quarantine separately while keeping legacy response counts', async () => {
+    vi.mocked(processTransaction).mockImplementationOnce(async (_tx, _wallet, _source, onEvidence) => {
+      onEvidence?.('quarantined');
+      return 'skipped';
+    });
+    const response = await app.inject({
+      method: 'POST', url: '/webhook/helius',
+      headers: { authorization: 'test-webhook-secret' },
+      payload: { blockTime: 1_760_000_000,
+        transaction: { signatures: ['observed-signature'], message: { accountKeys: [wallet], instructions: [] } },
+        meta: {} }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ processed: 0, skipped: 1, failed: 0 });
+    expect(recordIngestionBatch).toHaveBeenCalledWith(expect.objectContaining({
+      inserted: 0, skipped: 1, failed: 0,
+      evidence: { observed: 1, quarantined: 1, accepted: 0,
+        completeness: 'unknown', scope: 'delivery', confirmation: 'withheld' }
+    }));
+  });
+
   it('returns a retryable status when canonical lifecycle persistence fails', async () => {
     vi.mocked(processTransaction).mockRejectedValueOnce(
       new Error('canonical lifecycle unavailable')

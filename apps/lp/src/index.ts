@@ -269,6 +269,7 @@ async function runWalletIndexGuarded(): Promise<void> {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  app.addHook('onRequest', async (_request, reply) => { reply.header('Cache-Control', 'no-store'); });
   // CORS is opt-in per origin: reflecting `origin: true` with credentials
   // would let any site read cookie-authenticated responses. The operator
   // console (e.g. the Next.js app on its own port) names itself in

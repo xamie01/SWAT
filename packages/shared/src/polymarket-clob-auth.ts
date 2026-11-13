@@ -70,14 +70,14 @@ export function buildClobAuthTypedData(input: {
     },
     primaryType: 'ClobAuth' as const,
     message: {
-      address: input.signerAddress,
+      address: input.signerAddress as `0x${string}`,
       // String, not number — the type is `string` in the struct, and a numeric
       // encoding would hash differently and fail signature recovery.
       timestamp: String(input.timestampSeconds),
       nonce: input.nonce ?? 0,
       message: 'This message attests that I control the given wallet'
     }
-  };
+  } as const;
 }
 
 /**

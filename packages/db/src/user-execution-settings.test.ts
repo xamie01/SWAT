@@ -115,6 +115,7 @@ beforeEach(() => {
     if (sql.includes('user_chain_execution_settings')) {
       return { rows: sql.includes('RETURNING') ? [chainRow()] : [] };
     }
+    if (sql.includes('INSERT INTO user_execution_settings (user_id, killed)')) return { rows: [settingsRow({ killed: true })] };
     if (sql.includes('INSERT INTO user_execution_settings')) return { rows: [] };
     return { rows: [settingsRow()] };
   });
@@ -278,10 +279,12 @@ describe('upsertUserExecutionSettings', () => {
 });
 
 describe('setUserKillSwitch', () => {
-  it('is one atomic write that creates the row if absent', async () => {
+  it('creates the row and strictly audits in the same transaction', async () => {
     await setUserKillSwitch(scope, true);
-    expect(mocks.query).toHaveBeenCalledTimes(1);
-    const [sql, values] = mocks.query.mock.calls[0] as [string, unknown[]];
+    expect(mocks.query).not.toHaveBeenCalled();
+    const [sql, values] = mocks.clientQuery.mock.calls[1] as [string, unknown[]];
+    expect(mocks.clientQuery.mock.calls[2]![0]).toContain('INSERT INTO audit_log');
+    expect(mocks.clientQuery.mock.calls[3]![0]).toBe('COMMIT');
     expect(sql).toContain('INSERT INTO user_execution_settings (user_id, killed)');
     expect(sql).toContain('ON CONFLICT (user_id) DO UPDATE');
     expect(sql).not.toContain('mode');

@@ -11,7 +11,6 @@ import {
   connectEvmWallet,
   linkWalletWithSignature,
   signPolymarketClobAuth,
-  signRobinhoodDelegation,
   getSolanaProvider,
   getEvmProvider,
   deriveSolanaAnchorPda,
@@ -21,7 +20,7 @@ import {
 
 interface VaultData {
   solana: {
-    pdaAddress: string;
+    pdaAddress: string | null;
     rentLamports: number;
     solGasReserve: number;
     solGasUsd: number;
@@ -30,7 +29,8 @@ interface VaultData {
     status: string;
   };
   robinhood: {
-    smartAccountAddress: string;
+    smartAccountAddress: string | null;
+    accountAddress?: string | null;
     sessionKeyStatus: string;
     expiresAt: string | null;
     sponsoredOpsUsedToday: number;
@@ -40,7 +40,7 @@ interface VaultData {
     depositAddress: string;
     signerAddress?: string | null;
     status?: string | null;
-    apiKey?: string | null;
+    credentialsRecorded?: boolean;
     geoEligible: boolean;
     geoExpiresAt: string | null;
   };
@@ -78,21 +78,11 @@ export default function VaultPage() {
   // Interactive Modals
   const [activeModal, setActiveModal] = useState<'solana-gas' | 'robinhood-delegate' | 'polymarket-deposit' | null>(null);
 
-  // Withdrawal Form State
-  const [withdrawChain, setWithdrawChain] = useState<'solana' | 'robinhood-chain' | 'polygon'>('solana');
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawDest, setWithdrawDest] = useState('');
-  const [emailCode, setEmailCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [submittingWithdraw, setSubmittingWithdraw] = useState(false);
-
   // Solana Cluster, Copy Feedback & Modals
   const [solanaCluster, setSolanaCluster] = useState<'mainnet-beta' | 'devnet'>('mainnet-beta');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showWalletConnectModal, setShowWalletConnectModal] = useState<boolean>(false);
   const [actionSuccessNotice, setActionSuccessNotice] = useState<string | null>(null);
-  const [delegatingRh, setDelegatingRh] = useState<boolean>(false);
-  const [rhDelegationError, setRhDelegationError] = useState<string | null>(null);
 
   const triggerCopy = (text: string, key: string) => {
     const ok = copyToClipboard(text);
@@ -144,7 +134,7 @@ export default function VaultPage() {
         },
         robinhood: {
           smartAccountAddress: '',
-          sessionKeyStatus: 'not_delegated',
+          sessionKeyStatus: 'unsupported',
           expiresAt: null as any,
           sponsoredOpsUsedToday: 0,
           dailyCap: 50,
@@ -189,41 +179,8 @@ export default function VaultPage() {
         const detectedCluster = detectSolanaCluster(provider);
         setSolanaCluster(detectedCluster);
 
-        // Compute Real Solana Anchor Execution PDA
-        const { pdaAddress: derivedPda } = deriveSolanaAnchorPda(address, detectedCluster);
-
-        // Persist Solana execution grant in DB
-        await api.post('/v1/me/vault/grant', {
-          chain: 'solana',
-          grantKind: 'solana_vault',
-          accountAddress: derivedPda,
-        }).catch((err) => console.warn('Could not register solana grant in DB:', err));
-
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                solana: {
-                  ...prev.solana,
-                  pdaAddress: derivedPda,
-                  status: 'active',
-                },
-                linkedWallets: [
-                  ...prev.linkedWallets.filter((w) => w.address !== address),
-                  {
-                    address,
-                    chain: 'solana',
-                    verified: true,
-                    linkedAt: new Date().toISOString(),
-                    spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-                    isCoolingOff: false,
-                  },
-                ],
-              }
-            : prev
-        );
-
-        setWalletConnectSuccess(`Connected to ${walletName} (${detectedCluster.toUpperCase()})! Address ${address.slice(0, 4)}...${address.slice(-4)} cryptographically linked and saved. Anchor PDA: ${derivedPda}`);
+        await fetchVault();
+        setWalletConnectSuccess(`Connected to ${walletName}. Wallet ownership verified; vault deployment and user-live execution are unsupported. No funding address was created.`);
       } else if (chain === 'robinhood-chain') {
         const { address, provider, walletName } = await connectEvmWallet();
         setDetectedEvm(walletName);
@@ -235,7 +192,7 @@ export default function VaultPage() {
           provider,
         });
 
-        const derivedSmartAccount = address.startsWith('0x') ? `0x4337${address.slice(6)}` : `0x4337${address}`;
+        const accountAddress = address;
 
         setData((prev) =>
           prev
@@ -243,7 +200,7 @@ export default function VaultPage() {
                 ...prev,
                 robinhood: {
                   ...prev.robinhood,
-                  smartAccountAddress: derivedSmartAccount,
+                  smartAccountAddress: null, accountAddress, sessionKeyStatus: 'unsupported',
                 },
                 linkedWallets: [
                   ...prev.linkedWallets.filter((w) => w.address.toLowerCase() !== address.toLowerCase()),
@@ -274,7 +231,7 @@ export default function VaultPage() {
         });
 
         // 2. Derive Polymarket CLOB L2 credentials via EIP-712 ClobAuth
-        let polyApiKey: string | null = null;
+        let credentialsRecorded = false;
         try {
           const challenge = await api.get<{
             address: string;
@@ -287,7 +244,7 @@ export default function VaultPage() {
 
           const credsRes = await api.post<{
             success: boolean;
-            apiKey: string;
+            credentialsRecorded: boolean;
             address: string;
           }>('/v1/me/vault/polymarket/credentials', {
             address,
@@ -296,7 +253,7 @@ export default function VaultPage() {
             nonce: challenge.nonce,
           });
 
-          polyApiKey = credsRes.apiKey;
+          credentialsRecorded = credsRes.credentialsRecorded;
         } catch (authErr: any) {
           console.warn('Polymarket L2 credential derivation deferred:', authErr);
         }
@@ -309,10 +266,10 @@ export default function VaultPage() {
                 ...prev,
                 polymarket: {
                   ...prev.polymarket,
-                  depositAddress: derivedPolyDeposit,
+                  depositAddress: '',
                   signerAddress: address,
-                  status: polyApiKey ? 'active' : prev.polymarket?.status ?? 'uninitialized',
-                  apiKey: polyApiKey ?? prev.polymarket?.apiKey ?? null,
+                  status: credentialsRecorded ? 'credentials_recorded' : prev.polymarket?.status ?? 'uninitialized',
+                  credentialsRecorded: credentialsRecorded || prev.polymarket?.credentialsRecorded || false,
                   geoEligible: true,
                 },
                 linkedWallets: [
@@ -330,9 +287,9 @@ export default function VaultPage() {
             : prev
         );
 
-        if (polyApiKey) {
+        if (credentialsRecorded) {
           setWalletConnectSuccess(
-            `Connected to ${walletName} on Polygon! Polymarket CLOB L2 credentials derived & active (API Key: ${polyApiKey.slice(0, 8)}...).`
+            `Connected to ${walletName} on Polygon. Credentials recorded locally; live execution remains unavailable.`
           );
         } else {
           setWalletConnectSuccess(
@@ -370,7 +327,7 @@ export default function VaultPage() {
       // 3. Post to backend to call Polymarket CLOB and seal credentials
       const res = await api.post<{
         success: boolean;
-        apiKey: string;
+        credentialsRecorded: boolean;
         address: string;
         message: string;
       }>('/v1/me/vault/polymarket/credentials', {
@@ -381,7 +338,7 @@ export default function VaultPage() {
       });
 
       setWalletConnectSuccess(
-        `Polymarket CLOB L2 Authenticated! Signer ${address.slice(0, 6)}...${address.slice(-4)} active with API key ${res.apiKey.slice(0, 8)}...`
+        res.message
       );
 
       // Refresh vault data
@@ -405,82 +362,7 @@ export default function VaultPage() {
       const address = walletInput.trim();
       const chainKind = linkChain === 'solana' ? 'solana' : 'evm';
 
-      // 1. Check/request nonce
-      await api.post('/v1/auth/wallet/nonce', {
-        chainKind,
-        address,
-      }).catch(() => null);
-
-      // 2. Derive deterministic PDA for Solana or Smart Account for Robinhood
-      if (linkChain === 'solana') {
-        const { pdaAddress: derivedPda } = deriveSolanaAnchorPda(address, solanaCluster);
-        setData((prev) => prev ? {
-          ...prev,
-          solana: {
-            ...prev.solana,
-            pdaAddress: derivedPda,
-            status: 'preview',
-          },
-          linkedWallets: [
-            ...prev.linkedWallets.filter((w) => w.address !== address),
-            {
-              address,
-              chain: 'solana',
-              verified: false,
-              linkedAt: new Date().toISOString(),
-              spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-              isCoolingOff: true,
-            },
-          ],
-        } : prev);
-        setLinkSuccess(`Solana wallet preview loaded. Connect with Phantom/Solflare extension to sign SIWS verification.`);
-      } else if (linkChain === 'robinhood-chain') {
-        const derivedSmartAccount = address.startsWith('0x') ? `0x4337${address.slice(6)}` : `0x4337${address}`;
-        setData((prev) => prev ? {
-          ...prev,
-          robinhood: {
-            ...prev.robinhood,
-            smartAccountAddress: derivedSmartAccount,
-            sessionKeyStatus: 'unverified_preview',
-            expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-          },
-          linkedWallets: [
-            ...prev.linkedWallets.filter((w) => w.address !== address),
-            {
-              address,
-              chain: 'robinhood-chain',
-              verified: false,
-              linkedAt: new Date().toISOString(),
-              spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-              isCoolingOff: true,
-            },
-          ],
-        } : prev);
-        setLinkSuccess(`Robinhood wallet preview loaded. Connect with MetaMask/Rabby to cryptographically sign session.`);
-      } else {
-        const derivedPolyDeposit = address.startsWith('0x') ? `0x7739${address.slice(6)}` : `0x7739${address}`;
-        setData((prev) => prev ? {
-          ...prev,
-          polymarket: {
-            ...prev.polymarket,
-            depositAddress: derivedPolyDeposit,
-            geoEligible: true,
-          },
-          linkedWallets: [
-            ...prev.linkedWallets.filter((w) => w.address !== address),
-            {
-              address,
-              chain: 'polygon',
-              verified: false,
-              linkedAt: new Date().toISOString(),
-              spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-              isCoolingOff: true,
-            },
-          ],
-        } : prev);
-        setLinkSuccess(`Polymarket wallet preview loaded. Connect with extension to sign.`);
-      }
-
+      setLinkSuccess('An entered address is not a verified wallet or funding destination. Connect a wallet and sign the SIWE/SIWS challenge to link it.');
       setWalletInput('');
     } catch (err: any) {
       setError(err.message || 'Failed to link wallet');
@@ -489,191 +371,18 @@ export default function VaultPage() {
     }
   };
 
-  const handleSendEmailCode = async () => {
-    if (!withdrawDest) {
-      alert('Please specify a verified destination address first.');
-      return;
-    }
+  const disableLocalGrants = async (chain: 'solana' | 'robinhood-chain') => {
     try {
-      await api.post('/v1/me/trading/withdraw/request-otp', {
-        destinationAddress: withdrawDest,
-        chainKind: withdrawChain === 'solana' ? 'solana' : 'evm'
-      });
-      setCodeSent(true);
-      alert('Security verification code sent to your registered email address.');
-    } catch (err: any) {
-      alert(`Could not send code: ${err.message || 'Error requesting code'}`);
-    }
-  };
-
-  const handleExecuteWithdrawal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!withdrawAmount || !emailCode) {
-      alert('Please fill out all required withdrawal fields.');
-      return;
-    }
-    setSubmittingWithdraw(true);
-    try {
-      const res = await api.post<{ status: string; message: string }>('/v1/me/trading/withdraw', {
-        destinationAddress: withdrawDest,
-        chainKind: withdrawChain === 'solana' ? 'solana' : 'evm',
-        amountUsd: Number(withdrawAmount),
-        otpCode: emailCode.trim(),
-      });
-
-      alert(res?.message || `Withdrawal authorization verified and queued.`);
-      setWithdrawAmount('');
-      setEmailCode('');
-      setCodeSent(false);
-      fetchVault();
-    } catch (err: any) {
-      alert(`Withdrawal failed: ${err.message || 'Transaction could not be submitted'}`);
-    } finally {
-      setSubmittingWithdraw(false);
-    }
-  };
-
-  const handleRevokeSolanaVault = async () => {
-    try {
-      if (data?.solana.status === 'revoked') {
-        const solWallet = data?.linkedWallets?.find((w) => w.chain === 'solana');
-        if (solWallet) {
-          const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, solanaCluster);
-          await api.post('/v1/me/vault/grant', {
-            chain: 'solana',
-            grantKind: 'solana_vault',
-            accountAddress: newPda
-          });
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  solana: {
-                    ...prev.solana,
-                    status: 'active',
-                    pdaAddress: newPda,
-                  },
-                }
-              : prev
-          );
-          setActionSuccessNotice('Solana Anchor Vault re-activated and registered on-chain.');
-        }
-      } else {
-        await api.post('/v1/me/vault/revoke', { chain: 'solana' });
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                solana: {
-                  ...prev.solana,
-                  status: 'revoked',
-                  pdaAddress: 'REVOKED (Rent Lamports Returned to Wallet)',
-                },
-              }
-            : prev
-        );
-        setActionSuccessNotice('Solana Anchor Vault revoked. Rent-exempt lamports refunded to signer.');
-      }
-      setTimeout(() => setActionSuccessNotice(null), 4000);
-    } catch (err: any) {
-      alert(`Action failed: ${err.message || 'Could not update vault state'}`);
-    }
-  };
-
-  const handleConfirmRobinhoodDelegation = async () => {
-    setDelegatingRh(true);
-    setRhDelegationError(null);
-    try {
-      const rhWallet = data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain');
-      const evmAddress = rhWallet?.address || (typeof window !== 'undefined' ? (window as any).ethereum?.selectedAddress : null);
-      if (!evmAddress) {
-        throw new Error('Please connect your Robinhood / EVM wallet first before delegating.');
-      }
-
-      // 1. Request EIP-712 challenge
-      const challenge = await api.get<{
-        address: string;
-        smartAccount: string;
-        timestampSeconds: number;
-        nonce: number;
-        typedData: any;
-      }>(`/v1/me/vault/robinhood/challenge?address=${evmAddress}`);
-
-      // 2. Prompt wallet to sign
-      const provider = getEvmProvider()?.provider || (typeof window !== 'undefined' ? (window as any).ethereum : null);
-      const signature = await signRobinhoodDelegation(provider, evmAddress, challenge.typedData);
-
-      // 3. Post signature to backend to store in DB
-      await api.post('/v1/me/vault/robinhood/delegation', {
-        address: evmAddress,
-        signature,
-        timestampSeconds: challenge.timestampSeconds,
-        nonce: challenge.nonce,
-      });
-
-      setActiveModal(null);
-      setActionSuccessNotice('Robinhood Chain EIP-7702 delegation signed and saved to database! 30-day active session.');
-      setTimeout(() => setActionSuccessNotice(null), 4000);
+      const result = await api.post<{ message: string }>('/v1/me/vault/revoke', { chain });
+      setActionSuccessNotice(result.message);
       await fetchVault();
-    } catch (err: any) {
-      setRhDelegationError(err?.message || 'Failed to sign EIP-7702 delegation');
-    } finally {
-      setDelegatingRh(false);
-    }
+    } catch (err: any) { setError(err.message || 'Local disable failed; no on-chain action was attempted.'); }
   };
-
-  const handleRevokeRobinhoodSession = async () => {
-    try {
-      if (data?.robinhood.sessionKeyStatus === 'revoked' || data?.robinhood.sessionKeyStatus === 'not_delegated') {
-        setActiveModal('robinhood-delegate');
-        return;
-      }
-
-      await api.post('/v1/me/vault/revoke', { chain: 'robinhood-chain' });
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              robinhood: {
-                ...prev.robinhood,
-                sessionKeyStatus: 'revoked',
-              },
-            }
-          : prev
-      );
-      setActionSuccessNotice('Robinhood Chain EIP-7702 session delegation revoked. Automated trading paused.');
-      setTimeout(() => setActionSuccessNotice(null), 4000);
-    } catch (err: any) {
-      alert(`Action failed: ${err.message || 'Could not update delegation state'}`);
-    }
-  };
-
+  const handleRevokeSolanaVault = () => disableLocalGrants('solana');
+  const handleRevokeRobinhoodSession = () => disableLocalGrants('robinhood-chain');
   const handleToggleSolanaCluster = async (cluster: 'mainnet-beta' | 'devnet') => {
     setSolanaCluster(cluster);
-    if (data?.linkedWallets) {
-      const solWallet = data.linkedWallets.find((w) => w.chain === 'solana');
-      if (solWallet) {
-        const { pdaAddress: newPda } = deriveSolanaAnchorPda(solWallet.address, cluster);
-        await api.post('/v1/me/vault/grant', {
-          chain: 'solana',
-          grantKind: 'solana_vault',
-          accountAddress: newPda
-        }).catch(() => null);
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                solana: {
-                  ...prev.solana,
-                  pdaAddress: newPda,
-                },
-              }
-            : prev
-        );
-        setActionSuccessNotice(`Switched Solana cluster to ${cluster.toUpperCase()}. Anchor PDA recalculated: ${newPda.slice(0, 4)}...${newPda.slice(-4)}.`);
-        setTimeout(() => setActionSuccessNotice(null), 3000);
-      }
-    }
+    setActionSuccessNotice('Network selection is a preview only. Vault deployment verification is unavailable.');
   };
 
   return (
@@ -689,7 +398,7 @@ export default function VaultPage() {
               Custody Vault &amp; Liquidity Funding
             </h1>
             <p className="text-body-sm text-on-surface-variant">
-              Connect trading wallets, derive non-custodial Solana Anchor PDAs, authorize Robinhood EIP-7702 session keys, and fund Polymarket CLOB float.
+              Connect trading wallets, derive non-custodial Solana Anchor PDAs, view local credential records. User-live execution is unavailable.
             </p>
           </div>
           {role === 'admin' && (
@@ -770,7 +479,7 @@ export default function VaultPage() {
               }`}
             >
               <span className="w-2.5 h-2.5 rounded-full bg-[#FFB800]" />
-              <span>Robinhood 4337 Session</span>
+              <span>Robinhood EOA (delegation unavailable)</span>
               {data?.linkedWallets.some((w) => w.chain === 'robinhood-chain') && (
                 <span className="w-1.5 h-1.5 rounded-full bg-[#FFB800]" />
               )}
@@ -885,7 +594,7 @@ export default function VaultPage() {
                       </h3>
                       <p className="text-xs text-on-surface-variant">
                         {linkChain === 'solana' && 'Opens your Solana browser wallet to sign a zero-cost cryptographic SIWS challenge. Generates your non-custodial Anchor Execution PDA.'}
-                        {linkChain === 'robinhood-chain' && 'Opens your EVM browser wallet to sign an EIP-4361 SIWE challenge. Configures your ERC-4337 smart account for gasless copy-trading.'}
+                        {linkChain === 'robinhood-chain' && 'Opens your EVM browser wallet to sign an EIP-4361 SIWE challenge. Links your EOA for authentication only; delegation is unavailable.'}
                         {linkChain === 'polygon' && 'Connects your wallet on Polygon Mainnet to verify your signer and activate your dedicated Safe Deposit Proxy address.'}
                       </p>
                     </div>
@@ -1095,183 +804,19 @@ export default function VaultPage() {
 
             {/* 2. Three Venue Custody Cards */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-12">
-              {/* 1. Solana Keyless PDA */}
-              <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl p-6 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-bold text-primary text-base">Solana Keyless PDA</span>
-                    <div className="flex items-center gap-2">
-                      {/* Solana Network Selector */}
-                      <div className="flex items-center bg-surface-container border border-border-subtle rounded-lg p-0.5 text-[10px] font-mono">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSolanaCluster('mainnet-beta')}
-                          className={`px-2 py-0.5 rounded font-bold transition-colors ${
-                            solanaCluster === 'mainnet-beta'
-                              ? 'bg-primary text-white'
-                              : 'text-on-surface-variant hover:text-primary'
-                          }`}
-                        >
-                          Mainnet
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSolanaCluster('devnet')}
-                          className={`px-2 py-0.5 rounded font-bold transition-colors ${
-                            solanaCluster === 'devnet'
-                              ? 'bg-[#14F195] text-black'
-                              : 'text-on-surface-variant hover:text-primary'
-                          }`}
-                        >
-                          Devnet
-                        </button>
-                      </div>
-                      <ChainBadge chain="solana" />
-                    </div>
-                  </div>
-                  <p className="text-xs text-on-surface-variant mb-4">
-                    Non-custodial on-chain Anchor PDA. No private keys exist on server; derived execution authority with isolated rent state on Solana {solanaCluster === 'devnet' ? 'Devnet' : 'Mainnet-Beta'}.
-                  </p>
-
-                  <div className="space-y-3 p-3 bg-surface-container-low rounded-xl border border-border-subtle font-mono text-xs mb-4">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Anchor PDA Address</span>
-                        <button
-                          onClick={() => triggerCopy(data?.solana.pdaAddress || '', 'solana-pda')}
-                          className="text-[10px] text-primary underline font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          {copiedKey === 'solana-pda' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy PDA'}
-                        </button>
-                      </div>
-                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.solana.pdaAddress}</div>
-                    </div>
-                    <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
-                      <span className="text-on-surface-variant">Cluster & Program:</span>
-                      <span className="font-bold text-primary font-mono text-[11px]">
-                        {solanaCluster === 'devnet' ? 'Devnet (WakeDev)' : 'Mainnet (6t6dRetG)'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-on-surface-variant">Live SOL Gas Float:</span>
-                      <span className="font-bold text-primary">
-                        {data?.solana.solGasReserve} SOL (${data?.solana.solGasUsd})
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-on-surface-variant">Vault Status:</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        data?.solana.status === 'revoked'
-                          ? 'bg-status-error/15 text-status-error'
-                          : 'bg-status-success/15 text-status-success'
-                      }`}>
-                        {data?.solana.status === 'revoked' ? 'REVOKED / CLOSED' : 'ACTIVE'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={() => setActiveModal('solana-gas')}
-                    className="w-full py-2.5 bg-primary text-white font-bold text-xs rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-sm">local_gas_station</span>
-                    <span>Fund SOL Gas Float</span>
-                  </button>
-                  <button
-                    onClick={handleRevokeSolanaVault}
-                    className={`w-full py-2 rounded-lg text-xs font-semibold transition-colors border ${
-                      data?.solana.status === 'revoked'
-                        ? 'bg-primary/10 border-primary text-primary hover:bg-primary/20'
-                        : 'bg-surface-container hover:bg-surface-container-high border-border-subtle text-on-surface-variant'
-                    }`}
-                  >
-                    {data?.solana.status === 'revoked' ? 'Re-activate Anchor Vault' : 'Revoke / Close Anchor Vault'}
-                  </button>
-                </div>
+              <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl p-6">
+                <h3 className="font-bold">Solana vault — deployment unverified</h3>
+                <p className="text-xs my-3">Wallet linking does not deploy a vault. Registration and funding are unavailable until on-chain ownership and execution authority can be verified.</p>
+                <button onClick={handleRevokeSolanaVault} className="text-xs underline">Disable local Solana grants</button>
+                <p className="text-xs mt-3">Local disable does not close an on-chain account, revoke its authority, or refund rent.</p>
               </div>
 
-              {/* 2. Robinhood Chain Smart Account */}
-              <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl p-6 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-bold text-primary text-base">Robinhood Smart Account</span>
-                    <ChainBadge chain="robinhood-chain" />
-                  </div>
-                  <p className="text-xs text-on-surface-variant mb-4">
-                    ERC-4337 Smart Account with EIP-7702 session key delegation and Paymaster 100% gas sponsorship.
-                  </p>
-
-                  <div className="space-y-3 p-3 bg-surface-container-low rounded-xl border border-border-subtle font-mono text-xs mb-4">
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Smart Account Address</span>
-                        <button
-                          onClick={() => triggerCopy(data?.robinhood.smartAccountAddress || '', 'rh-smart')}
-                          className="text-[10px] text-primary underline font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          {copiedKey === 'rh-smart' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy Address'}
-                        </button>
-                      </div>
-                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.robinhood.smartAccountAddress}</div>
-                    </div>
-                    <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
-                      <span className="text-on-surface-variant">Paymaster Gas Status:</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFB800]/10 text-[#B45309] dark:text-[#FFB800] border border-[#FFB800]/30">
-                        100% SPONSORED
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-on-surface-variant">Session Key Status:</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        data?.robinhood.sessionKeyStatus === 'revoked'
-                          ? 'bg-status-error/15 text-status-error'
-                          : data?.robinhood.sessionKeyStatus === 'delegated'
-                            ? 'bg-status-success/15 text-status-success'
-                            : 'bg-on-surface-variant/15 text-on-surface-variant'
-                      }`}>
-                        {data?.robinhood.sessionKeyStatus === 'revoked'
-                          ? 'REVOKED (PAUSED)'
-                          : data?.robinhood.sessionKeyStatus === 'delegated'
-                            ? 'DELEGATED (ACTIVE)'
-                            : 'NOT DELEGATED'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-on-surface-variant">Daily Ops Used:</span>
-                      <span className="font-bold text-primary">
-                        {data?.robinhood.sponsoredOpsUsedToday}/{data?.robinhood.dailyCap} ops
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={() => setActiveModal('robinhood-delegate')}
-                    className="w-full py-2.5 bg-[#FFB800] hover:bg-[#E5A700] text-black font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                  >
-                    <span className="material-symbols-outlined text-sm">key</span>
-                    <span>{data?.robinhood.sessionKeyStatus === 'delegated' ? 'Extend Delegation (30 Days)' : 'Delegate EIP-7702 Session (30 Days)'}</span>
-                  </button>
-                  {data?.robinhood.sessionKeyStatus === 'delegated' && (
-                    <button
-                      onClick={handleRevokeRobinhoodSession}
-                      className="w-full py-2 rounded-lg text-xs font-semibold transition-colors border bg-surface-container hover:bg-surface-container-high border-border-subtle text-on-surface-variant"
-                    >
-                      Revoke Delegation
-                    </button>
-                  )}
-                  {data?.robinhood.sessionKeyStatus === 'revoked' && (
-                    <button
-                      onClick={() => setActiveModal('robinhood-delegate')}
-                      className="w-full py-2 rounded-lg text-xs font-semibold transition-colors border bg-[#FFB800]/10 border-[#FFB800] text-[#B45309] dark:text-[#FFB800] hover:bg-[#FFB800]/20"
-                    >
-                      Re-delegate 30-Day Session
-                    </button>
-                  )}
-                </div>
+              <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl p-6">
+                <h3 className="font-bold">Robinhood EOA — delegation unsupported</h3>
+                <p className="text-xs my-3">Wallet linking remains available, including WalletConnect. No deployed EIP-7702 delegation, smart account, gas sponsorship or automated spend authority is available. Do not fund an assumed smart account.</p>
+                <p className="font-mono text-xs break-all">Linked EOA: {data?.robinhood.accountAddress || 'No verified EVM wallet linked'}</p>
+                <button disabled className="mt-3 opacity-50">Delegation unavailable</button>
+                <button onClick={handleRevokeRobinhoodSession} className="block mt-3 text-xs underline">Disable historical local Robinhood grants</button>
               </div>
 
               {/* 3. Polymarket Safe Deposit Address */}
@@ -1282,7 +827,7 @@ export default function VaultPage() {
                     <ChainBadge chain="polymarket" />
                   </div>
                   <p className="text-xs text-on-surface-variant mb-4">
-                    Dedicated ERC-7739 safe proxy holding trading float for Polymarket prediction exchange CLOB orders.
+                    Locally recorded Polymarket credentials do not establish a deployed deposit proxy or live executor.
                   </p>
 
                   <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-800 dark:text-amber-300 mb-4">
@@ -1290,7 +835,7 @@ export default function VaultPage() {
                       <span className="material-symbols-outlined text-sm">info</span>
                       Zero-Custody Venue Float Rule (ADR-0003)
                     </div>
-                    Deposit Polygon USDC to this proxy. When trading halts or withdrawals occur, capital exits custody directly back to your verified linked wallet.
+                    Do not fund an assumed proxy. No deposit address has been verified by this application.
                   </div>
 
                   <div className="space-y-3 p-3 bg-surface-container-low rounded-xl border border-border-subtle font-mono text-xs mb-4">
@@ -1309,21 +854,13 @@ export default function VaultPage() {
                     <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
                       <span className="text-on-surface-variant">L2 CLOB Signer:</span>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        data?.polymarket.status === 'active'
+                        data?.polymarket.status === 'credentials_recorded'
                           ? 'bg-status-success/15 text-status-success'
                           : 'bg-surface-container-high text-on-surface-variant'
                       }`}>
-                        {data?.polymarket.status === 'active' ? 'AUTHENTICATED (READY)' : 'UNINITIALIZED'}
+                        {data?.polymarket.status === 'credentials_recorded' ? 'CREDENTIALS RECORDED — EXECUTION UNAVAILABLE' : 'UNINITIALIZED'}
                       </span>
                     </div>
-                    {data?.polymarket.apiKey && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-on-surface-variant">CLOB API Key:</span>
-                        <span className="font-bold text-primary truncate max-w-[160px]">
-                          {data.polymarket.apiKey.slice(0, 8)}...{data.polymarket.apiKey.slice(-4)}
-                        </span>
-                      </div>
-                    )}
                     <div className="flex items-center justify-between">
                       <span className="text-on-surface-variant">Network:</span>
                       <span className="font-bold text-[#8B5CF6]">Polygon (Chain ID 137)</span>
@@ -1351,7 +888,7 @@ export default function VaultPage() {
                       <>
                         <span className="material-symbols-outlined text-sm">verified_user</span>
                         <span>
-                          {data?.polymarket.status === 'active'
+                          {data?.polymarket.status === 'credentials_recorded'
                             ? 'Re-authorize Polymarket L2 Signer'
                             : 'Authorize Polymarket L2 Signer (1-Click)'}
                         </span>
@@ -1373,226 +910,20 @@ export default function VaultPage() {
               </div>
             </section>
 
-            {/* 3. Anti-Theft Withdrawal Rail */}
             <section className="bg-surface-container-lowest border border-border-subtle rounded-2xl p-6 sm:p-8 max-w-2xl mx-auto shadow-sm mb-8">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-primary text-white flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-xl">lock</span>
-                </div>
-                <div>
-                  <h2 className="font-headline-md text-xl font-bold text-primary">Secure Capital Withdrawal Rail</h2>
-                  <span className="text-xs text-on-surface-variant">
-                    Withdrawals are strictly restricted to verified linked wallets with mandatory email 2FA verification.
-                  </span>
-                </div>
-              </div>
-
-              <form onSubmit={handleExecuteWithdrawal} className="space-y-4">
-                <div>
-                  <label className="text-[11px] text-on-surface-variant uppercase font-semibold block mb-1">
-                    Source Venue / Chain
-                  </label>
-                  <select
-                    value={withdrawChain}
-                    onChange={(e: any) => setWithdrawChain(e.target.value)}
-                    className="w-full bg-surface-container border border-border-subtle rounded-lg p-2.5 text-sm outline-none focus:border-primary"
-                  >
-                    <option value="solana">Solana (USDC)</option>
-                    <option value="robinhood-chain">Robinhood Chain 4663 (USDC)</option>
-                    <option value="polygon">Polymarket Polygon (USDC)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] text-on-surface-variant uppercase font-semibold block mb-1">
-                    Amount to Withdraw (USDC)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    required
-                    placeholder="0.00"
-                    value={withdrawAmount}
-                    onChange={(e) => setWithdrawAmount(e.target.value)}
-                    className="w-full bg-surface-container border border-border-subtle rounded-lg p-2.5 text-sm font-mono outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] text-on-surface-variant uppercase font-semibold block mb-1">
-                    Verified Destination Wallet
-                  </label>
-                  <select
-                    value={withdrawDest}
-                    onChange={(e) => setWithdrawDest(e.target.value)}
-                    className="w-full bg-surface-container border border-border-subtle rounded-lg p-2.5 text-sm font-mono outline-none focus:border-primary"
-                  >
-                    {data?.linkedWallets.map((w) => (
-                      <option key={w.address} value={w.address}>
-                        {w.address} ({w.chain}) {w.isCoolingOff ? '[Cooling off]' : '[Active]'}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-[11px] text-on-surface-variant mt-1 block">
-                    Only addresses past the 24-hour cooling-off safety window are eligible for automated outbound settlement.
-                  </span>
-                </div>
-
-                <div>
-                  <label className="text-[11px] text-on-surface-variant uppercase font-semibold block mb-1">
-                    Email Security Code (2FA)
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      required
-                      placeholder="6-digit verification code"
-                      value={emailCode}
-                      onChange={(e) => setEmailCode(e.target.value)}
-                      className="w-full bg-surface-container border border-border-subtle rounded-lg p-2.5 text-sm font-mono outline-none focus:border-primary"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSendEmailCode}
-                      className="px-4 py-2.5 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
-                    >
-                      {codeSent ? 'Resend Code' : 'Send Code'}
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submittingWithdraw}
-                  className="w-full py-3 bg-primary text-white font-bold rounded-xl text-sm hover:opacity-90 transition-opacity mt-4 flex items-center justify-center gap-2"
-                >
-                  {submittingWithdraw ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Broadcasting On-Chain...</span>
-                    </>
-                  ) : (
-                    <span>Confirm &amp; Execute Withdrawal</span>
-                  )}
-                </button>
-              </form>
+              <h2 className="font-headline-md text-xl font-bold text-primary">Withdrawals unavailable</h2>
+              <p role="status" className="text-sm text-on-surface-variant mt-2">
+                Withdrawals are unsupported. Durable exact withdrawal intents and an authorized execution handoff are not implemented.
+                No email code, approval, or transfer can be requested here. A linked wallet does not establish custody or withdrawal capability.
+              </p>
             </section>
           </>
         )}
 
         {/* Modal: Fund Solana Gas Float */}
         {activeModal === 'solana-gas' && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#14F195]" />
-                  <h3 className="font-headline-md font-bold text-primary text-base">Fund Solana Gas Float</h3>
-                </div>
-                <button onClick={() => setActiveModal(null)} className="text-on-surface-variant hover:text-primary">
-                  <span className="material-symbols-outlined">close</span>
-                </button>
-              </div>
-
-              <p className="text-xs text-on-surface-variant mb-4">
-                To execute sub-second copy trades autonomously, your Keyless PDA requires a small SOL gas float to pay for transaction priority fees.
-              </p>
-
-              <div className="p-3 bg-surface-container rounded-xl border border-border-subtle mb-4">
-                <span className="text-[10px] text-on-surface-variant uppercase font-semibold block mb-1">
-                  Your Solana PDA Vault Address
-                </span>
-                <div className="font-mono text-xs text-primary font-bold break-all mb-2">
-                  {data?.solana.pdaAddress}
-                </div>
-                <button
-                  onClick={() => triggerCopy(data?.solana.pdaAddress || '', 'modal-sol')}
-                  className="text-xs font-semibold text-primary underline"
-                >
-                  {copiedKey === 'modal-sol' ? <span className="text-status-success font-bold">✓ Copied PDA!</span> : 'Copy PDA Address'}
-                </button>
-              </div>
-
-              <div className="text-xs space-y-1.5 text-on-surface-variant mb-6">
-                <div>• Recommended deposit: <strong>0.1 SOL (~$16 USD)</strong></div>
-                <div>• Automatic rent reclamation: 100% refunded if you close the vault</div>
-              </div>
-
-              <button
-                onClick={() => {
-                  alert('Refreshed on-chain balance status.');
-                  setActiveModal(null);
-                  fetchVault();
-                }}
-                className="w-full py-2.5 bg-primary text-white font-bold rounded-xl text-sm hover:opacity-90 transition-opacity"
-              >
-                I Have Deposited SOL
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Robinhood EIP-7702 Delegation */}
-        {activeModal === 'robinhood-delegate' && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#FFB800]" />
-                  <h3 className="font-headline-md font-bold text-primary text-base">Authorize EIP-7702 Delegation</h3>
-                </div>
-                <button onClick={() => setActiveModal(null)} className="text-on-surface-variant hover:text-primary">
-                  <span className="material-symbols-outlined">close</span>
-                </button>
-              </div>
-
-              <p className="text-xs text-on-surface-variant mb-4">
-                EIP-7702 temporarily designates your account as an ERC-4337 smart wallet. This authorizes Wake Protocol to broadcast copy-trades with Paymaster sponsored gas.
-              </p>
-
-              <div className="space-y-2 p-3 bg-surface-container rounded-xl border border-border-subtle text-xs font-mono mb-4">
-                <div className="flex justify-between">
-                  <span className="text-on-surface-variant">Validity Window:</span>
-                  <span className="font-bold text-primary">30 Days</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-on-surface-variant">Max Daily Sponsored Ops:</span>
-                  <span className="font-bold text-primary">50 Ops</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-on-surface-variant">Permitted Venues:</span>
-                  <span className="font-bold text-primary">Robinhood Chain (Chain ID: 4663)</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-on-surface-variant">Delegating Wallet:</span>
-                  <span className="font-bold text-[#FFB800] text-[11px] truncate max-w-[200px]">
-                    {data?.linkedWallets?.find((w) => w.chain === 'robinhood-chain')?.address || 'No EVM wallet connected'}
-                  </span>
-                </div>
-              </div>
-
-              {rhDelegationError && (
-                <div className="p-3 mb-4 rounded-xl bg-status-error/10 border border-status-error/20 text-status-error text-xs">
-                  {rhDelegationError}
-                </div>
-              )}
-
-              <button
-                onClick={handleConfirmRobinhoodDelegation}
-                disabled={delegatingRh || !data?.linkedWallets?.some((w) => w.chain === 'robinhood-chain')}
-                className="w-full py-2.5 bg-[#FFB800] hover:bg-[#E5A700] text-black font-bold rounded-xl text-sm transition-colors mb-2 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {delegatingRh ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                    <span>Signing EIP-7702 Delegation...</span>
-                  </>
-                ) : (
-                  <span>Sign &amp; Authorize 30-Day Delegation</span>
-                )}
-              </button>
-            </div>
+          <div role="alert">Vault funding is unsupported. No deployed vault or gas balance has been verified.
+            <button onClick={() => setActiveModal(null)}>Close</button>
           </div>
         )}
 
@@ -1611,7 +942,7 @@ export default function VaultPage() {
               </div>
 
               <p className="text-xs text-on-surface-variant mb-4">
-                Send Polygon USDC (native USDC or bridged USDC.e) to your dedicated deposit proxy address below to fund your prediction market trading float.
+                Deposit proxy verification is unavailable. Do not send funds to an assumed proxy. Use the venue directly for account funding.
               </p>
 
               <div className="p-3 bg-surface-container rounded-xl border border-border-subtle mb-4">

@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { query } from './client.js';
 
 /**
@@ -27,8 +28,9 @@ export interface AuditEventInput {
   readonly metadata?: Record<string, unknown>;
 }
 
-async function insert(input: AuditEventInput): Promise<void> {
-  await query(
+async function insert(input: AuditEventInput, client?: PoolClient): Promise<void> {
+  const execute = client ? (sql: string, values: unknown[]) => client.query(sql, values) : query;
+  await execute(
     `INSERT INTO audit_log
        (actor_type, actor_id, event, target_type, target_id, ip, user_agent, metadata)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -72,8 +74,8 @@ export async function recordAuditEvent(input: AuditEventInput): Promise<void> {
  * operations, withdrawals, tier changes, and admin role changes (Stage 4/5).
  * Reach for this whenever "we cannot prove this happened" is the greater harm.
  */
-export async function recordAuditEventStrict(input: AuditEventInput): Promise<void> {
-  await insert(input);
+export async function recordAuditEventStrict(input: AuditEventInput, client?: PoolClient): Promise<void> {
+  await insert(input, client);
 }
 
 export const AUDIT_EVENTS = {

@@ -15,3 +15,4 @@ export * from './entrypoint.js';
 export * from './key-wrapper.js';
 export * from './envelope.js';
 export * from './withdrawal-authorization.js';
+export * from './solana-vault-address.js';

@@ -6,6 +6,7 @@ import {
 } from '@swat/db';
 import { prefixChainValue } from '@swat/shared';
 import { processTransaction } from './index.js';
+import { observedIngestionEvidence } from './ingestion-health.js';
 import {
   enhancedEventToTransaction,
   getEnhancedWalletCandidates,
@@ -45,6 +46,9 @@ app.post('/webhook/helius', async (req, reply) => {
   const events = Array.isArray(req.body) ? req.body : [req.body];
   let processed = 0;
   let skipped = 0;
+  let observed = 0;
+  let quarantined = 0;
+  let accepted = 0;
   let failed = 0;
   let lastEventAt: Date | null = null;
 
@@ -72,7 +76,11 @@ app.post('/webhook/helius', async (req, reply) => {
             if (!lastEventAt || eventAt > lastEventAt) lastEventAt = eventAt;
           }
 
-          const result = await processTransaction(transaction, walletAddress, 'solana-webhook');
+          const result = await processTransaction(transaction, walletAddress, 'solana-webhook', (outcome) => {
+            observed++;
+            if (outcome === 'quarantined') quarantined++;
+            else accepted++;
+          });
           if (result === 'inserted') {
             processed++;
             await refreshWalletActivity(
@@ -104,6 +112,8 @@ app.post('/webhook/helius', async (req, reply) => {
     inserted: processed,
     skipped,
     failed,
+    evidence: observedIngestionEvidence(observed, quarantined, accepted,
+      failed > 0 ? 'partial' : 'unknown', 'delivery'),
     errorMessage: failed > 0 ? `${failed} webhook item(s) failed` : null
   });
 

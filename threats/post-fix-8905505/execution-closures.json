@@ -1,0 +1,309 @@
+[
+  {
+    "id": "EXE-01",
+    "status": "closed(source)",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts", "lines": "498-568,604-619", "observation": "Default user Solana factory no longer inherits the operator signer; a venue-trade request without a user signer denies."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1127-1164,1600-1622,2940-2950", "observation": "Production constructs the default factory without user signer options and returns on denial before canonical claims or venue dispatch."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts", "lines": "328-399", "observation": "Registry selects the matching principal/chain adapter and checks the returned principal, user and chain."}
+    ],
+    "reason": "The specifically reported default operator-signer fallback is source-closed by containment. This is NOT completed delegated execution: default user-live Solana, Robinhood and Polymarket routes deny. The optional Solana adapter still synthesizes a settlement identity and is not grant-bound; operator Jupiter final-byte authorization remains PF-EXE-02. No assertion of deployed vault security or successful user execution is made.",
+    "testGap": "The added adapter test proves default denial locally, not production factory-to-signer isolation. Add a synthetic production-port job asserting zero operator signatures/transports for an unresolved user, plus explicit-signer tests requiring real vault/grant identity and scoped final bytes.",
+    "findingIds": ["PF-EXE-02"]
+  },
+  {
+    "id": "EXE-02",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "318-411,1204-1213,1600-1605,1666-1675,2638-2654", "observation": "Principal-derived userId now reaches the reviewed canonical claim and all located handleJob trade writes through recordTrade."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "1834-1870,2575-2616,2718-2728", "observation": "Claim/evidence tenancy is explicit, but the first confirmed execution terminalizes the shared signal and later new tenant claims reject executed status."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts", "lines": "140-179,193-249,341-353", "observation": "Trade values normalize the provided tenant; the fill writer terminalizes the shared signal, and re-buy cooldown remains global."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts", "lines": "242-255,349-359", "observation": "Distinct user jobs are queued operator-first."}
+    ],
+    "reason": "The original omitted-userId plumbing was repaired at reviewed writes, so it is not reported as unchanged. End-to-end tenant execution remains incomplete: first-tenant/operator confirmation suppresses later tenants through shared source state, and explicit exit IDs are loaded without expected-tenant validation. A generic persistTrade caller still has an optional tenant parameter; this review did not certify all consumers outside the partition.",
+    "testGap": "Actual worker plus faithful DB contracts for operator and two users, same paper source, sequential completion and cooldown disabled; assert separate claims, trades and lots. Also reject a mismatched explicit exit execution before evidence.",
+    "findingIds": ["PF-EXE-05", "PF-EXE-07"]
+  },
+  {
+    "id": "EXE-03",
+    "status": "partial",
+    "severity": "High",
+    "currentResidualSeverity": "Medium (default user-live denial contains live widening)",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-candidates.ts", "lines": "203-289", "observation": "Enumeration reads global user settings and balances, not per-chain user mode/slippage."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.ts", "lines": "273-278", "observation": "Eligible verdict uses platform effectiveMode."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts", "lines": "242-253", "observation": "Job carries executionMode/mirrors but not the effective per-user slippage."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1408-1432,1458-1466,1608-1622,1714-1717,2330-2343,2500-2505", "observation": "Worker refreshes platform mode but ignores queued mode/mirrors; Polymarket does not receive slippage, while paper Jupiter uses 150."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket.ts", "lines": "740-746", "observation": "Polymarket uses environment maxSlippageBps."}
+    ],
+    "reason": "forceFresh improves platform cache behavior but does not implement current tenant/subscription policy resolution, queued mode constraints, policy revision or cross-venue slippage continuity. Current user-live adapters deny, so direct unintended user-live signing is contained rather than demonstrated; intended paper jobs can instead be skipped on a live platform.",
+    "testGap": "Queue under paper/off or a 50-bps user preference, change user kill/subscription state before dequeue, and exercise each venue with synthetic ports. Assert no scope widening, live transport or default-tolerance substitution.",
+    "findingIds": ["PF-EXE-11", "PF-EXE-12"]
+  },
+  {
+    "id": "EXE-04",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "354-369,1547-1578,2940-2950", "observation": "Finite cap parsing now falls back to 50000; missing/invalid prices still use fixed guesses, unvalued fills can write zero, and admission is a read/compare before execution."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts", "lines": "408-434", "observation": "Exposure sums only filled/partial buys, omits pending/unknown liabilities and combines paper/live."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/trade-workers.ts", "lines": "39-99", "observation": "Per-chain configurable concurrency and legacy drain worker exist; no spending reservation is supplied by this scheduler."}
+    ],
+    "reason": "The NaN cap bypass is locally repaired, but finite fallback/guessed pricing is not fail-closed risk valuation and the limit remains non-atomic confirmed history rather than reserved spending. Actual over-cap financial effects require pending/concurrent successful trades; no tests or live configuration were inspected.",
+    "testGap": "Cap 100 with two pending buys of 60, sequential and concurrent; unknown price, invalid cap, paper/live separation and unknown submission retention. Assert transactional reservation prevents the second effect.",
+    "findingIds": ["PF-EXE-10"]
+  },
+  {
+    "id": "EXE-05",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter.ts", "lines": "166-219", "observation": "ExactIn/ExactOut amount and present mint identity comparisons were added; quote slippage is not bound to the requested limit."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/jupiter-swap.ts", "lines": "135-266", "observation": "Builder consumes quote slippage and accepts preassembled bytes or supplied instructions/lookup-table contents without economic intent inspection."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts", "lines": "238-311", "observation": "Build, optional simulation and operator signing lead to bundle submission."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts", "lines": "117-134", "observation": "Runtime signs through environmentSigner.sign, not a grant-bound final-artifact authorization capability."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-signer.ts", "lines": "64-79", "observation": "New signer validation checks nonempty decodable transaction/instructions, then signs."}
+    ],
+    "reason": "Useful quote binding and structural checks do not constrain the final message's transfers, recipients, approvals, account owners, debit/credit bounds, fees or resolved ALT identities. Successful simulation is not intent authorization. Missing quote mints alone are not asserted as a live exploit because the builder rejects missing mints.",
+    "testGap": "Generated offline transactions with extra transfer/approval, wrong recipient, malicious ALT or widened minimum-output/tolerance must refuse before signing even with a passing simulation stub.",
+    "findingIds": ["PF-EXE-02"]
+  },
+  {
+    "id": "EXE-06",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts", "lines": "108-175,221-235,294-344,383-455", "observation": "Read-then-submit has no atomic ownership; saves still occur after POST and retryable errors use pending_unknown instead of a recoverable signed identity."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1339-1346,2677-2685", "observation": "Outer errors attempt to terminate canonical executions."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "2127-2182", "observation": "Failed/cancelled transitions release reserved quantity and may terminate the shared source signal."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.test.ts", "lines": "147-171", "observation": "Inspected tests cover sequential pending redelivery and returned submission_unknown label, not write-ahead/CAS/crash recovery."}
+    ],
+    "reason": "The new post-error save contains clean repeat deliveries but is not write-ahead. Crash/store errors can leave a submitted trade without durable identity; concurrent callers can both pass checks. Querying a placeholder bundle ID and later expiry cannot establish whether the original accepted bundle already landed. Actual duplicates/loss require controlled fault/race testing.",
+    "testGap": "Barrier concurrent submitters and inject failures before/after POST and save. Require one owner, pre-POST exact signed identity, retained unknown reservations and no rebuild or false failed classification after an accepted/lost response.",
+    "findingIds": ["PF-EXE-03"]
+  },
+  {
+    "id": "EXE-07",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "1159-1192", "observation": "Canonical client order ID is swat- plus a SHA-256 digest, not a UUID."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "714-763,1805-1853,2781-2804", "observation": "Sweep passes clientOrderId as signalId to $2::uuid; pending trade writes have no actual fill amounts, and the transition only changes status/signature/timestamps."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts", "lines": "390-411,448-455", "observation": "Landed status produces a signature/tip result and Redis is resolved before the SQL consumer runs."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/reconciliation-venues.ts", "lines": "30-50,95-118", "observation": "Canonical fallback cannot reconstruct an absent submission identity or missing quantities."}
+    ],
+    "reason": "A consumer was connected but the canonical identifier is incompatible with its SQL filter, causing a current source-level settlement regression. Redis acknowledgement precedes database success. For legacy UUID jobs the status-only update still does not produce receipt quantities, fees, canonical fill evidence or lots.",
+    "testGap": "Actual canonical swat-prefixed IDs through sweep and SQL; DB failure after Redis observation; restart/replay; attributable exact receipt amounts and fee application once. Assert neither UUID casts nor unquantified filled trades.",
+    "findingIds": ["PF-EXE-01"]
+  },
+  {
+    "id": "EXE-08",
+    "status": "closed(source)",
+    "severity": "Medium",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-config.ts", "lines": "91-138", "observation": "Factory now refuses readiness when simulation is required and no gate initializes."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-simulation.ts", "lines": "452-505", "observation": "Default simulation is enabled; missing explicit RPC/Helius configuration returns a null gate."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "450-467,1792-1820,2727-2741", "observation": "Production constructs and selects configured Jito runtime; readiness still accepts either Solana venue."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/solana-executor-selection.ts", "lines": "57-64", "observation": "An unavailable Jito runtime cannot be selected as Jupiter/Jito."}
+    ],
+    "reason": "The original accidental Jito-ready-with-missing-default-simulator condition is source-closed. Explicit SOLANA_SIMULATION_ENABLED=false remains supported. Selected-route fallback to Trojan, simulation of a replaced blockhash, and final-message authorization are separate limitations; this is not a claim of mandatory simulation for every live venue or verified runtime behavior.",
+    "testGap": "Add missing-simulation-endpoint with signer shared-RPC fallback and selected-Jito/Trojan-ready cases. Existing inspected factory wiring tests check gate presence and explicit disablement, not the new missing-gate refusal across route selection.",
+    "findingIds": []
+  },
+  {
+    "id": "SIG-02",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "1942-2054", "observation": "New master-lot sum improves the common case, but zero master lot rows use aggregate fallback; master pending reservations are not subtracted from the sum."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "1341-1352,1695-1722,2350-2383", "observation": "Reservations roll up at aggregate level; explicit lot exits use a separate active-lot guard; actual source fill allocation is master-scoped and rejects excess after submission."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1666-1675,1760-1783,1805-1819,2330-2343", "observation": "Actual worker claims and submits the requested quantity."},
+      {"path": "/home/xahmie/Documents/SWAT/docs/adr/0007-master-attributed-inventory.md", "lines": "59-68,95-121", "observation": "Requires no order without attributable lots and compatible master/aggregate reservations."}
+    ],
+    "reason": "The new query does not satisfy no-cross-master or pending reservation invariants. A master with no lot rows can size against another master's balance. Distinct pending sells can reserve more than a master's remaining inventory while staying under aggregate availability; post-fill refusal is too late to prevent an external over-sale.",
+    "testGap": "Actual claim SQL for A with no lots/B with 100, and A=10/B=90 with A's first 8 reserved followed by another A sell or explicit lot exit. Assert no borrowed inventory and combined reservations at most 10.",
+    "findingIds": ["PF-EXE-06"]
+  },
+  {
+    "id": "SIG-03",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/scorer/src/close-all.ts", "lines": "46-70", "observation": "Producer carries exitLotId and a claimed copyExecutionId."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1630-1640,1700-1709,1760-1763,2108-2110,2459-2488,2612-2654", "observation": "Old pending-entry gate is exempted, but explicit execution is loaded without expected identity/mode checks, live Solana/Robinhood require a source fraction, and trade persistence drops exitLotId."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/trades.ts", "lines": "7-130", "observation": "TradeInsert and INSERT omit exit_lot_id."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/sql/061_copy_position_lot_exits.sql", "lines": "19-29,45-91", "observation": "Lot exits must have null source fraction; source-less exit trades require exit_lot_id and consistent execution identity."}
+    ],
+    "reason": "The original pending-signal obstruction is locally removed but the actual exit path still fails its schema contract. Paper canonical evidence can commit before trade insertion fails; live lot exits are presently contained by user authority denial and also mismatch Solana/Robinhood fraction guards. Current mode may silently paper-complete an existing live lot.",
+    "testGap": "Actual close-all payload and executed acquisition signal against migration 061, multiple lots, complete accounting, restart after partial persistence, wrong tenant/mode, and every venue's source-less exit contract.",
+    "findingIds": ["PF-EXE-04", "PF-EXE-05", "PF-EXE-09"]
+  },
+  {
+    "id": "SIG-04",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts", "lines": "300-321", "observation": "MTM snapshot supplies lot positionKey and quantity."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts", "lines": "225-277", "observation": "Claim uses positionKey but queue payload omits it and a canonical lot exit execution."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts", "lines": "85-123", "observation": "Trigger claim inserts a guard only; it does not reserve inventory and is released only for enqueue failure."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1501-1513,1758-1783,2104-2135,2330-2343,2612-2653", "observation": "Solana/Polygon receive stop-loss quantities, but Solana guesses six decimals when unknown, Robinhood receives no exact stop-loss amount, and absent canonical execution means no lot evidence."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/robinhood.ts", "lines": "744-757,855-900,1166-1201", "observation": "Undefined exact sell amount with default 10000 bps uses wallet balance and encodes it into swap handoff."}
+    ],
+    "reason": "Solana raw cap and Polygon shares are real partial fixes; lot identity, reservations and evidence continuity remain missing. Robinhood full-wallet sizing is established through quote/calldata handoff, but submitAndWait internals and actual external effects were not reverified, so financial over-sale confidence is Likely. Default user-live denial limits direct user funds exposure.",
+    "testGap": "Breached lot 10 of wallet 100 through actual producer and each fake venue; require exact quantity, known decimals, canonical reservation/evidence and retry safety. Include races with mirrored sells and two lots from the same signal.",
+    "findingIds": ["PF-EXE-09", "PF-EXE-14"]
+  },
+  {
+    "id": "SIG-05",
+    "status": "partial",
+    "severity": "High",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.ts", "lines": "204-277", "observation": "New buy-only score/balance/position checks are useful; explicit kills and tier checks remain."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts", "lines": "472-477,509-591", "observation": "Early sell exception still reaches final score >=80 and safety gate before enqueue, then dispatched marking."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "858-879", "observation": "Source candidate query still requires active wallet and non-null score."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1477-1489", "observation": "Ordinary mirrored sells remain subject to entry-style auto-execute score gate."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.test.ts", "lines": "362-386", "observation": "New tests exercise only pure assessor, not final producer/worker gates."}
+    ],
+    "reason": "The helper fix does not reach all actual gates. Low-scoring/deteriorating/paused sources still lose reducing exits, so the claim that follower exits are never blocked is unsupported. Explicit intentional kill switches should remain effective.",
+    "testGap": "Full producer-to-worker winding-down sell with held lot, score 10, paused source, low purchase balance and full cap; prove owned exits are distinct from new buys and explicit kills.",
+    "findingIds": ["PF-EXE-08"]
+  },
+  {
+    "id": "SIG-06",
+    "status": "not-verified",
+    "severity": "Medium",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "843-862", "observation": "Current candidate query still selects wallet composite score; this is only the consuming boundary."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts", "lines": "437-449,511", "observation": "Signal insertion/trade gate uses supplied signalScore; scoring provenance was not re-reviewed."}
+    ],
+    "reason": "Full scorer metrics, confirmation/fee/sample quality, counterparty-control evidence and manipulation economics fall outside this bounded execution partition. Unchanged partition source and remediation assertions prove neither closure nor exploitability.",
+    "testGap": "Scorer owner must inspect actual scoring query/metric persistence callers and test synthetic controlled histories, fees, incomplete samples and out-of-sample gating. No such tests ran here.",
+    "findingIds": []
+  },
+  {
+    "id": "SIG-07",
+    "status": "not-verified",
+    "severity": "Medium",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "863-870", "observation": "Only source candidate selection of a cluster was read; independence/hub evidence and warning consumers were not revalidated."}
+    ],
+    "reason": "Independence queries, reviewed hub roles, multi-cluster membership and API/browser warning semantics are outside this partition. Prior report evidence was read for assignment tracking only; no closure or current exploitation claim is made.",
+    "testGap": "Responsible reviewer should trace unknown/unassessed versus independent labels through actual control evidence and UI/API consumers, using low-observed-degree and multi-cluster fixtures.",
+    "findingIds": []
+  },
+  {
+    "id": "SIG-08",
+    "status": "open",
+    "severity": "Medium",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts", "lines": "544-578", "observation": "Capacity ledger writing still follows enqueue."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/capacity-inputs.ts", "lines": "421-447,641-655,670-702", "observation": "Entries are unpriced; writer catches failures; wholly unassessable primary capacity uses skip."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/master-capacity.ts", "lines": "721-747,815-839,1596-1605,1666-1685", "observation": "Partial notional is a lower bound; accrual is UPDATE-only and explicitly reports missing row."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1314-1335", "observation": "Post-fill accrual failure is swallowed and logged."}
+    ],
+    "reason": "Current inspected callers and sinks still permit lost/unpriced obligations and unrepaired missing accrual rows. The claimed pre-enqueue capacity reservation is not implemented in these paths. This is not a claim that every unknown-capacity input fails open: wholly unassessable primary capacity correctly skips.",
+    "testGap": "Fail cohort write and race fill-before-row creation, then restart. Confirm conservative pending commitments, repair of missing rows, idempotent accrual and no false headroom for partly unpriced obligations.",
+    "findingIds": ["PF-EXE-13"]
+  },
+  {
+    "id": "SIG-09",
+    "status": "open",
+    "severity": "Medium",
+    "confidence": "Verified(path read)",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/index.ts", "lines": "239-313,544-591", "observation": "Enumeration error returns null; caller emits operator-only plan and later marks source dispatched."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/signal-engine/src/fanout-enqueue.ts", "lines": "225-255,349-359", "observation": "Adds are sequential with queue retries; successful jobs are removed."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "871-879", "observation": "Undispatched retry enumeration depends on shared eligible/alerted state."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts", "lines": "245-277", "observation": "Release happens on enqueue failure, not a later clean skip/failure."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1616-1619,2953-2957", "observation": "Authority denial returns skipped; worker failure hooks only log in the reviewed path."}
+    ],
+    "reason": "Queue retries are not a durable per-user delivery ledger. Enumeration-null success, shared source state, and retained stop-loss triggers still leave missing user/exit execution without a reviewed repair obligation. Later authority containment can manifest as an accepted-but-skipped exit.",
+    "testGap": "Enumeration exception, mid-cohort queue failure with first execution completing, accepted exit then authority denial/clean skip/exhausted retry. Require durable, visible repair without blindly resending unknown submissions.",
+    "findingIds": ["PF-EXE-07", "PF-EXE-14"]
+  },
+  {
+    "id": "CRY-02",
+    "status": "open",
+    "severity": "Medium",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/key-wrapper.ts", "lines": "7-28,71-107", "observation": "AAD is exactly userId, broad chainKind and keyVersion."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/envelope.ts", "lines": "27-59,70-129", "observation": "Seal/open use that context; no full resource/grant domain is added."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/execution-grants.ts", "lines": "315-327", "observation": "Secret load returns ciphertext/version from an owner-scoped row, without a full authenticated grant identity."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql", "lines": "31-66", "observation": "Stored grants distinguish concrete chain, account, grant kind and lifecycle that are absent from helper AAD."}
+    ],
+    "reason": "The actual helper remains too narrowly domain-bound; existing user binding predates the claim and is not a fix for same-user cross-resource substitution. No production decrypt-and-use consumer was found in the bounded executor/signal/DB reference crosscheck, so application exploitation remains conditional.",
+    "testGap": "Same-user different network/account/grant/purpose envelope swaps, explicit v2 migration, restore and legacy-envelope refusal. Use generated local keys only.",
+    "findingIds": ["PF-EXE-15"]
+  },
+  {
+    "id": "CRY-03",
+    "status": "not-verified",
+    "severity": "Medium",
+    "confidence": "Needs check",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/key-wrapper.ts", "lines": "38-107", "observation": "Current environment wrapper holds one symmetric master key and exposes both wrap/unwrap."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/envelope.ts", "lines": "79-95,112-129", "observation": "Reader accepts v1 and requires the supplied wrapper ID to match; no registry or rotation coordinator was reviewed."},
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql", "lines": "74-81", "observation": "SQL commentary claims the API lacks a wrapper key; deployment/caller evidence is needed to assess that claim."}
+    ],
+    "reason": "The primitive and commentary were re-read, but current API sealing caller, process key distribution, seal-only capability and rotation/revocation orchestration were outside this partition. Therefore neither source closure nor a revalidated deployed API key-custody finding is asserted.",
+    "testGap": "Main/API reviewer should finish current seal/open caller and capability separation review. Rotation/restore/revocation tests need synthetic wrappers and a version registry, never real keys.",
+    "findingIds": []
+  },
+  {
+    "id": "CRY-04",
+    "status": "open",
+    "severity": "Medium",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/withdrawal-authorization.ts", "lines": "4-11,34-43,55-149", "observation": "Message has chain/owner/recipient/amount/time/nonce; verifier checks age and signature but has no nonce issuance/consumption or deployment/program/vault/asset identity."}
+    ],
+    "reason": "OTP changes elsewhere do not remediate this separate signature helper. A time window is not single-use replay defense. No production consumer of the helper was identified in the bounded execution partition, so live withdrawal exploitation remains conditional and API behavior was not duplicated.",
+    "testGap": "Synthetic one-time intent consumption, concurrent replay and cross-deployment/network/vault/asset substitution; retries must reuse one durable withdrawal rather than verify the same signature as a new authorization.",
+    "findingIds": ["PF-EXE-16"]
+  },
+  {
+    "id": "CRY-05",
+    "status": "open",
+    "severity": "Medium",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.ts", "lines": "636-768,797-845,1105-1194", "observation": "Signed-struct allowance validation accepts any address operation and any amount-bound operation; contract allowance validation uses configured functionName, while rule matching uses target/selector."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts", "lines": "417-467,604-619", "observation": "Default per-user Robinhood authority still denies, rather than adopting this helper as a live signing boundary."}
+    ],
+    "reason": "The semantic compiler/evaluator weakness remains in current source; no mandatory spender/actual-amount/recipient schema is established by the inspected checks. Full field decoder composition and a production policy-gated signer were not verified, so this is a latent helper finding, not a proven user-live bypass.",
+    "testGap": "Reject Permit policies that constrain token plus nonce but omit spender/amount, approval selector/name aliases, missing own-recipient/economic bounds and post-evaluation payload substitution. Exercise full compiler-decoder-signer composition with synthetic data.",
+    "findingIds": ["PF-EXE-17"]
+  },
+  {
+    "id": "DB-04",
+    "status": "partial",
+    "severity": "Medium",
+    "confidence": "Likely",
+    "currentEvidence": [
+      {"path": "/home/xahmie/Documents/SWAT/packages/db/src/execution-config.ts", "lines": "68-89,172-203,225-243", "observation": "forceFresh bypasses completed cache but reuses current-generation in-flight query; emergency mutation only clears local generation."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts", "lines": "1458-1466,1805-1820", "observation": "Worker requests fresh platform mode once, before asynchronous authority/claim/quote/signing work."},
+      {"path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/jupiter-jito-runtime.ts", "lines": "238-311", "observation": "Reviewed final Jito build/simulate/sign/send path has no control epoch check."}
+    ],
+    "reason": "Ordinary completed-cache TTL exposure is improved, but the claimed emergency epoch/fleet halt is not implemented in the reviewed path. In-flight stale results and post-check/pre-submit changes remain possible. API response semantics and actual fleet timing were deliberately not reviewed here.",
+    "testGap": "Two isolated config contexts with pre-stop query held in flight, plus barriers before signing/send. Define acknowledgement semantics and assert no new submission after the stop barrier without losing reconciliation of already-sent work.",
+    "findingIds": ["PF-EXE-12"]
+  }
+]

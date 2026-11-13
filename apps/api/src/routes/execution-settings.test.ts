@@ -204,7 +204,8 @@ describe('PATCH /v1/me/execution-settings', () => {
     expect(response.statusCode).toBe(200);
     expect(deps.upsertUserExecutionSettings).toHaveBeenCalledWith(
       { userId: USER_A },
-      { maxConcurrentPositions: 12, autoExecute: true }
+      { maxConcurrentPositions: 12, autoExecute: true },
+      { role: 'user' }
     );
     await app.close();
   });

@@ -1,0 +1,428 @@
+{
+  "partition": "on-chain programs; LP/perps/alerts/discovery/ML; MCP source removal; infrastructure and relevant test claims",
+  "repository": "/home/xahmie/Documents/SWAT",
+  "baseline": "d5852a0e31e8e9a517c6e7c47ed9623819c7fc71",
+  "head": "8905505595802c21053118b5fab3fd53a8a1654c",
+  "revisionVerification": "Both revisions resolved by read-only git rev-parse. Current workspace source inspected after confirming HEAD; no atomic snapshot or clean-worktree certification by this reviewer.",
+  "diffCommand": "git -C /home/xahmie/Documents/SWAT diff --name-status d5852a0e31e8e9a517c6e7c47ed9623819c7fc71...8905505595802c21053118b5fab3fd53a8a1654c",
+  "method": {
+    "sourceToolCallsUsed": 24,
+    "sourceToolCallLimit": 24,
+    "bashCalls": 23,
+    "readToolCalls": 1,
+    "bashCpuAffinity": "taskset -c 0 for every Bash invocation; sequential",
+    "helper": "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/source-evidence.py",
+    "helperHandling": "Initial attempted threats/ read was rejected by helper allowlist. Helper was then read (79 lines) and its redaction patterns reused for precise threat-table and additional deployment excerpts. Approved helper read operations append their existing shared read ledger automatically; no separate report/helper file was created by this reviewer.",
+    "maxRequestedExcerptLines": 220,
+    "excerptPolicy": "Each requested file excerpt bounded at 220 lines or fewer. Some calls batched multiple small excerpts. Focused search results are not full-file review.",
+    "redaction": "Source helper credential-pattern redaction; additional full-line redaction of credential-bearing URL/assignment lines in deployment and CI excerpts. No .woodpecker literal credential values reproduced in artifacts.",
+    "truncatedCalls": [
+      "Initial redacted old CHAIN/SEC report excerpts produced a truncated tool response; precise finding tables were subsequently extracted and fully visible.",
+      "Initial remediation excerpt plus unfiltered Git metadata produced a truncated response; relevant remediation ranges and filtered partition metadata were subsequently extracted. The unfiltered diff/log and unseen output are not claimed reviewed."
+    ],
+    "testsRun": false,
+    "buildsRun": false,
+    "servicesStarted": false,
+    "networkUsed": false,
+    "nestedAgentsUsed": false,
+    "applicationEdits": false,
+    "gitWrites": false,
+    "secretFilesRead": false,
+    "historicalCredentialContentRead": false,
+    "runtimeChainPermissionsOrCiSecretsAssessed": false,
+    "fixesApplied": false,
+    "syntheticAssertionsExecuted": false
+  },
+  "retainedIds": [
+    "CHAIN-01", "CHAIN-02", "CHAIN-03", "CHAIN-04", "CHAIN-05", "CHAIN-06", "CHAIN-07",
+    "SEC-01", "SEC-02", "SEC-03", "SEC-04", "SEC-05", "SEC-06", "SEC-07", "SEC-08", "SEC-09", "SEC-10",
+    "MCP-01", "MCP-02", "MCP-03",
+    "INF-01", "INF-02", "INF-03", "INF-04", "INF-05", "INF-06"
+  ],
+  "dispositionCounts": {
+    "closed(source)": 2,
+    "partial": 4,
+    "open": 14,
+    "not-verified": 3,
+    "surface-removed": 3,
+    "total": 26
+  },
+  "priorFindingTablesRead": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/security-review/04-on-chain-programs.md",
+      "ranges": [[28, 36]],
+      "depth": "Exact retained CHAIN-01..07 table fully visible; broader initial output truncated and not treated as complete review."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/security-review/08-secondary-services.md",
+      "ranges": [[39, 50]],
+      "depth": "Exact retained SEC-01..10 table fully visible; broader initial output truncated and not treated as complete review."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/security-review/09-agent-mcp.md",
+      "ranges": [[24, 28]],
+      "depth": "Exact retained MCP-01..03 table and heading/route-table context; no historical source implementation re-read."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/security-review/11-infrastructure-supply-chain.md",
+      "ranges": [[15, 22]],
+      "depth": "Exact retained INF-01..06 table and headings; historical opaque-material claim read only as prior finding metadata, not underlying credential bytes."
+    }
+  ],
+  "remediationClaimsRead": {
+    "path": "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md",
+    "fullyVisibleRelevantRanges": [[75, 185], [195, 211], [221, 291]],
+    "openingPreview": "Opening overall 100% claim and category table visible in first truncated result preview; relevant detailed claims re-read within bounded excerpts.",
+    "claimsNotIndependentEvidence": "Build/test totals, deployed state, installed roles, and governance/audit signoff not accepted as verified merely because the report says complete."
+  },
+  "standardsRead": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md",
+      "ranges": [[1, 55]],
+      "scope": "Protocol-enforced scoped, revocable, expiring authority."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/docs/adr/0004-solana-vault.md",
+      "ranges": [[25, 62]],
+      "visibleThrough": 56,
+      "scope": "PDA owner, global executor, balance-delta invariants and documentation-only audit signoff claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/routes.ts",
+      "ranges": [[403, 408]],
+      "scope": "Local documented rule: global registry mutation service-key-only."
+    }
+  ],
+  "currentSourceExcerptsRead": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/programs/wake-vault/src/lib.rs",
+      "ranges": [[35, 180], [175, 234], [235, 409], [411, 585], [635, 733]],
+      "trace": "Init/config/admin, prefunded ownership/allocation, owner revoke/restore/withdraw, delegated swap and account contexts/state, invariant helpers, initial unit tests.",
+      "limits": "Not whole-file coverage: top imports/constants, helper tail and later tests were outside excerpts. External runtime/Jupiter not inspected."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/programs/pda-vault-minimal/src/lib.rs",
+      "ranges": [[1, 105], [100, 136]],
+      "visibleThrough": 116,
+      "trace": "Complete current minimal instruction handler including tag-0 withdraw and failing tag-1 demo.",
+      "limits": "Deployment/client selection and actual runtime execution not assessed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/programs/wake-vault/trident-tests/fuzz_0/src/lib.rs",
+      "ranges": [[1, 148]],
+      "visibleThrough": 143,
+      "trace": "Complete helper/synthetic-state campaign; no real runtime dispatch in this file."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/routes.ts",
+      "ranges": [[215, 257], [257, 302], [300, 516]],
+      "trace": "Authenticated deploy input/call, manual rebalance, SQL-state close, global service registry endpoints and user copy subscription writer.",
+      "limits": "Full LP route inventory and downstream subscription implementation not reviewed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/lp-tracked-wallets.ts",
+      "ranges": [[1, 105]],
+      "trace": "Global track writer conflict update/default cadence and registry data model."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/builder/build-position.ts",
+      "ranges": [[95, 250]],
+      "visibleThrough": 244,
+      "trace": "Mode check, guard-before-insert, raw deposit persistence, SDK build calls, paper activation/live pending state.",
+      "limits": "Underlying SDK adapters and all exception-recovery callers not inspected."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/lp-positions.ts",
+      "ranges": [[185, 215], [275, 296], [395, 440]],
+      "visibleThroughLastRange": 427,
+      "trace": "Deposit insertion, monitor state filter, raw cross-asset/pool sums.",
+      "limits": "State-machine helper internals and all close/reconcile paths not exhaustively read."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/guardrails/deploy-guard.ts",
+      "ranges": [[1, 110]],
+      "visibleThrough": 60,
+      "trace": "Complete guard: DB amounts supplied as USD to pure ratio."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/guardrails/exposure-cap.ts",
+      "ranges": [[1, 111]],
+      "visibleThrough": 97,
+      "trace": "Complete finite validation and post-deposit concentration arithmetic; first-deposit policy treated as deliberate, not raised as separate security defect."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts",
+      "ranges": [[265, 312], [327, 346], [350, 417]],
+      "additionalFocusedMatches": [109, 224, 331, 358, 420],
+      "trace": "CORS/auth registration, deploy dependencies, manual queue adapter, worker behavior, live refusal and boot references.",
+      "limits": "Focused wiring matches are anchors, not full surrounding scan/monitor implementation coverage."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/lp/src/auth.ts",
+      "ranges": [[1, 142]],
+      "visibleThrough": 103,
+      "trace": "Complete LP auth module: optional key, session resolution/CSRF, tenant-only scope helper. Primary auth reviewer owns deeper session boundary."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/polymarket-perps.ts",
+      "ranges": [[67, 220]],
+      "trace": "Margin health and execute-order validation/payload/external-submit-before-record sequence.",
+      "limits": "Position follow-up beyond line 220, session implementation, instrument sync beginning, external SDK and venue validation unassessed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/alert-service/src/index.ts",
+      "ranges": [[35, 68], [350, 430]],
+      "trace": "Telegram fetch/retry, signal delivery lease/send/SQL CASE/finally, real worker adapter.",
+      "limits": "Full message-formatting injection, bridge recovery, operational alert variants and deployment worker multiplicity not reviewed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/discovery/src/runner.ts",
+      "ranges": [[1, 116]],
+      "trace": "Core ingest persist/enqueue and failure handling plus process-local trigger guard."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/discovery/src/index.ts",
+      "ranges": [[1, 78]],
+      "trace": "Actual DB/queue dependency wiring, nightly schedule and pub/sub trigger."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/wallets.ts",
+      "ranges": [[30, 80]],
+      "trace": "Independent upsert durability and chain-address normalization call.",
+      "limits": "Address normalizer internals and unrelated wallet lifecycle callers not in partition."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/discovery-queries.ts",
+      "ranges": [[1, 84]],
+      "visibleThrough": 68,
+      "trace": "Complete known-wallet exclusion selectors and discovery logging."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/discovery/src/runner.test.ts",
+      "ranges": [[1, 170]],
+      "visibleThrough": 99,
+      "trace": "Complete three-test file: successful chain propagation, pre-persist failure isolation, in-process overlap; no enqueue-after-upsert failure test."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "ranges": [[96, 193], [195, 226]],
+      "trace": "Storage settings paths, address normalization and safe YAML roster parsing through Kol construction.",
+      "limits": "Environment values, actual roster files and secrets not read. Configured external path support may be intentional operator privilege, not by itself remote exploit."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+      "ranges": [[73, 117]],
+      "trace": "Raw parquet write path incorporating roster address without confinement.",
+      "limits": "DuckDB full lifecycle and all storage callers not inspected."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+      "ranges": [[155, 226], [583, 652]],
+      "trace": "Operator pull --kols -> nonempty source result -> write_raw_parquet; ranker pickle writer and score pickle loader.",
+      "limits": "Provider response behavior for invalid addresses, full HTTP service/subprocess paths and model contents not assessed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/.woodpecker.yaml",
+      "ranges": [[68, 103]],
+      "visibleThrough": 90,
+      "trace": "Redacted deployment stage and exact vercel@65.11.0 pin.",
+      "redactedLines": [74, 75, 77, 79, 86, 87, 90],
+      "limits": "No secret literal values, CI config values or resolved transitive dependencies inspected."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/.woodpecker/ci.yaml",
+      "ranges": [[68, 103]],
+      "visibleThrough": 90,
+      "trace": "Second redacted deployment stage copy and exact CLI pin.",
+      "redactedLines": [74, 75, 77, 79, 86, 87, 90],
+      "limits": "No live CI execution/secrets/permissions assessed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/deploy/systemd/swat-api.service",
+      "ranges": [[1, 65]],
+      "visibleThrough": 24,
+      "trace": "Complete supplied unit, not installed unit; dedicated user and protected /root executable path."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/deploy/systemd/swat-trade-executor.service",
+      "ranges": [[1, 65]],
+      "visibleThrough": 28,
+      "trace": "Complete supplied unit, not installed unit; same protected path mismatch."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/DEPLOYMENT.md",
+      "ranges": [[304, 332], [390, 403]],
+      "trace": "Root API/web unit examples and global unversioned PM2 installation; not full deployment runbook."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/docker-compose.yml",
+      "ranges": [[1, 63]],
+      "redactedLines": [16, 49],
+      "trace": "Database bootstrap and PgBouncer role configuration references; no actual credential or runtime role checks."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+      "ranges": [[1, 38], [59, 75]],
+      "trace": "URL-based pool construction and query returning result.rows.",
+      "limits": "Runtime config helper, actual role enforcement and connection privileges belong to primary DB review."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/064_row_level_security.sql",
+      "ranges": [[45, 66]],
+      "trace": "Application role creation/grants, not actual deployment/effective login state. No credential literal reproduced in report artifacts."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/scripts/setup-server.sh",
+      "ranges": [[1, 65]],
+      "trace": "Bootstrap and unbounded pip/editable install commands, read only; script not executed. Referenced dotenv/roster files not opened."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/pyproject.toml",
+      "ranges": [[1, 58]],
+      "visibleThrough": 55,
+      "trace": "Full manifest, unbounded lower versions/build backend and CLI entrypoint."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/web/next.config.ts",
+      "ranges": [[1, 115]],
+      "visibleThrough": 63,
+      "trace": "Complete source config; substring-based production HTTP exception and API/LP rewrite destinations."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/web/middleware.ts",
+      "ranges": [[1, 120]],
+      "visibleThrough": 97,
+      "trace": "Complete source middleware; HTTP rule and session-only fetchRole cookie forwarding. Main browser reviewer notified for deduplication."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts",
+      "ranges": [[1, 45]],
+      "trace": "PDA derivation catch fallback and cluster detection, not entire wallet helper."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx",
+      "ranges": [[131, 224], [510, 600]],
+      "trace": "Initial fallback and connect->derive->grant->active; HTTP revoke/restore and success wording.",
+      "limits": "Funding buttons/transactions, complete initialize flow and full UI handlers not reviewed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+      "ranges": [[392, 465], [1320, 1390], [1390, 1470], [1610, 1654]],
+      "visibleThroughLastRange": 1644,
+      "focusedMatches": [24, 1634, 1638],
+      "trace": "Revoke DB-only path, current perps portfolio and close endpoint. Two old-anchor reads landed on unrelated feed/withdrawal context before focused search located current perps endpoint.",
+      "limits": "Full API auth/withdrawal/grant verification not claimed here; owned by main partition. Unrelated read context not turned into additional findings."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/polymarket-perps.ts",
+      "ranges": [[258, 291]],
+      "visibleThrough": 284,
+      "trace": "Order recording tail and complete closePerpsPosition update/result check."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/package.json",
+      "ranges": [[1, 80]],
+      "visibleThrough": 45,
+      "trace": "Complete root manifest: pnpm pin, scripts, no MCP task."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pnpm-workspace.yaml",
+      "ranges": [[1, 40]],
+      "visibleThrough": 3,
+      "trace": "Complete generic app/package workspace globs."
+    }
+  ],
+  "focusedSearches": [
+    {
+      "purpose": "Observed perps order reachability",
+      "scope": "Tracked safe source files under /home/xahmie/Documents/SWAT/apps and /home/xahmie/Documents/SWAT/packages; excluded helper-disallowed files/directories and non-source suffixes",
+      "pattern": "executePerpsOrder | evaluatePerpsMarginHealth | import-from paths containing polymarket-perps",
+      "result": "16 matching lines; function implementation plus tests; DB index reexports are separate DB module. No production caller of executor helper observed. Result cap 50 was not hit.",
+      "limit": "Does not establish absence of dynamic loading, excluded compiled artifacts or external deployment calls. Test file received match-only inspection, not whole-file review."
+    },
+    {
+      "purpose": "MCP tracked surface removal",
+      "scope": "Safe tracked .ts/.tsx/.js/.mjs/.py/.json/.yaml/.yml/.service files under apps, packages, pattern-ml, deploy, programs plus root package/workspace manifests",
+      "pattern": "apps/mcp-server | @swat/mcp-server | mcp-server/src | mcp-server/dist",
+      "result": "Zero matching lines; git ls-files apps/mcp-server returned no tracked files. Root manifest inspected.",
+      "limit": "Not an all-repository text search; historical/source-review documents and unsafe/excluded files not searched. Does not certify deployed process absence."
+    },
+    {
+      "purpose": "MCP local residue inventory",
+      "scope": "/home/xahmie/Documents/SWAT/apps/mcp-server immediate directory entry names only",
+      "result": [".turbo", "dist", "node_modules"],
+      "limit": "No contents were read, deleted or executed; launchability and deployed copies remain unverified."
+    },
+    {
+      "purpose": "ML raw writer caller",
+      "scope": "Safe tracked source under /home/xahmie/Documents/SWAT/pattern-ml/src",
+      "pattern": "write_raw_parquet(",
+      "result": "CLI line 219 plus storage definition line 89; caller then inspected in bounded context. Result cap not hit.",
+      "limit": "Other subprocess/service/artifact distribution paths not exhaustively traced."
+    },
+    {
+      "purpose": "LP production guard/monitor/queue wiring",
+      "scope": "Safe tracked source under /home/xahmie/Documents/SWAT/apps/lp/src",
+      "pattern": "createDeployGuard( | startExecutionWorkers( | queueManualRebalance | listPositionsForMonitor",
+      "result": "13 matches, including production guard creation, monitor filter call, queue adapter and worker startup; test matches not treated as runtime callers. Cap not hit.",
+      "limit": "Not full SDK/copy-engine/runtime recovery review."
+    },
+    {
+      "purpose": "Current perps close API anchor",
+      "scope": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+      "pattern": "closePerpsPosition | perps/positions | limited local/on-chain revocation wording",
+      "result": "Import and close route at lines 1634/1638, then route inspected; no broad API reassessment."
+    },
+    {
+      "purpose": "Program test and root standards path metadata",
+      "scope": "Tracked program paths and exact root AGENTS.md/CONTRIBUTING.md",
+      "result": "No exact root standards paths returned; program test/fuzz paths were fuzz_0/Cargo.toml and fuzz_0/src/lib.rs. Embedded lib.rs unit tests read separately.",
+      "limit": "Not proof that no other standards or instruction-level test elsewhere in repository exists. Cargo manifest not opened; dependency/build artifacts excluded."
+    }
+  ],
+  "partitionChangeMetadata": {
+    "meaning": "Metadata only. Unchanged file does not imply fixed or open; current handlers and callers are primary evidence.",
+    "relevantVisibleChanges": [
+      "Modified .woodpecker.yaml and .woodpecker/ci.yaml",
+      "Modified apps/alert-service/src/index.ts",
+      "Modified apps/lp/src/auth.ts and apps/lp/src/index.ts; added apps/lp/.zcodeignore",
+      "Deleted apps/mcp-server/package.json, src/index.ts, src/index.test.ts and tsconfig.json",
+      "Modified apps/web/next.config.ts"
+    ],
+    "filterLimit": "Filtered metadata query intentionally did not list all primary API/browser/executor changes. No absence-of-diff closure inference made."
+  },
+  "reachabilityQualifications": {
+    "onChain": "Handlers/account constraints directly inspected; installed programs, funded vaults, Jupiter routes, upgrade authority and governance not assessed.",
+    "lp": "Authenticated routes, queue adapter, risk builder and worker directly traced. Reviewed live LP submission explicitly refuses; paper/planning/metadata correctness findings are not live liquidity-loss claims.",
+    "perpsExecutor": "Only helper/tests observed, no production order caller in scoped search. Keep latent defects distinct from reachable perps close API.",
+    "perpsClose": "Registered user API and SQL helper traced; actual rows and live exposure unverified.",
+    "alerts": "Worker and sender traced; lease/network/DB interleaving consequences reasoned but not tested.",
+    "discovery": "Nightly/pub-sub runner wired to real DB and queue source; alternative global recovery unverified.",
+    "ml": "Operator CLI/model/path sinks traced. Artifact distribution trust and invalid roster producing nonempty provider frame remain conditional; no remote RCE asserted.",
+    "infrastructure": "Templates/runbook/CI source only, not applied configuration, installed permissions or secret settings.",
+    "mcp": "Tracked source removed; generated residue and deployed listeners not certified removed."
+  },
+  "coordinatorDeduplication": {
+    "overlapIds": ["CHAIN-02", "CHAIN-06", "SEC-01", "SEC-02", "SEC-07", "INF-03", "INF-04"],
+    "handling": "Requested and sent focused progress/evidence to coordinator. Final dispositions use this reviewer's own source observations. LP auth is recorded as source closure without new finding; shared browser/API/DB findings should be merged by invariant rather than double counted.",
+    "findingPrefix": "PF-SEC-",
+    "findingsInReport": 18
+  },
+  "exclusions": [
+    "No dotenv, keypair, secret, certificate, actual roster/model artifact or historical credential content read.",
+    "No underlying historical opaque assignment inspected or validity/provenance tested; INF-05 remains not-verified.",
+    "No network, service, test, build, exploit or malicious pickle execution.",
+    "No external Jupiter, Token2022 extension, perps SDK, Telegram or model-provider implementation/protocol validation.",
+    "No deployed-chain state, balances, upgrade authority, multisig/timelock configuration or actual admin identity certification.",
+    "No installed systemd unit execution, filesystem permission audit, CI secret/runtime configuration or database role-flag assessment.",
+    "No lockfile, dependency tree, generated dist/.turbo/node_modules content or resolved package vulnerability inventory.",
+    "No exhaustive all-repository subprocess/deserialization/service entrypoint review; reviewed ML operator sinks do not establish remote exploitability.",
+    "No complete app test inventory or independent verification of claimed 3000-plus tests/build totals.",
+    "No attribution of current workspace files to an atomic snapshot beyond separately verified HEAD and bounded current reads."
+  ],
+  "artifacts": [
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/secondary-contract-review.md",
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/secondary-contract-closures.json",
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/secondary-contract-coverage.json"
+  ]
+}

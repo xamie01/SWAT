@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
   BILLING_PLANS,
+  canonicalPaymentHash,
   USDC_MINTS,
   executeWithRpcFailover,
   resolveBillingPlan,
@@ -73,7 +74,7 @@ export async function verifyPolygonUsdcTransferOnChain(input: {
     return await executeWithRpcFailover({
       chain: 'polygon',
       action: async (rpcUrl) => {
-        const { createPublicClient, http, parseAbiItem } = await import('viem');
+        const { createPublicClient, http, parseAbiItem, decodeEventLog } = await import('viem');
         const { polygon } = await import('viem/chains');
 
         const client = createPublicClient({
@@ -82,7 +83,8 @@ export async function verifyPolygonUsdcTransferOnChain(input: {
         });
 
         const receipt = await client.getTransactionReceipt({ hash: input.txHash as `0x${string}` });
-        if (receipt.status !== 'success') {
+        const finalized = await client.getBlock({ blockTag: 'finalized' });
+        if (receipt.status !== 'success' || receipt.blockNumber == null || finalized.number == null || receipt.blockNumber > finalized.number) {
           return { verified: false, payerAddress: null, amountUsdc: 0 };
         }
 
@@ -97,19 +99,15 @@ export async function verifyPolygonUsdcTransferOnChain(input: {
         for (const log of receipt.logs) {
           if (log.address.toLowerCase() !== usdcContract) continue;
           try {
-            // Topics: [0] = signature, [1] = from, [2] = to
-            if (log.topics[2]) {
-              const toAddress = `0x${log.topics[2].slice(26)}`.toLowerCase();
-              if (toAddress === treasuryLower) {
-                const rawAmount = BigInt(log.data);
-                const amountUsdc = Number(rawAmount) / 1e6;
-                const fromAddress = log.topics[1] ? `0x${log.topics[1].slice(26)}` : null;
-
-                if (amountUsdc >= input.expectedUsdc) {
-                  return { verified: true, payerAddress: fromAddress, amountUsdc };
-                }
-              }
-            }
+            if (log.topics.length !== 3 || !/^0x[0-9a-fA-F]{64}$/.test(log.data)
+                || !log.topics.slice(1).every((t) => /^0x0{24}[0-9a-fA-F]{40}$/.test(t))) continue;
+            const decoded = decodeEventLog({ abi: [transferEventAbi], eventName: 'Transfer',
+              topics: log.topics, data: log.data, strict: true });
+            const { from, to, value } = decoded.args;
+            if (to.toLowerCase() !== treasuryLower || from === '0x0000000000000000000000000000000000000000'
+                || from.toLowerCase() === treasuryLower || value > BigInt(Number.MAX_SAFE_INTEGER)) continue;
+            const amountUsdc = Number(value) / 1e6;
+            if (amountUsdc >= input.expectedUsdc) return { verified: true, payerAddress: from.toLowerCase(), amountUsdc };
           } catch {
             // Ignore unparseable log
           }
@@ -130,6 +128,8 @@ interface SolanaParsedTokenBalance {
   owner?: string;
   uiTokenAmount: {
     uiAmount: number | null;
+    amount?: string;
+    decimals?: number;
   };
 }
 
@@ -173,7 +173,7 @@ export async function verifySolanaUsdcTransferOnChain(input: {
             method: 'getTransaction',
             params: [
               input.txHash,
-              { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
+              { encoding: 'jsonParsed', commitment: 'finalized', maxSupportedTransactionVersion: 0 }
             ]
           })
         });
@@ -191,40 +191,35 @@ export async function verifySolanaUsdcTransferOnChain(input: {
         }
         const tx = payload.result;
 
-        if (!tx || tx.meta?.err) {
+        if (!tx?.meta || tx.meta.err !== null) {
           return { verified: false, payerAddress: null, amountUsdc: 0 };
         }
 
-        const targetMint = USDC_MINTS.solana;
-        let foundAmountUsdc = 0;
-        let payer: string | null = null;
-
-        const preBalances = tx.meta?.preTokenBalances || [];
-        const postBalances = tx.meta?.postTokenBalances || [];
-
-        for (const post of postBalances) {
-          if (post.mint === targetMint && post.owner === input.treasuryAddress) {
-            const pre = preBalances.find((p: SolanaParsedTokenBalance) => p.accountIndex === post.accountIndex);
-            const preAmount = pre?.uiTokenAmount.uiAmount || 0;
-            const postAmount = post.uiTokenAmount.uiAmount || 0;
-            const diff = postAmount - preAmount;
-            if (diff > 0) {
-              foundAmountUsdc += diff;
-            }
+        // Never attribute a token transfer to the fee payer. Require a single
+        // debited token owner who signed, with an equal treasury increase.
+        const pre = tx.meta.preTokenBalances ?? [];
+        const post = tx.meta.postTokenBalances ?? [];
+        const keys = tx.transaction?.message?.accountKeys ?? [];
+        const deltas = new Map<string, bigint>();
+        const indexes = new Set([...pre, ...post].filter(b => b.mint === USDC_MINTS.solana).map(b => b.accountIndex));
+        for (const index of indexes) {
+          const before = pre.find(b => b.accountIndex === index);
+          const after = post.find(b => b.accountIndex === index);
+          const owner = after?.owner ?? before?.owner;
+          if (!owner || (before && after && (before.owner !== after.owner || before.mint !== after.mint))) return { verified: false, payerAddress: null, amountUsdc: 0 };
+          for (const balance of [before, after]) {
+            if (balance && (balance.mint !== USDC_MINTS.solana || balance.uiTokenAmount.decimals !== 6 || !/^\d+$/.test(balance.uiTokenAmount.amount ?? ''))) return { verified: false, payerAddress: null, amountUsdc: 0 };
           }
+          const delta = BigInt(after?.uiTokenAmount.amount ?? '0') - BigInt(before?.uiTokenAmount.amount ?? '0');
+          deltas.set(owner, (deltas.get(owner) ?? 0n) + delta);
         }
-
-        const accountKeys = tx.transaction?.message?.accountKeys || [];
-        const signerAccount = accountKeys.find((k: SolanaAccountKey) => k.signer);
-        if (signerAccount) {
-          payer = signerAccount.pubkey;
-        }
-
-        if (foundAmountUsdc >= input.expectedUsdc) {
-          return { verified: true, payerAddress: payer, amountUsdc: foundAmountUsdc };
-        }
-
-        return { verified: false, payerAddress: null, amountUsdc: foundAmountUsdc };
+        const received = deltas.get(input.treasuryAddress) ?? 0n;
+        const debits = [...deltas].filter(([owner, delta]) => owner !== input.treasuryAddress && delta < 0n);
+        const [payer, debit] = debits[0] ?? [null, 0n];
+        const amountUsdc = Number(received) / 1e6;
+        if (debits.length !== 1 || !payer || -debit !== received || received <= 0n || received > BigInt(Number.MAX_SAFE_INTEGER)
+            || !keys.some(k => k.pubkey === payer && k.signer) || amountUsdc < input.expectedUsdc) return { verified: false, payerAddress: null, amountUsdc: 0 };
+        return { verified: true, payerAddress: payer, amountUsdc };
       }
     });
   } catch (error) {
@@ -359,7 +354,7 @@ export async function registerBillingRoutes(
     } catch (error) {
       return reply.code(400).send({
         error: 'Bad Request',
-        message: error instanceof Error ? error.message : 'Failed to create payment intent'
+        message: 'Failed to create payment intent', requestId: request.id
       });
     }
   });
@@ -379,7 +374,10 @@ export async function registerBillingRoutes(
       });
     }
 
-    const { chain, txHash, planId, memo } = parsed.data;
+    const { chain, planId, memo } = parsed.data;
+    let txHash: string;
+    try { txHash = canonicalPaymentHash(chain, parsed.data.txHash); }
+    catch { return reply.code(400).send({ error: 'invalid-transaction-hash' }); }
     const plan = resolveBillingPlan(planId);
     if (!plan) {
       return reply.code(400).send({ error: 'Bad Request', message: `Unknown plan: ${planId}` });
@@ -388,7 +386,8 @@ export async function registerBillingRoutes(
     // API-01 / OWA-03: Prevent payment hijacking by binding payment to user intent or linked wallet
     const effectiveMemo = memo?.trim();
     if (effectiveMemo) {
-      if (deps.findPaymentIntentByMemo) {
+      if (!deps.findPaymentIntentByMemo) return reply.code(503).send({ error: 'payment-intent-verification-unavailable' });
+      {
         const intent = await deps.findPaymentIntentByMemo(effectiveMemo);
         if (!intent || intent.userId !== scope.userId) {
           return reply.code(403).send({
@@ -396,19 +395,19 @@ export async function registerBillingRoutes(
             message: 'This payment reference memo belongs to a different user account or does not exist.'
           });
         }
-        if (intent.status && intent.status !== 'pending') {
+        if (intent.status !== 'pending') {
           return reply.code(400).send({
             error: 'Bad Request',
             message: `This payment intent has already been processed (status: ${intent.status}).`
           });
         }
-        if (intent.planId && intent.planId !== planId) {
+        if (intent.planId !== planId) {
           return reply.code(400).send({
             error: 'Bad Request',
             message: `Payment intent plan (${intent.planId}) does not match requested plan (${planId}).`
           });
         }
-        if (intent.expiresAt && new Date(intent.expiresAt).getTime() < Date.now()) {
+        if (!intent.expiresAt || !(new Date(intent.expiresAt).getTime() > Date.now())) {
           return reply.code(400).send({
             error: 'Bad Request',
             message: 'This payment intent has expired.'
@@ -425,7 +424,7 @@ export async function registerBillingRoutes(
       txHash,
       expectedUsdc: plan.priceUsdc,
       treasuryAddress: treasury,
-      memo
+      memo: effectiveMemo
     });
 
     if (!verification.verified) {
@@ -435,27 +434,17 @@ export async function registerBillingRoutes(
       });
     }
 
-    // API-01 / OWA-03: If no intent memo was supplied, require payerAddress to match one of the user's linked auth wallets
-    if (!effectiveMemo && deps.listAuthWallets) {
-      if (!verification.payerAddress) {
-        return reply.code(400).send({
-          error: 'Bad Request',
-          message: 'Payer address could not be identified on-chain and no intent memo was supplied.'
-        });
-      }
-      const linkedWallets = await deps.listAuthWallets(scope);
-      const isLinkedPayer = linkedWallets.some((w) =>
-        chain === 'solana'
-          ? w.address === verification.payerAddress
-          : w.address.toLowerCase() === verification.payerAddress?.toLowerCase()
-      );
-      if (!isLinkedPayer) {
-        return reply.code(403).send({
-          error: 'Forbidden',
-          message: 'The transaction sender address does not match any verified linked wallet on this account, and no intent reference memo was provided.'
-        });
-      }
-    }
+    // A user-supplied memo is not chain evidence. Exchange-originated deposits
+    // need a separately implemented ownership/reference verifier; never credit them here.
+    const linkedWallets = deps.listAuthWallets ? await deps.listAuthWallets(scope) : [];
+    const payer = verification.payerAddress;
+    const isLinkedPayer = payer && linkedWallets.some(w =>
+      w.chainKind === (chain === 'solana' ? 'solana' : 'evm') &&
+      (chain === 'solana' ? w.address === payer : w.address.toLowerCase() === payer.toLowerCase()));
+    if (!isLinkedPayer) return reply.code(422).send({
+      error: 'payment-attribution-unsupported', status: 'manual-review-required',
+      message: 'No verified linked payer matches this transfer. Exchange or third-party deposits cannot be credited automatically; request manual review. A reference memo alone does not prove ownership.'
+    });
 
     // 2. Record payment and upgrade tier atomically
     try {
@@ -468,7 +457,7 @@ export async function registerBillingRoutes(
         planId,
         payerAddress: verification.payerAddress,
         treasuryAddress: treasury,
-        memo
+        memo: effectiveMemo
       });
 
       return reply.code(200).send({
@@ -480,6 +469,7 @@ export async function registerBillingRoutes(
         amountUsdc: result.payment.amountUsdc
       });
     } catch (error) {
+      if (error instanceof Error && error.name === 'PaymentClaimRejectedError') return reply.code(409).send({ error: 'payment-claim-no-longer-eligible', message: 'Payment intent or linked payer changed. No payment was credited.' });
       if (error instanceof DuplicatePaymentTransactionError) {
         return reply.code(409).send({
           error: 'Conflict',

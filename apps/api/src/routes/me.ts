@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Queue } from 'bullmq';
-import { randomInt, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
   isSubscribed,
@@ -12,6 +12,7 @@ import {
   beginWindDown,
   requestCloseAll,
   query,
+  recordExecutionGrant,
   checkWalletClusterIndependence,
   checkWalletHubStatus,
   listAuthWallets,
@@ -26,16 +27,15 @@ import {
 } from '@swat/db';
 import {
   buildClobAuthTypedData,
+  deriveWakeVaultAddress,
   capabilitiesFor,
   chainSchema,
   createWalletBackfillJob,
   EnvMasterKeyWrapper,
   fetchClobCredentialsFromSignature,
   isValidAddressForChain,
-  loadEmailConfigFromEnv,
   resolveChainAddress,
   sealSecret,
-  sendEmail,
   tierAllowsChain,
   type Chain,
   type WrapContext
@@ -94,19 +94,6 @@ export function isWalletCoolingOff(
   }
   return { isCoolingOff: false, hoursRemaining: 0 };
 }
-
-const withdrawRequestOtpSchema = z.object({
-  destinationAddress: z.string().trim().min(32).max(120),
-  chainKind: z.enum(['evm', 'solana']),
-  amountUsd: z.number().positive().max(100_000).optional()
-});
-
-const withdrawConfirmSchema = z.object({
-  destinationAddress: z.string().trim().min(32).max(120),
-  chainKind: z.enum(['evm', 'solana']),
-  amountUsd: z.number().positive().max(100_000),
-  otpCode: z.string().trim().length(6)
-});
 
 const subscribeSchema = z.object({
   address: z.string().trim().min(32).max(120),
@@ -349,42 +336,30 @@ export async function registerMeRoutes(
     }>(
       `SELECT chain, grant_kind, account_address, status, expires_at, scope_policy
          FROM user_execution_grants
-        WHERE user_id = $1 AND status = 'active'`,
+        WHERE user_id = $1 AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > NOW())`,
       [scope.userId]
     );
 
-    const solGrant = grants.find((g) => g.grant_kind === 'solana_vault');
-    const rhGrant = grants.find((g) => g.chain === 'robinhood-chain' || g.grant_kind === 'eip7702');
     const polyGrant = grants.find((g) => g.grant_kind === 'polymarket_signer');
 
     return reply.send({
       solana: {
-        pdaAddress: solGrant?.account_address ?? null,
-        rentLamports: 2039280,
-        solGasReserve: 0.12,
-        solGasUsd: 19.8,
-        solMinGasUsd: 10.0,
-        hasMinimumGas: true,
-        status: solGrant ? 'active' : 'uninitialized'
+        pdaAddress: null, rentLamports: null, solGasReserve: null, solGasUsd: null,
+        solMinGasUsd: null, hasMinimumGas: false, status: 'unsupported', executionSupported: false
       },
       robinhood: {
-        smartAccountAddress: rhGrant
-          ? (typeof rhGrant.scope_policy === 'string'
-              ? (JSON.parse(rhGrant.scope_policy)?.smartAccount || `0x4337${rhGrant.account_address.slice(6)}`)
-              : (rhGrant.scope_policy?.smartAccount || `0x4337${rhGrant.account_address.slice(6)}`))
-          : null,
-        sessionKeyStatus: rhGrant ? 'delegated' : 'not_delegated',
-        expiresAt: rhGrant?.expires_at ? new Date(rhGrant.expires_at).toISOString() : null,
-        sponsoredOpsUsedToday: 0,
-        dailyCap: 50
+        smartAccountAddress: null,
+        accountAddress: authWallets.find((w) => w.chainKind === 'evm')?.address ?? null,
+        sessionKeyStatus: 'unsupported', executionSupported: false,
+        expiresAt: null, sponsoredOpsUsedToday: 0, dailyCap: 0
       },
       polymarket: {
-        depositAddress: polyGrant?.account_address ?? null,
+        depositAddress: null,
         signerAddress: polyGrant?.account_address ?? null,
-        status: polyGrant ? 'active' : 'uninitialized',
-        apiKey: typeof polyGrant?.scope_policy === 'string'
-          ? (JSON.parse(polyGrant.scope_policy)?.apiKey ?? null)
-          : (polyGrant?.scope_policy?.apiKey ?? null),
+        status: polyGrant ? 'credentials_recorded' : 'uninitialized',
+        executionSupported: false,
+        credentialsRecorded: !!polyGrant,
         geoEligible: true,
         geoExpiresAt: new Date(now.getTime() + 7 * 86400000).toISOString()
       },
@@ -423,29 +398,20 @@ export async function registerMeRoutes(
           RETURNING id`,
         [scope.userId]
       );
-    } else if (chain === 'solana') {
-      updated = await query<{ id: string }>(
-        `UPDATE user_execution_grants
-            SET status = 'revoked', revoked_at = NOW()
-          WHERE user_id = $1 AND (grant_kind = 'solana_vault' OR chain = 'solana') AND status = 'active'
-          RETURNING id`,
-        [scope.userId]
-      );
     } else {
       updated = await query<{ id: string }>(
-        `UPDATE user_execution_grants
-            SET status = 'revoked', revoked_at = NOW()
-          WHERE user_id = $1 AND (grant_kind IN ('eip7702', 'session_key_4337', 'polymarket_signer') OR chain = $2) AND status = 'active'
-          RETURNING id`,
+        `UPDATE user_execution_grants SET status = 'revoked', revoked_at = NOW()
+          WHERE user_id = $1 AND chain = $2 AND status = 'active' RETURNING id`,
         [scope.userId, chain]
       );
     }
 
     return reply.send({
       success: true,
-      revokedCount: updated.length,
+      revokedCount: updated.length, affectedGrantIds: updated.map(g => g.id),
+      localOnly: true, onChainRevoked: false,
       chain,
-      message: `${chain} vault / execution delegation revoked successfully`
+      message: `${chain} local grants disabled. No on-chain authority was revoked, vault closed, or rent refunded.`
     });
   });
 
@@ -463,294 +429,38 @@ export async function registerMeRoutes(
       return reply.code(400).send({ error: 'Bad Request', message: 'Invalid grant payload' });
     }
     const { chain, grantKind, accountAddress } = parsed.data;
-
-    // Strict address format validation per chain (API-07)
-    const normalizedAddress = chain === 'solana' ? accountAddress.trim() : accountAddress.trim().toLowerCase();
-    if (chain === 'solana') {
-      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(normalizedAddress)) {
-        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid Solana address format' });
-      }
-    } else {
-      if (!/^0x[0-9a-fA-F]{40}$/.test(accountAddress.trim())) {
-        return reply.code(400).send({ error: 'Bad Request', message: 'Invalid EVM address format' });
-      }
-    }
-
-    // Reject reservation if already registered to another user (API-07 / OWA-04)
-    const existingOther = await query<{ user_id: string }>(
-      `SELECT user_id FROM user_execution_grants
-        WHERE chain = $1 AND account_address = $2 AND status = 'active' AND user_id != $3`,
-      [chain, normalizedAddress, scope.userId]
-    );
-    if (existingOther.length > 0) {
-      return reply.code(409).send({
-        error: 'Conflict',
-        message: 'This account address is already registered to another user'
-      });
-    }
-
-    // Revoke previous active grant for this kind
-    await query(
-      `UPDATE user_execution_grants
-          SET status = 'revoked', revoked_at = NOW()
-        WHERE user_id = $1 AND grant_kind = $2 AND status = 'active'`,
-      [scope.userId, grantKind]
-    );
-
-    const expiresAt = grantKind === 'eip7702' || grantKind === 'session_key_4337'
-      ? new Date(Date.now() + 30 * 86400000)
-      : null;
-
-    let inserted: { id: string }[];
-    if (grantKind === 'solana_vault') {
-      inserted = await query<{ id: string }>(
-        `INSERT INTO user_execution_grants (user_id, chain, grant_kind, account_address, status, expires_at, created_at)
-         VALUES ($1, 'solana', 'solana_vault', $2, 'active', $3, NOW())
-         ON CONFLICT (chain, account_address) DO UPDATE
-            SET user_id = EXCLUDED.user_id,
-                grant_kind = EXCLUDED.grant_kind,
-                status = 'active',
-                revoked_at = NULL
-          WHERE user_execution_grants.user_id = EXCLUDED.user_id
-         RETURNING id`,
-        [scope.userId, normalizedAddress, expiresAt]
-      );
-    } else {
-      return reply.code(400).send({
-        error: 'Bad Request',
-        message: `${grantKind} requires cryptographic delegation signature via /v1/me/vault/robinhood/delegation or /v1/me/vault/polymarket/credentials`
-      });
-    }
-
-    return reply.send({
-      success: true,
-      grantId: inserted[0]?.id,
-      expiresAt: expiresAt?.toISOString() ?? null,
-      message: `${grantKind} registered and activated successfully`
-    });
-  });
-
-  // ─── Robinhood Chain EIP-7702 Session Delegation ──────────────────────────────
-  app.get('/v1/me/vault/robinhood/challenge', async (request, reply) => {
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-
-    const q = request.query as { address?: string };
-    const address = q.address?.trim();
-    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
-      return reply.code(400).send({
-        error: 'Bad Request',
-        message: 'Valid EVM address query param required (0x followed by 40 hex characters)'
-      });
-    }
-
-    const timestampSeconds = Math.floor(Date.now() / 1000);
-    const nonce = Math.floor(Math.random() * 1000000);
-    const smartAccount = `0x4337${address.slice(6).toLowerCase()}`;
-    const validUntil = timestampSeconds + 30 * 86400; // 30 days
-
-    const typedData = {
-      domain: {
-        name: 'RobinhoodPaymasterSession',
-        version: '1',
-        chainId: 4663,
-        verifyingContract: '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
-      },
-      types: {
-        EIP712Domain: [
-          { name: 'name', type: 'string' },
-          { name: 'version', type: 'string' },
-          { name: 'chainId', type: 'uint256' },
-          { name: 'verifyingContract', type: 'address' }
-        ],
-        SessionDelegation: [
-          { name: 'account', type: 'address' },
-          { name: 'smartAccount', type: 'address' },
-          { name: 'validUntil', type: 'uint256' },
-          { name: 'dailyCap', type: 'uint256' },
-          { name: 'nonce', type: 'uint256' }
-        ]
-      },
-      primaryType: 'SessionDelegation',
-      message: {
-        account: address,
-        smartAccount,
-        validUntil,
-        dailyCap: 50,
-        nonce
-      }
-    };
-
-    return reply.send({
-      address,
-      smartAccount,
-      timestampSeconds,
-      validUntil,
-      nonce,
-      typedData
-    });
-  });
-
-  const robinhoodDelegationSchema = z.object({
-    address: z.string().trim().regex(/^0x[0-9a-fA-F]{40}$/),
-    signature: z.string().trim().regex(/^0x[0-9a-fA-F]+$/),
-    timestampSeconds: z.number().int().positive(),
-    nonce: z.number().int().nonnegative()
-  });
-
-  app.post('/v1/me/vault/robinhood/delegation', async (request, reply) => {
-    reply.header('Cache-Control', 'no-store');
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-
-    const parsed = robinhoodDelegationSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Bad Request', issues: parsed.error.issues });
-    }
-
-    const { address, signature, timestampSeconds, nonce } = parsed.data;
-    const normalizedAddress = address.trim().toLowerCase();
-    const smartAccount = `0x4337${normalizedAddress.slice(6)}`;
-    const validUntil = timestampSeconds + 30 * 86400;
-
-    // Verify linked auth wallet ownership (API-07 / S4-12)
-    const authWallets = await listAuthWallets(scope);
-    const isLinked = authWallets.some(
-      (w) => w.chainKind === 'evm' && w.address.toLowerCase() === normalizedAddress
-    );
-    if (!isLinked) {
-      // Auto-link if verified with signature
-      await query(
-        `INSERT INTO user_auth_wallets (user_id, chain_kind, address)
-         VALUES ($1, 'evm', $2)
-         ON CONFLICT (chain_kind, address) DO UPDATE
-            SET verified_at = NOW()
-          WHERE user_auth_wallets.user_id = $1`,
-        [scope.userId, normalizedAddress]
-      );
-    }
-
-    // Verify signature recovery diagnostic
+    const validPair = grantKind === 'solana_vault' ? chain === 'solana'
+      : grantKind === 'polymarket_signer' ? chain === 'polygon' : chain === 'robinhood-chain';
+    if (!validPair) return reply.code(400).send({ error: 'invalid-chain-grant-pair' });
+    if (grantKind !== 'solana_vault') return reply.code(501).send({ error: 'grant-registration-unsupported', status: 'unsupported', executionSupported: false });
+    const body = request.body as { ownerAddress?: string; cluster?: string };
+    if (body.cluster !== 'mainnet-beta') return reply.code(501).send({ error: 'vault-network-unsupported' });
+    const wallets = await listAuthWallets(scope);
+    const owner = wallets.find(w => w.chainKind === 'solana' && w.address === body.ownerAddress);
+    if (!owner) return reply.code(403).send({ error: 'vault-owner-not-linked' });
     try {
-      const { recoverTypedDataAddress } = await import('viem');
-      const recovered = await recoverTypedDataAddress({
-        domain: {
-          name: 'RobinhoodPaymasterSession',
-          version: '1',
-          chainId: BigInt(4663),
-          verifyingContract: '0x0000000071727De22E5E9d8BAf0edAc6f37da032' as `0x${string}`
-        },
-        types: {
-          EIP712Domain: [
-            { name: 'name', type: 'string' },
-            { name: 'version', type: 'string' },
-            { name: 'chainId', type: 'uint256' },
-            { name: 'verifyingContract', type: 'address' }
-          ],
-          SessionDelegation: [
-            { name: 'account', type: 'address' },
-            { name: 'smartAccount', type: 'address' },
-            { name: 'validUntil', type: 'uint256' },
-            { name: 'dailyCap', type: 'uint256' },
-            { name: 'nonce', type: 'uint256' }
-          ]
-        },
-        primaryType: 'SessionDelegation',
-        message: {
-          account: address as `0x${string}`,
-          smartAccount: smartAccount as `0x${string}`,
-          validUntil: BigInt(validUntil),
-          dailyCap: BigInt(50),
-          nonce: BigInt(nonce)
-        },
-        signature: signature as `0x${string}`
-      }).catch((e: any) => `recovery_failed: ${e?.message}`);
-
-      request.log.info({ address, recovered }, '[robinhood-delegation] Signature verified');
-    } catch (recErr) {
-      request.log.warn({ err: recErr }, '[robinhood-delegation] Diagnostic recovery error');
-    }
-
-    try {
-      // Envelope-seal the delegation session
-      const wrapper = new EnvMasterKeyWrapper();
-      const wrapContext: WrapContext = {
-        userId: scope.userId,
-        chainKind: 'evm',
-        keyVersion: 1
-      };
-      const secretPayload = JSON.stringify({
-        address: normalizedAddress,
-        smartAccount,
-        signature,
-        delegatedAt: new Date().toISOString()
-      });
-      const sealedSecret = await sealSecret(secretPayload, wrapContext, wrapper);
-
-      // Check conflict with another user
-      const existingOther = await query<{ user_id: string }>(
-        `SELECT user_id FROM user_execution_grants
-          WHERE chain = 'robinhood-chain' AND account_address = $1 AND status = 'active' AND user_id != $2`,
-        [normalizedAddress, scope.userId]
-      );
-      if (existingOther.length > 0) {
-        return reply.code(409).send({
-          error: 'Conflict',
-          message: 'Account address is already registered to another user'
-        });
-      }
-
-      // Revoke prior active grants for robinhood-chain
-      await query(
-        `UPDATE user_execution_grants
-            SET status = 'retired', revoked_at = NOW()
-          WHERE user_id = $1 AND chain = 'robinhood-chain' AND status = 'active'`,
-        [scope.userId]
-      );
-
-      const policy = {
-        smartAccount,
-        dailyCap: 50,
-        chainId: 4663,
-        delegatedAt: new Date().toISOString()
-      };
-
-      const expiresAt = new Date(Date.now() + 30 * 86400000);
-
-      const inserted = await query<{ id: string }>(
-        `INSERT INTO user_execution_grants
-           (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, expires_at, status, created_at)
-         VALUES ($1, 'robinhood-chain', 'eip7702', $2, $3, 1, $4, $5, 'active', NOW())
-         ON CONFLICT (chain, account_address) DO UPDATE
-            SET user_id = EXCLUDED.user_id,
-                grant_kind = 'eip7702',
-                sealed_secret = EXCLUDED.sealed_secret,
-                key_version = EXCLUDED.key_version,
-                scope_policy = EXCLUDED.scope_policy,
-                expires_at = EXCLUDED.expires_at,
-                status = 'active',
-                revoked_at = NULL
-          WHERE user_execution_grants.user_id = EXCLUDED.user_id
-         RETURNING id`,
-        [scope.userId, normalizedAddress, sealedSecret, JSON.stringify(policy), expiresAt]
-      );
-
-      return reply.send({
-        success: true,
-        grantId: inserted[0]?.id,
-        address: normalizedAddress,
-        smartAccountAddress: smartAccount,
-        expiresAt: expiresAt.toISOString(),
-        message: 'Robinhood Chain EIP-7702 session delegation authorized and persisted successfully'
-      });
-    } catch (err: any) {
-      request.log.error(err, '[robinhood-delegation] Failed to record delegation');
-      return reply.code(500).send({
-        error: 'Robinhood delegation failed',
-        message: err.message || 'Failed to save Robinhood delegation grant'
-      });
-    }
+      if (deriveWakeVaultAddress(owner.address) !== accountAddress.trim()) return reply.code(400).send({ error: 'vault-pda-mismatch' });
+    } catch { return reply.code(400).send({ error: 'invalid-vault-address' }); }
+    return reply.code(501).send({ error: 'vault-deployment-verification-unsupported', status: 'unsupported', executionSupported: false,
+      message: 'The PDA derivation matches, but deployed ownership and execution authority cannot be verified. No grant was created. Do not fund this as a usable vault.' });
   });
+
+  // No deployed EIP-7702 account implementation or user-live executor exists.
+  // Off-chain signatures must never become wallet links or spend authority.
+  for (const [method, url] of [
+    ['GET', '/v1/me/vault/robinhood/challenge'],
+    ['POST', '/v1/me/vault/robinhood/delegation']
+  ] as const) {
+    app.route({ method, url, handler: async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      if (!requireUser(request, reply)) return;
+      return reply.code(501).send({
+        error: 'robinhood-delegation-unsupported', status: 'unsupported',
+        executionSupported: false,
+        message: 'Robinhood delegation is unavailable. Link your wallet using SIWE; no delegation or spend authority will be created.'
+      });
+    } });
+  }
 
   // ─── Polymarket CLOB L2 Authentication ──────────────────────────────────────
   app.get('/v1/me/vault/polymarket/challenge', async (request, reply) => {
@@ -801,71 +511,21 @@ export async function registerMeRoutes(
 
     const { address, signature, timestampSeconds, nonce } = parsed.data;
 
-    // API-03 / CRY-06 / LEAK-01: Redact raw signature proof from normal log streams
-    request.log.info(
-      { address, timestampSeconds },
-      '[polymarket-clob] Received credentials derivation request'
-    );
-
+    const linked = await listAuthWallets(scope);
+    if (!linked.some(w => w.chainKind === 'evm' && w.address.toLowerCase() === address.toLowerCase())) return reply.code(403).send({ error: 'signer-not-linked' });
+    const age = Math.floor(Date.now() / 1000) - timestampSeconds;
+    if (age < 0 || age > 300) return reply.code(400).send({ error: 'expired-signature-challenge' });
     try {
       const { recoverTypedDataAddress } = await import('viem');
-      const recovered137 = await recoverTypedDataAddress({
-        domain: { name: 'ClobAuthDomain', version: '1', chainId: BigInt(137) },
-        types: {
-          EIP712Domain: [
-            { name: 'name', type: 'string' },
-            { name: 'version', type: 'string' },
-            { name: 'chainId', type: 'uint256' }
-          ],
-          ClobAuth: [
-            { name: 'address', type: 'address' },
-            { name: 'timestamp', type: 'string' },
-            { name: 'nonce', type: 'uint256' },
-            { name: 'message', type: 'string' }
-          ]
-        },
-        primaryType: 'ClobAuth',
-        message: {
-          address: address as `0x${string}`,
-          timestamp: String(timestampSeconds),
-          nonce: BigInt(nonce),
-          message: 'This message attests that I control the given wallet'
-        },
+      const typedData = buildClobAuthTypedData({ signerAddress: address, timestampSeconds, nonce });
+      const recovered = await recoverTypedDataAddress({
+        ...typedData,
+        types: { ClobAuth: typedData.types.ClobAuth },
+        message: { ...typedData.message, nonce: BigInt(nonce) },
         signature: signature as `0x${string}`
-      }).catch((e: any) => `recovery_failed: ${e?.message}`);
-
-      const recovered1 = await recoverTypedDataAddress({
-        domain: { name: 'ClobAuthDomain', version: '1', chainId: BigInt(1) },
-        types: {
-          EIP712Domain: [
-            { name: 'name', type: 'string' },
-            { name: 'version', type: 'string' },
-            { name: 'chainId', type: 'uint256' }
-          ],
-          ClobAuth: [
-            { name: 'address', type: 'address' },
-            { name: 'timestamp', type: 'string' },
-            { name: 'nonce', type: 'uint256' },
-            { name: 'message', type: 'string' }
-          ]
-        },
-        primaryType: 'ClobAuth',
-        message: {
-          address: address as `0x${string}`,
-          timestamp: String(timestampSeconds),
-          nonce: BigInt(nonce),
-          message: 'This message attests that I control the given wallet'
-        },
-        signature: signature as `0x${string}`
-      }).catch((e: any) => `recovery_failed: ${e?.message}`);
-
-      request.log.info(
-        { address, recovered137, recovered1, match137: recovered137?.toLowerCase() === address.toLowerCase(), match1: recovered1?.toLowerCase() === address.toLowerCase() },
-        '[polymarket-clob] Signature recovery diagnostic'
-      );
-    } catch (recErr) {
-      request.log.warn({ err: recErr }, '[polymarket-clob] Diagnostic recovery threw');
-    }
+      });
+      if (recovered.toLowerCase() !== address.toLowerCase()) return reply.code(403).send({ error: 'invalid-signer-proof' });
+    } catch { return reply.code(403).send({ error: 'invalid-signer-proof' }); }
 
     try {
       // 1. Call Polymarket CLOB to create or derive L2 credentials using the user's signature
@@ -891,63 +551,26 @@ export async function registerMeRoutes(
       });
       const sealedSecret = await sealSecret(secretPayload, wrapContext, wrapper);
 
-      // API-03 / OWA-04: Prevent cross-owner account reassignment
-      const existing = await query<{ user_id: string }>(
-        `SELECT user_id FROM user_execution_grants WHERE chain = 'polygon' AND account_address = $1 AND status = 'active'`,
-        [address.toLowerCase()]
-      );
-      if (existing.length > 0 && existing[0].user_id !== scope.userId) {
-        return reply.code(409).send({
-          error: 'Conflict',
-          message: 'Account address is already registered to another user'
-        });
-      }
-
-      // 3. Revoke any prior active grant for polygon polymarket_signer
-      await query(
-        `UPDATE user_execution_grants
-            SET status = 'revoked', revoked_at = NOW()
-          WHERE user_id = $1 AND chain = 'polygon' AND grant_kind = 'polymarket_signer' AND status = 'active'`,
-        [scope.userId]
-      );
-
-      const policy = {
-        apiKey: creds.apiKey,
-        derivedAt: new Date().toISOString(),
-        nonce
-      };
-
-      const inserted = await query<{ id: string }>(
-        `INSERT INTO user_execution_grants
-           (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, status, created_at)
-         VALUES ($1, 'polygon', 'polymarket_signer', $2, $3, 1, $4, 'active', NOW())
-         ON CONFLICT (chain, account_address) DO UPDATE
-            SET user_id = EXCLUDED.user_id,
-                sealed_secret = EXCLUDED.sealed_secret,
-                key_version = EXCLUDED.key_version,
-                scope_policy = EXCLUDED.scope_policy,
-                status = 'active',
-                revoked_at = NULL
-          WHERE user_execution_grants.user_id = EXCLUDED.user_id
-         RETURNING id`,
-        [scope.userId, address.toLowerCase(), sealedSecret, JSON.stringify(policy)]
-      );
-
-      const apiKeyMasked = creds.apiKey ? `${creds.apiKey.slice(0, 6)}...${creds.apiKey.slice(-4)}` : '';
+      const grant = await recordExecutionGrant(scope, {
+        chain: 'polygon', grantKind: 'polymarket_signer', accountAddress: address,
+        sealedSecret, keyVersion: 1,
+        scopePolicy: { derivedAt: new Date().toISOString(), nonce, authorizationOnly: true }
+      }, { replace: true });
 
       return reply.send({
         success: true,
-        grantId: inserted[0]?.id,
+        grantId: grant.id,
         address,
-        apiKey: creds.apiKey,
-        apiKeyMasked,
-        message: 'Polymarket L2 credentials derived and activated successfully'
+        credentialsRecorded: true,
+        localOnly: true, executionSupported: false,
+        message: 'Polymarket L2 credentials recorded locally. No on-chain deposit wallet or live execution was established.'
       });
     } catch (err: any) {
+      if (err?.name === 'ExecutionGrantConflictError') return reply.code(409).send({ error: 'grant-conflict', message: 'Grant replacement rejected; previous grant preserved.' });
       request.log.error(err, '[polymarket-clob] Failed to derive credentials');
       return reply.code(400).send({
         error: 'Polymarket L2 authentication failed',
-        message: err.message || 'Failed to authenticate with Polymarket CLOB'
+        message: 'Failed to authenticate with Polymarket CLOB', requestId: request.id
       });
     }
   });
@@ -1409,197 +1032,21 @@ export async function registerMeRoutes(
     return reply.send({ events: rows });
   });
 
-  // ── Trading Withdrawal Routes (S4-12 anti-theft core) ──────────────────────
-
-  const withdrawalOtps = options.otpStore ?? new Map<string, StoredWithdrawalOtp>();
-
-  app.post('/v1/me/trading/withdraw/request-otp', async (request, reply) => {
+  // No durable exact-intent store or authorized withdrawal executor is wired.
+  // Refuse both entry points rather than issue an unusable approval or burn a code.
+  const unsupportedWithdrawal = async (request: FastifyRequest, reply: FastifyReply) => {
     reply.header('Cache-Control', 'no-store');
     const scope = requireUser(request, reply);
     if (!scope) return;
-    const principal = request.principal;
-    if (principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
-
-    const parsed = withdrawRequestOtpSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Invalid payload', details: parsed.error.issues });
-    }
-
-    const { destinationAddress, chainKind, amountUsd } = parsed.data;
-
-    // S4-12: Destination MUST be a verified linked auth wallet (case-aware matching)
-    const linkedWallets = await listAuthWallets(scope);
-    const linked = linkedWallets.find(
-      (w) => w.chainKind === chainKind && isSameAddress(w.address, destinationAddress, chainKind)
-    );
-
-    if (!linked) {
-      return reply.code(400).send({
-        error: 'destination-not-linked-auth-wallet',
-        message: 'Withdrawals are strictly permitted only to SIWE/SIWS verified linked auth wallets (S4-12)'
-      });
-    }
-
-    // S4-12: 24h cooling-off window on newly linked wallets
-    const now = options.now?.() ?? new Date();
-    const cooling = isWalletCoolingOff(linked.verifiedAt, now, options.coolingOffMs);
-    if (cooling.isCoolingOff) {
-      return reply.code(403).send({
-        error: 'wallet-cooling-off-active',
-        message: `Newly linked wallet is in a 24-hour security cooling-off period (S4-12). ${cooling.hoursRemaining} hours remaining`,
-        hoursRemaining: cooling.hoursRemaining
-      });
-    }
-
-    // Cooldown guard: prevent rapid OTP overwrites and DoS
-    const existingOtp = withdrawalOtps.get(scope.userId);
-    if (existingOtp && existingOtp.expiresAt.getTime() > now.getTime()) {
-      const remainingMs = existingOtp.expiresAt.getTime() - now.getTime();
-      const elapsedMs = 15 * 60 * 1000 - remainingMs;
-      if (elapsedMs < 60 * 1000) {
-        return reply.code(429).send({
-          error: 'otp-cooldown-active',
-          message: 'Please wait at least 60 seconds before requesting a new withdrawal code'
-        });
-      }
-    }
-
-    // Generate cryptographically secure 6-digit OTP code with 15-minute validity (C-01 / S4-12)
-    const otpCode = randomInt(100000, 1000000).toString();
-    const expiresAt = new Date(now.getTime() + 15 * 60 * 1000);
-    withdrawalOtps.set(scope.userId, {
-      code: otpCode,
-      expiresAt,
-      destinationAddress,
-      chainKind,
-      amountUsd,
-      attempts: 0
+    if (request.principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
+    return reply.code(501).send({
+      error: 'withdrawal-unsupported',
+      supported: false,
+      message: 'Withdrawals are unavailable: durable exact intents and an authorized execution handoff are not implemented. No code was sent, authorization recorded, or transfer queued.'
     });
-
-    // Send confirmation code via email
-    if (options.sendWithdrawalOtpEmail) {
-      await options.sendWithdrawalOtpEmail(principal.user.email, otpCode);
-    } else {
-      const emailConfig = loadEmailConfigFromEnv();
-      await sendEmail(
-        {
-          to: principal.user.email,
-          subject: 'WAKE Withdrawal Confirmation Code',
-          text: `Your withdrawal confirmation code is: ${otpCode}. It expires in 15 minutes. If you did not initiate this, please contact support immediately.`
-        },
-        emailConfig
-      ).catch((err) => {
-        request.log.error(err, 'Failed to deliver withdrawal OTP email');
-      });
-    }
-
-    return reply.code(200).send({
-      ok: true,
-      message: 'Withdrawal confirmation OTP sent to registered email address'
-    });
-  });
-
-  app.post('/v1/me/trading/withdraw', async (request, reply) => {
-    reply.header('Cache-Control', 'no-store');
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-    const principal = request.principal;
-    if (principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
-
-    const parsed = withdrawConfirmSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Invalid payload', details: parsed.error.issues });
-    }
-
-    const { destinationAddress, chainKind, amountUsd, otpCode } = parsed.data;
-
-    // Verify linked wallet destination and cooling-off
-    const linkedWallets = await listAuthWallets(scope);
-    const linked = linkedWallets.find(
-      (w) => w.chainKind === chainKind && isSameAddress(w.address, destinationAddress, chainKind)
-    );
-
-    if (!linked) {
-      return reply.code(400).send({
-        error: 'destination-not-linked-auth-wallet',
-        message: 'Withdrawals are strictly permitted only to SIWE/SIWS verified linked auth wallets (S4-12)'
-      });
-    }
-
-    const now = options.now?.() ?? new Date();
-    const cooling = isWalletCoolingOff(linked.verifiedAt, now, options.coolingOffMs);
-    if (cooling.isCoolingOff) {
-      return reply.code(403).send({
-        error: 'wallet-cooling-off-active',
-        message: `Newly linked wallet is in a 24-hour security cooling-off period (S4-12). ${cooling.hoursRemaining} hours remaining`,
-        hoursRemaining: cooling.hoursRemaining
-      });
-    }
-
-    // Verify OTP code with brute-force lockout and constant-time comparison
-    const storedOtp = withdrawalOtps.get(scope.userId);
-    if (!storedOtp || storedOtp.expiresAt.getTime() <= now.getTime()) {
-      return reply.code(400).send({
-        error: 'invalid-or-expired-otp',
-        message: 'Withdrawal confirmation code is invalid or has expired'
-      });
-    }
-
-    if (storedOtp.attempts >= 5) {
-      withdrawalOtps.delete(scope.userId);
-      return reply.code(429).send({
-        error: 'otp-attempts-exceeded',
-        message: 'Too many incorrect attempts. Please request a new withdrawal code.'
-      });
-    }
-
-    if (!isSameAddress(storedOtp.destinationAddress, destinationAddress, chainKind)) {
-      return reply.code(400).send({
-        error: 'destination-mismatch',
-        message: 'Withdrawal code was requested for a different destination address'
-      });
-    }
-
-    // API-06 / CRY-07: Verify exact bound amount and chain against stored OTP intent
-    if (storedOtp.amountUsd !== undefined && storedOtp.amountUsd !== amountUsd) {
-      return reply.code(400).send({
-        error: 'amount-mismatch',
-        message: 'Withdrawal code was requested for a different amount'
-      });
-    }
-
-    if (storedOtp.chainKind !== chainKind) {
-      return reply.code(400).send({
-        error: 'chain-mismatch',
-        message: 'Withdrawal code was requested for a different chain'
-      });
-    }
-
-    if (!constantTimeCodeMatch(storedOtp.code, otpCode)) {
-      storedOtp.attempts += 1;
-      const remainingAttempts = 5 - storedOtp.attempts;
-      return reply.code(400).send({
-        error: 'invalid-or-expired-otp',
-        message: `Invalid withdrawal confirmation code. ${remainingAttempts} attempt(s) remaining.`
-      });
-    }
-
-    // Burn OTP immediately (single use)
-    withdrawalOtps.delete(scope.userId);
-
-    // API-06: Acknowledge verified authorization accurately (not yet queued for on-chain execution)
-    return reply.code(200).send({
-      status: 'confirmed',
-      message: 'Withdrawal authorization verified and authorized',
-      withdrawal: {
-        userId: scope.userId,
-        destinationAddress,
-        chainKind,
-        amountUsd,
-        confirmedAt: now.toISOString()
-      }
-    });
-  });
+  };
+  app.post('/v1/me/trading/withdraw/request-otp', unsupportedWithdrawal);
+  app.post('/v1/me/trading/withdraw', unsupportedWithdrawal);
 
   // --- Polymarket Perpetual Futures (Perps) Endpoints ---
 

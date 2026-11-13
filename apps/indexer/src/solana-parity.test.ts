@@ -33,24 +33,45 @@ type SwapFixture = {
 };
 
 function toRawBackfillTransaction(fixture: SwapFixture): HeliusParsedTransaction {
-  const nativeBalanceChange = fixture.nativeBalanceChange ?? 0;
+  const nativeBalanceChange = fixture.nativeBalanceChange ?? -FEE_LAMPORTS;
   return {
     slot: SLOT,
     blockTime: BLOCK_TIME,
     transaction: {
       signatures: [fixture.signature],
-      message: { accountKeys: [WALLET] }
+      message: {
+        accountKeys: [WALLET, ...Object.keys(fixture.tokenDeltas).map(mint => `${mint}-account`)],
+        instructions: [{
+          programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+          accounts: [WALLET, ...Object.keys(fixture.tokenDeltas).map(mint => `${mint}-account`)],
+          data: '63UCE4emmE3VCoXST22eKm9'
+        }]
+      }
     },
     meta: {
+      err: null,
+      innerInstructions: [{ index: 0, instructions: [...Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+        program: 'spl-token', parsed: { type: 'transfer', info: {
+          source: delta < 0n ? `${mint}-account` : `pool-${mint}`,
+          destination: delta > 0n ? `${mint}-account` : `pool-${mint}`,
+          amount: (delta < 0n ? -delta : delta).toString()
+        } }
+      })), ...(fixture.nativeBalanceChange === undefined ? [] : [{ program: 'system', parsed: { type: 'transfer', info: {
+        source: fixture.nativeBalanceChange < 0 ? WALLET : 'pool-sol',
+        destination: fixture.nativeBalanceChange > 0 ? WALLET : 'pool-sol',
+        lamports: Math.abs(fixture.nativeBalanceChange + FEE_LAMPORTS)
+      } } }])] }],
       fee: FEE_LAMPORTS,
-      preBalances: [nativeBalanceChange < 0 ? Math.abs(nativeBalanceChange) : 0],
-      postBalances: [nativeBalanceChange > 0 ? nativeBalanceChange : 0],
-      preTokenBalances: Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+      preBalances: [nativeBalanceChange < 0 ? Math.abs(nativeBalanceChange) : 0, ...Object.keys(fixture.tokenDeltas).map(() => 0)],
+      postBalances: [nativeBalanceChange > 0 ? nativeBalanceChange : 0, ...Object.keys(fixture.tokenDeltas).map(() => 0)],
+      preTokenBalances: Object.entries(fixture.tokenDeltas).map(([mint, delta], index) => ({
+        accountIndex: index + 1,
         owner: WALLET,
         mint,
         uiTokenAmount: { amount: delta < 0n ? (-delta).toString() : '0' }
       })),
-      postTokenBalances: Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+      postTokenBalances: Object.entries(fixture.tokenDeltas).map(([mint, delta], index) => ({
+        accountIndex: index + 1,
         owner: WALLET,
         mint,
         uiTokenAmount: { amount: delta > 0n ? delta.toString() : '0' }
@@ -66,15 +87,33 @@ function toEnhancedWebhookEvent(fixture: SwapFixture): EnhancedWebhookEvent {
     timestamp: BLOCK_TIME,
     fee: FEE_LAMPORTS,
     feePayer: WALLET,
+    transactionError: null,
+    instructions: [{
+      programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+      accounts: [WALLET, ...Object.keys(fixture.tokenDeltas).map(mint => `${mint}-account`)],
+      data: '63UCE4emmE3VCoXST22eKm9',
+      innerInstructions: [...Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
+        program: 'spl-token', parsed: { type: 'transfer', info: {
+          source: delta < 0n ? `${mint}-account` : `pool-${mint}`,
+          destination: delta > 0n ? `${mint}-account` : `pool-${mint}`,
+          amount: (delta < 0n ? -delta : delta).toString()
+        } }
+      })), ...(fixture.nativeBalanceChange === undefined ? [] : [{ program: 'system', parsed: { type: 'transfer', info: {
+        source: fixture.nativeBalanceChange < 0 ? WALLET : 'pool-sol',
+        destination: fixture.nativeBalanceChange > 0 ? WALLET : 'pool-sol',
+        lamports: Math.abs(fixture.nativeBalanceChange + FEE_LAMPORTS)
+      } } }])]
+    }],
     accountData: [{
       account: WALLET,
-      nativeBalanceChange: fixture.nativeBalanceChange ?? 0,
+      nativeBalanceChange: fixture.nativeBalanceChange ?? -FEE_LAMPORTS,
       tokenBalanceChanges: Object.entries(fixture.tokenDeltas).map(([mint, delta]) => ({
         userAccount: WALLET,
+        tokenAccount: `${mint}-account`,
         mint,
         rawTokenAmount: { tokenAmount: delta.toString() }
       }))
-    }]
+    }, ...Object.keys(fixture.tokenDeltas).map(mint => ({ account: `${mint}-account`, nativeBalanceChange: 0 }))]
   };
 }
 

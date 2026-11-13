@@ -208,7 +208,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       // errors; live-context failures bubble to the global handler as 500.
       const message = error instanceof Error ? error.message : String(error);
       if (/must be|required|unknown strategy template|not both|binStep|tickSpacing/.test(message)) {
-        return reply.code(400).send({ error: message });
+        return reply.code(400).send({ error: 'Invalid LP request', requestId: request.id });
       }
       throw error;
     }
@@ -305,7 +305,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
         || error.message.includes('not both') || error.message.includes('no current price')
         || error.message.includes('chain-prefixed')
       )) {
-        return reply.code(400).send({ error: error.message });
+        return reply.code(400).send({ error: 'Invalid LP request', requestId: request.id });
       }
       throw error;
     }
@@ -344,7 +344,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       });
     } catch (error) {
       return reply.code(409).send({
-        error: error instanceof Error ? error.message : 'transition refused'
+        error: 'transition refused', requestId: request.id
       });
     }
     return { queued: true, positionId, state: 'rebalancing' };
@@ -394,7 +394,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       });
     } catch (error) {
       return reply.code(409).send({
-        error: error instanceof Error ? error.message : 'transition refused'
+        error: 'transition refused', requestId: request.id
       });
     }
     return { positionId, state: 'closed' };
@@ -506,7 +506,7 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
       });
       return subscription;
     } catch (error) {
-      return reply.code(400).send({ error: error instanceof Error ? error.message : 'failed to create subscription' });
+      return reply.code(400).send({ error: 'failed to create subscription', requestId: request.id });
     }
   });
 

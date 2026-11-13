@@ -3,6 +3,7 @@ import {
   BILLING_GRACE_PERIOD_DAYS,
   BILLING_RENEWAL_ALERT_DAYS,
   calculateTierExtension,
+  canonicalPaymentHash,
   generateBillingMemo,
   resolveBillingPlan,
   type BillingChain,
@@ -20,6 +21,10 @@ export class DuplicatePaymentTransactionError extends Error {
     super(`Transaction ${txHash} on chain ${chain} has already been credited`);
     this.name = 'DuplicatePaymentTransactionError';
   }
+}
+
+export class PaymentClaimRejectedError extends Error {
+  constructor() { super('Payment intent or verified payer is no longer eligible'); this.name = 'PaymentClaimRejectedError'; }
 }
 
 export class InvalidBillingPlanError extends Error {
@@ -141,11 +146,15 @@ export async function recordCryptoPaymentAndGrantTier(input: {
   const plan = resolveBillingPlan(input.planId);
   if (!plan) throw new InvalidBillingPlanError(input.planId);
 
-  if (input.amountUsdc < plan.priceUsdc) {
+  if (!Number.isFinite(input.amountUsdc) || input.amountUsdc < plan.priceUsdc) {
     throw new UnderpaidPaymentError(plan.priceUsdc, input.amountUsdc);
   }
 
   const now = input.now ?? new Date();
+  const txHash = canonicalPaymentHash(input.chain, input.txHash);
+  const memo = input.memo?.trim() || null;
+  const payerAddress = input.chain === 'polygon' ? input.payerAddress?.trim().toLowerCase() : input.payerAddress?.trim();
+  if (!payerAddress) throw new PaymentClaimRejectedError();
 
   const result = await withTransaction(async (client: PoolClient) => {
     // 1. Fetch current user tier state FOR UPDATE to lock the row against concurrent race conditions
@@ -156,6 +165,32 @@ export async function recordCryptoPaymentAndGrantTier(input: {
 
     if (userRes.rows.length === 0) {
       throw new Error(`User ${input.scope.userId} not found`);
+    }
+
+    // Serialize the canonical transaction identity, including pre-fix mixed-case
+    // receipts. Historical rows are checked, never rewritten or silently merged.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`billing:${input.chain}:${txHash}`]);
+    const duplicate = await client.query(`SELECT id FROM crypto_payments WHERE chain = $1 AND
+      (CASE WHEN chain = 'polygon' THEN lower(btrim(tx_hash)) ELSE btrim(tx_hash) END) = $2`, [input.chain, txHash]);
+    if (duplicate.rows.length) throw new DuplicatePaymentTransactionError(input.chain, txHash);
+
+    const payer = await client.query(`SELECT id FROM user_auth_wallets
+      WHERE user_id = $1 AND chain_kind = $2 AND address = $3
+        AND EXISTS (SELECT 1 FROM audit_log a WHERE a.event = 'auth.wallet_linked'
+          AND a.actor_type = 'user' AND a.actor_id = user_auth_wallets.user_id
+          AND a.target_id = user_auth_wallets.address AND a.occurred_at >= user_auth_wallets.verified_at)
+      FOR SHARE`, [input.scope.userId, input.chain === 'solana' ? 'solana' : 'evm', payerAddress]);
+    if (payer.rows.length !== 1) throw new PaymentClaimRejectedError();
+
+    let intentId: string | null = null;
+    if (memo) {
+      const { rows } = await client.query(`SELECT id, user_id, status, plan_id, expected_amount_usdc, expires_at
+        FROM user_payment_intents WHERE reference_memo = $1 FOR UPDATE`, [memo]);
+      const intent = rows[0];
+      if (rows.length !== 1 || intent.user_id !== input.scope.userId || intent.status !== 'pending'
+          || intent.plan_id !== plan.id || Number(intent.expected_amount_usdc) !== plan.priceUsdc
+          || !(new Date(intent.expires_at).getTime() > Date.now())) throw new PaymentClaimRejectedError();
+      intentId = intent.id;
     }
 
     const currentUser = userRes.rows[0]!;
@@ -192,21 +227,21 @@ export async function recordCryptoPaymentAndGrantTier(input: {
         [
           input.scope.userId,
           input.chain,
-          input.txHash,
+          txHash,
           input.amountUsdc,
           plan.tier,
           plan.id,
           plan.durationDays,
-          input.payerAddress ?? null,
+          payerAddress,
           input.treasuryAddress,
-          input.memo ?? null,
+          memo,
           now
         ]
       );
     } catch (err: unknown) {
       // 23505 = unique_violation on uq_crypto_payments_chain_tx
       if ((err as { code?: string }).code === '23505') {
-        throw new DuplicatePaymentTransactionError(input.chain, input.txHash);
+        throw new DuplicatePaymentTransactionError(input.chain, txHash);
       }
       throw err;
     }
@@ -217,12 +252,12 @@ export async function recordCryptoPaymentAndGrantTier(input: {
       [input.scope.userId, extension.tier, extension.expiresAt]
     );
 
-    // 4. If there was a matching intent, mark it as completed
-    if (input.memo) {
-      await client.query(
-        "UPDATE user_payment_intents SET status = 'completed' WHERE reference_memo = $1 AND user_id = $2",
-        [input.memo, input.scope.userId]
-      );
+    // Recheck expiry at consumption, after any lock/verification delay.
+    if (intentId) {
+      const consumed = await client.query(`UPDATE user_payment_intents SET status = 'completed'
+        WHERE id = $1 AND user_id = $2 AND status = 'pending' AND plan_id = $3
+          AND expires_at > clock_timestamp() RETURNING id`, [intentId, input.scope.userId, plan.id]);
+      if (consumed.rows.length !== 1) throw new PaymentClaimRejectedError();
     }
 
     // 5. Strict audit log entry
@@ -234,13 +269,13 @@ export async function recordCryptoPaymentAndGrantTier(input: {
       targetId: input.scope.userId,
       metadata: {
         chain: input.chain,
-        txHash: input.txHash,
+        txHash,
         amountUsdc: input.amountUsdc,
         planId: plan.id,
         newTier: extension.tier,
         expiresAt: extension.expiresAt?.toISOString() ?? null
       }
-    });
+    }, client);
 
     const row = paymentRes.rows[0]!;
     return {
@@ -404,30 +439,19 @@ export async function runTierDowngradeSweep(now = new Date()): Promise<{
   const downgradedUserIds: string[] = [];
 
   for (const user of targetUsers) {
-    // API-04: Atomic conditional update prevents overwriting a newly renewed tier
-    const updated = await query<{ id: string }>(
-      "UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1 AND tier <> 'free' AND tier_expires_at IS NOT NULL AND tier_expires_at < $2 RETURNING id",
-      [user.id, graceCutoff]
-    );
-    if (updated.length === 0) {
-      continue;
-    }
-    invalidateUserSessionCache(user.id);
-
-    downgradedUserIds.push(user.id);
-
-    await recordAuditEventStrict({
-      actorType: 'service',
-      actorId: 'billing-sweeper',
-      event: 'billing.tier_downgraded',
-      targetType: 'user',
-      targetId: user.id,
-      metadata: {
-        previousTier: user.tier,
-        expiredAt: user.tier_expires_at.toISOString(),
-        downgradedAt: now.toISOString()
-      }
+    const changed = await withTransaction(async (client) => {
+      const { rows } = await client.query<{ id: string }>(
+        "UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1 AND tier <> 'free' AND tier_expires_at IS NOT NULL AND tier_expires_at < $2 RETURNING id",
+        [user.id, graceCutoff]
+      );
+      if (rows.length === 0) return false;
+      await recordAuditEventStrict({
+        actorType: 'service', actorId: null, event: 'billing.tier_downgraded', targetType: 'user', targetId: user.id,
+        metadata: { previousTier: user.tier, expiredAt: user.tier_expires_at.toISOString(), downgradedAt: now.toISOString() }
+      }, client);
+      return true;
     });
+    if (changed) { invalidateUserSessionCache(user.id); downgradedUserIds.push(user.id); }
   }
 
   return {

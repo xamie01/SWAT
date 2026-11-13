@@ -1,0 +1,42 @@
+{
+  "reviewDate": "2026-11-08",
+  "head": "8905505595802c21053118b5fab3fd53a8a1654c",
+  "partition": "Coordinator database/indexer/scoring/test-assurance and selected cross-partition validation",
+  "depth": "Relevant paths and bounded excerpts, not entire modules or all files",
+  "recordedReads": "read-ledger.jsonl records helper paths/ranges shared by reviewers. It is requested-read evidence; truncation and direct Read coverage must also be considered.",
+  "sourceFamilies": [
+    "packages/db/src/users.ts and authentication-cache callers",
+    "packages/db/src/tenancy.ts, client.ts, client-runtime.ts, evm-nonce.ts, migrate.ts",
+    "packages/db/sql/064_row_level_security.sql,066_lp_dashboard.sql,067_lp_auto_rebalance.sql",
+    "apps/indexer/src/parse.ts,index.ts,source-trade-lifecycle.ts,polymarket.ts,robinhood-ingestion.ts,evm.ts,webhook.ts,webhook-helpers.ts",
+    "packages/db/src/transactions.ts,scoring-queries.ts,clustering-queries.ts,independence.ts,independence-queries.ts",
+    "apps/scorer/src/index.ts and apps/api/src/routes/me.ts relevant consumers",
+    "vitest.integration.config.ts; tests/integration/chaos.integration.test.ts; helpers/lifecycle-fixture.ts,schema-guard.ts",
+    "packages/shared/src/rpc-failover.ts,logger.ts,authority/key-wrapper.ts,authority/envelope.ts",
+    "apps/web/lib/api.ts,api-server.ts, app/login/page.tsx, next.config.ts and dependency/compiler configuration",
+    "Current API delegation/billing, executor settlement/trade persistence/client-ID/source claim/lot sizing, and contract authority high-finding anchors"
+  ],
+  "additionalDirectReads": [
+    "package.json",
+    "tsconfig.base.json",
+    "apps/web/package.json",
+    "apps/web/tsconfig.json",
+    "packages/shared/src/billing.ts",
+    "apps/trade-executor/src/jupiter-jito-runtime.ts:1-181,190-359",
+    "apps/trade-executor/src/jupiter-jito-runtime.test.ts:1-105"
+  ],
+  "safeScanCoverage": "sensitive-literal-scan.json: 118 current source files plus 22 existing client artifacts; zero heuristic candidates; existing artifacts not proven current",
+  "executionEvidence": "verification.md and commands.jsonl; 176 existing tests plus 17 new assertions, no real database/Redis/venue connections",
+  "excluded": [
+    "Production and current credential files, keypairs, real signatures or funds",
+    "Installed DB roles/schema and transaction-pooler behavior",
+    "Live external metadata, finality/reorg incidence and provider fill correction semantics",
+    "Complete scorer economics and all parser/caller alternatives",
+    "Actual frontend browser/deployed API response headers, logs and runtime injection",
+    "Fresh external advisory audit and dependency installation",
+    "Full production emitted builds and actual Anchor/CPI instruction runtime",
+    "Unlisted source and generated server bundles"
+  ],
+  "integrityEvidence": "source-snapshot.json and final-validation.json; 778 selected tracked text hashes, not 778 audited files",
+  "standards": "OWASP Web2025/API2023/ASVS5.0.0 plus repo ADR tenancy, delegated-authority and master-lot constraints; not compliance certification"
+}

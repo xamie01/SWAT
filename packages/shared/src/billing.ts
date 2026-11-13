@@ -123,3 +123,11 @@ export function generateBillingMemo(userId: string): string {
     .toUpperCase();
   return `SWAT-${cleanId}${salt}`;
 }
+
+/** Canonical ledger identity; Solana signatures are case-sensitive. */
+export function canonicalPaymentHash(chain: BillingChain, value: string): string {
+  const hash = value.trim();
+  if (chain === 'polygon' && /^0x[0-9a-fA-F]{64}$/.test(hash)) return hash.toLowerCase();
+  if (chain === 'solana' && /^[1-9A-HJ-NP-Za-km-z]{87,88}$/.test(hash)) return hash;
+  throw new Error('Invalid payment transaction hash');
+}

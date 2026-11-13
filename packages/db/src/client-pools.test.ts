@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const constructed: Array<{ connectionString?: string }> = [];
+const endings: Array<string | undefined> = [];
 
 vi.mock('pg', () => {
   class Pool {
@@ -15,8 +16,16 @@ vi.mock('pg', () => {
       constructed.push(options);
     }
     on = vi.fn();
-    query = vi.fn(async () => ({ rows: [{ pool: this.options.connectionString }] }));
-    end = vi.fn(async () => undefined);
+    async connect() {
+      return { on() {}, off() {}, release() {}, query: async (sql: string) => {
+        if (sql.includes('FROM pg_catalog.pg_roles')) return { rows: [{ role_name: 'swat_app', session_role: 'swat_app',
+          rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false,
+          rolreplication: false, rolinherit: false, has_memberships: false,
+          owns_objects: false, can_create: false, row_security: 'on' }] };
+        return { rows: [{ pool: this.options.connectionString }], command: sql };
+      } };
+    }
+    end = vi.fn(async () => { endings.push(this.options.connectionString); });
   }
   return { Pool, types: { setTypeParser: vi.fn() } };
 });
@@ -27,6 +36,7 @@ const READ_URL = 'postgres://user:pw@replica/swat';
 async function loadClient(env: { read?: string }) {
   vi.resetModules();
   constructed.length = 0;
+  endings.length = 0;
   process.env.DATABASE_URL = WRITE_URL;
   if (env.read === undefined) {
     delete process.env.DATABASE_READ_URL;
@@ -100,8 +110,7 @@ describe('read and write pools', () => {
 
     await client.closePool();
 
-    expect(client.writePool.end).toHaveBeenCalledTimes(1);
-    expect(client.readPool.end).toHaveBeenCalledTimes(1);
+    expect(endings).toEqual([WRITE_URL, READ_URL]);
   });
 
   it('closes the shared pool exactly once', async () => {
@@ -110,6 +119,6 @@ describe('read and write pools', () => {
     await client.closePool();
     await client.closePool();
 
-    expect(client.writePool.end).toHaveBeenCalledTimes(1);
+    expect(endings).toEqual([WRITE_URL]);
   });
 });

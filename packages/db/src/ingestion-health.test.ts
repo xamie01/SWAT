@@ -24,7 +24,7 @@ import { recordIngestionBatch } from './ingestion-health.js';
 describe('recordIngestionBatch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.clientQuery.mockResolvedValue({ rows: [] });
+    mocks.clientQuery.mockImplementation(async (sql: string) => ({ rows: [], command: sql === 'COMMIT' ? 'COMMIT' : undefined }));
   });
 
   it('records the batch event and updates counters in one transaction', async () => {

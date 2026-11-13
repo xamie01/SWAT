@@ -33,7 +33,7 @@ import {
   walletInputSchema
 } from '@swat/shared';
 import type { Chain } from '@swat/shared';
-import { getActiveRpcUrl, probeRpcPool } from '@swat/shared';
+import { getActiveRpcUrl, probeRpcPool, redactLogValue } from '@swat/shared';
 import { executeBillingSweepJob } from './cron/billing-sweep.js';
 import {
   emergencyOff,
@@ -51,7 +51,15 @@ import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
 
 initLogger('api');
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: {
+  redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]', 'req.headers["x-csrf-token"]'],
+  serializers: {
+    req: request => ({ id: request.id, method: request.method, url: request.url?.split('?')[0] }),
+    err: () => ({ type: 'Error', message: 'Request failed', stack: '' })
+  },
+  hooks: { logMethod(args, method) { method.apply(this, args.map(value => redactLogValue(value)) as Parameters<typeof method>); } }
+} });
+app.addHook('onRequest', async (_request, reply) => { reply.header('Cache-Control', 'no-store'); });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const tradeQueueConnection = new Redis(redisUrl, { maxRetriesPerRequest: null });
@@ -188,7 +196,7 @@ app.setErrorHandler((error, request, reply) => {
   // Fastify validation errors have a validation property.
   const err = error as any;
   if (err.validation) {
-    return reply.code(400).send({ error: 'Bad Request', message: err.message });
+    return reply.code(400).send({ error: 'Bad Request', message: 'Invalid request' });
   }
   // PostgreSQL invalid uuid error (22P02) or similar can be mapped to 400
   if (err.code === '22P02') {
@@ -199,7 +207,7 @@ app.setErrorHandler((error, request, reply) => {
   // below, reporting the caller's mistake as a server fault — which hides real
   // 500s in the logs and tells the client to retry something that cannot work.
   if (typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 500) {
-    return reply.code(err.statusCode).send({ error: 'Bad Request', message: err.message });
+    return reply.code(err.statusCode).send({ error: 'Bad Request', message: 'Invalid request' });
   }
   // Return stable public error for anything else to prevent leaking DB details
   reply.code(500).send({ error: 'Internal Server Error' });
@@ -224,10 +232,7 @@ app.setErrorHandler((error, request, reply) => {
  */
 app.post('/v1/auth/ticket', async (request, reply) => {
   if (!requireRole(request, reply, 'admin')) return;
-  const ticket = randomBytes(16).toString('hex');
-  // Ticket expires in 60 seconds
-  await redis.set(`swat:ticket:${ticket}`, '1', 'EX', 60);
-  return { ticket };
+  return reply.code(410).send({ error: 'SSE tickets removed; use the authenticated same-origin stream.' });
 });
 
 await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
@@ -921,7 +926,7 @@ app.get('/v1/logs/stream', async (req, reply) => {
 
   const sseHeaders: Record<string, string> = {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-store',
     'Connection': 'keep-alive',
   };
   if (allowedOrigin) {

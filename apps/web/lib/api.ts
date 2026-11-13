@@ -18,6 +18,8 @@
  * a client that read `document.cookie` directly would be untestable here.
  */
 
+import { resolveBackendTarget, validateBackendTarget } from './backend-target.js';
+
 /** Name of the CSRF cookie the API sets. Deliberately JS-readable. */
 export const CSRF_COOKIE = 'swat_csrf';
 /** Header the API compares the cookie against. */
@@ -125,30 +127,20 @@ export function resolveApiBase(
   location?: { protocol: string; hostname: string } | null,
   configured: string | undefined = process.env.NEXT_PUBLIC_API_URL
 ): string {
-  if (configured) return configured.replace(/\/+$/, '');
   if (typeof window !== 'undefined' || location) {
-    return '';
+    return configured ? validateBackendTarget(configured) : '';
   }
-  return (
-    process.env.INTERNAL_API_URL ??
-    process.env.BACKEND_API_INTERNAL_URL ??
-    (process.env.NODE_ENV === 'production' ? 'http://75.119.151.184:3001' : 'http://localhost:3001')
-  );
+  return resolveBackendTarget('api');
 }
 
 export function resolveLpApiBase(
   location?: { protocol: string; hostname: string } | null,
   configured: string | undefined = process.env.NEXT_PUBLIC_LP_API_URL
 ): string {
-  if (configured) return configured.replace(/\/+$/, '');
   if (typeof window !== 'undefined' || location) {
-    return '';
+    return configured ? validateBackendTarget(configured) : '';
   }
-  return (
-    process.env.INTERNAL_LP_URL ??
-    process.env.BACKEND_LP_INTERNAL_URL ??
-    (process.env.NODE_ENV === 'production' ? 'http://75.119.151.184:3010' : 'http://localhost:3010')
-  );
+  return resolveBackendTarget('lp');
 }
 
 function currentLocation(): { protocol: string; hostname: string } | null {

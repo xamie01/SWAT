@@ -73,6 +73,12 @@ vi.mock('./evm.js', () => ({
   backfillEvmWallet: vi.fn()
 }));
 
+vi.mock('./polymarket-book-runtime.js', () => ({
+  createPolymarketBookRuntimeOnRedis: vi.fn(() => ({
+    start: vi.fn(), stop: vi.fn(), subscriber: { subscribe: vi.fn() }
+  }))
+}));
+
 vi.mock('./polymarket.js', () => ({
   backfillPolymarketWallet: vi.fn(),
   pollPolymarketResolutions: vi.fn(async () => undefined)
@@ -88,19 +94,27 @@ function confirmedBuy(): HeliusParsedTransaction {
     blockTime: 1_760_000_000,
     transaction: {
       signatures: [signature],
-      message: { accountKeys: [wallet], instructions: [] }
+      message: { accountKeys: [wallet, 'quote-account', 'target-account'], instructions: [{
+        programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+        accounts: [wallet, 'quote-account', 'target-account'], data: '63UCE4emmE3VCoXST22eKm9'
+      }] }
     },
     meta: {
+      err: null,
+      innerInstructions: [{ index: 0, instructions: [
+        { program: 'spl-token', parsed: { type: 'transfer', info: { source: 'quote-account', destination: 'pool-quote', amount: '25000000' } } },
+        { program: 'spl-token', parsed: { type: 'transfer', info: { source: 'pool-target', destination: 'target-account', amount: '5000000' } } }
+      ] }],
       fee: 5_000,
-      preBalances: [1_000_000],
-      postBalances: [995_000],
+      preBalances: [1_000_000, 0, 0],
+      postBalances: [995_000, 0, 0],
       preTokenBalances: [
-        { owner: wallet, mint: USDC_MINT, uiTokenAmount: { amount: '25000000' } },
-        { owner: wallet, mint: token, uiTokenAmount: { amount: '0' } }
+        { accountIndex: 1, owner: wallet, mint: USDC_MINT, uiTokenAmount: { amount: '25000000' } },
+        { accountIndex: 2, owner: wallet, mint: token, uiTokenAmount: { amount: '0' } }
       ],
       postTokenBalances: [
-        { owner: wallet, mint: USDC_MINT, uiTokenAmount: { amount: '0' } },
-        { owner: wallet, mint: token, uiTokenAmount: { amount: '5000000' } }
+        { accountIndex: 1, owner: wallet, mint: USDC_MINT, uiTokenAmount: { amount: '0' } },
+        { accountIndex: 2, owner: wallet, mint: token, uiTokenAmount: { amount: '5000000' } }
       ]
     }
   };
@@ -141,9 +155,31 @@ describe('Solana source lifecycle ingestion', () => {
     }), { status: 200 })));
   });
 
+  it.each(['solana-backfill', 'solana-webhook'] as const)('quarantines %s observations before accepted-trade writes and enrichment', async (source) => {
+    await expect(processTransaction(confirmedBuy(), wallet, source)).resolves.toBe('skipped');
+    expect(recordSourceTradeEvent).toHaveBeenCalledWith(expect.objectContaining({
+      confirmationState: 'observed', quantity: '5000000'
+    }));
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(upsertToken).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.fetchTokenPriceUsd).not.toHaveBeenCalled();
+    expect(updateTokenLaunchTimestamp).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it('reports quarantine without changing the public legacy result string', async () => {
+    const outcome = vi.fn();
+    await expect(processTransaction(confirmedBuy(), wallet, 'solana-backfill', outcome))
+      .resolves.toBe('skipped');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('quarantined');
+    expect(upsertToken).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
   it('converges webhook and backfill observations on one immutable BUY event', async () => {
     await expect(processTransaction(confirmedBuy(), wallet, 'solana-backfill'))
-      .resolves.toBe('inserted');
+      .resolves.toBe('skipped');
     vi.mocked(insertParsedTransaction).mockResolvedValueOnce(false);
     await expect(processTransaction(confirmedBuy(), wallet, 'solana-webhook'))
       .resolves.toBe('skipped');
@@ -168,8 +204,25 @@ describe('Solana source lifecycle ingestion', () => {
       side: 'buy',
       quantity: '5000000',
       amountUsd: '25',
-      confirmationState: 'confirmed'
+      confirmationState: 'observed'
     });
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'missing-result', 'unrelated-program', 'multiple-legs'])('persists and publishes nothing for %s observations', async (kind) => {
+    const rejected = confirmedBuy();
+    if (kind === 'failed') rejected.meta!.err = { InstructionError: [0, 'Custom'] };
+    if (kind === 'missing-result') delete rejected.meta!.err;
+    if (kind === 'unrelated-program') rejected.transaction!.message!.instructions = [];
+    if (kind === 'multiple-legs') rejected.meta!.postTokenBalances!.push({
+      accountIndex: 2, owner: wallet, mint: 'unrelated', uiTokenAmount: { amount: '100' }
+    });
+    await expect(processTransaction(rejected, wallet, 'solana-webhook')).resolves.toBe('skipped');
+    expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(upsertToken).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
   });
 
   it('creates no lifecycle event for a rejected Solana row', async () => {
@@ -193,6 +246,26 @@ describe('Solana source lifecycle ingestion', () => {
 
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(updateTokenLaunchTimestamp).not.toHaveBeenCalled();
+  });
+
+  it.each(['observation', 'null-transaction', 'capped'] as const)('reports %s backfill evidence without certifying history or finality', async (kind) => {
+    vi.stubEnv('BACKFILL_SIGNATURE_LIMIT', kind === 'capped' ? '1' : '1000');
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { method: string };
+      const result = request.method === 'getSignaturesForAddress'
+        ? [{ signature, slot: 351_000_000, blockTime: 1_760_000_000 }]
+        : kind === 'null-transaction' ? null : confirmedBuy();
+      return new Response(JSON.stringify({ result }), { status: 200 });
+    });
+    const result = await backfillWallet(wallet);
+    expect(result).toMatchObject({ fetched: 1, inserted: 0, skipped: 1, failed: 0,
+      evidence: {
+        observed: kind === 'null-transaction' ? 0 : 1,
+        quarantined: kind === 'null-transaction' ? 0 : 1,
+        accepted: 0, confirmation: 'withheld', scope: 'requested-window',
+        completeness: kind === 'observation' ? 'unknown' : 'partial'
+      }
+    });
   });
 
   it('fails a backfill batch when canonical lifecycle persistence fails', async () => {

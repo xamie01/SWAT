@@ -112,6 +112,7 @@ export function isUserReachable(path: string): boolean {
  */
 export async function registerAdminOnlyGlobals(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     if (request.method === 'OPTIONS') return;
     const path = request.url.split('?')[0]!;
     if (!path.startsWith('/v1/')) return;
@@ -128,6 +129,7 @@ export async function registerAuth(app: FastifyInstance, options: AuthPluginOpti
   app.decorateRequest('principal', undefined);
 
   app.addHook('onRequest', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
     if (request.method === 'OPTIONS') return;
     const path = request.url.split('?')[0]!;
     const isPublic = PUBLIC_PATHS.has(path);
@@ -164,18 +166,8 @@ export async function registerAuth(app: FastifyInstance, options: AuthPluginOpti
 
     if (isPublic) return;
 
-    // SSE cannot send headers, so it authenticates with a one-time ticket in the
-    // query string. The ticket must be consumed HERE: the stream route performs
-    // no validation of its own, so falling through without checking would leave
-    // it open to anyone.
-    if (path.startsWith('/v1/logs/stream')) {
-      const ticket = (request.query as { ticket?: unknown }).ticket;
-      if (typeof ticket === 'string' && ticket && (await options.consumeSseTicket(ticket))) {
-        request.principal = { kind: 'service' };
-        return;
-      }
-      // Fall through: a legacy key may still authorise the stream.
-    }
+    // Query-string bearer credentials are not accepted. Browser streams use
+    // the same session cookie and role checks as other operator requests.
 
     const authorization = request.headers.authorization;
     if (authorization?.startsWith('Bearer ')) {

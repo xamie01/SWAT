@@ -13,6 +13,7 @@ export function deriveSolanaAnchorPda(
   userAddress: string,
   cluster: 'mainnet-beta' | 'devnet' = 'mainnet-beta'
 ): { pdaAddress: string; bump: number } {
+  if (cluster !== 'mainnet-beta') throw new Error('Devnet vault deployment is unsupported.');
   try {
     const userPubkey = new PublicKey(userAddress.trim());
     const progId = new PublicKey(
@@ -24,8 +25,7 @@ export function deriveSolanaAnchorPda(
     );
     return { pdaAddress: pda.toBase58(), bump };
   } catch (err) {
-    console.warn('Could not derive Anchor PDA with @solana/web3.js:', err);
-    return { pdaAddress: WAKE_SOLANA_MAINNET_PROGRAM_ID, bump: 255 };
+    throw new Error('Vault PDA derivation failed; no funding address is available.');
   }
 }
 
@@ -354,57 +354,9 @@ export async function signPolymarketClobAuth(
   }
 }
 
-/**
- * Prompts the connected EVM wallet (MetaMask, Rabby, Trust Wallet) to sign the
- * Robinhood Chain EIP-7702 SessionDelegation typed data via eth_signTypedData_v4.
- */
+/** No deployed delegated-account implementation is available. Never prompt a substitute signature. */
 export async function signRobinhoodDelegation(
-  provider: any,
-  address: string,
-  typedData: any
+  _provider: any, _address: string, _typedData: any
 ): Promise<string> {
-  const activeProvider = provider || (typeof window !== 'undefined' ? (window as any).ethereum : null);
-  if (!activeProvider) {
-    throw new Error('No EVM wallet provider available to sign Robinhood delegation.');
-  }
-
-  const payload = {
-    ...typedData,
-    types: {
-      EIP712Domain: [
-        { name: 'name', type: 'string' },
-        { name: 'version', type: 'string' },
-        { name: 'chainId', type: 'uint256' },
-        { name: 'verifyingContract', type: 'address' },
-      ],
-      ...typedData.types,
-    },
-  };
-
-  try {
-    return await activeProvider.request({
-      method: 'eth_signTypedData_v4',
-      params: [address, JSON.stringify(payload)],
-    });
-  } catch (err: any) {
-    if (err?.code === 4001) {
-      throw new Error('Robinhood delegation signature rejected by user.');
-    }
-    try {
-      return await activeProvider.request({
-        method: 'eth_signTypedData_v4',
-        params: [address, payload],
-      });
-    } catch (err2: any) {
-      if (err2?.code === 4001) {
-        throw new Error('Robinhood delegation signature rejected by user.');
-      }
-      // Mobile wallet personal_sign fallback
-      const message = `Robinhood Chain Session Delegation\nChain ID: 4663\nAccount: ${address}\nValid: 30 Days\nDaily Cap: 50 Ops\nNonce: ${typedData?.message?.nonce ?? 0}`;
-      return await activeProvider.request({
-        method: 'personal_sign',
-        params: [message, address],
-      });
-    }
-  }
+  throw new Error('Robinhood EIP-7702 delegation is unsupported; wallet linking does not grant spend authority.');
 }

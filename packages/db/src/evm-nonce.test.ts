@@ -1,31 +1,38 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const client = {
     query: vi.fn(),
     on: vi.fn(),
     off: vi.fn(),
-    release: vi.fn()
+    connect: vi.fn(async () => {}),
+    end: vi.fn(async () => {})
   };
-  return { client, connect: vi.fn(async () => client) };
+  return { client };
 });
 
-vi.mock('./client.js', () => ({ pool: { connect: mocks.connect } }));
+vi.mock('pg', () => ({ Client: class { constructor() { return mocks.client; } } }));
 
 import { evmNonceLockKey, withEvmNonceLock } from './evm-nonce.js';
+const role = { role_name: 'swat_app', session_role: 'swat_app', rolsuper: false, rolbypassrls: false,
+  rolcreaterole: false, rolcreatedb: false, rolreplication: false, rolinherit: false,
+  has_memberships: false, owns_objects: false, can_create: false, row_security: 'on' };
+afterEach(() => vi.unstubAllEnvs());
 
 /** Mirrors `pg_try_advisory_lock` returning `locked`, then the unlock. */
 function grantLock(): void {
   mocks.client.query.mockImplementation(async (sql: string) => {
-    if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }] };
-    return { rows: [] };
+    if (sql.includes('FROM pg_catalog.pg_roles')) return { rows: [role] };
+    if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true, backend_pid: 101 }] };
+    return { rows: [{ unlocked: true, backend_pid: 101 }] };
   });
 }
 
 function refuseLock(): void {
   mocks.client.query.mockImplementation(async (sql: string) => {
-    if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: false }] };
-    return { rows: [] };
+    if (sql.includes('FROM pg_catalog.pg_roles')) return { rows: [role] };
+    if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: false, backend_pid: 101 }] };
+    return { rows: [{ unlocked: true, backend_pid: 101 }] };
   });
 }
 
@@ -79,7 +86,8 @@ describe('evmNonceLockKey (S4-M12)', () => {
 describe('withEvmNonceLock (S4-M12)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.connect.mockImplementation(async () => mocks.client);
+    vi.stubEnv('DIRECT_DATABASE_URL', 'postgresql://swat_app:fixture@127.0.0.1:59998/review_test');
+    vi.stubEnv('DIRECT_DATABASE_SESSION_CONFIRMED', 'true');
   });
 
   it('runs the critical section and releases the lock', async () => {
@@ -93,7 +101,7 @@ describe('withEvmNonceLock (S4-M12)', () => {
     const sql = mocks.client.query.mock.calls.map(([text]) => text as string);
     expect(sql.some((s) => s.includes('pg_try_advisory_lock'))).toBe(true);
     expect(sql.some((s) => s.includes('pg_advisory_unlock'))).toBe(true);
-    expect(mocks.client.release).toHaveBeenCalledWith(false);
+    expect(mocks.client.end).toHaveBeenCalledOnce();
   });
 
   it('does NOT run the critical section when another holder has the lock', async () => {
@@ -130,7 +138,7 @@ describe('withEvmNonceLock (S4-M12)', () => {
 
     const sql = mocks.client.query.mock.calls.map(([text]) => text as string);
     expect(sql.some((s) => s.includes('pg_advisory_unlock'))).toBe(true);
-    expect(mocks.client.release).toHaveBeenCalledWith(false);
+    expect(mocks.client.end).toHaveBeenCalledOnce();
   });
 
   it('destroys the connection when the unlock fails, so the lock cannot leak', async () => {
@@ -138,24 +146,25 @@ describe('withEvmNonceLock (S4-M12)', () => {
     // that still holds the lock to the pool would wedge the account for the life
     // of that pooled connection — worse than failing this one trade.
     mocks.client.query.mockImplementation(async (sql: string) => {
-      if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }] };
+    if (sql.includes('FROM pg_catalog.pg_roles')) return { rows: [role] };
+      if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true, backend_pid: 101 }] };
       if (sql.includes('pg_advisory_unlock')) throw new Error('backend gone');
-      return { rows: [] };
+      return { rows: [{ unlocked: true, backend_pid: 101 }] };
     });
 
     await expect(withEvmNonceLock({
       chain: 'robinhood-chain',
       account: '0xabc',
       run: vi.fn().mockResolvedValue(1)
-    })).resolves.toEqual({ acquired: true, result: 1 });
+    })).rejects.toThrow('backend gone');
 
-    expect(mocks.client.release).toHaveBeenCalledWith(true);
+    expect(mocks.client.end).toHaveBeenCalledOnce();
   });
 
-  it('always returns the client to the pool', async () => {
+  it('always destroys the dedicated session', async () => {
     grantLock();
     await withEvmNonceLock({ chain: 'polygon', account: '0xabc', run: vi.fn() });
-    expect(mocks.client.release).toHaveBeenCalledOnce();
+    expect(mocks.client.end).toHaveBeenCalledOnce();
   });
 
   it('registers and removes a client error handler around the critical section', async () => {

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { WakeLogo } from '../../components/WakeLogo.js';
 import { ThemeToggle } from '../../components/ThemeToggle.js';
 import { api, ApiError } from '../../lib/api.js';
+import { resolveLoginDestination } from '../../lib/route-access.js';
 
 /**
  * Real login against POST /v1/auth/login (checklist S6-3 / S6-5 partial).
@@ -36,25 +37,7 @@ function LoginForm() {
     try {
       const res = await api.post<{ user: { id: string; email: string; role: string; tier: string } }>('/v1/auth/login', { email, password });
       
-      const role = res?.user?.role;
-      const isAdminPrefix = (path: string) => [
-        '/admin', '/workspace', '/signals', '/wallets', '/logs', '/clusters', '/setup', '/performance'
-      ].some(prefix => path === prefix || path.startsWith(`${prefix}/`));
-
-      let destination = '/dashboard';
-      if (next && next.startsWith('/') && !next.startsWith('//')) {
-        if (role !== 'admin' && isAdminPrefix(next)) {
-          destination = '/dashboard';
-        } else {
-          destination = next;
-        }
-      } else if (role === 'admin') {
-        destination = '/admin/portfolio';
-      } else {
-        destination = '/dashboard';
-      }
-
-      router.push(destination);
+      router.push(resolveLoginDestination(next, res?.user?.role));
     } catch (caught) {
       setError(
         caught instanceof ApiError

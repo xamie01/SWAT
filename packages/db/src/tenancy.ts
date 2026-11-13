@@ -1,5 +1,6 @@
 import type { PoolClient, QueryResultRow } from 'pg';
 import { withTransaction, type TransactionOptions } from './transaction.js';
+import { assertDatabaseRole } from './database-role.js';
 
 /**
  * Tenant scoping (D12 & Migration 064).
@@ -38,9 +39,9 @@ export interface UserScope {
  * single grep target for "where does tenant scope enter the system?".
  */
 export function forUser(userId: string): UserScope {
-  if (!userId) {
+  if (!userId.trim() || userId.trim() === '*') {
     // An empty scope would silently widen every query built from it.
-    throw new Error('forUser() requires a user id');
+    throw new Error('forUser() requires a non-wildcard user id');
   }
   return { userId } as UserScope;
 }
@@ -67,16 +68,15 @@ export function isCrossTenant(scope: UserScope): boolean {
  *
  * Scopes queries to `scope.userId`, enabling Postgres RLS enforcement on all 17 user tables.
  * Setting `is_rls_bypassed = 'off'` activates kernel RLS filtering for specific users.
- * When `scope.userId === '*'`, sets `app.bypass_rls = 'on'` for cross-tenant administration.
+ * Cross-tenant administration is refused until a separate privileged capability is reviewed.
  */
 export async function setTenantScope(client: PoolClient, scope: UserScope): Promise<void> {
   if (isCrossTenant(scope)) {
-    await client.query("SET LOCAL app.bypass_rls = 'on'");
-    await client.query("SET LOCAL app.current_user_id = '*'");
-  } else {
-    await client.query("SET LOCAL app.bypass_rls = 'off'");
-    await client.query("SELECT set_config('app.current_user_id', $1, true)", [scope.userId]);
+    throw new Error('Cross-tenant queries require a separately reviewed privileged capability');
   }
+  await assertDatabaseRole(client, 'runtime');
+  await client.query("SET LOCAL app.bypass_rls = 'off'");
+  await client.query("SELECT set_config('app.current_user_id', $1, true)", [scope.userId]);
 }
 
 /**

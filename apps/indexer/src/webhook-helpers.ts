@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
-import type { HeliusParsedTransaction } from './parse.js';
+import { decodeTransferInstruction, type HeliusParsedTransaction, type HeliusParsedInstruction, type HeliusTokenBalance } from './parse.js';
 
 export type EnhancedTokenBalanceChange = {
   userAccount?: string;
+  tokenAccount?: string;
   mint?: string;
   rawTokenAmount?: {
     tokenAmount?: string;
+    decimals?: number;
   };
 };
 
@@ -28,6 +30,8 @@ export type EnhancedWebhookEvent = {
   slot?: number;
   timestamp?: number;
   fee?: number;
+  transactionError?: unknown;
+  instructions?: Array<HeliusParsedInstruction & { innerInstructions?: HeliusParsedInstruction[] }>;
   accountData?: EnhancedAccountData[];
   nativeTransfers?: EnhancedNativeTransfer[];
 };
@@ -75,34 +79,41 @@ export function enhancedEventToTransaction(
   event: EnhancedWebhookEvent,
   walletAddress: string
 ): HeliusParsedTransaction {
-  const deltas = new Map<string, bigint>();
+  const accountKeys = [...new Set([event.feePayer ?? '', walletAddress,
+    ...(event.accountData ?? []).map(account => account.account ?? ''),
+    ...(event.accountData ?? []).flatMap(account => (account.tokenBalanceChanges ?? []).map(change => change.tokenAccount ?? ''))
+  ])];
+  const preTokenBalances: HeliusTokenBalance[] = [];
+  const postTokenBalances: HeliusTokenBalance[] = [];
+  let malformed = false;
   for (const account of event.accountData ?? []) {
     for (const change of account.tokenBalanceChanges ?? []) {
-      if (change.userAccount !== walletAddress || !change.mint) continue;
-      const amount = BigInt(change.rawTokenAmount?.tokenAmount ?? '0');
-      deltas.set(change.mint, (deltas.get(change.mint) ?? 0n) + amount);
+      if (change.userAccount !== walletAddress) continue;
+      const text = change.rawTokenAmount?.tokenAmount;
+      if (!change.mint || typeof text !== 'string' || !/^-?(0|[1-9][0-9]{0,19})$/.test(text)) {
+        malformed = true;
+        continue;
+      }
+      const delta = BigInt(text);
+      const common = {
+        owner: walletAddress, mint: change.mint,
+        accountIndex: change.tokenAccount ? accountKeys.indexOf(change.tokenAccount) : undefined
+      };
+      preTokenBalances.push({ ...common, uiTokenAmount: {
+        amount: delta < 0n ? (-delta).toString() : '0', decimals: change.rawTokenAmount?.decimals
+      } });
+      postTokenBalances.push({ ...common, uiTokenAmount: {
+        amount: delta > 0n ? delta.toString() : '0', decimals: change.rawTokenAmount?.decimals
+      } });
     }
   }
-
-  const preTokenBalances = [];
-  const postTokenBalances = [];
-  for (const [mint, delta] of deltas) {
-    preTokenBalances.push({
-      owner: walletAddress,
-      mint,
-      uiTokenAmount: { amount: delta < 0n ? (-delta).toString() : '0' }
-    });
-    postTokenBalances.push({
-      owner: walletAddress,
-      mint,
-      uiTokenAmount: { amount: delta > 0n ? delta.toString() : '0' }
-    });
-  }
-
-  const nativeChange = (event.accountData ?? [])
-    .find((account) => account.account === walletAddress)
-    ?.nativeBalanceChange ?? 0;
-  const nativeMagnitude = Math.abs(nativeChange);
+  const balanceChanges = accountKeys.map(key => {
+    const value = (event.accountData ?? []).find(account => account.account === key)?.nativeBalanceChange;
+    const requiresEvidence = key === walletAddress
+      || preTokenBalances.some(balance => accountKeys[balance.accountIndex ?? -1] === key);
+    if (requiresEvidence && !Number.isSafeInteger(value)) malformed = true;
+    return value ?? 0;
+  });
 
   return {
     slot: event.slot,
@@ -110,8 +121,8 @@ export function enhancedEventToTransaction(
     transaction: {
       signatures: event.signature ? [event.signature] : [],
       message: {
-        accountKeys: [walletAddress],
-        instructions: (event.nativeTransfers ?? []).map((transfer) => ({
+        accountKeys,
+        instructions: [...(event.instructions ?? []), ...(event.nativeTransfers ?? []).map((transfer) => ({
           program: 'system',
           parsed: {
             type: 'transfer',
@@ -121,15 +132,17 @@ export function enhancedEventToTransaction(
               lamports: transfer.amount
             }
           }
-        }))
+        }))]
       }
     },
     meta: {
-      fee: event.fee ?? 0,
-      preBalances: [nativeChange < 0 ? nativeMagnitude : 0],
-      postBalances: [nativeChange > 0 ? nativeMagnitude : 0],
+      err: malformed ? 'Malformed enhanced balance evidence' : event.transactionError,
+      fee: event.fee,
+      preBalances: balanceChanges.map(value => value < 0 ? -value : 0),
+      postBalances: balanceChanges.map(value => value > 0 ? value : 0),
       preTokenBalances,
-      postTokenBalances
+      postTokenBalances,
+      innerInstructions: (event.instructions ?? []).map((ix, index) => ({ index, instructions: (ix.innerInstructions ?? []).map(decodeTransferInstruction) }))
     }
   };
 }

@@ -1,0 +1,155 @@
+{
+  "reviewDate": "2026-11-08",
+  "root": "/home/xahmie/Documents/SWAT",
+  "head": "8905505595802c21053118b5fab3fd53a8a1654c",
+  "baseline": "d5852a0e31e8e9a517c6e7c47ed9623819c7fc71",
+  "remediation": "ec3c5fefe4424be4d9a015a7402e2cfc7d8c6ab7",
+  "partition": [
+    "/home/xahmie/Documents/SWAT/apps/api",
+    "/home/xahmie/Documents/SWAT/apps/web",
+    "/home/xahmie/Documents/SWAT/pda-test-ui",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/auth.ts",
+    "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts (authentication/CORS boundary only)",
+    "/home/xahmie/Documents/SWAT/packages/db (directly needed billing/auth/grant helpers and schema only)"
+  ],
+  "method": {
+    "confidenceMeaning": {
+      "Verified": "Current source behavior traced; not an executed test, exploit or deployment observation.",
+      "Likely": "Source path observed but security effect depends on an unverified browser/provider/topology condition.",
+      "Needs check": "Explicitly excluded or insufficiently inspected runtime, deployment, dependency or producer behavior; used as a qualification rather than inferred closed."
+    },
+    "toolCalls": 29,
+    "toolCallBreakdown": { "Skill": 1, "Read": 1, "Bash": 24, "Write": 3 },
+    "shellPolicy": "Every shell invocation started with taskset -c 0 python3; all were sequential. Git was invoked by these CPU-pinned Python readers. No nested agents or workflow.",
+    "sourceReader": "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/source-evidence.py",
+    "sourceReaderMode": "read only, maximum 321 lines per source range; no snapshot/deriveKeys mode executed",
+    "redaction": "Approved helper redacted suspected literals in source/test reads. Focused git diffs and prior-report extracts applied its PATTERNS before printing. No candidate secret values are repeated in deliverables.",
+    "directRead": "The known-safe approved helper itself was read with the Read tool before use.",
+    "allowedReaderSideEffect": "The approved helper appended its existing read-ledger.jsonl; no edits to helper or application source were made.",
+    "applicationCodeChanged": false,
+    "testsRun": false,
+    "buildsRun": false,
+    "syntaxChecksExecuted": false,
+    "servicesStarted": false,
+    "networkUsed": false,
+    "credentialFilesRead": false,
+    "actualLogsOrRuntimeCapturesRead": false,
+    "realAccountDerivation": false,
+    "reviewCompleteness": "Bounded selection, not a complete review of any directory, all call sites, dependency implementation, deployment or OWASP/ASVS catalogue. Source ranges below are those actually visible in successful bounded reads, plus explicitly marked single-line/regex selections."
+  },
+  "revisionEvidence": {
+    "resolvedRefs": ["HEAD", "d5852a0e31e8e9a517c6e7c47ed9623819c7fc71", "ec3c5fefe4424be4d9a015a7402e2cfc7d8c6ab7"],
+    "commitSubjectsObserved": [
+      "8905505 feat(web,api): integrate WalletConnect AppKit and persistent Robinhood EIP-7702 delegation",
+      "ec3c5fe fix(security): complete phases 1-5 threat remediation across monorepo",
+      "db0227c threat assesment"
+    ],
+    "focusedDiffs": [
+      "git -C /home/xahmie/Documents/SWAT diff --unified=3 ec3c5fe...HEAD -- apps/api/src/routes/me.ts (redacted before printing)",
+      "git -C /home/xahmie/Documents/SWAT diff --unified=5 d5852a0...HEAD -- apps/api/src/routes/billing.test.ts (redacted before printing)",
+      "git -C /home/xahmie/Documents/SWAT diff --unified=5 d5852a0...HEAD -- apps/api/src/routes/withdraw.test.ts (redacted before printing)",
+      "git -C /home/xahmie/Documents/SWAT diff --unified=5 d5852a0...HEAD -- packages/db/src/billing.test.ts (redacted before printing)"
+    ],
+    "metadataOnlyDiffs": [
+      "Baseline-to-HEAD scoped changed-path and stat lists, excluding reports/build/dist/lockfile/dotenv noise; no credential-file content opened.",
+      "Baseline-to-HEAD MCP source deletion name-status list only.",
+      "ec3c5fe-to-HEAD scoped test diff stat: no API/web/PDA test changes shown.",
+      "Final selected tracked worktree diff against HEAD returned no differing paths for apps/api, apps/web, pda-test-ui, LP auth/index and directly checked billing/auth/grant/settings helpers."
+    ],
+    "mcpDeletionPaths": [
+      "/home/xahmie/Documents/SWAT/apps/mcp-server/src/index.ts",
+      "/home/xahmie/Documents/SWAT/apps/mcp-server/src/index.test.ts",
+      "/home/xahmie/Documents/SWAT/apps/mcp-server/package.json",
+      "/home/xahmie/Documents/SWAT/apps/mcp-server/tsconfig.json"
+    ],
+    "deploymentAssurance": false
+  },
+  "reviewedSourceRanges": [
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts", "ranges": [[1,125],[333,531],[534,754],[756,953],[1410,1605]], "notes": "Complete bounded route bodies for vault/grants/Robinhood/Polymarket and withdrawal; intervening account/position/wallet/perps business routes not read in full. Additional route/log anchor selections across the file were navigation only." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts", "ranges": [[1,516]], "notes": "Read in two bounded chunks, including both on-chain verifiers, intent lookup, verification authorization and recording call." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/index.ts", "ranges": [[52,57],[90,237],[305,346],[900,961]], "notes": "Authentication/CORS/rate limiting, route registration, health diagnostics and SSE. Additional selected header/log matches do not mean full index review." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts", "ranges": [[60,184],[218,253]], "notes": "CSRF, principal construction, public/operator distinction, SSE ticket branch, role/tier excerpts. Not every helper or service-key branch was re-read." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts", "ranges": [[75,135],[270,387]], "notes": "Cookie issuance and wallet signature/link/login consumers; nonce issuance body and other auth handlers not fully reviewed." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/execution-settings.ts", "ranges": [[450,554]], "matchedLinesAlsoObserved": [279,624,625], "notes": "Ceiling and kill-switch mutations. Chain route registration observed by anchors; whole schema/dependency system excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/admin-portfolio.ts", "ranges": [[20,48],[110,141]], "notes": "CSV encoder and admin export route; data producer excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/lp/src/index.ts", "ranges": [[270,310]], "notes": "LP CORS and auth registration only, not LP business/execution behavior." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/lp/src/auth.ts", "ranges": [[1,103]], "notes": "Authentication, CSRF, public health and tenant scope guard." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/middleware.ts", "ranges": [[1,97]], "notes": "Full small file, cookie forwarding and redirect layer." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/next.config.ts", "ranges": [[1,63]], "notes": "Full small file; no builds or effective deployment headers inspected." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/lib/api.ts", "ranges": [[1,224]], "notes": "API/LP resolution, browser request options, error producer-to-consumer path. Remaining convenience wrapper lines not required/reviewed." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/lib/api-server.ts", "ranges": [[1,53]], "notes": "Full file: session-only forwarding and no-store fetch." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/context/appkit.tsx", "ranges": [[1,79]], "notes": "Full file: public project identifier, networks, metadata, lazy QueryClient. SDK internals excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/layout.tsx", "ranges": [[1,101]], "notes": "Full file: provider wiring and static theme script. No compiled frontend bundle inspected." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts", "ranges": [[100,187],[355,410]], "notes": "Provider detection and complete Robinhood signer. Additional signing/chain anchors were navigation, not full review of Solana derivation or Polymarket signer." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/components/WalletConnectModalButton.tsx", "ranges": [[1,170]], "notes": "Complete connect/sign/link handlers and most render body. Render tail not read." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx", "ranges": [[225,309],[489,531],[581,651]], "matchedLinesAlsoObserved": [335,384,1211,1217,1323,1383,1385,1401,1476,1565,1570,1582,1583], "notes": "Link/enrollment response handling, withdrawal UI and Robinhood delegation/revoke handlers. Explicit single-line matches show copied/displayed account, masked identifier and execution labels; the entire large page is not reviewed." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/billing/page.tsx", "ranges": [[177,220]], "notes": "Intent creation response and payment verification UI path." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/settings/page.tsx", "ranges": [[32,113]], "notes": "Settings read/save, two-request partial save and kill-switch UI." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/logs/page.tsx", "ranges": [[137,171]], "notes": "Admin ticket acquisition and EventSource URL sink only." },
+    { "path": "/home/xahmie/Documents/SWAT/pda-test-ui/server.mjs", "ranges": [[1,130],[190,381],[385,449]], "notes": "HMAC signing account, URL/status, withdrawal, response errors and listeners. Duplicate const declarations source-traced; no syntax check/server run. Certificate paths occur in source but certificate/key files were not read." },
+    { "path": "/home/xahmie/Documents/SWAT/pda-test-ui/public/index.html", "ranges": [[456,480],[505,528],[758,819],[830,908]], "notes": "Text logging, connection errors, dynamic result sinks, canonical signed request. UI dependency assets and most page markup excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/auth-wallets.ts", "ranges": [[1,111]], "notes": "Full file, including uniqueness-conflict behavior and login/billing/withdrawal consumers." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/billing.ts", "ranges": [[140,267],[380,437]], "notes": "Transaction writer, audit and sweep. Other sections inspected by anchors only; full billing math/plan module excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/audit-log.ts", "ranges": [[1,87]], "notes": "Global-query strict audit implementation; event-list tail excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts", "ranges": [[20,63]], "notes": "Dedicated transaction client, callback, commit and rollback excerpt." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts", "ranges": [[1,80]], "notes": "Pool/global query behavior needed to establish independent audit/replacement statements. No configured database URLs read." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/user-execution-settings.ts", "ranges": [[386,473]], "notes": "Locked settings upsert and kill-switch persistence; audits/ceiling invariant analysis only." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/execution-grants.ts", "ranges": [[115,181],[211,320],[380,417]], "notes": "Validation/writer, active lookup, sealed-reader interface and lapse helper. No secret opened; executor consumers excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/users.ts", "ranges": [[176,259]], "notes": "Session cache/invalidation and DB lookup excerpt directly needed for auth/billing claims, not an exhaustive session review." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/sql/041_user_auth_wallets.sql", "ranges": [[1,34]], "notes": "Full schema: global wallet ownership and automatic verified_at default." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/sql/047_user_execution_grants.sql", "ranges": [[1,135]], "notes": "Full schema: status, secret shape, expiry, global account and active-grant uniqueness. Not proof migrations are deployed." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/sql/049_user_execution_settings.sql", "ranges": [[37,60]], "notes": "Admin ceiling/audit and kill-switch requirements." }
+  ],
+  "reviewedTests": [
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.test.ts", "ranges": [[1,106],[263,337]], "diff": "All baseline-to-HEAD additions read; other test names/anchors only.", "executed": false },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/withdraw.test.ts", "ranges": [[145,216],[218,260]], "diff": "All baseline-to-HEAD additions read; earlier test names/anchors only.", "executed": false },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/billing.test.ts", "ranges": [[244,277]], "diff": "All baseline-to-HEAD changed lines read; other tests excluded.", "executed": false },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/admin-portfolio.test.ts", "ranges": [], "selection": "describe/it names at 131-283 only, not assertion bodies.", "executed": false },
+    { "path": "/home/xahmie/Documents/SWAT/apps/api/src/routes/execution-settings.test.ts", "ranges": [], "selection": "describe/it names at 144-681 only, not assertion bodies.", "executed": false },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.test.ts", "ranges": [], "selection": "Changed-path name only; explicitly not reviewed as part of this partition.", "executed": false }
+  ],
+  "navigationAndNarrowSearches": [
+    { "paths": ["/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts"], "mode": "Route and log anchors only outside the fully reviewed ranges.", "patterns": ["app.get/post/patch/delete", "log.info/warn/error", "ON CONFLICT", "error.message"] },
+    { "paths": ["/home/xahmie/Documents/SWAT/apps/web/app/vault/page.tsx","/home/xahmie/Documents/SWAT/apps/web/app/settings/page.tsx","/home/xahmie/Documents/SWAT/apps/web/lib/wallets.ts","/home/xahmie/Documents/SWAT/apps/web/app/billing/page.tsx","/home/xahmie/Documents/SWAT/packages/db/src/execution-grants.ts","/home/xahmie/Documents/SWAT/packages/db/src/billing.ts","/home/xahmie/Documents/SWAT/apps/api/src/routes/execution-settings.ts"], "mode": "Line anchors selected by delegation/payment/settings/expiry terms; only later bounded ranges and explicitly cited match lines count as source review." },
+    { "paths": ["/home/xahmie/Documents/SWAT/apps/api/src/index.ts","/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts","/home/xahmie/Documents/SWAT/apps/api/src/routes/billing.ts","/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts","/home/xahmie/Documents/SWAT/apps/web/next.config.ts"], "mode": "Bounded matched-line output for Cache-Control/no-store/onSend/onResponse/redact/Content-Security/Referrer-Policy; not global proof that no plugin/deployment header exists." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/signals/page.tsx", "matchedLines": [3,28], "mode": "serverApiGet import/call only." },
+    { "path": "/home/xahmie/Documents/SWAT/apps/web/app/performance/page.tsx", "matchedLines": [3,12,27], "mode": "serverApiGet import/comment/call only." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/fanout-eligibility.ts", "matchedLines": [96,245,246], "mode": "Grant/expiry term anchors only; no execution-consumer review." },
+    { "path": "/home/xahmie/Documents/SWAT/packages/db/src/execution-config.ts", "ranges": [], "mode": "Narrow grant/expiry/policy term scan produced no relevant consumer matches; full module excluded." },
+    { "paths": ["/home/xahmie/Documents/SWAT/apps/api","/home/xahmie/Documents/SWAT/apps/web","/home/xahmie/Documents/SWAT/pda-test-ui","/home/xahmie/Documents/SWAT/packages/db"], "mode": "Tracked names/line counts/change metadata only; path enumeration is not content review." }
+  ],
+  "standardsAndPriorEvidence": [
+    { "path": "/home/xahmie/Documents/SWAT/docs/adr/0001-tenancy-key.md", "ranges": [[43,63]], "selectionAlso": "Headings and tenancy/decision clauses. Earlier whole requests were truncated and not treated as full review." },
+    { "path": "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md", "ranges": [[9,17],[55,84]], "selectionAlso": "Headings and selected noncustody/policy clauses; remaining chain sections excluded." },
+    { "path": "/home/xahmie/Documents/SWAT/threats/06-owasp-and-sensitive-data-review.md", "ranges": [], "selection": "All OWA-01..08 and LEAK-01..07 headings plus first two substantive evidence/prerequisite paragraphs were printed with per-line truncation at 550 characters; selected LEAK-03 paragraphs 171-178 also visible. Prior report is orientation, not current closure evidence. Whole-file attempt overflowed tool output and was not counted complete." },
+    { "path": "/home/xahmie/Documents/SWAT/threats/security-review/01-api.md", "ranges": [], "selection": "All API-01..08 headings and first two substantive lines, truncated per line; used to identify original threat/repair targets, not accept old source facts." },
+    { "path": "/home/xahmie/Documents/SWAT/threats/REMEDIATION-EXECUTION-REPORT.md", "ranges": [], "selection": "Selected claims 3,14,16,36,44-60,78,80,92-99 and bounded numbered extract 96-119; long lines truncated. Treated as spec, never verification evidence." },
+    { "path": "/home/xahmie/Documents/SWAT/threats/evidence/owasp-standards-reference.json", "ranges": [], "selection": "Parsed stored Web2025/API2023 metadata/categories and ASVS5.0.0 family/version metadata. No refetch, no exhaustive numbered requirement audit." },
+    { "path": "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/source-evidence.py", "ranges": [], "selection": "Entire known-safe helper read directly before use; its allowed-path and literal-redaction behavior inspected." }
+  ],
+  "truncationAccounting": {
+    "affectedToolCalls": [3,4,5,6,11,20],
+    "qualification": "These setup/document/combined-boundary outputs exceeded the tool output limit. Only visible previews and later focused re-reads were relied upon. Generated tool stdout logs were not reopened, and no actual application/runtime logs were read.",
+    "ledgerCaution": "The shared approved read-ledger records requested reads, including material that may have been truncated and reads from other reviewers. It is not alone evidence of this review's visible coverage. This artifact's ranges and exclusions take precedence for this partition."
+  },
+  "exclusions": [
+    "No whole-monorepo discovery/review or claim that every changed line/current handler was inspected.",
+    "Trade-executor, settlement, bundlers/paymasters, on-chain authorization/permission enforcement and grant-secret decryption consumers were not reopened. An active grant database row is not proof of working execution.",
+    "Shared crypto, envelope wrappers, permission compiler, Polymarket create/derive credential helper, RPC failover internals and shared console logger were excluded. No venue proof replay window or full credential error leak was verified.",
+    "LEAK-03 original pool URL/error producer and shared console/log fan-out need a separate reviewer. Only the API serialization boundary and testbed URL sanitizer were checked here.",
+    "LP business routes, local exception producers and LP financial/execution logic were excluded; only auth/CORS was reviewed.",
+    "Unrelated API account/position/master/wallet/perps/global handlers and most web pages/components/styles were not reviewed.",
+    "Dependency implementations/default hooks, lockfiles, build artifacts, compiled bundles, SSR hydration and WalletConnect network/relay behavior were not inspected or run.",
+    "No dotenv, .mcp credential configuration, keypairs, private keys, certificates, actual logs, runtime captures, database contents, token values or production balances were read.",
+    "No network/OWASP refetch, live contract receipt, transaction simulation/submission, tests, builds, syntax execution, service starts or deriveKeys on any account.",
+    "No deployment assurance: ingress/TLS/header/cache policy, trusted proxies, runtime origins, secure-cookie output, rate-limit behavior, replicas, service process inventory and MCP decommissioning unverified.",
+    "Historical crypto-payment hash normalization/migrations, database privilege/RLS enforcement and deployed schema equivalence were not checked.",
+    "Expiration sweeper scheduling, cross-process session/OTP consistency and real execution cap enforcement were not exhaustively reviewed; only cited local consumers/helpers were traced.",
+    "Existing test suites were not read in full. No passing-test, effective exploit or exact code-review coverage percentage is asserted."
+  ],
+  "artifacts": [
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/api-web-review.md",
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/api-web-closures.json",
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/api-web-coverage.json"
+  ]
+}

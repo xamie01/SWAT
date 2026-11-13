@@ -12,6 +12,7 @@ export * from './polymarket-perps.js';
 export * from './discovery-queries.js';
 export * from './clustering-queries.js';
 export * from './polymarket.js';
+export * from './polymarket-resolution-polling.js';
 export * from './polymarket-redemptions.js';
 export * from './ingestion-health.js';
 export * from './execution-config.js';

@@ -7,6 +7,7 @@
  */
 import { Redis } from 'ioredis';
 import { inspect } from 'node:util';
+import { redactLogValue } from './redaction.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const MAX_LOG_MESSAGE_LENGTH = 20_000;
@@ -18,6 +19,7 @@ const originalError = console.error;
 
 export function serializeLogArgument(value: unknown): string {
   try {
+    value = redactLogValue(value);
     if (typeof value === 'string') return value;
     if (typeof value === 'bigint') return `${value}n`;
     if (
@@ -59,7 +61,7 @@ function getRedisInstance(): Redis {
     redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
     redis.on('error', (err: any) => {
       // Print directly to console without looping
-      originalError(`[logger-internal] Redis connection error: ${err.message}`);
+      originalError('[logger-internal] Redis connection error');
     });
   }
   return redis;
@@ -84,7 +86,7 @@ function publishToRedis(level: 'info' | 'error', message: string) {
     // Publish to live pub/sub stream channel
     client.publish('swat:logs:stream', logStr).catch(() => {});
   } catch (err: any) {
-    originalError(`[logger-internal] Failed to publish log: ${err.message}`);
+    originalError('[logger-internal] Failed to publish log');
   }
 }
 
@@ -95,16 +97,16 @@ export function initLogger(serviceName: string) {
   currentService = serviceName;
 
   console.log = (...args: any[]) => {
-    originalLog(...args);
     const message = serializeLogArguments(args);
+    originalLog(message);
     // Avoid double logging redis errors or our own internal hooks
     if (message.startsWith('[logger-internal]')) return;
     publishToRedis('info', message);
   };
 
   console.error = (...args: any[]) => {
-    originalError(...args);
     const message = serializeLogArguments(args);
+    originalError(message);
     if (message.startsWith('[logger-internal]')) return;
     publishToRedis('error', message);
   };

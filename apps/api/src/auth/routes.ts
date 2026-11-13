@@ -100,9 +100,7 @@ export async function registerAuthRoutes(
   ): Promise<void> {
     const session = await createSession({ userId: user.id, ip, userAgent });
     const csrf = issueCsrfToken();
-    const isSecure = process.env.COOKIE_SECURE !== undefined
-      ? process.env.COOKIE_SECURE === 'true'
-      : (options.isProduction && (reply.request.protocol === 'https' || reply.request.headers['x-forwarded-proto'] === 'https'));
+    const isSecure = options.isProduction || process.env.COOKIE_SECURE === 'true';
     reply.setCookie(SESSION_COOKIE, session.token, {
       httpOnly: true,
       secure: isSecure,

@@ -134,13 +134,9 @@ export default function LogsPage() {
 
     async function connectStream() {
       setStatus('connecting');
-      let ticket = '';
       try {
-        // A one-time ticket, because EventSource cannot carry a header. The POST
-        // itself goes through the client so it picks up the CSRF token.
-        const data = await api.post<{ ticket?: string }>('/v1/auth/ticket');
-        if (!data?.ticket) throw new Error('Ticket response carried no ticket');
-        ticket = data.ticket;
+        const identity = await api.get<{ user?: { role?: string } }>('/v1/auth/me');
+        if (identity.user?.role !== 'admin') throw new ApiError(403, 'Admin role required');
       } catch (err: unknown) {
         // `POST /v1/auth/ticket` requires role=admin, so a signed-in non-admin
         // gets a 403 here. The generic 'not permitted' wording does not explain
@@ -163,7 +159,7 @@ export default function LogsPage() {
         return;
       }
 
-      eventSource = new EventSource(`${apiBase()}/v1/logs/stream?ticket=${encodeURIComponent(ticket)}`);
+      eventSource = new EventSource('/v1/logs/stream', { withCredentials: true });
 
       eventSource.onopen = () => {
         setStatus('connected');

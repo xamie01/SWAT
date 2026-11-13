@@ -51,18 +51,26 @@ export function formatIngestionOpsMessage(
     ? 'HEALTHY'
     : health.status === 'empty'
       ? 'NO DATA'
-      : 'STALE';
+      : health.status === 'unready'
+        ? 'UNREADY'
+        : 'STALE';
 
   return [
     `<b>${heading}</b>`,
     '',
     `<b>Chain:</b> ${health.chain}`,
     `<b>State:</b> ${state}`,
+    `<b>Readiness:</b> ${health.readiness}`,
+    `<b>Completeness:</b> ${health.completeness}`,
+    `<b>Confirmation:</b> ${health.confirmation}`,
     `<b>Event lag:</b> ${formatDuration(health.lagSeconds)}`,
     `<b>Alert threshold:</b> ${formatDuration(health.staleAfterSeconds)}`,
     `<b>Last event:</b> ${health.lastEventAt ?? 'never'}`,
     `<b>Last batch:</b> ${health.lastBatchAt ?? 'never'}`,
     '',
+    `<b>24h observed:</b> ${health.observed24h ?? 'unknown'}`,
+    `<b>24h quarantined:</b> ${health.quarantined24h ?? 'unknown'}`,
+    `<b>24h accepted:</b> ${health.accepted24h ?? 'unknown'}`,
     `<b>24h inserted:</b> ${health.inserted24h}`,
     `<b>24h skipped:</b> ${health.skipped24h}`,
     `<b>24h failed:</b> ${health.failed24h}`,

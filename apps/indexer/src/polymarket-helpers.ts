@@ -12,13 +12,15 @@ export function parsePolymarketTimestamp(value: string | number): Date {
   return date;
 }
 
+// Historical public name; parsed Data API rows are observations, not finality
+// certificates, and carry no locally substantiated independent fill/log ID.
 export type ConfirmedPolymarketTrade = {
   proxyWallet: string;
   timestamp: Date;
   conditionId: string;
   asset: string;
-  size: number;
-  price: number;
+  size: string;
+  price: string;
   side: 'BUY' | 'SELL';
   transactionHash: string;
   outcome: string;
@@ -58,6 +60,40 @@ function positiveNumber(value: unknown, field: string): number {
     throw new Error(`Invalid Polymarket ${field}: ${String(value)}`);
   }
   return parsed;
+}
+
+export function normalizePolymarketDecimal(value: unknown, field: string, maxScale: 36 | 42 = 36): string {
+  const invalid = () => new Error(`Invalid Polymarket ${field}`);
+  if (typeof value !== 'string' && typeof value !== 'number') throw invalid();
+  if (typeof value === 'number' && (!Number.isFinite(value) || value <= 0)) throw invalid();
+  const text = String(value);
+  if (text.length > 128) throw invalid();
+  const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d{1,3}))?$/.exec(text);
+  if (!match) throw invalid();
+  const integer = match[1]!;
+  const fraction = match[2] ?? '';
+  const exponent = Number(match[3] ?? '0');
+  if (Math.abs(exponent) > 36) throw invalid();
+  const digits = integer + fraction;
+  const point = integer.length + exponent;
+  const expanded = point <= 0
+    ? `0.${'0'.repeat(-point)}${digits}`
+    : point >= digits.length
+      ? digits + '0'.repeat(point - digits.length)
+      : `${digits.slice(0, point)}.${digits.slice(point)}`;
+  const [whole = '0', decimal = ''] = expanded.split('.');
+  const normalizedWhole = whole.replace(/^0+(?=\d)/, '');
+  const normalizedDecimal = decimal.replace(/0+$/, '');
+  if (normalizedWhole.length > 78 || normalizedDecimal.length > maxScale) throw invalid();
+  const normalized = normalizedDecimal ? `${normalizedWhole}.${normalizedDecimal}` : normalizedWhole;
+  if (normalized === '0') throw invalid();
+  return normalized;
+}
+
+export function normalizePolymarketPrice(value: unknown): string {
+  const price = normalizePolymarketDecimal(value, 'trade price');
+  if (price !== '1' && !price.startsWith('0.')) throw new Error('Invalid Polymarket trade price');
+  return price;
 }
 
 function normalizeConditionId(value: unknown): string {
@@ -107,6 +143,20 @@ function stringArray(value: unknown, field: string): string[] {
   return parsed.map((item) => nonEmptyString(item, field));
 }
 
+function normalizeIdentityAliases(
+  raw: Record<string, unknown>,
+  keys: readonly string[],
+  normalize: (value: unknown) => string,
+  field: string
+): string {
+  const values = keys.filter((key) => raw[key] !== undefined).map((key) => normalize(raw[key]));
+  if (values.length === 0) return normalize(undefined);
+  if (values.some((value) => value !== values[0])) {
+    throw new Error(`Conflicting Polymarket ${field} aliases`);
+  }
+  return values[0]!;
+}
+
 export function parseConfirmedPolymarketTrade(value: unknown): ConfirmedPolymarketTrade {
   if (!value || typeof value !== 'object') {
     throw new Error('Invalid Polymarket confirmed trade');
@@ -116,18 +166,17 @@ export function parseConfirmedPolymarketTrade(value: unknown): ConfirmedPolymark
   if (side !== 'BUY' && side !== 'SELL') {
     throw new Error(`Invalid Polymarket trade side: ${side}`);
   }
-  const price = positiveNumber(raw.price, 'trade price');
-  if (price > 1) throw new Error(`Invalid Polymarket trade price: ${price}`);
+  const price = normalizePolymarketPrice(raw.price);
 
   return {
-    proxyWallet: normalizeProxyWallet(raw.proxy_wallet ?? raw.proxyWallet),
+    proxyWallet: normalizeIdentityAliases(raw, ['proxy_wallet', 'proxyWallet'], normalizeProxyWallet, 'proxy wallet'),
     timestamp: parsePolymarketTimestamp((raw.timestamp ?? raw.created_at) as string | number),
     conditionId: normalizeConditionId(raw.condition_id ?? raw.conditionId),
     asset: normalizeTokenId(raw.token_id ?? raw.asset_id ?? raw.asset),
-    size: positiveNumber(raw.size, 'trade size'),
+    size: normalizePolymarketDecimal(raw.size, 'trade size'),
     price,
     side,
-    transactionHash: normalizeTransactionHash(raw.transaction_hash ?? raw.transactionHash),
+    transactionHash: normalizeIdentityAliases(raw, ['transaction_hash', 'transactionHash'], normalizeTransactionHash, 'transaction hash'),
     outcome: nonEmptyString(raw.outcome, 'trade outcome'),
     title: nonEmptyString(raw.title, 'market title')
   };

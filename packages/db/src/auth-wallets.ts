@@ -1,4 +1,5 @@
 import { query } from './client.js';
+import { withTransaction } from './transaction.js';
 import type { UserScope } from './tenancy.js';
 
 export type AuthWalletChainKind = 'evm' | 'solana';
@@ -50,7 +51,8 @@ export async function linkAuthWallet(
   input: { chainKind: AuthWalletChainKind; address: string }
 ): Promise<AuthWalletRecord> {
   try {
-    const rows = await query<AuthWalletRow>(
+    return await withTransaction(async (client) => {
+    const { rows } = await client.query<AuthWalletRow>(
       `INSERT INTO user_auth_wallets (user_id, chain_kind, address)
        VALUES ($1, $2, $3)
        -- Re-linking a wallet the same user already owns is a no-op success, not
@@ -64,7 +66,11 @@ export async function linkAuthWallet(
     // Zero rows means the ON CONFLICT WHERE excluded it: the row exists and
     // belongs to somebody else.
     if (!rows[0]) throw new WalletAlreadyLinkedError();
+    await client.query(`INSERT INTO audit_log (actor_type, actor_id, event, target_type, target_id, metadata)
+      VALUES ('user', $1, 'auth.wallet_linked', 'auth_wallet', $2, '{"proof":"siwe-siws"}')`,
+      [scope.userId, input.address]);
     return toWallet(rows[0]);
+    });
   } catch (error) {
     if (error instanceof WalletAlreadyLinkedError) throw error;
     if ((error as { code?: string }).code === '23505') throw new WalletAlreadyLinkedError();
@@ -83,7 +89,7 @@ export async function findUserIdByAuthWallet(
   address: string
 ): Promise<string | null> {
   const rows = await query<{ user_id: string }>(
-    'SELECT user_id FROM user_auth_wallets WHERE chain_kind = $1 AND address = $2',
+    `SELECT user_id FROM user_auth_wallets WHERE chain_kind = $1 AND address = $2 AND EXISTS (SELECT 1 FROM audit_log a WHERE a.event = 'auth.wallet_linked' AND a.actor_type = 'user' AND a.actor_id = user_auth_wallets.user_id AND a.target_id = user_auth_wallets.address AND a.occurred_at >= user_auth_wallets.verified_at)`,
     [chainKind, address]
   );
   return rows[0]?.user_id ?? null;
@@ -91,7 +97,7 @@ export async function findUserIdByAuthWallet(
 
 export async function listAuthWallets(scope: UserScope): Promise<AuthWalletRecord[]> {
   const rows = await query<AuthWalletRow>(
-    `SELECT ${WALLET_COLUMNS} FROM user_auth_wallets WHERE user_id = $1 ORDER BY verified_at`,
+    `SELECT ${WALLET_COLUMNS} FROM user_auth_wallets WHERE user_id = $1 AND EXISTS (SELECT 1 FROM audit_log a WHERE a.event = 'auth.wallet_linked' AND a.actor_type = 'user' AND a.actor_id = user_auth_wallets.user_id AND a.target_id = user_auth_wallets.address AND a.occurred_at >= user_auth_wallets.verified_at) ORDER BY verified_at`,
     [scope.userId]
   );
   return rows.map(toWallet);

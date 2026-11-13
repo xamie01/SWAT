@@ -184,14 +184,17 @@ function BillingView() {
   };
 
   const handleOpenPayment = async (planId: string) => {
-    setSelectedPlanId(planId);
+    setSelectedPlanId(null);
+    setReferenceMemo('');
     setVerificationSuccess(false);
     setTxHash('');
     try {
-      const intent = await api.post<{ referenceMemo: string }>('/v1/billing/crypto/intent', { planId });
-      setReferenceMemo(intent.referenceMemo);
-    } catch {
-      setReferenceMemo(`WAKE-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
+      const response = await api.post<{ intent: { referenceMemo: string } }>('/v1/billing/crypto/intent', { planId });
+      if (!response.intent?.referenceMemo) throw new Error('No payment intent was returned. Do not send funds.');
+      setReferenceMemo(response.intent.referenceMemo);
+      setSelectedPlanId(planId);
+    } catch (err: any) {
+      setError(err.message || 'Payment intent unavailable. Do not send funds.');
     }
   };
 
@@ -204,7 +207,7 @@ function BillingView() {
         chain,
         txHash: txHash.trim(),
         memo: referenceMemo || undefined,
-        referenceMemo: referenceMemo || undefined,
+        
       });
       setVerificationSuccess(true);
       fetchBilling();
@@ -230,7 +233,7 @@ function BillingView() {
               Subscription &amp; Crypto Billing Rail
             </h1>
             <p className="text-body-sm text-on-surface-variant">
-              Pure crypto-native USDC payments with zero banking bottlenecks. Instant automated on-chain activation.
+              Pure crypto-native USDC payments with zero banking bottlenecks. Automatic credit requires a verified linked payer. Exchange deposits require manual review.
             </p>
           </div>
           {role === 'admin' && (
