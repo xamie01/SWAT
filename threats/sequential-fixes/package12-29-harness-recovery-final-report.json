@@ -1,0 +1,123 @@
+{
+  "scope": "Bounded package12-29 harness recovery only; independent review pending",
+  "ownerRoot": "/home/xahmie/Documents/SWAT",
+  "completedUtc": "2026-11-14T14:48:09.917646+00:00",
+  "status": "Owned inert selftest green and focused strict noEmit green; not global package acceptance",
+  "changedFiles": [
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.test.ts"
+  ],
+  "corrections": [
+    "Reject dynamic glob, extglob parentheses and backslash syntax on raw input before filesystem lookup and on canonical workspace-relative include paths. Apply existing non-test/service/integration refusals on both candidate and canonical paths, including aliases.",
+    "Install a pre-config CLI hook with an exact allowlist: Vitest run followed only by --config/-c and one nonempty trimmed configuration value, either separate or equals form. Reject positional, name, include/exclude, reporter/output, worker/pool and all other override/reduction arguments.",
+    "Replace the JSON string reporter with an installed JsonReporter subclass using public vitest/reporters. Await the actual JSON writer, validate exact nonempty absolute testResults names with no missing/duplicate/unselected files, validate assertion statuses and aggregate counts, then reject errors with process.exitCode=1. Preserve exact failed reports and failed exits. Do not treat numTotalTestSuites as actual file count or modify the historical runner."
+  ],
+  "selftestSafety": {
+    "selectedActualFile": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.test.ts",
+    "fixtures": "Owned fresh mkdtemp directory beneath package12-29-harness-recovery2-fixtures-*; comments-only path fixtures, inert symlinks and cleanup in afterAll. Fixture suites were never imported, collected or executed.",
+    "reporterRegression": "Exercises inherited real onFinished -> logTasks -> overridden writeReport with inert task data for empty/reduced/duplicate/wrong manifests; asserts retained actual JSON and final error exit. Also rejects mutations of real retained historical JSON and confirms unchanged historical failed report writing.",
+    "temporaryFixturesRemaining": 0,
+    "dangerousEntrypointsExecuted": false,
+    "otherOwnerTestsExecuted": false,
+    "historicalSequentialTestRerun": false,
+    "gitInstallServicesSecretsKeygenSigningMigrationUsed": false,
+    "concurrentHarnessWriters": 0,
+    "priorActiveAgentsToPrune": 0
+  },
+  "executionBoundary": {
+    "prefix": "taskset -c 0 flock /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "runnerUnchanged": true,
+    "testHeapMiB": 512,
+    "noEmitHeapMiB": 640,
+    "noEmitLabelEnds640": true,
+    "pool": "forks",
+    "minWorkers": 1,
+    "maxWorkers": 1,
+    "fileParallelism": false,
+    "maxConcurrency": 1,
+    "runnerTimeoutSeconds": 240,
+    "toolTimeoutMilliseconds": 600000,
+    "offlineNetworkAndCredentialGuard": true,
+    "allLabelsNew": true
+  },
+  "runs": [
+    {
+      "label": "package12-29-harness-recovery3-self-red-20261114c",
+      "exitCode": 1,
+      "elapsedSeconds": 7.695,
+      "actualFiles": 1,
+      "total": 74,
+      "passed": 27,
+      "failed": 47,
+      "purpose": "Fresh deterministic reproduction against unchanged initial factory",
+      "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-self-red-20261114c.json",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-self-red-20261114c.log"
+    },
+    {
+      "label": "package12-29-harness-recovery3-self-green-20261114d",
+      "exitCode": 1,
+      "elapsedSeconds": 7.478,
+      "actualFiles": 0,
+      "jsonWritten": false,
+      "failure": "Startup before collection: TypeError import_tinyrainbow.default.yellow is not a function, caused by bundling the relative reporter import. Corrected to public vitest/reporters import; failed artifact retained, label not reused.",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-self-green-20261114d.log"
+    },
+    {
+      "label": "package12-29-harness-recovery3-self-green-20261114e",
+      "exitCode": 0,
+      "elapsedSeconds": 7.26,
+      "command": ["/usr/bin/node", "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs", "run", "--config", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.config.ts"],
+      "actualFiles": 1,
+      "total": 87,
+      "passed": 87,
+      "failed": 0,
+      "skipped": 0,
+      "pending": 0,
+      "todo": 0,
+      "success": true,
+      "numTotalTestSuitesNotFileCount": 4,
+      "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-self-green-20261114e.json",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-self-green-20261114e.log"
+    },
+    {
+      "label": "package12-29-harness-recovery3-noemit-20261114f-640",
+      "exitCode": 0,
+      "elapsedSeconds": 14.633,
+      "command": ["/usr/bin/node", "/home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc", "--noEmit", "--strict", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", "--skipLibCheck", "--types", "node", "--esModuleInterop", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.test.ts", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.config.ts", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.config.ts", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.sequential.test.ts"],
+      "diagnostics": 0,
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-noemit-20261114f-640.log"
+    }
+  ],
+  "retainedHistoricalRed": {
+    "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery-self-red-20261114a.json",
+    "actualFiles": 1,
+    "total": 48,
+    "passed": 37,
+    "failed": 11,
+    "success": false,
+    "sha256Unchanged": "9ddee462f2b44ed0a6935159be989af8f4c293aec78e0c74a13532d778e39bb2"
+  },
+  "sha256Final": {
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.test.ts": "46c0f575eb261603b74ed849412b558e93c4d07461f9d74c2a28b0522e79d4a2",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery3-self-green-20261114e.json": "365a60b3e7f5965a6695f793688e957c7a296d1bf55bb4261089ce4f3f6fa30e"
+  },
+  "sha256PreservedBeforeAndAfter": {
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/vitest.config.ts": "23576558f15e3da1e0ed6b048c13e99effa2c97165e3c1f4aa0778f4c9bc8ca4",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.config.ts": "41436acf7dcf4bd7f953de06c9e1803755772819d08364e4a4da97c490d369ea",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.sequential.test.ts": "931105b68c7f48fe5be0e53760117211d2f0d026038bb488ef83c9b44588d9b5",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-selftest.config.ts": "8edd2b826877861257e63420a29baa7daf6b73d4d59b373d81325c9156ee77f4",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-independent-review.md": "45fd7fbe5ddf43c8831690df0ede9a70c096311a77cbc8d52766a5915bb60f0e",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery-self-red-20261114a.log": "2a8cba9f75023a788e7c398608db87a17fde80841ca5be4cceac15e24f4e1bba",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-self-red-20261114b.json": "63ee89a700d39c1c17d30550521a3ce97abeddd498298a9715babb030c51a791",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-recovery2-self-red-20261114b.log": "8acdd69fa97af1819de5d959beacf526b704b123801bc42ea032738ec5da5c5a"
+  },
+  "limits": [
+    "Independent corrected-source review has not occurred; both initial Medium/high-confidence findings are addressed locally, not independently accepted.",
+    "Historical runner/config/guards and historical red artifacts were preserved. Only runner-managed evidence logs, cache/tmp and commands.jsonl append occur outside the owned file prefix by the explicitly authorized unchanged runner.",
+    "Other package tests remain held; no product, full-repository, live service, financial runtime, custody or integration acceptance is claimed."
+  ]
+}

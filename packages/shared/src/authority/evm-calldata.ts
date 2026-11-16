@@ -128,6 +128,17 @@ export const ACCOUNT_EXECUTE: EvmFunctionDescriptor = {
  */
 export const ACCOUNT_EXECUTE_SELECTORS: readonly string[] = [ACCOUNT_EXECUTE.selector];
 
+// Trusted, bounded ABI registry. A caller descriptor is a selection, never an ABI definition.
+const TRUSTED_FUNCTIONS: readonly EvmFunctionDescriptor[] = [ERC20_APPROVE, ERC20_TRANSFER, ACCOUNT_EXECUTE];
+for (const descriptor of TRUSTED_FUNCTIONS) {
+  for (const arg of descriptor.args) Object.freeze(arg);
+  Object.freeze(descriptor.args);
+  Object.freeze(descriptor);
+}
+export function getTrustedEvmFunction(selector: string): EvmFunctionDescriptor | undefined {
+  return TRUSTED_FUNCTIONS.find(d => d.selector === selector.toLowerCase());
+}
+
 const WORD_HEX = 64;
 
 function failed(code: EvmDecodeFailureCode, reason: string): EvmDecodeFailure {
@@ -156,6 +167,11 @@ function validateDescriptor(descriptor: EvmFunctionDescriptor): string | null {
       return `descriptor ${descriptor.name} declares a bytes argument that is not last; this decoder supports one dynamic tail only`;
     }
   }
+  const trusted = getTrustedEvmFunction(descriptor.selector);
+  if (!trusted || descriptor.name !== trusted.name || descriptor.args.length !== trusted.args.length ||
+      descriptor.args.some((arg, i) => arg.name !== trusted.args[i]!.name || arg.type !== trusted.args[i]!.type)) {
+    return 'descriptor does not match the trusted selector/name/argument schema';
+  }
   return null;
 }
 
@@ -182,7 +198,9 @@ export function decodeEvmCalldata(
   }
 
   const selector = `0x${body.slice(0, 8)}`;
-  const descriptor = descriptors.find((d) => d.selector.toLowerCase() === selector);
+  const selected = descriptors.filter((d) => d.selector.toLowerCase() === selector);
+  if (selected.length > 1) return failed('authority-action-undecodable', 'duplicate selector descriptors');
+  const descriptor = selected[0];
   if (descriptor === undefined) {
     return failed(
       'authority-action-unknown-selector',
@@ -204,6 +222,9 @@ export function decodeEvmCalldata(
     );
   }
 
+  if (!descriptor.args.some(arg => arg.type === 'bytes') && argsBody.length !== headWords * WORD_HEX) {
+    return failed('authority-action-undecodable', 'noncanonical static calldata length');
+  }
   const args: Record<string, AuthorityFieldValue> = {};
 
   for (let i = 0; i < descriptor.args.length; i += 1) {
@@ -272,6 +293,11 @@ export function decodeEvmCalldata(
         'authority-action-undecodable',
         `argument ${arg.name} declares ${byteLength} bytes but only ${(argsBody.length - dataStart) / 2} remain`
       );
+    }
+    const paddedLength = Math.ceil(Number(byteLength) / 32) * WORD_HEX;
+    if (argsBody.length !== dataStart + paddedLength ||
+        /[^0]/.test(argsBody.slice(dataStart + dataHexLength))) {
+      return failed('authority-action-undecodable', 'noncanonical dynamic tail padding or trailing bytes');
     }
     args[arg.name] = `0x${argsBody.slice(dataStart, dataStart + dataHexLength)}`;
   }

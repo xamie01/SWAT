@@ -1,0 +1,1195 @@
+{
+  "reportId": "package15-acquisition-recovery-20261114-final-report-c",
+  "status": "bounded-acquisition-proof-corrected-focused-mock-green-noemit-green-runtime-unverified",
+  "capturedUtc": "2026-11-14T18:11:50.650736+00:00",
+  "repository": "/home/xahmie/Documents/SWAT",
+  "deliverable": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-final-report-c.json",
+  "ownership": {
+    "exclusiveReplacementOfRevokedOwner": true,
+    "TaskStopNotTreatedAsCancellationProof": true,
+    "initialPinsMatchedAndStable": true,
+    "baselineEvidence": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-baseline-a.json",
+    "finalTwoObservationsStable": true,
+    "unexplainedTrackedSourceTestChanges": [],
+    "ownedRegressionUnedited": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+    "pnlFrozenUnchanged": {
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts": "3105fca7aaa38a53897918ea8b02fe862438a4dccc41d2cc59fd75852d863e74",
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts": "c5370deed0a7973c9c898f7dea07fc24449b0fe97b7b84c2e0a7aa03a4c96669"
+    },
+    "redNotRerunOrOverwritten": true
+  },
+  "scope": {
+    "sourceEdits": [
+      "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts"
+    ],
+    "testEdits": [],
+    "otherAppSchemaScorerPnlEdits": [],
+    "historyRepair": false,
+    "globalLedgerEdits": false,
+    "newConfigs": [
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.config.ts",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.typecheck.json"
+    ],
+    "journal": "Historical runner automatically appended its two own check records. One malformed NUL-containing journal line was skipped by report parser only, retained unchanged; no journal repair."
+  },
+  "finding": {
+    "review": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-bounded-independent-review-20261114.md",
+    "contracts": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md",
+    "originalReport": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.report.json",
+    "schemaReadOnly": [
+      "/home/xahmie/Documents/SWAT/packages/db/sql/028_copy_execution_lifecycle.sql",
+      "/home/xahmie/Documents/SWAT/packages/db/sql/050_copy_tenancy.sql",
+      "/home/xahmie/Documents/SWAT/packages/db/sql/058_copy_position_lots.sql"
+    ],
+    "explanation": "SQL058 independent execution/evidence FKs do not prove actual lot acquisition. Evidence reversal deactivates application; synchronizePositionLots returns on reversed/unconfirmed evidence, retaining positive lot rows. No actual deployed corruption/financial abuse observed."
+  },
+  "correction": {
+    "requiredProof": "evidence.id = lot.acquisition_evidence_id AND evidence.execution_id = acquisition.id (= lot.acquisition_execution_id); evidence confirmed/finalized; application evidence/execution identical, active, actual lot.position_id, null-safe tenant, acquisition account, lot chain/token.",
+    "availability": "LEFT JOIN proof preserves disqualified positive owned lots in decision; trusted requires non-null evidence.id and application.evidence_id, so any such lot refuses before reservation rather than using aggregate funding.",
+    "ownership": "Discovery and locked reload INNER JOIN evidence/application. Reload additionally FOR SHARE OF acquisition, source, evidence, application under existing canonical advisory and position/lot row locks; missing/reversed/inactive/mismatched proof refuses before replay/reservation.",
+    "replay": "Independent replay evidence/application joins repeat actual acquisition scope proof; locked reload refuses invalid proof before returning old claim.",
+    "preserved": [
+      "SQL NUMERIC sizing/text output and exact replay equality",
+      "canonical advisory [account,chain,token,user] and existing row-lock topology",
+      "caller-owned PoolClient transaction without nested/global transactions",
+      "missing provenance/unattributed liabilities/modes/overlap refusals",
+      "no aggregate fallback/Number authority",
+      "source readiness false unchanged at original286-291",
+      "no history repair or schema edits"
+    ]
+  },
+  "exactScopedDiffs": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+      "baselineSha256": "785dacfb948032b97a7ce3f791b9ba6f0404ef5e52479b292c574dfa678a96a5",
+      "finalSha256": "851d1722a7cd3feec30f54cd854a2d742e4633a98a441ac81bcdcc6e4d80f50d",
+      "diffSha256": "967e39d8289d66953a60b634e39333e5a0992038c28e9daef5a7c69b2456a3a5",
+      "addedLines": 19,
+      "removedLines": 1,
+      "unifiedDiff": "--- /home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts (pinned baseline)\n+++ /home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts (recovery)\n@@ -1408,6 +1408,15 @@\n          AND acquisition.direction = 'buy'\n          AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id\n          AND acquisition.source_trade_id = lot.source_trade_id\n+       JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id\n+         AND evidence.execution_id = acquisition.id\n+         AND evidence.confirmation_state IN ('confirmed', 'finalized')\n+       JOIN copy_position_applications application ON application.evidence_id = evidence.id\n+         AND application.execution_id = acquisition.id AND application.active\n+         AND application.position_id = lot.position_id\n+         AND application.user_id IS NOT DISTINCT FROM lot.user_id\n+         AND application.target_account = acquisition.target_account\n+         AND application.chain = lot.chain AND application.token_mint = lot.token_mint\n        JOIN source_trades source ON source.id = lot.source_trade_id\n          AND source.chain = lot.chain AND source.token_mint = lot.token_mint\n          AND source.wallet_address = lot.master_wallet_address AND source.direction = 'buy'\n@@ -1423,7 +1432,7 @@\n   );\n   if (position.rows[0]?.id !== discovered.position_id) throw new Error('Lot exit position is unavailable');\n   const owner = (await client.query<LotOwner>(\n-    `${ownershipSql} FOR UPDATE OF lot FOR SHARE OF acquisition, source`, [lotId, userId]\n+    `${ownershipSql} FOR UPDATE OF lot FOR SHARE OF acquisition, source, evidence, application`, [lotId, userId]\n   )).rows[0];\n   if (!owner || owner.position_id !== discovered.position_id\n       || owner.target_account !== discovered.target_account || owner.chain !== discovered.chain\n@@ -1459,6 +1468,15 @@\n        AND acquisition.chain = lot.chain AND acquisition.token_mint = lot.token_mint\n        AND acquisition.direction = 'buy'\n        AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id\n+     JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id\n+       AND evidence.execution_id = acquisition.id\n+       AND evidence.confirmation_state IN ('confirmed', 'finalized')\n+     JOIN copy_position_applications application ON application.evidence_id = evidence.id\n+       AND application.execution_id = acquisition.id AND application.active\n+       AND application.position_id = lot.position_id\n+       AND application.user_id IS NOT DISTINCT FROM lot.user_id\n+       AND application.target_account = acquisition.target_account\n+       AND application.chain = lot.chain AND application.token_mint = lot.token_mint\n      JOIN source_trades source ON source.id = lot.source_trade_id\n        AND source.chain = lot.chain AND source.token_mint = lot.token_mint AND source.direction = 'buy'\n      WHERE execution.chain = $1 AND execution.target_account = $2 AND execution.client_order_id = $3\n"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+      "baselineSha256": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59",
+      "finalSha256": "2b6836cc20e2b5fb03920a4aae622c09502fd0e7da8698fd04f4d440b51e7c19",
+      "diffSha256": "64300ca136bb0b68502560322b9aeaeea565f6cfd19311013a99f6e39f3ce347",
+      "addedLines": 11,
+      "removedLines": 1,
+      "unifiedDiff": "--- /home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts (pinned baseline)\n+++ /home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts (recovery)\n@@ -137,7 +137,8 @@\n   const result = await client.query<{ quantity: string | null; reason: string | null }>(\n     `WITH lots AS (\n        SELECT lot.id, lot.remaining_quantity, acquisition.execution_mode,\n-              (acquisition.id IS NOT NULL AND source.id IS NOT NULL) AS trusted\n+              (acquisition.id IS NOT NULL AND source.id IS NOT NULL\n+                AND evidence.id IS NOT NULL AND application.evidence_id IS NOT NULL) AS trusted\n        FROM copy_position_master_lots lot\n        LEFT JOIN copy_executions acquisition ON acquisition.id = lot.acquisition_execution_id\n          AND acquisition.user_id IS NOT DISTINCT FROM lot.user_id\n@@ -145,6 +146,15 @@\n          AND acquisition.token_mint = $3 AND acquisition.direction = 'buy'\n          AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id\n          AND acquisition.source_trade_id = lot.source_trade_id\n+       LEFT JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id\n+         AND evidence.execution_id = acquisition.id\n+         AND evidence.confirmation_state IN ('confirmed', 'finalized')\n+       LEFT JOIN copy_position_applications application ON application.evidence_id = evidence.id\n+         AND application.execution_id = acquisition.id AND application.active\n+         AND application.position_id = lot.position_id\n+         AND application.user_id IS NOT DISTINCT FROM lot.user_id\n+         AND application.target_account = acquisition.target_account\n+         AND application.chain = lot.chain AND application.token_mint = lot.token_mint\n        LEFT JOIN source_trades source ON source.id = lot.source_trade_id\n          AND source.wallet_address = lot.master_wallet_address\n          AND source.chain = lot.chain AND source.token_mint = lot.token_mint AND source.direction = 'buy'\n"
+    }
+  ],
+  "checks": {
+    "preservedRed": {
+      "result": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.json",
+      "actualFiles": 1,
+      "manifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+          "status": "failed",
+          "assertions": 74,
+          "counts": {
+            "passed": 32,
+            "failed": 42
+          }
+        }
+      ],
+      "total": 74,
+      "passed": 32,
+      "failed": 42,
+      "pending": 0,
+      "skipped": 0,
+      "todo": 0,
+      "success": false,
+      "exitCode": 1,
+      "rerun": false
+    },
+    "focusedGreen": {
+      "result": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-green-a.json",
+      "actualFiles": 1,
+      "manifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+          "status": "passed",
+          "assertions": 74,
+          "counts": {
+            "passed": 74
+          }
+        }
+      ],
+      "total": 74,
+      "passed": 74,
+      "failed": 0,
+      "pending": 0,
+      "skipped": 0,
+      "todo": 0,
+      "success": true,
+      "exitCode": 0,
+      "testSha256Unchanged": "777ae553c961e6e1a4a1ff769fbf1c0184ce51a3d0c342882a40c93084f54531"
+    },
+    "identicalActualAssertionNames": true,
+    "resolvedPreservedRedFailures": [
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with missingEvidence",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongEvidenceExecution",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with observedEvidence",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with reversedEvidence",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with missingApplication",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationEvidence",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationExecution",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with inactiveApplication",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationPosition",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationTenant",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationAccount",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationChain",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationToken",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses missingEvidence before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongEvidenceExecution before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses observedEvidence before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses reversedEvidence before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses missingApplication before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationEvidence before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationExecution before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses inactiveApplication before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationPosition before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationTenant before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationAccount before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationChain before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationToken before reservation/history",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses missingEvidence without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongEvidenceExecution without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses observedEvidence without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses reversedEvidence without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses missingApplication without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationEvidence without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationExecution without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses inactiveApplication without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationPosition without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationTenant without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationAccount without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationChain without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationToken without returning old claim",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) reload refuses reversal after lock-key discovery before replay lookup",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) replay query independently proves the evidence/application association",
+      "package15 acquisition evidence/application proof (mocked SQL boundaries) availability requires evidence and active application in its trusted decision, not only valid acquisitions"
+    ],
+    "countsNotSummedAcrossRuns": true,
+    "suiteCountsNotFileCounts": true,
+    "compiler": {
+      "label": "package15-acquisition-recovery-20261114-focused-noemit-b-640",
+      "exitCode": 0,
+      "noEmit": true,
+      "incremental": false,
+      "module": "ESNext",
+      "moduleResolution": "Bundler",
+      "config": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.typecheck.json",
+      "actualListFilesClosure": [
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es5.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2016.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2018.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2019.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2021.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.dom.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.dom.iterable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.dom.asynciterable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.webworker.importscripts.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.scripthost.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.core.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.collection.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.generator.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.iterable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.promise.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.proxy.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.reflect.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.symbol.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2015.symbol.wellknown.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2016.array.include.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2016.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.arraybuffer.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.date.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.object.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.sharedmemory.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.string.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2017.typedarrays.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2018.asyncgenerator.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2018.asynciterable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2018.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2018.promise.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2018.regexp.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2019.array.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2019.object.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2019.string.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2019.symbol.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2019.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.bigint.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.date.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.promise.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.sharedmemory.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.string.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.symbol.wellknown.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2020.number.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2021.promise.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2021.string.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2021.weakref.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2021.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.array.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.error.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.intl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.object.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.string.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.regexp.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.decorators.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.decorators.legacy.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/lib.es2022.full.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/compatibility/disposable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/compatibility/indexable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/compatibility/iterators.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/compatibility/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/globals.typedarray.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/buffer.buffer.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/globals.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/web-globals/abortcontroller.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/web-globals/domexception.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/web-globals/events.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/buffer@6.0.3/node_modules/buffer/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/header.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/readable.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/file.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/fetch.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/formdata.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/connector.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/client.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/errors.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/dispatcher.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/global-dispatcher.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/global-origin.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/pool-stats.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/pool.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/handlers.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/balanced-pool.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/agent.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/mock-interceptor.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/mock-agent.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/mock-client.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/mock-pool.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/mock-errors.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/proxy-agent.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/env-http-proxy-agent.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/retry-handler.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/retry-agent.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/api.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/interceptors.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/util.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/cookies.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/patch.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/websocket.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/eventsource.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/filereader.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/diagnostics-channel.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/content-type.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/cache.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/undici-types@6.21.0/node_modules/undici-types/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/web-globals/fetch.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/web-globals/navigator.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/web-globals/storage.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/assert.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/assert/strict.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/async_hooks.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/buffer.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/child_process.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/cluster.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/console.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/constants.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/crypto.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/dgram.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/diagnostics_channel.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/dns.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/dns/promises.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/domain.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/events.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/fs.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/fs/promises.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/http.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/http2.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/https.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/inspector.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/inspector.generated.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/module.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/net.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/os.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/path.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/perf_hooks.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/process.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/punycode.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/querystring.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/readline.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/readline/promises.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/repl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/sea.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/sqlite.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/stream.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/stream/promises.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/stream/consumers.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/stream/web.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/string_decoder.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/test.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/timers.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/timers/promises.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/tls.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/trace_events.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/tty.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/url.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/util.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/v8.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/vm.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/wasi.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/worker_threads.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/zlib.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+node@22.19.19/node_modules/@types/node/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/pg-types@2.2.0/node_modules/pg-types/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/pg-protocol@1.13.0/node_modules/pg-protocol/dist/messages.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/pg-protocol@1.13.0/node_modules/pg-protocol/dist/serializer.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/pg-protocol@1.13.0/node_modules/pg-protocol/dist/parser.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/pg-protocol@1.13.0/node_modules/pg-protocol/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+pg@8.20.0/node_modules/@types/pg/lib/type-overrides.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+pg@8.20.0/node_modules/@types/pg/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+pg@8.20.0/node_modules/@types/pg/index.d.mts",
+        "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@solana+web3.js@1.98.4_bufferutil@4.1.0_typescript@5.9.3_utf-8-validate@6.0.6/node_modules/@solana/web3.js/lib/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/typeAliases.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/util.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/index.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/ZodError.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/locales/en.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/errors.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/enumUtil.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/partialUtil.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/standard-schema.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.d.cts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/zod@3.25.76/node_modules/zod/index.d.cts",
+        "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts",
+        "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts",
+        "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/numeric.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+pretty-format@3.2.6/node_modules/@vitest/pretty-format/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/types.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/helpers.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/tinyrainbow@2.0.0/node_modules/tinyrainbow/dist/index-8b61d5bc.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/tinyrainbow@2.0.0/node_modules/tinyrainbow/dist/node.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/tasks.d-CkscK4of.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/types.d-BCElaP-c.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/diff.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/types.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/error.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/optional-types.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/environment.d.cL3nLXbE.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/hmrPayload.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/dist/node/chunks/moduleRunnerTransport.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/customEvent.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+estree@1.0.9/node_modules/@types/estree/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/rollup@4.62.0/node_modules/rollup/dist/rollup.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/rollup@4.62.0/node_modules/rollup/dist/parseAst.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/hot.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/dist/node/module-runner.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/esbuild@0.27.7/node_modules/esbuild/lib/main.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/internal/terserOptions.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/source-map.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/previous-map.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/input.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/css-syntax-error.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/declaration.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/root.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/warning.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/lazy-result.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/no-work-result.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/processor.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/result.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/document.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/rule.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/node.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/comment.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/container.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/at-rule.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/list.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/postcss.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/postcss@8.5.15/node_modules/postcss/lib/postcss.d.mts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/internal/cssPreprocessorOptions.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/internal/lightningcssOptions.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/importGlob.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/types/metadata.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite@7.3.5_@types+node@22.19.19_tsx@4.21.0/node_modules/vite/dist/node/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+mocker@3.2.6_vite@7.3.5_@types+node@22.19.19_tsx@4.21.0_/node_modules/@vitest/mocker/dist/registry.d-D765pazg.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+mocker@3.2.6_vite@7.3.5_@types+node@22.19.19_tsx@4.21.0_/node_modules/@vitest/mocker/dist/types.d-D_aRZRdy.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+mocker@3.2.6_vite@7.3.5_@types+node@22.19.19_tsx@4.21.0_/node_modules/@vitest/mocker/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+utils@3.2.6/node_modules/@vitest/utils/dist/source-map.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite-node@3.2.4_@types+node@22.19.19_tsx@4.21.0/node_modules/vite-node/dist/trace-mapping.d-DLVdEqOp.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite-node@3.2.4_@types+node@22.19.19_tsx@4.21.0/node_modules/vite-node/dist/index.d-DGmxD2U7.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite-node@3.2.4_@types+node@22.19.19_tsx@4.21.0/node_modules/vite-node/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+snapshot@3.2.6/node_modules/@vitest/snapshot/dist/environment.d-DHdQ1Csl.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+snapshot@3.2.6/node_modules/@vitest/snapshot/dist/rawSnapshot.d-lFsMJFUd.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+snapshot@3.2.6/node_modules/@vitest/snapshot/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+snapshot@3.2.6/node_modules/@vitest/snapshot/dist/environment.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/config.d.BKdhh7Zx.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/worker.d.CUgIPz9V.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+deep-eql@4.0.2/node_modules/@types/deep-eql/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/assertion-error@2.0.1/node_modules/assertion-error/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@types+chai@5.2.3/node_modules/@types/chai/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/utils.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/tinybench@2.9.0/node_modules/tinybench/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/benchmark.d.BwvBVTda.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vite-node@3.2.4_@types+node@22.19.19_tsx@4.21.0/node_modules/vite-node/dist/client.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/coverage.d.S9RMNXIe.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+snapshot@3.2.6/node_modules/@vitest/snapshot/dist/manager.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/reporters.d.BuRON0I0.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/worker.d.uzWsCv9X.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+spy@3.2.6/node_modules/@vitest/spy/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+expect@3.2.6/node_modules/@vitest/expect/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/global.d.MAmajcmJ.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/vite.d.BnOPPc46.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/mocker.d.BE_2ls6u.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/chunks/suite.d.FvehnV49.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/expect-type@1.3.0/node_modules/expect-type/dist/utils.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/expect-type@1.3.0/node_modules/expect-type/dist/overloads.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/expect-type@1.3.0/node_modules/expect-type/dist/branding.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/expect-type@1.3.0/node_modules/expect-type/dist/messages.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/expect-type@1.3.0/node_modules/expect-type/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/index.d.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/reporters.d.BuRON0I0.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/vite.d.BnOPPc46.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/config.d.BKdhh7Zx.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/environment.d.cL3nLXbE.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/optional-types.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/worker.d.CUgIPz9V.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/benchmark.d.BwvBVTda.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/chunks/coverage.d.S9RMNXIe.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/dist/config.d.ts",
+        "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/reporters.d.ts",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.config.ts"
+      ],
+      "listedCount": 302,
+      "canonicalUniqueCount": 294,
+      "projectSources": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts",
+          "sha256": "76cc2950a169555416d236dc07c657f52740ac1b439a2cd4546d91b78afe5fdd",
+          "size": 2199,
+          "mtime_ns": 1793960882158030334,
+          "inode": 4090354
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts",
+          "sha256": "eef078359911ed8e584f5c51ff270864694d902944d9b45851f8710574b408dd",
+          "size": 1503,
+          "mtime_ns": 1793960882159030323,
+          "inode": 4085840
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts",
+          "sha256": "8edc44e3bce30b9a18082356596f8f70b52bebc3d13df83ecd0d4e8268d4a453",
+          "size": 2868,
+          "mtime_ns": 1793960882062031395,
+          "inode": 4089069
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts",
+          "sha256": "4384db4b419fff32833afb622fbf4c65b8d36e3725568a540a16de3399ff5f67",
+          "size": 8576,
+          "mtime_ns": 1785876204757171666,
+          "inode": 4089110
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+          "sha256": "6d0095d2adc3fdbe7db2b472821fe8a19e141121bd6385b3e37d18bdff40bb19",
+          "size": 329,
+          "mtime_ns": 1794673093186226607,
+          "inode": 5541561
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts",
+          "sha256": "265f73b0a970ac502f91baaddacfaa3baa5ebbdb562c0c6e813a9165a527487d",
+          "size": 4688,
+          "mtime_ns": 1793960881840033862,
+          "inode": 4087391
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts",
+          "sha256": "b14d0d744d78b481573b032641402679447d9b09c4472702995a445dde8e9f9b",
+          "size": 1747,
+          "mtime_ns": 1794252748703239502,
+          "inode": 4095878
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/numeric.ts",
+          "sha256": "ed015957d3d0b6ef79a95d7f1476599cc24e94ab4d5c996a52d248391934e1fb",
+          "size": 1580,
+          "mtime_ns": 1785876204752171152,
+          "inode": 4088811
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+          "sha256": "4a2069cf92c48f40817af17c1ee2207ea40b02304f57047df1cdd63b4f5e0af0",
+          "size": 4736,
+          "mtime_ns": 1794253100243808936,
+          "inode": 4067877
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts",
+          "sha256": "3b0b2d4954f35a4cf96c32b2098cff446bf983db3074b34e648cbd6ed4bf3d6d",
+          "size": 16739,
+          "mtime_ns": 1793960881989032203,
+          "inode": 4092354
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+          "sha256": "675e7d1899b2ca681b14e2f81367a58526cf96d819e73e014d6632d4aa7994aa",
+          "size": 3115,
+          "mtime_ns": 1794251844896303737,
+          "inode": 4089066
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+          "sha256": "851d1722a7cd3feec30f54cd854a2d742e4633a98a441ac81bcdcc6e4d80f50d",
+          "size": 103036,
+          "mtime_ns": 1794679485153026353,
+          "inode": 4088753
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+          "sha256": "2b6836cc20e2b5fb03920a4aae622c09502fd0e7da8698fd04f4d440b51e7c19",
+          "size": 16703,
+          "mtime_ns": 1794679442939646518,
+          "inode": 4096082
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+          "sha256": "777ae553c961e6e1a4a1ff769fbf1c0184ce51a3d0c342882a40c93084f54531",
+          "size": 20895,
+          "mtime_ns": 1794675512278374217,
+          "inode": 4095868
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+          "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+          "size": 8927,
+          "mtime_ns": 1794667624010929305,
+          "inode": 5541372
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.config.ts",
+          "sha256": "fb546e90741347a5f8e5167e88fc8fe8566cf9eee79a1552a503a81a82914035",
+          "size": 174,
+          "mtime_ns": 1794679498649517629,
+          "inode": 5541753
+        }
+      ],
+      "sourceAlias": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+      "qualification": "Compiler-only real-source shared reexports, no type stubs, no application execution; not whole workspace/package/runtime acceptance."
+    },
+    "actualRunnerRecords": [
+      {
+        "label": "package15-acquisition-proof-20261114-red-a",
+        "command": [
+          "node",
+          "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114.config.ts"
+        ],
+        "finishedUtc": "2026-11-14T17:00:05.612730+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 8.923,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.log"
+      },
+      {
+        "label": "package15-acquisition-recovery-20261114-focused-green-a",
+        "command": [
+          "/usr/bin/node",
+          "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.config.ts"
+        ],
+        "finishedUtc": "2026-11-14T18:06:17.272466+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 6.687,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-green-a.log"
+      },
+      {
+        "label": "package15-acquisition-recovery-20261114-focused-noemit-b-640",
+        "command": [
+          "/usr/bin/node",
+          "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc",
+          "--project",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.typecheck.json",
+          "--noEmit",
+          "--listFiles"
+        ],
+        "finishedUtc": "2026-11-14T18:07:05.028283+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 14.492,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-noemit-b-640.log"
+      }
+    ],
+    "retainedMalformedJournalLines": [
+      {
+        "line": 11,
+        "sha256": "eb444ff11ef72285718ab0aa52f1a61ba4d4e8dc73917cc5eed9ce1bc62c2bd7",
+        "length": 1219,
+        "containsNul": true
+      }
+    ]
+  },
+  "fingerprints": {
+    "finalTrackedMetadata": {
+      "/home/xahmie/Documents/SWAT/packages/db/sql/028_copy_execution_lifecycle.sql": {
+        "sha256": "a622a7b1a1f3424f5e64c9b4dabff8498a337dc714b22a107e62c97641332388",
+        "size": 19756,
+        "mtime_ns": 1793960881793034386,
+        "inode": 4087388
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/sql/050_copy_tenancy.sql": {
+        "sha256": "0a1c8ba40a485f22e75811d147f4d0cae34ad46a215b67563ec5d4780c1ec4eb",
+        "size": 20060,
+        "mtime_ns": 1793960881817034119,
+        "inode": 4092272
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/sql/058_copy_position_lots.sql": {
+        "sha256": "fa52121782714e0a44808c5660054bcb15a7371e3b74eef2498020353ba0873d",
+        "size": 4536,
+        "mtime_ns": 1793960881820034085,
+        "inode": 4092280
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts": {
+        "sha256": "265f73b0a970ac502f91baaddacfaa3baa5ebbdb562c0c6e813a9165a527487d",
+        "size": 4688,
+        "mtime_ns": 1793960881840033862,
+        "inode": 4087391
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/client.ts": {
+        "sha256": "4a2069cf92c48f40817af17c1ee2207ea40b02304f57047df1cdd63b4f5e0af0",
+        "size": 4736,
+        "mtime_ns": 1794253100243808936,
+        "inode": 4067877
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts": {
+        "sha256": "851d1722a7cd3feec30f54cd854a2d742e4633a98a441ac81bcdcc6e4d80f50d",
+        "size": 103036,
+        "mtime_ns": 1794679485153026353,
+        "inode": 4088753
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts": {
+        "sha256": "b14d0d744d78b481573b032641402679447d9b09c4472702995a445dde8e9f9b",
+        "size": 1747,
+        "mtime_ns": 1794252748703239502,
+        "inode": 4095878
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts": {
+        "sha256": "2b6836cc20e2b5fb03920a4aae622c09502fd0e7da8698fd04f4d440b51e7c19",
+        "size": 16703,
+        "mtime_ns": 1794679442939646518,
+        "inode": 4096082
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/numeric.ts": {
+        "sha256": "ed015957d3d0b6ef79a95d7f1476599cc24e94ab4d5c996a52d248391934e1fb",
+        "size": 1580,
+        "mtime_ns": 1785876204752171152,
+        "inode": 4088811
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts": {
+        "sha256": "777ae553c961e6e1a4a1ff769fbf1c0184ce51a3d0c342882a40c93084f54531",
+        "size": 20895,
+        "mtime_ns": 1794675512278374217,
+        "inode": 4095868
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts": {
+        "sha256": "c5370deed0a7973c9c898f7dea07fc24449b0fe97b7b84c2e0a7aa03a4c96669",
+        "size": 21313,
+        "mtime_ns": 1794676434253593223,
+        "inode": 4088703
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts": {
+        "sha256": "3105fca7aaa38a53897918ea8b02fe862438a4dccc41d2cc59fd75852d863e74",
+        "size": 16282,
+        "mtime_ns": 1794676345683831334,
+        "inode": 4092309
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts": {
+        "sha256": "3b0b2d4954f35a4cf96c32b2098cff446bf983db3074b34e648cbd6ed4bf3d6d",
+        "size": 16739,
+        "mtime_ns": 1793960881989032203,
+        "inode": 4092354
+      },
+      "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts": {
+        "sha256": "675e7d1899b2ca681b14e2f81367a58526cf96d819e73e014d6632d4aa7994aa",
+        "size": 3115,
+        "mtime_ns": 1794251844896303737,
+        "inode": 4089066
+      },
+      "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts": {
+        "sha256": "8edc44e3bce30b9a18082356596f8f70b52bebc3d13df83ecd0d4e8268d4a453",
+        "size": 2868,
+        "mtime_ns": 1793960882062031395,
+        "inode": 4089069
+      },
+      "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts": {
+        "sha256": "4384db4b419fff32833afb622fbf4c65b8d36e3725568a540a16de3399ff5f67",
+        "size": 8576,
+        "mtime_ns": 1785876204757171666,
+        "inode": 4089110
+      },
+      "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts": {
+        "sha256": "76cc2950a169555416d236dc07c657f52740ac1b439a2cd4546d91b78afe5fdd",
+        "size": 2199,
+        "mtime_ns": 1793960882158030334,
+        "inode": 4090354
+      },
+      "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts": {
+        "sha256": "eef078359911ed8e584f5c51ff270864694d902944d9b45851f8710574b408dd",
+        "size": 1503,
+        "mtime_ns": 1793960882159030323,
+        "inode": 4085840
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs": {
+        "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "size": 1382,
+        "mtime_ns": 1794167952514082880,
+        "inode": 5533637
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts": {
+        "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+        "size": 8927,
+        "mtime_ns": 1794667624010929305,
+        "inode": 5541372
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md": {
+        "sha256": "efdcb600ef9312f8362d81c26e8e39d6a18826fbe86874a998b1079ca031c596",
+        "size": 20524,
+        "mtime_ns": 1794672056439250852,
+        "inode": 5541349
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.json": {
+        "sha256": "92330f845d5d6d705e55e8cb4b5e9c21f360feb5e5a829b25256bccff5caa275",
+        "size": 73197,
+        "mtime_ns": 1794675604560912007,
+        "inode": 5541685
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.log": {
+        "sha256": "5a03bd4ddc479e2fc55fb4ba8ad0632a3e8e087c31e6ce2231435d7c34e25180",
+        "size": 51742,
+        "mtime_ns": 1794675604560912007,
+        "inode": 5541684
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114.config.ts": {
+        "sha256": "fb546e90741347a5f8e5167e88fc8fe8566cf9eee79a1552a503a81a82914035",
+        "size": 174,
+        "mtime_ns": 1794675583542570331,
+        "inode": 5541683
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-bounded-independent-review-20261114.md": {
+        "sha256": "50cfc0df2aacb9632c4475e9944335f917743d660a320e531e372412e6f7d72f",
+        "size": 2574,
+        "mtime_ns": 1794675218136636800,
+        "inode": 5541628
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.report.json": {
+        "sha256": "deabb536f5d94ae9596764ec62ca14ba88430ec506a86a4256e7ba7e78e3bde5",
+        "size": 16941,
+        "mtime_ns": 1794673824864451390,
+        "inode": 5541602
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts": {
+        "sha256": "6d0095d2adc3fdbe7db2b472821fe8a19e141121bd6385b3e37d18bdff40bb19",
+        "size": 329,
+        "mtime_ns": 1794673093186226607,
+        "inode": 5541561
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.typecheck.json": {
+        "sha256": "249e52d21de5186f4a00db273f4e8f11cb0f23d4b502ed62b3897b413cde4709",
+        "size": 798,
+        "mtime_ns": 1794673120477644787,
+        "inode": 5541566
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py": {
+        "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+        "size": 2489,
+        "mtime_ns": 1794167952514476894,
+        "inode": 5533639
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts": {
+        "sha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+        "size": 604,
+        "mtime_ns": 1794252187891247077,
+        "inode": 5533636
+      },
+      "/home/xahmie/Documents/SWAT/tsconfig.base.json": {
+        "sha256": "aeba8b3fe294e242c4fe667500becf0d8eb1130aa0e59943afe488de5e0542b8",
+        "size": 366,
+        "mtime_ns": 1778585170725211016,
+        "inode": 4097257
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.config.ts": {
+        "sha256": "fb546e90741347a5f8e5167e88fc8fe8566cf9eee79a1552a503a81a82914035",
+        "size": 174,
+        "mtime_ns": 1794679498649517629,
+        "inode": 5541753
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.typecheck.json": {
+        "sha256": "84a0d4a8e756a269267c807a625ebf807fffa5cfd2d21bdf3c7d5a2a7b104558",
+        "size": 687,
+        "mtime_ns": 1794679512828987785,
+        "inode": 5541754
+      }
+    },
+    "artifacts": {
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-baseline-a.json": {
+        "sha256": "896422a1b36a3de4a1c77020cd11edc0fc8027de469015a14f850610638c506c",
+        "size": 158750,
+        "mtime_ns": 1794679414116779445,
+        "inode": 5541752
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-checks-a.json": {
+        "sha256": "54b38f3fb4c76e0bb590e13f4b3a8c45c3565309a594bc90150b949936616963",
+        "size": 5872,
+        "mtime_ns": 1794679550121615960,
+        "inode": 5541755
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.config.ts": {
+        "sha256": "fb546e90741347a5f8e5167e88fc8fe8566cf9eee79a1552a503a81a82914035",
+        "size": 174,
+        "mtime_ns": 1794679498649517629,
+        "inode": 5541753
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused.typecheck.json": {
+        "sha256": "84a0d4a8e756a269267c807a625ebf807fffa5cfd2d21bdf3c7d5a2a7b104558",
+        "size": 687,
+        "mtime_ns": 1794679512828987785,
+        "inode": 5541754
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-green-a.json": {
+        "sha256": "3b4fc16f6b472cb01dea33dd958e675f0e4dec932e7098e42a3c92c050ed6b77",
+        "size": 30036,
+        "mtime_ns": 1794679576197674493,
+        "inode": 5541757
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-green-a.log": {
+        "sha256": "ac74e54a1b76446e52a786cc7958680cee938bc05733f5b853ddea855fd530f9",
+        "size": 652,
+        "mtime_ns": 1794679576199674421,
+        "inode": 5541756
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-noemit-b-640.log": {
+        "sha256": "6ab64acd655eb2d05f6bc1ff74a9aa100045d83ceb3a7d507ce13a74675d8eb1",
+        "size": 33256,
+        "mtime_ns": 1794679624899952485,
+        "inode": 5541758
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.json": {
+        "sha256": "92330f845d5d6d705e55e8cb4b5e9c21f360feb5e5a829b25256bccff5caa275",
+        "size": 73197,
+        "mtime_ns": 1794675604560912007,
+        "inode": 5541685
+      },
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.log": {
+        "sha256": "5a03bd4ddc479e2fc55fb4ba8ad0632a3e8e087c31e6ce2231435d7c34e25180",
+        "size": 51742,
+        "mtime_ns": 1794675604560912007,
+        "inode": 5541684
+      }
+    },
+    "installedEntrypoints": {
+      "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/vitest.mjs": {
+        "sha256": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+        "size": 43,
+        "mtime_ns": 1781548328522631758,
+        "inode": 4203530
+      },
+      "/home/xahmie/Documents/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": {
+        "sha256": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+        "size": 45,
+        "mtime_ns": 1778696310453348766,
+        "inode": 4219065
+      }
+    }
+  },
+  "importSafety": {
+    "actualTestConfigHarnessRunnerGuardReviewedBeforeExecution": true,
+    "reviewedGraph": [
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+        "import": "@swat/shared",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+        "import": "../../packages/shared/src/types.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+        "import": "../../packages/shared/src/address.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts",
+        "import": "./types.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts",
+        "import": "./validation.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts",
+        "import": "@solana/web3.js",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts",
+        "import": "zod",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+        "import": "../../packages/shared/src/copy-trade-lifecycle.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts",
+        "import": "./types.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+        "import": "./copy-trade-lifecycle.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "node:crypto",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "@swat/shared",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "./client.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+        "import": "./client-runtime.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+        "import": "./database-role.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+        "import": "./numeric.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/numeric.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "./quote-valuation.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts",
+        "import": "@swat/shared",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "./transaction.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+        "import": "./client.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "import": "./lot-allocation.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "import": "node:fs",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "import": "pg",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "import": "vitest",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "import": "./copy-trade-lifecycle.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "import": "./lot-allocation.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "import": "node:fs",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "import": "node:path",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "import": "node:url",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "import": "../../node_modules/vitest/dist/config.js",
+        "resolvedSource": "/home/xahmie/Documents/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_tsx@4.21.0/node_modules/vitest/dist/config.js"
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "import": "vitest/reporters",
+        "resolvedSource": null
+      },
+      {
+        "from": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts",
+        "import": "vitest",
+        "resolvedSource": null
+      }
+    ],
+    "runtimeActual": [
+      "copy-trade-lifecycle.ts",
+      "lot-allocation.ts",
+      "pure quote-valuation.ts"
+    ],
+    "inertMocks": [
+      "./client.js",
+      "./transaction.js",
+      "complete @swat/shared facade",
+      "pg/ioredis setup blockers"
+    ],
+    "noServiceCryptoSharedBarrelExecuted": true,
+    "compilerRealClientTraversalDoesNotExecuteApplication": true,
+    "qualification": "SQL-includes clause-sensitive mocks execute actual TypeScript seams, NOT PostgreSQL semantics, confirmation-state simulation or locking/concurrency/economic proof. No standalone success certificate fabricated."
+  },
+  "executionSafety": {
+    "everyShellPrefix": "taskset -c 0",
+    "everyTestCompilerPrefix": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "bashTimeoutMs": 600000,
+    "runnerTimeoutSeconds": 240,
+    "testsHeapMB": 512,
+    "focusedNoEmitHeapMB": 640,
+    "compilerLabelEndsExactly640": true,
+    "pool": "forks",
+    "workers": 1,
+    "fileParallelism": false,
+    "maxConcurrency": 1,
+    "literalOneFileManifest": true,
+    "guardNotOSSandbox": true,
+    "notPerformed": [
+      "red rerun",
+      "broad/root build",
+      "heap increase/install/download/network",
+      "credentials/keygen/signing/orders",
+      "services/PG/Redis/container/listeners",
+      "migrations applied/schema/global privileges",
+      "deploy/publish/Git/destructive cleanup",
+      "global-ledger/PNL/history changes"
+    ]
+  },
+  "review": {
+    "local": "Diff limited to acquisition evidence/application joins and trusted predicate plus proof row SHARE locks. Nullable application position must equal actual lot position, no NULL fallback; unavailable evidence/application remains visible in availability. INNER JOIN ownership proof avoids locking nullable outer-join rows. Exact numeric/replay/refusal/source readiness unchanged.",
+    "independent": "Post-correction independent Spec/Standards recheck remains coordinator gate, not claimed."
+  },
+  "remainingGates": [
+    "PostgreSQL schema/RLS/runtime role, arithmetic, reversal races and lock concurrency acceptance not executed or certified.",
+    "Source verifier remains unavailable; historical confirmed labels cannot authorize source trades.",
+    "Worker current policy/tenant/operator stops/authority and DB-loaded immutable lot scope checks before simulation/venue/signing remain outside correction.",
+    "Full exact per-lot allocations/reductions, atomic evidence/trade/fee/capacity settlement, durable ack/reconciliation and economic history integration remain open.",
+    "Stale/invalid historical lots/applications refused at corrected seams, not backfilled/repaired.",
+    "No financial runtime/deployment/venue acceptance claimed."
+  ]
+}

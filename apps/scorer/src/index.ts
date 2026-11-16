@@ -197,6 +197,7 @@ async function runMarkToMarket() {
     const sweep = await runStopLossSweep({
       positions,
       resolvePolicy: resolveRiskPolicy,
+      claimExit: claimLotExitExecution,
       claim: claimStopLossTrigger,
       release: releaseStopLossTrigger,
       enqueueSell: (job, jobId, chain) => {

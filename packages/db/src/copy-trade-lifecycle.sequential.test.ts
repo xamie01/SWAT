@@ -120,6 +120,27 @@ describe('uncertified source observation persistence', () => {
     }
   );
 
+  it('withholds an existing execution retry before the historical execution lookup', async () => {
+    const { calls } = persistenceFixture();
+    mocks.withTransaction.mockImplementation(async operation => operation({
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        calls.push({ sql, params });
+        if (sql.includes('FROM signals')) return { rows: [{ id: 'signal-1',
+          status: 'executing', source_trade_id: SOURCE_ID, source_side: 'buy', expires_at: null }] };
+        if (sql.includes('FROM source_trades')) return { rows: [sourceRow()] };
+        if (sql.includes('FROM copy_executions')) return { rows: [{ id: 'execution-1',
+          signal_id: 'signal-1', state: 'requested', source_trade_id: SOURCE_ID }] };
+        return { rows: [] };
+      })
+    }));
+    expect(await claimSourceSignalForCopyExecution({ signalId: 'signal-1', targetAccount: WALLET,
+      executionMode: 'paper', requestedBaseQuantity: '1', maxPositionEvidenceAgeMs: 60_000,
+      now: EVENT_AT })).toMatchObject({ execution: null, created: false, claimed: false,
+      reason: 'Source confirmation verifier is unavailable' });
+    expect(calls.some(({ sql }) => sql.includes('FROM copy_executions'))).toBe(false);
+    expect(calls.some(({ sql }) => /^\s*(?:INSERT INTO|UPDATE|DELETE FROM)/.test(sql))).toBe(false);
+  });
+
   it.each(['confirmed', 'finalized', 'reversed'] as const)(
     'refuses caller-supplied %s intake before persistence', async confirmationState => {
       persistenceFixture();

@@ -206,7 +206,7 @@ export function isBalanceStale(
   // A negative age means the row is timestamped in the future — clock skew, or a
   // caller that set fetched_at itself. Treat it as stale: an unexplained
   // timestamp is not evidence of freshness.
-  return age < 0 || age > maxAgeMs;
+  return !Number.isFinite(age) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0 || age < 0 || age > maxAgeMs;
 }
 
 /**
@@ -225,9 +225,12 @@ export function resolveKnownBalanceUsd(
   if (balances.length === 0) return null;
   let total = 0;
   for (const balance of balances) {
-    if (balance.usd === null) return null;
+    if (balance.usd === null || !Number.isFinite(balance.usd) || balance.usd < 0) return null;
     if (isBalanceStale(balance, now, maxAgeMs)) return null;
+    if (!(balance.usdPricedAt instanceof Date)
+        || isBalanceStale({ fetchedAt: balance.usdPricedAt }, now, maxAgeMs)) return null;
     total += balance.usd;
+    if (!Number.isFinite(total)) return null;
   }
   return total;
 }

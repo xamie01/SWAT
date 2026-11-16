@@ -1,0 +1,132 @@
+{
+  "scope": "Bounded package28 limiter integration only; not full integration isolation or deployment acceptance",
+  "workspace": "/home/xahmie/Documents/SWAT",
+  "actualModule": "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.ts",
+  "approvedContract": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md#28-limiter-isolation",
+  "editedFiles": [
+    "/home/xahmie/Documents/SWAT/apps/api/src/index.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.ts",
+    "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.test.ts"
+  ],
+  "createdConfigurationFiles": [
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.config.ts",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.typecheck.json"
+  ],
+  "implementation": [
+    "Index imports the genuine limiter module first, loads limiterConfig before Fastify, supplies package28TrustProxy(limiterConfig), and awaits registerPackage28Limiters(app, limiterConfig) before registerAuth.",
+    "Removed only obsolete global and scoped rate-limit registrations and their unused import. Retained the auth route scope and all auth options/hooks/routes unchanged.",
+    "Existing module performs synchronous loadPackage28LimiterConfig(process.env) at first import. Required because @swat/db reexports client.ts, which constructs Pool while static dependencies evaluate; body-only index validation would be too late. This introduces environment validation on limiter-module import, but constructs no service or client.",
+    "Preserved genuine independent global-IP/onRequest credential-IP/preValidation normalized-account buckets, configured integer bounds/defaults and exact immediate-peer hop-zero proxy trust.",
+    "Focused compiler exposed saved ambiguous Fastify addHook overload reply type; replaced only that annotation with already-imported FastifyReply."
+  ],
+  "configuration": {
+    "RATE_LIMIT_MAX": { "min": 1, "max": 10000, "default": 300 },
+    "AUTH_RATE_LIMIT_MAX": { "min": 1, "max": 1000, "default": 10 },
+    "AUTH_ACCOUNT_RATE_LIMIT_MAX": { "min": 1, "max": 1000, "default": 10 },
+    "trustedProxy": "false by default; exact configured non-wildcard IP string and hop === 0 only",
+    "testSelection": "createPackageConfig(['apps/api/src/package28-limiter.test.ts']) from './package12-29-harness.js'",
+    "testImportReview": [
+      "Direct imports: Fastify, node:fs readFileSync, installed TypeScript AST parser, Vitest, genuine local package28-limiter.js.",
+      "Limiter runtime dependencies: @fastify/rate-limit and node:net isIP; Fastify imports there are type-only. No workspace package barrel/service/auth/DB/Redis imports.",
+      "Read-only index/module source AST assertions; never import/evaluate/transpile-and-run index. Inert app.inject fixtures only; app.close in finally.",
+      "Reviewed unchanged harness, historical runner, network/credential guard and test-safety setup before execution."
+    ],
+    "executionLimits": {
+      "cpuAffinity": [0],
+      "sharedFlock": "/tmp/swat-package11-checks.lock",
+      "runner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "shellTimeoutMs": 600000,
+      "runnerChildTimeoutSeconds": 240,
+      "testHeapMB": 512,
+      "typecheckHeapMB": 640,
+      "typecheckLabelsEndExactly": "-640",
+      "pool": "forks",
+      "minWorkers": 1,
+      "maxWorkers": 1,
+      "maxConcurrency": 1,
+      "fileParallelism": false
+    }
+  },
+  "runs": [
+    {
+      "label": "package28-limiter-bounded-20261114-red-a",
+      "command": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock /usr/bin/python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package28-limiter-bounded-20261114-red-a /usr/bin/node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.config.ts",
+      "exitCode": 1, "elapsedSeconds": 6.426, "finishedUtc": "2026-11-14T15:18:16.843017+00:00",
+      "files": 1, "total": 17, "passed": 15, "failed": 2, "skippedPendingTodo": 0,
+      "targetedFailures": ["Index missing first genuine limiter import/wiring", "Limiter missing first-import environment validation"],
+      "productionCorrectionOccurredAfterThisRun": true
+    },
+    {
+      "label": "package28-limiter-bounded-20261114-green-a",
+      "command": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock /usr/bin/python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package28-limiter-bounded-20261114-green-a /usr/bin/node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.config.ts",
+      "exitCode": 0, "elapsedSeconds": 6.122, "finishedUtc": "2026-11-14T15:22:59.287544+00:00",
+      "files": 1, "total": 15, "passed": 15, "failed": 0, "skippedPendingTodo": 0
+    },
+    {
+      "label": "package28-limiter-bounded-20261114-typecheck-a-640",
+      "command": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock /usr/bin/python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package28-limiter-bounded-20261114-typecheck-a-640 /usr/bin/node /home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc --project /home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.typecheck.json --noEmit --listFiles",
+      "exitCode": 2, "elapsedSeconds": 19.598, "finishedUtc": "2026-11-14T15:23:18.973272+00:00",
+      "diagnostics": "2 saved limiter reply possibly undefined diagnostics; 6 unchanged harness import.meta/CommonJS diagnostics from initial focused config's inherited NodeNext. Corrected existing reply annotation and threat-only config ESNext/Bundler; harness untouched."
+    },
+    {
+      "label": "package28-limiter-bounded-20261114-green-b",
+      "command": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock /usr/bin/python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package28-limiter-bounded-20261114-green-b /usr/bin/node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.config.ts",
+      "exitCode": 0, "elapsedSeconds": 5.315, "finishedUtc": "2026-11-14T15:24:42.551550+00:00",
+      "files": 1, "total": 15, "passed": 15, "failed": 0, "skippedPendingTodo": 0
+    },
+    {
+      "label": "package28-limiter-bounded-20261114-typecheck-b-640",
+      "command": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock /usr/bin/python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package28-limiter-bounded-20261114-typecheck-b-640 /usr/bin/node /home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc --project /home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.typecheck.json --noEmit --listFiles",
+      "exitCode": 0, "elapsedSeconds": 13.188, "finishedUtc": "2026-11-14T15:24:55.817426+00:00"
+    }
+  ],
+  "countQualification": "Final 15 assertions: 2 AST wiring/import-order, 3 parameterized invalid-bound cases (39 invalid inputs internally), 3 defaults/inclusive-bound cases, 1 proxy validation case, 6 inert Fastify inject cases. Original 10 global-only invalid rows became 3 comprehensive variable-specific rows; 3 bounds/default cases and 2 inject cases added. Both targeted red assertions and all original limiter behaviors remain. Do not sum repeated runs or count internal expect calls as tests.",
+  "actualTestManifest": ["/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.test.ts"],
+  "finalTypecheck": {
+    "totalListedFiles": 349,
+    "workspaceNonDependencyFiles": [
+      "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.ts",
+      "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.test.ts",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.config.ts"
+    ],
+    "indexEntrypointExcluded": true,
+    "dbSourceExcluded": true,
+    "fullManifestLog": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114-typecheck-b-640.log",
+    "manifestSha256": "a6dee304dd917b8a231907196d2bee65e26bd65837ccc580fadfe6eabad71f3d"
+  },
+  "finalSha256": {
+    "/home/xahmie/Documents/SWAT/apps/api/src/index.ts": "ed4029c6c6493c1cd1692984d565cf4c2fcc7321385fc90b33db6cb78bedad2a",
+    "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.ts": "a364fdc3285c5810ec0e50290d58cb00162c21fb1de00ede77b700c4e0621e17",
+    "/home/xahmie/Documents/SWAT/apps/api/src/package28-limiter.test.ts": "68f63a089c285d9e1728bde744f46fbeac4640755980a9ca8c8cc75572c42e84",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.config.ts": "748eafba4db8ef0fbb903dfe83fbb5a39a1d37becc381f67bc307bc56dc82712",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114.typecheck.json": "30f129640cdea4a2afa981cd4c8f718686383ca8e489d78e72c860144d8dde32",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114-red-a.json": "17152ceea43982f569a0495d046b5fcb24fe8c6a36801c762991aac0b54f90a7",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114-green-b.json": "8ffd24f3ef0357061aa7932cc0f01eb9ddd985ff69ec747d48f76b7371b65fb7",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-limiter-bounded-20261114-typecheck-b-640.log": "a6dee304dd917b8a231907196d2bee65e26bd65837ccc580fadfe6eabad71f3d"
+  },
+  "protectedFilesVerifiedUnchanged": {
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts": "921d679f36242243e245086d266d9cc99fe9627e84af75f61360a918b0b45d9d",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/plugin.ts": "45a4bc18420d66f6215a60720d08c99fbd8eac05997723ed1c2b049a8ef72c25",
+    "/home/xahmie/Documents/SWAT/apps/api/src/auth/routes.ts": "1d2db357f7ce06bee8b13bfa59ef9df4ab62c84ee416932526a51daefcd1fda8",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf"
+  },
+  "historicalRunnerSideEffects": "Required unchanged runner appends commands.jsonl and writes unique log/JSON evidence; unchanged harness writes shared cache. No manual ledger/harness changes. commands.jsonl was concurrently changed/regenerated and own labels no longer present at final inspection; exact commands/status/timestamps retained above from actual tool outputs, unique evidence files intact. Both ledgers and several coordinator reports changed concurrently; not edited/reverted by this agent.",
+  "review": {
+    "method": "Local bounded diff/import/spec self-review only, no spawned reviewers",
+    "findingsRemainingWithinBoundedScope": 0,
+    "independentSpecReview": "Not performed by this agent; no independent reviewer approval claimed",
+    "indexDiffCheck": "taskset -c 0 git -C /home/xahmie/Documents/SWAT diff --check -- apps/api/src/index.ts exited 0"
+  },
+  "missingRuntimeGates": [
+    "Index runtime was not imported/executed; full index/service/NodeNext graph was not typechecked.",
+    "Real auth hooks/routes, database, Redis, listener and production ingress were not exercised; index registration/import order verified statically and child hook behavior with inert stand-ins only.",
+    "No live multi-process or shared-store limiter acceptance; existing buckets remain in-memory process-local stores.",
+    "No full integration-isolation guard/profile/unique-fixture/schema-catalog/role/RLS or infrastructure acceptance; historical four isolation failures remain outside assignment.",
+    "No deployment/service configuration, credential/key/signing/provider/financial authority enabled or certified."
+  ],
+  "prohibitedActionsPerformed": []
+}

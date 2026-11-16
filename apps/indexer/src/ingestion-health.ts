@@ -87,6 +87,11 @@ export async function runTrackedIngestion(
     throw error;
   }
 
+  // A completed call can still contain known failed items. Preserve its counters
+  // and scope, but do not project that evidence as unknown or complete.
+  if (result.failed > 0 && result.evidence) {
+    result = { ...result, evidence: { ...result.evidence, completeness: 'partial' } };
+  }
   await recorder({
     chain: input.chain,
     source: input.source,

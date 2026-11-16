@@ -1,0 +1,1028 @@
+{
+  "title": "Package14 PNL acquisition-proof bounded followup checkpoint",
+  "generatedUtc": "2026-11-14T17:25:58.419086+00:00",
+  "scope": {
+    "supportedFinding": "1 High: exact PNL lot ownership lacked current same-acquisition confirmed evidence and active scoped application. Prior 0-finding specification superseded for this producer.",
+    "status": "Narrow producer SQL correction complete with qualified offline source/test checks; not installed/runtime acceptance.",
+    "ownedChangedApplicationPaths": [
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts"
+    ],
+    "package14SequentialTestEdited": false,
+    "preservedInheritedDirtyContent": true,
+    "baseline": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-baseline.json",
+      "sha256": "fa92c64b0257f436b52cd37edfc63e9dfca87660fb14baf04655ed59417d24d2",
+      "bytes": 36761
+    },
+    "forbiddenSourceEditsPerformed": false,
+    "noOverlap": "No lifecycle/allocator/scorer/worker/schema/global-ledger edits; lifecycle/allocator acquisition proof remains a separate owner task."
+  },
+  "changes": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts",
+      "sha256": "3105fca7aaa38a53897918ea8b02fe862438a4dccc41d2cc59fd75852d863e74",
+      "bytes": 16282,
+      "baselineSha256": "f72d1e0218a2a4fa4d1659ca00a36affa2d7e16fb1b8f78d73554ca1bcc1536a",
+      "diffAgainstPreservedFollowupBaseline": "--- /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts (followup baseline)\n+++ /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts (final acquisition-proof checkpoint)\n@@ -182,9 +182,10 @@\n   const positions: OpenPositionSnapshot[] = [];\n   let skipped = 0;\n \n-  // Lot rows are the authoritative tenant/master identity once confirmed copy\n-  // evidence has created them. The trade-ledger path remains the compatibility\n-  // fallback for legacy rows and for tenants whose evidence predates migration 058.\n+  // Lot exit scope requires its acquisition evidence to remain confirmed and\n+  // actively applied to this exact position. A reversal can leave a positive\n+  // historical lot; existence/provenance alone must not expose exact exit scope.\n+  // The trade-ledger fallback remains diagnostic, without exact lot ownership.\n   const hasTenantLedger = [...grouped.values()].some((group) => group.key.userId !== null);\n   const openMasterLots = hasTenantLedger\n     ? await query<OpenMasterLot>(\n@@ -213,6 +214,16 @@\n            JOIN source_trades source ON source.id = lot.source_trade_id\n              AND source.chain = lot.chain AND source.token_mint = lot.token_mint\n              AND source.wallet_address = lot.master_wallet_address AND source.direction = 'buy'\n+           JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id\n+             AND evidence.execution_id = acquisition.id\n+             AND evidence.confirmation_state IN ('confirmed', 'finalized')\n+           JOIN copy_position_applications application ON application.evidence_id = evidence.id\n+             AND application.execution_id = acquisition.id\n+             AND application.active = TRUE\n+             AND application.position_id = position.id\n+             AND application.user_id IS NOT DISTINCT FROM lot.user_id\n+             AND application.target_account = position.target_account\n+             AND application.chain = lot.chain AND application.token_mint = lot.token_mint\n           WHERE lot.remaining_quantity > 0\n             AND ($1::uuid IS NULL OR lot.signal_id = $1)\n           ORDER BY lot.signal_id, lot.user_id, lot.master_wallet_address, lot.acquired_at, lot.id`,\n"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+      "sha256": "c5370deed0a7973c9c898f7dea07fc24449b0fe97b7b84c2e0a7aa03a4c96669",
+      "bytes": 21313,
+      "baselineSha256": "269c386739ee6f7a7570f8f1af2e7f9d567fcfb9b4daec76faacc604f4bb3b51",
+      "diffAgainstPreservedFollowupBaseline": "--- /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts (followup baseline)\n+++ /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts (final acquisition-proof checkpoint)\n@@ -361,6 +361,50 @@\n     });\n   });\n \n+  // This fixture models only the named SQL guard at the mocked query boundary.\n+  // It is a generated-query/projection regression, not PostgreSQL execution proof.\n+  it.each([\n+    ['missing acquisition evidence', 'evidence.id = lot.acquisition_evidence_id'],\n+    ['evidence from another execution', 'evidence.execution_id = acquisition.id'],\n+    ['observed evidence', \"evidence.confirmation_state IN ('confirmed', 'finalized')\"],\n+    ['reversed evidence with a still-positive lot', \"evidence.confirmation_state IN ('confirmed', 'finalized')\"],\n+    ['application for another evidence', 'application.evidence_id = evidence.id'],\n+    ['application for another execution', 'application.execution_id = acquisition.id'],\n+    ['inactive applied application', 'application.active = TRUE'],\n+    ['application on another position', 'application.position_id = position.id'],\n+    ['application owned by another tenant', 'application.user_id IS NOT DISTINCT FROM lot.user_id'],\n+    ['application on another target account', 'application.target_account = position.target_account'],\n+    ['application on another chain', 'application.chain = lot.chain'],\n+    ['application on another token', 'application.token_mint = lot.token_mint']\n+  ])('does not expose exact ownership for %s (inert acquisition guard fixture)', async (_reason, predicate) => {\n+    const retainedLot = {\n+      lot_id: 'retained-lot', signal_id: 'shared-signal', user_id: 'user-a',\n+      master_wallet_address: 'solana:master-a', token_mint: 'solana:token-1', chain: 'solana',\n+      remaining_quantity: '10.000000000000000001', remaining_cost_basis_usd: '100',\n+      target_account: 'solana:target-a', execution_mode: 'live'\n+    };\n+    mocks.query.mockImplementation(async (sql: string) => {\n+      if (sql.includes('FROM trades t')) return [\n+        buy({ user_id: 'user-a', token_amount: '10', amount_usd: '100', price_usd: '10' })\n+      ];\n+      if (sql.includes('FROM copy_position_master_lots lot')) {\n+        // Without this predicate the old query admits this otherwise scoped lot.\n+        return sql.includes(predicate) ? [] : [retainedLot];\n+      }\n+      return [];\n+    });\n+    mocks.fetchTokenPriceUsd.mockResolvedValue(5);\n+\n+    const result = await markToMarketOpenPositions();\n+    expect(result.positions).toEqual([{\n+      signalId: 'shared-signal', userId: 'user-a', tokenMint: 'solana:token-1', chain: 'solana',\n+      openQuantity: 10, openCostBasisUsd: 100, unrealizedPnlUsd: -50, currentPriceUsd: 5\n+    }]);\n+    expect(result.updated).toBe(1);\n+    const [sql] = mocks.query.mock.calls[1] as [string];\n+    expect(sql).toContain(predicate);\n+  });\n+\n   it.each(['paper', 'shadow', 'live'] as const)(\n     'keeps %s acquisition scope on the owning tenant lot, not a co-holder or legacy aggregate', async mode => {\n       mocks.query\n@@ -448,6 +492,16 @@\n       'source.id = lot.source_trade_id',\n       'source.chain = lot.chain AND source.token_mint = lot.token_mint',\n       \"source.wallet_address = lot.master_wallet_address AND source.direction = 'buy'\",\n+      'JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id',\n+      'evidence.execution_id = acquisition.id',\n+      \"evidence.confirmation_state IN ('confirmed', 'finalized')\",\n+      'JOIN copy_position_applications application ON application.evidence_id = evidence.id',\n+      'application.execution_id = acquisition.id',\n+      'application.active = TRUE',\n+      'application.position_id = position.id',\n+      'application.user_id IS NOT DISTINCT FROM lot.user_id',\n+      'application.target_account = position.target_account',\n+      'application.chain = lot.chain AND application.token_mint = lot.token_mint',\n       '($1::uuid IS NULL OR lot.signal_id = $1)'\n     ]) expect(lotSql).toContain(predicate);\n     expect(lotParams).toEqual(['shared-signal']);\n"
+    }
+  ],
+  "oneBasedLineReferences": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts",
+      "ranges": {
+        "updatedQualificationComment": [
+          185,
+          188
+        ],
+        "existingPositionAcquisitionSourceProvenance": [
+          204,
+          216
+        ],
+        "newEvidenceApplicationProofJoins": [
+          217,
+          226
+        ],
+        "diagnosticFallback": [
+          328,
+          332
+        ],
+        "unchangedExactOwnershipProjection": [
+          347,
+          353
+        ],
+        "unchangedNumericSnapshot": [
+          356,
+          360
+        ]
+      }
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+      "ranges": {
+        "inertNegativeGuardFixtures": [
+          364,
+          406
+        ],
+        "positiveProofJoinAssertions": [
+          495,
+          504
+        ],
+        "precisionSensitivePositiveOutput": [
+          509,
+          540
+        ]
+      }
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+      "ranges": {
+        "unchangedOriginalSnapshotRegression": [
+          34,
+          43
+        ]
+      }
+    }
+  ],
+  "proofContract": {
+    "evidence": [
+      "evidence.id = lot.acquisition_evidence_id",
+      "evidence.execution_id = acquisition.id",
+      "evidence.confirmation_state IN ('confirmed', 'finalized')"
+    ],
+    "application": [
+      "application.evidence_id = evidence.id",
+      "application.execution_id = acquisition.id",
+      "application.active = TRUE",
+      "application.position_id = position.id",
+      "application.user_id IS NOT DISTINCT FROM lot.user_id",
+      "application.target_account = position.target_account",
+      "application.chain = lot.chain",
+      "application.token_mint = lot.token_mint"
+    ],
+    "scope": "Existing position/acquisition/source joins retain tenant/account/chain/token/signal/source/master/buy provenance. Application tenant uses null-safe identity; nullable/missing position_id fails the inner join. Evidence PK and application evidence PK do not multiply lot rows.",
+    "quantity": "lot.remaining_quantity::text still copied verbatim to openQuantityExact; no Number-derived exact fallback.",
+    "omission": "Disqualified positive historical lot rows are excluded from the SQL lot rowset. The existing fallback emits only diagnostic aggregate fields when no qualifying lot remains for a ledger; no positionKey, openQuantityExact, masterWalletAddress, targetAccount, or acquisitionExecutionMode is attached. Mixed qualifying/disqualified rowsets do not reintroduce rejected lot identities.",
+    "preserved": "No history repair, new schema, confirmation mutation, verifier enablement, numeric PNL/epsilon policy changes, exit reservation changes, settlement changes, or current-policy/runtime gate bypass."
+  },
+  "readOnlySchemaAndProducerReferences": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/028_copy_execution_lifecycle.sql",
+      "lines": [
+        402,
+        417
+      ],
+      "finding": "Evidence execution FK and confirmed/finalized/observed/reversed state schema."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/028_copy_execution_lifecycle.sql",
+      "lines": [
+        451,
+        458
+      ],
+      "finding": "Application evidence PK, execution FK, account/chain/token, active."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/050_copy_tenancy.sql",
+      "lines": [
+        193,
+        240
+      ],
+      "finding": "Application tenant and nullable surrogate position_id; canonical account/chain/token/null-safe tenant backfill."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/058_copy_position_lots.sql",
+      "lines": [
+        8,
+        22
+      ],
+      "finding": "Independent position/source/execution/evidence FKs do not prove evidence.execution_id equals lot acquisition execution."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+      "lines": [
+        2344,
+        2369
+      ],
+      "finding": "Application active is derived from evidence confirmation before lot synchronization."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+      "lines": [
+        2011,
+        2019
+      ],
+      "finding": "Synchronization returns for non-applied confirmation; reversal can leave positive historical lot."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md",
+      "lines": [
+        27,
+        40
+      ],
+      "finding": "Exact snapshot and canonical lot claim/settlement contracts; no legacy aggregate exit authority."
+    }
+  ],
+  "verification": {
+    "runs": [
+      {
+        "label": "package14-acquisition-proof-20261114-red-a",
+        "command": [
+          "node",
+          "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts"
+        ],
+        "finishedUtc": "2026-11-14T17:09:38.337065+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 5.718,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-red-a.log",
+        "nodeHeapMb": 512,
+        "outerCommand": "taskset -c 0 flock /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package14-acquisition-proof-20261114-red-a node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts",
+        "logArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-red-a.log",
+          "sha256": "580404ca69b002322cd2f8d64518c1e08c409d49ff8a34cc36f2eb3eb8d56a8d",
+          "bytes": 11701
+        },
+        "jsonArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-red-a.json",
+          "sha256": "18030785ad4a31a13fecaf452c557f8de80bc23f3398237af7132b4e4817fd61",
+          "bytes": 18340
+        },
+        "success": false,
+        "actualFiles": 2,
+        "actualAssertionResults": 33,
+        "counts": {
+          "passed": 21,
+          "failed": 12
+        },
+        "files": [
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 6,
+            "counts": {
+              "passed": 6
+            },
+            "failures": []
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+            "status": "failed",
+            "actualAssertionResults": 27,
+            "counts": {
+              "passed": 15,
+              "failed": 12
+            },
+            "failures": [
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for missing acquisition evidence (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for evidence from another execution (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for observed evidence (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for reversed evidence with a still-positive lot (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application for another evidence (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application for another execution (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for inactive applied application (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application on another position (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application owned by another tenant (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application on another target account (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application on another chain (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              },
+              {
+                "name": "markToMarketOpenPositions per-tenant grouping (S4-M46) does not expose exact ownership for application on another token (inert acquisition guard fixture)",
+                "messages": [
+                  "AssertionError: expected [ Array(1) ] to deeply equal [ { signalId: 'shared-signal', \u2026(7) } ]\n    at /home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts:399:30\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at file:///home/xahmie/Documents/SWAT/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+                ]
+              }
+            ]
+          }
+        ],
+        "stageQualification": "Fresh negative red before source joins."
+      },
+      {
+        "label": "package14-acquisition-proof-20261114-green-b",
+        "command": [
+          "node",
+          "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts"
+        ],
+        "finishedUtc": "2026-11-14T17:13:09.410865+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 5.511,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-b.log",
+        "nodeHeapMb": 512,
+        "outerCommand": "taskset -c 0 flock /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package14-acquisition-proof-20261114-green-b node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts",
+        "logArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-b.log",
+          "sha256": "3c64f407c5d154b3b45090f86ded90a6eeabc5a43b8a54cf57678fd0258aa367",
+          "bytes": 740
+        },
+        "jsonArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-b.json",
+          "sha256": "bfc1b5511929b766391b3ec64e6a56d989b641dc65c11010bccd081c2eb7e453",
+          "bytes": 13667
+        },
+        "success": true,
+        "actualFiles": 2,
+        "actualAssertionResults": 33,
+        "counts": {
+          "passed": 33
+        },
+        "files": [
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 6,
+            "counts": {
+              "passed": 6
+            },
+            "failures": []
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 27,
+            "counts": {
+              "passed": 27
+            },
+            "failures": []
+          }
+        ],
+        "stageQualification": "Intermediate green before the final strengthened positive SQL assertion list."
+      },
+      {
+        "label": "package14-acquisition-proof-20261114-green-c",
+        "command": [
+          "node",
+          "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts"
+        ],
+        "finishedUtc": "2026-11-14T17:18:33.111485+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 8.526,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-c.log",
+        "nodeHeapMb": 512,
+        "outerCommand": "taskset -c 0 flock /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package14-acquisition-proof-20261114-green-c node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts",
+        "logArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-c.log",
+          "sha256": "067e9f2de3ad2152ba0f353a358d4c363766ed612437276310d11e536552e559",
+          "bytes": 740
+        },
+        "jsonArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-c.json",
+          "sha256": "b3b5d21fd16b899493c62171ed0d9ff04d4425a22047587612761bbba5747b9e",
+          "bytes": 13663
+        },
+        "success": true,
+        "actualFiles": 2,
+        "actualAssertionResults": 33,
+        "counts": {
+          "passed": 33
+        },
+        "files": [
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 6,
+            "counts": {
+              "passed": 6
+            },
+            "failures": []
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 27,
+            "counts": {
+              "passed": 27
+            },
+            "failures": []
+          }
+        ],
+        "stageQualification": "Final focused green for the reported source/test hashes."
+      },
+      {
+        "label": "package14-acquisition-proof-20261114-neighbors-d",
+        "command": [
+          "node",
+          "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+          "run",
+          "--config",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors.config.ts"
+        ],
+        "finishedUtc": "2026-11-14T17:20:25.587482+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 6.865,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors-d.log",
+        "nodeHeapMb": 512,
+        "outerCommand": "taskset -c 0 flock /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package14-acquisition-proof-20261114-neighbors-d node /home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs run --config /home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors.config.ts",
+        "logArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors-d.log",
+          "sha256": "5750aa5380487a96409ed2fa61767ddcbcf0c66f852213027699fe28c0711b99",
+          "bytes": 966
+        },
+        "jsonArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors-d.json",
+          "sha256": "a2504ddaeb2854f1ce978af87d0f6efb5b848ba3c6bf77df6ac28122948b2de5",
+          "bytes": 11694
+        },
+        "success": true,
+        "actualFiles": 4,
+        "actualAssertionResults": 38,
+        "counts": {
+          "passed": 38
+        },
+        "files": [
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 4,
+            "counts": {
+              "passed": 4
+            },
+            "failures": []
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 6,
+            "counts": {
+              "passed": 6
+            },
+            "failures": []
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 13,
+            "counts": {
+              "passed": 13
+            },
+            "failures": []
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.test.ts",
+            "status": "passed",
+            "actualAssertionResults": 15,
+            "counts": {
+              "passed": 15
+            },
+            "failures": []
+          }
+        ],
+        "stageQualification": "Safe narrow neighbors, not the separate lot acquisition-proof owner suite."
+      },
+      {
+        "label": "package14-acquisition-proof-20261114-source-test-noemit-e-640",
+        "command": [
+          "node",
+          "/home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc",
+          "--project",
+          "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114.typecheck.json",
+          "--noEmit",
+          "--listFiles"
+        ],
+        "finishedUtc": "2026-11-14T17:21:13.394623+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 23.572,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-source-test-noemit-e-640.log",
+        "nodeHeapMb": 640,
+        "outerCommand": "taskset -c 0 flock /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py package14-acquisition-proof-20261114-source-test-noemit-e-640 node /home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc --project /home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114.typecheck.json --noEmit --listFiles",
+        "logArtifact": {
+          "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-source-test-noemit-e-640.log",
+          "sha256": "48c30b5799375aaf0ac1eb94619862e74814117f7add00ccc00309c96bd26b38",
+          "bytes": 33857
+        },
+        "diagnostics": [],
+        "diagnosticCount": 0,
+        "listFilesProjectCount": 25,
+        "listFilesProjectClosure": [
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts",
+            "sha256": "76cc2950a169555416d236dc07c657f52740ac1b439a2cd4546d91b78afe5fdd",
+            "bytes": 2199
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts",
+            "sha256": "eef078359911ed8e584f5c51ff270864694d902944d9b45851f8710574b408dd",
+            "bytes": 1503
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts",
+            "sha256": "8edc44e3bce30b9a18082356596f8f70b52bebc3d13df83ecd0d4e8268d4a453",
+            "bytes": 2868
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts",
+            "sha256": "4384db4b419fff32833afb622fbf4c65b8d36e3725568a540a16de3399ff5f67",
+            "bytes": 8576
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/evm-calldata.ts",
+            "sha256": "5c3bb0b67bd3b5ea302a4a81bce534722bd61bd0254edb5dbb3722b2ba2e601d",
+            "bytes": 14282
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/permission-policy.ts",
+            "sha256": "e772fcfe698847d9c63f1fa85ff6baa42d06cd26f3c2b2e60f58a2efcc4fe9fe",
+            "bytes": 52412
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/shared/src/prices.ts",
+            "sha256": "a06095a8f477dd90d8e8d3f9023630f841f19ce07b7c8e4777bd69f9f4378e6f",
+            "bytes": 12847
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114.shared-source.ts",
+            "sha256": "047c37b5be752a72cebaced7f0014325e9abcea81c31c3b0b34b9e5402304587",
+            "bytes": 389
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts",
+            "sha256": "265f73b0a970ac502f91baaddacfaa3baa5ebbdb562c0c6e813a9165a527487d",
+            "bytes": 4688
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts",
+            "sha256": "b14d0d744d78b481573b032641402679447d9b09c4472702995a445dde8e9f9b",
+            "bytes": 1747
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/numeric.ts",
+            "sha256": "ed015957d3d0b6ef79a95d7f1476599cc24e94ab4d5c996a52d248391934e1fb",
+            "bytes": 1580
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+            "sha256": "4a2069cf92c48f40817af17c1ee2207ea40b02304f57047df1cdd63b4f5e0af0",
+            "bytes": 4736
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.ts",
+            "sha256": "bd37c987c645739c4d393c12bfb94c7e12946817e41d65c798750206d444fb7f",
+            "bytes": 2893
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts",
+            "sha256": "3b0b2d4954f35a4cf96c32b2098cff446bf983db3074b34e648cbd6ed4bf3d6d",
+            "bytes": 16739
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+            "sha256": "675e7d1899b2ca681b14e2f81367a58526cf96d819e73e014d6632d4aa7994aa",
+            "bytes": 3115
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+            "sha256": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59",
+            "bytes": 15949
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+            "sha256": "785dacfb948032b97a7ce3f791b9ba6f0404ef5e52479b292c574dfa678a96a5",
+            "bytes": 101711
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts",
+            "sha256": "1503ec2a14148b390c441abd6dc2317456522b976365c5e11b06e734646f303e",
+            "bytes": 5218
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts",
+            "sha256": "3105fca7aaa38a53897918ea8b02fe862438a4dccc41d2cc59fd75852d863e74",
+            "bytes": 16282
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+            "sha256": "c5370deed0a7973c9c898f7dea07fc24449b0fe97b7b84c2e0a7aa03a4c96669",
+            "bytes": 21313
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/close-all.ts",
+            "sha256": "3f917c1aba607b538d13b2986d157d11d5536906fa74626d5d17b8b0988a0259",
+            "bytes": 5508
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+            "sha256": "9ad98edb8a4ce646c8ce7f7f98408bf78d0d42416aaa29369619662efc3e8197",
+            "bytes": 4086
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+            "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+            "bytes": 8927
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts",
+            "sha256": "7cad4ec14e5ec534a0dbad2307bd4eb86214138efb0a566ec645b8c2716100d6",
+            "bytes": 202
+          },
+          {
+            "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors.config.ts",
+            "sha256": "f57e761318b18efbec665eb72bb2a39ad9a179e49219325f37eca50a25cd6489",
+            "bytes": 282
+          }
+        ],
+        "allListedFilesIncludingDependencies": 311
+      }
+    ],
+    "finalDeduplicated": {
+      "actualFiles": 5,
+      "passedAssertionResults": 65,
+      "files": {
+        "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts": 6,
+        "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts": 27,
+        "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts": 4,
+        "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.test.ts": 13,
+        "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.test.ts": 15
+      },
+      "arithmetic": "33 final focused + 38 neighbors - 6 repeated package14 = 65 in 5 distinct files. Intermediate/red assertions are not added to the final coverage total.",
+      "countDefinition": "Counts are actual JSON testResults files and assertionResults entries (test cases), not number of expect calls or Vitest suite totals."
+    }
+  },
+  "testQualification": {
+    "seam": "Actual markToMarketOpenPositions public function with fully mocked DB/client and pricing/shared dependencies; exact output checked against independent literal expectations.",
+    "negativeCases": 12,
+    "mechanism": "Each negative fixture supplies an otherwise scoped retained positive lot only when its named SQL predicate is absent (sql.includes at mocked query boundary). This checks generated-query guards and omission in fallback, not actual relational execution.",
+    "distinctness": "Observed and reversed scenarios share the confirmation whitelist guard; twelve cases are not twelve independent relational scenarios.",
+    "positive": "Existing paper/shadow/live tenant isolation and two distinct master/account/exact-quantity outputs remain; strengthened SQL assertions check evidence/application JOINs and all scoped predicates.",
+    "notProven": [
+      "Actual PostgreSQL syntax/planner/constraint execution",
+      "Real evidence or application transitions",
+      "Installed schema/RLS/role/current tenant authority",
+      "Custody/economics/source verification",
+      "End-to-end claim/queue/settlement/runtime acceptance"
+    ]
+  },
+  "importSafety": {
+    "reviewedCompleteTests": [
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.test.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.test.ts"
+    ],
+    "runtimeClosure": "PNL tests fully mock ./client.js and @swat/shared. Package14 fully mocks both before imports; executes close-all, PNL, stop-loss and allocator helpers. PNL math has no imports. Stop-loss imports client at runtime (fully mocked) and only types from shared/lifecycle. Allocator imports only types from pg/shared/lifecycle; no DB/service module initialization. Close-all runtime dependency is allocator plus mocked client.",
+    "guards": [
+      {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs",
+        "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "bytes": 1382
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts",
+        "sha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+        "bytes": 604
+      }
+    ],
+    "guardQualification": "Historical Node network/credential-file guard plus throwing pg/ioredis safety mocks is defense in depth, not proof of all possible native I/O. No real infrastructure exercised.",
+    "excluded": [
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.sequential.test.ts",
+        "reason": "Historical test does not fully mock shared service/crypto barrel; excluded from fresh safe manifest."
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+        "reason": "Separate owner acquisition-proof work; narrow PNL neighbors deliberately avoid certifying its current suite."
+      }
+    ]
+  },
+  "resources": {
+    "allShellCommandsCpu0": true,
+    "allTestCompilerLock": "/tmp/swat-package11-checks.lock",
+    "runner": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "bytes": 2489
+    },
+    "bashTimeoutMs": 600000,
+    "childTimeoutSeconds": 240,
+    "testHeapMb": 512,
+    "compilerHeapMb": 640,
+    "compilerLabelEndsWith640": true,
+    "pool": "one fork/worker",
+    "fileParallelism": false,
+    "literalExistingManifestsOnly": true,
+    "cliTestFilters": false,
+    "syntheticEnv": "Sanitized runner environment, DOTENV_CONFIG_PATH=/dev/null, synthetic non-service DB/Redis URLs, no credential/service access."
+  },
+  "compilerQualification": {
+    "project": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114.typecheck.json",
+      "sha256": "0fce76ae4e94a17759984c579a58321fb47b634c888ec734170116792377fa82",
+      "bytes": 733
+    },
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "incremental": false,
+    "noEmit": true,
+    "sharedAlias": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114.shared-source.ts",
+      "sha256": "047c37b5be752a72cebaced7f0014325e9abcea81c31c3b0b34b9e5402304587",
+      "bytes": 389
+    },
+    "aliasNature": "Existing compiler-only export alias to actual shared types/address/lifecycle/prices source, not declaration stubs and not runtime wiring. Reused rather than creating a redundant alias.",
+    "projectClosureCount": 25,
+    "qualification": "Checks reported PNL source/test roots plus existing package14 and manifest roots and actual transitive project sources. Other safe neighbor tests executed but are not compiler roots. Does not certify full NodeNext, source/dist, dependency declarations (skipLibCheck), workspace build, or module execution. Owner lifecycle/allocator are traversed read-only for types."
+  },
+  "protectedSampledFingerprints": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+      "sha256": "9ad98edb8a4ce646c8ce7f7f98408bf78d0d42416aaa29369619662efc3e8197",
+      "bytes": 4086,
+      "baselineSha256": "9ad98edb8a4ce646c8ce7f7f98408bf78d0d42416aaa29369619662efc3e8197",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+      "sha256": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59",
+      "bytes": 15949,
+      "baselineSha256": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+      "sha256": "785dacfb948032b97a7ce3f791b9ba6f0404ef5e52479b292c574dfa678a96a5",
+      "bytes": 101711,
+      "baselineSha256": "785dacfb948032b97a7ce3f791b9ba6f0404ef5e52479b292c574dfa678a96a5",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/028_copy_execution_lifecycle.sql",
+      "sha256": "a622a7b1a1f3424f5e64c9b4dabff8498a337dc714b22a107e62c97641332388",
+      "bytes": 19756,
+      "baselineSha256": "a622a7b1a1f3424f5e64c9b4dabff8498a337dc714b22a107e62c97641332388",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/050_copy_tenancy.sql",
+      "sha256": "0a1c8ba40a485f22e75811d147f4d0cae34ad46a215b67563ec5d4780c1ec4eb",
+      "bytes": 20060,
+      "baselineSha256": "0a1c8ba40a485f22e75811d147f4d0cae34ad46a215b67563ec5d4780c1ec4eb",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/sql/058_copy_position_lots.sql",
+      "sha256": "fa52121782714e0a44808c5660054bcb15a7371e3b74eef2498020353ba0873d",
+      "bytes": 4536,
+      "baselineSha256": "fa52121782714e0a44808c5660054bcb15a7371e3b74eef2498020353ba0873d",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "bytes": 2489,
+      "baselineSha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+      "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+      "bytes": 8927,
+      "baselineSha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs",
+      "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+      "bytes": 1382,
+      "baselineSha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts",
+      "sha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+      "bytes": 604,
+      "baselineSha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+      "unchangedAtReportCapture": true,
+      "qualification": "Read-only sampled fingerprint; lifecycle/allocator remain separately owned and may change after this capture. No whole-worktree/Git claim."
+    }
+  ],
+  "selectedRuntimeTestSourceFingerprints": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts",
+      "sha256": "c5370deed0a7973c9c898f7dea07fc24449b0fe97b7b84c2e0a7aa03a4c96669",
+      "bytes": 21313
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+      "sha256": "9ad98edb8a4ce646c8ce7f7f98408bf78d0d42416aaa29369619662efc3e8197",
+      "bytes": 4086
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts",
+      "sha256": "236a79587af6edd684d00878c985fc81e1a7e0e9a0d601b9dcd66d9fa6fbcaed",
+      "bytes": 2030
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.test.ts",
+      "sha256": "738619bc5d3cb27cb00534b2fb4c288efe35fa38378da3633575e94e0b298c47",
+      "bytes": 4014
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.test.ts",
+      "sha256": "8fd094963d8d07c95a63bab3bc5c3816ef0b8b1f05f5688b91c609bdf46dfc68",
+      "bytes": 6013
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts",
+      "sha256": "3105fca7aaa38a53897918ea8b02fe862438a4dccc41d2cc59fd75852d863e74",
+      "bytes": 16282
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.ts",
+      "sha256": "bd37c987c645739c4d393c12bfb94c7e12946817e41d65c798750206d444fb7f",
+      "bytes": 2893
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts",
+      "sha256": "1503ec2a14148b390c441abd6dc2317456522b976365c5e11b06e734646f303e",
+      "bytes": 5218
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/close-all.ts",
+      "sha256": "3f917c1aba607b538d13b2986d157d11d5536906fa74626d5d17b8b0988a0259",
+      "bytes": 5508
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+      "sha256": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59",
+      "bytes": 15949
+    }
+  ],
+  "remainingCallerRuntimeGaps": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/scorer/src/index.ts",
+      "lines": [
+        197,
+        218
+      ],
+      "gap": "Actual stop-loss sweep caller lacks claimExit injection. Tenant canonical exits still fail closed before claim/enqueue; no caller edit authorized."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/apps/scorer/src/stop-loss.ts",
+      "lines": [
+        235,
+        263
+      ],
+      "gap": "Requires exact scope and canonical claimExit; validates returned execution identity and preserves reservations on queue failure. These gates were not changed or executed."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+      "gap": "Projection is not tenant/service authorization. Installed schema, RLS, role/context setup and runtime transaction integration untested."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+      "gap": "Snapshot proof is point-in-time stored attribution, not independently verified custody/economics or a locked reservation. Separate owner must revalidate under canonical claim/availability transaction. No history repair by PNL."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/packages/db/src/close-all.ts",
+      "gap": "Read-only neighboring producer; this followup does not add acquisition evidence/application proof there or certify its runtime authority."
+    },
+    {
+      "gap": "Source verifier remains unavailable. Current-policy/readiness/settlement/receipt/economic allocation/runtime acceptance remain gated; no financial action enabled."
+    }
+  ],
+  "operationsNotPerformed": [
+    "Live DB/network/Redis/services/containers",
+    "Credential reads",
+    "Signing/keygen/financial actions",
+    "Install/deploy/migrations",
+    "Git/history/cleanup",
+    "Spawn/workflow/parallel test execution",
+    "Global-ledger or other-owner source edits"
+  ],
+  "evidenceArtifacts": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-baseline.json",
+      "sha256": "fa92c64b0257f436b52cd37edfc63e9dfca87660fb14baf04655ed59417d24d2",
+      "bytes": 36761
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-focused.config.ts",
+      "sha256": "7cad4ec14e5ec534a0dbad2307bd4eb86214138efb0a566ec645b8c2716100d6",
+      "bytes": 202
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors.config.ts",
+      "sha256": "f57e761318b18efbec665eb72bb2a39ad9a179e49219325f37eca50a25cd6489",
+      "bytes": 282
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114.typecheck.json",
+      "sha256": "0fce76ae4e94a17759984c579a58321fb47b634c888ec734170116792377fa82",
+      "bytes": 733
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-red-a.log",
+      "sha256": "580404ca69b002322cd2f8d64518c1e08c409d49ff8a34cc36f2eb3eb8d56a8d",
+      "bytes": 11701
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-red-a.json",
+      "sha256": "18030785ad4a31a13fecaf452c557f8de80bc23f3398237af7132b4e4817fd61",
+      "bytes": 18340
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-b.log",
+      "sha256": "3c64f407c5d154b3b45090f86ded90a6eeabc5a43b8a54cf57678fd0258aa367",
+      "bytes": 740
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-b.json",
+      "sha256": "bfc1b5511929b766391b3ec64e6a56d989b641dc65c11010bccd081c2eb7e453",
+      "bytes": 13667
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-c.log",
+      "sha256": "067e9f2de3ad2152ba0f353a358d4c363766ed612437276310d11e536552e559",
+      "bytes": 740
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-green-c.json",
+      "sha256": "b3b5d21fd16b899493c62171ed0d9ff04d4425a22047587612761bbba5747b9e",
+      "bytes": 13663
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors-d.log",
+      "sha256": "5750aa5380487a96409ed2fa61767ddcbcf0c66f852213027699fe28c0711b99",
+      "bytes": 966
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors-d.json",
+      "sha256": "a2504ddaeb2854f1ce978af87d0f6efb5b848ba3c6bf77df6ac28122948b2de5",
+      "bytes": 11694
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-acquisition-proof-20261114-source-test-noemit-e-640.log",
+      "sha256": "48c30b5799375aaf0ac1eb94619862e74814117f7add00ccc00309c96bd26b38",
+      "bytes": 33857
+    }
+  ],
+  "reusedArtifactFingerprints": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114.shared-source.ts",
+      "sha256": "047c37b5be752a72cebaced7f0014325e9abcea81c31c3b0b34b9e5402304587",
+      "bytes": 389
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/tsconfig.base.json",
+      "sha256": "aeba8b3fe294e242c4fe667500becf0d8eb1130aa0e59943afe488de5e0542b8",
+      "bytes": 366
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md",
+      "sha256": "efdcb600ef9312f8362d81c26e8e39d6a18826fbe86874a998b1079ca031c596",
+      "bytes": 20524
+    }
+  ],
+  "provenance": {
+    "historicalSnapshotReport": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114.report.json",
+    "historicalQualification": "Original snapshot recovery report is retained as historical provenance only; it does not cover this acquisition-proof followup. Earlier neighbor65pass/1fail/4 also remains historical, not a fresh result.",
+    "commandsJsonl": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/commands.jsonl",
+    "commandsPolicy": "Only five mandated runner records appended automatically. Existing malformed historical line skipped by report parser, not repaired or rewritten.",
+    "malformedHistoricalLinesSkipped": 1,
+    "markdownReport": "Not created because developer instructions prohibit report/summary/findings/analysis .md files."
+  }
+}

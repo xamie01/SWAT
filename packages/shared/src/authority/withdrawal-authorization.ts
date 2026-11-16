@@ -1,6 +1,6 @@
-import { createPublicKey, verify } from 'node:crypto';
-import { resolveChainAddress } from '../address.js';
+import { assertResourceWrapContext, type ResourceWrapContext } from './key-wrapper.js';
 
+/** Retained input type for explicit legacy refusal, never executable authorization. */
 export interface WithdrawalAuthorizationPayload {
   readonly chain: 'solana' | 'robinhood-chain' | 'polygon';
   readonly ownerPubkey: string;
@@ -9,187 +9,95 @@ export interface WithdrawalAuthorizationPayload {
   readonly timestampMs: number;
   readonly nonce: string;
 }
-
 export interface VerificationResult {
   readonly valid: boolean;
   readonly reason?: string;
-  readonly code?:
-    | 'auth-ok'
-    | 'invalid-amount'
-    | 'timestamp-expired'
-    | 'timestamp-future'
-    | 'invalid-owner'
-    | 'invalid-signature';
+  readonly code?: 'intent-state-unavailable' | 'invalid-amount' | 'timestamp-expired' | 'timestamp-future' | 'invalid-owner' | 'invalid-signature';
 }
 
-// SPKI DER prefix for raw 32-byte Ed25519 public keys (RFC 8410)
-const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
-
-/**
- * Builds the canonical plaintext message to be signed by the user's wallet.
- *
- * Enforces strict line-delimited key-value structure so signatures cannot be
- * cross-interpreted across chains, recipients, or times.
- */
-export function buildWithdrawalAuthorizationMessage(payload: WithdrawalAuthorizationPayload): string {
-  return [
-    'WAKE-VAULT-WITHDRAWAL',
-    `Chain: ${payload.chain}`,
-    `Owner: ${payload.ownerPubkey}`,
-    `Recipient: ${payload.recipientPubkey}`,
-    `AmountLamports: ${payload.amountLamports.toString()}`,
-    `Timestamp: ${payload.timestampMs}`,
-    `Nonce: ${payload.nonce}`
-  ].join('\n');
+/** Legacy signatures cannot prove domain binding or durable single-use consumption. */
+export function buildWithdrawalAuthorizationMessage(_payload: WithdrawalAuthorizationPayload): string {
+  throw new Error('legacy withdrawal message unavailable; negotiate resource-bound intent v2');
 }
-
-/**
- * Cryptographically verifies an off-chain withdrawal authorization request (S4-P21, ADR-0003 §5).
- *
- * Guarantees:
- *   1. Non-zero amount requested.
- *   2. Strict replay protection via expiration window (default 5 minutes).
- *   3. Clock drift bound (maximum 30s future tolerance).
- *   4. Valid Ed25519 signature verified directly against the authentic owner public key using native crypto.
- */
-export function verifySolanaWithdrawalAuthorization(opts: {
-  readonly payload: WithdrawalAuthorizationPayload;
-  readonly signatureHex: string;
-  readonly nowMs?: number;
-  readonly maxAgeMs?: number;
+/** Fail closed before cryptographic work. There is no durable issued-intent consumer. */
+export function verifySolanaWithdrawalAuthorization(_opts: {
+  readonly payload: WithdrawalAuthorizationPayload; readonly signatureHex: string;
+  readonly nowMs?: number; readonly maxAgeMs?: number;
 }): VerificationResult {
-  const { payload, signatureHex, nowMs = Date.now(), maxAgeMs = 300_000 } = opts;
-
-  // 1. Amount verification
-  if (payload.amountLamports <= 0n) {
-    return {
-      valid: false,
-      code: 'invalid-amount',
-      reason: 'Withdrawal amount must be greater than zero'
-    };
-  }
-
-  // 2. Replay window: expired check
-  if (nowMs - payload.timestampMs > maxAgeMs) {
-    return {
-      valid: false,
-      code: 'timestamp-expired',
-      reason: `Authorization expired: timestamp ${payload.timestampMs} exceeds max age of ${maxAgeMs}ms`
-    };
-  }
-
-  // 3. Clock drift: future timestamp check
-  if (payload.timestampMs - nowMs > 30_000) {
-    return {
-      valid: false,
-      code: 'timestamp-future',
-      reason: `Authorization timestamp is too far in the future (${payload.timestampMs} vs ${nowMs})`
-    };
-  }
-
-  // 4. Validate and decode owner public key
-  let rawOwnerBytes: Buffer;
-  try {
-    const resolved = resolveChainAddress(payload.ownerPubkey, 'solana');
-    rawOwnerBytes = Buffer.from(decodeBase58Pubkey(resolved.raw));
-    if (rawOwnerBytes.length !== 32) {
-      throw new Error('Solana public key must be exactly 32 bytes');
-    }
-  } catch (err) {
-    return {
-      valid: false,
-      code: 'invalid-owner',
-      reason: `Invalid owner public key: ${err instanceof Error ? err.message : String(err)}`
-    };
-  }
-
-  // 5. Decode signature
-  let signatureBytes: Buffer;
-  try {
-    signatureBytes = Buffer.from(signatureHex, 'hex');
-    if (signatureBytes.length !== 64) {
-      throw new Error('Ed25519 signature must be exactly 64 bytes');
-    }
-  } catch (err) {
-    return {
-      valid: false,
-      code: 'invalid-signature',
-      reason: `Malformed signature format: ${err instanceof Error ? err.message : String(err)}`
-    };
-  }
-
-  // 6. Verify Ed25519 signature over canonical message using native node:crypto
-  try {
-    const publicKeyObject = createPublicKey({
-      key: Buffer.concat([ED25519_SPKI_PREFIX, rawOwnerBytes]),
-      format: 'der',
-      type: 'spki'
-    });
-
-    const message = buildWithdrawalAuthorizationMessage(payload);
-    const messageBuffer = Buffer.from(message, 'utf8');
-
-    const isValid = verify(null, messageBuffer, publicKeyObject, signatureBytes);
-
-    if (!isValid) {
-      return {
-        valid: false,
-        code: 'invalid-signature',
-        reason: 'Ed25519 cryptographic signature verification failed: signer does not match owner'
-      };
-    }
-  } catch (err) {
-    return {
-      valid: false,
-      code: 'invalid-signature',
-      reason: `Cryptographic verification error: ${err instanceof Error ? err.message : String(err)}`
-    };
-  }
-
-  return { valid: true, code: 'auth-ok' };
+  return { valid: false, code: 'intent-state-unavailable', reason: 'Durable resource-bound intent issuance/consumption and withdrawal persistence are unavailable' };
 }
 
-const B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-const B58_MAP = new Uint8Array(256).fill(255);
-for (let i = 0; i < B58_ALPHABET.length; i++) {
-  B58_MAP[B58_ALPHABET.charCodeAt(i)] = i;
+export interface WithdrawalIntent {
+  readonly version: 2;
+  readonly resource: ResourceWrapContext;
+  readonly programId: string;
+  readonly vaultAddress: string;
+  readonly assetId: string;
+  /** Exact integer base units, never a display quantity or implicit lamports for tokens. */
+  readonly units: 'base-units';
+  readonly ownerAddress: string;
+  readonly recipientAddress: string;
+  readonly amount: bigint;
+  readonly intentId: string;
+  readonly issuedAtMs: number;
+  readonly expiresAtMs: number;
+}
+function validateIntent(intent: WithdrawalIntent): void {
+  assertResourceWrapContext(intent.resource);
+  if (intent.version !== 2 || intent.resource.purpose !== 'withdrawal-intent' || intent.units !== 'base-units') throw new Error('invalid withdrawal intent domain');
+  for (const field of ['programId', 'vaultAddress', 'assetId', 'ownerAddress', 'recipientAddress', 'intentId'] as const) {
+    const value = intent[field];
+    if (typeof value !== 'string' || !value || value.length > 256 || value.trim() !== value || /[\u0000-\u0020\u007f]/.test(value)) throw new Error(`invalid intent ${field}`);
+  }
+  if (typeof intent.amount !== 'bigint' || intent.amount <= 0n || intent.amount >= 1n << 256n) throw new Error('invalid intent amount');
+  if (!Number.isSafeInteger(intent.issuedAtMs) || !Number.isSafeInteger(intent.expiresAtMs) || intent.issuedAtMs < 0 || intent.expiresAtMs <= intent.issuedAtMs) throw new Error('invalid intent lifetime');
+}
+/** Pure message construction is not signing, issuance, verification or withdrawal approval. */
+export function buildWithdrawalIntentMessage(intent: WithdrawalIntent): string {
+  validateIntent(intent);
+  const r = intent.resource;
+  return JSON.stringify(['SWAT-WITHDRAWAL-INTENT', 2, r.deploymentId, r.userId, r.chainKind, r.chainId,
+    r.accountAddress, r.grantId, r.grantKind, r.purpose, r.keyVersion,
+    intent.programId, intent.vaultAddress, intent.assetId, intent.units, intent.ownerAddress,
+    intent.recipientAddress, intent.amount.toString(), intent.intentId, intent.issuedAtMs, intent.expiresAtMs]);
 }
 
-function decodeBase58Pubkey(input: string): Uint8Array {
-  const bytes = [0];
-  for (let i = 0; i < input.length; i++) {
-    const val = B58_MAP[input.charCodeAt(i)];
-    if (val === 255) throw new Error(`Invalid Base58 character: ${input[i]}`);
-    for (let j = 0; j < bytes.length; j++) {
-      bytes[j] *= 58;
-    }
-    bytes[0] += val;
-    let carry = 0;
-    for (let j = 0; j < bytes.length; j++) {
-      bytes[j] += carry;
-      carry = bytes[j] >> 8;
-      bytes[j] &= 0xff;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
+/** Persist issuedMessage exactly; do not reconstruct issued challenges from a caller's payload. */
+export interface WithdrawalIntentRecord {
+  readonly issuedMessage: string;
+  readonly state: 'issued' | 'consumed';
+  readonly withdrawalId: string | null;
+}
+export type WithdrawalIntentConsumptionPlan =
+  | { readonly kind: 'unavailable'; readonly reason: string }
+  | { readonly kind: 'refused'; readonly reason: string }
+  | { readonly kind: 'reuse'; readonly withdrawalId: string; readonly authorizeExecution: false }
+  | { readonly kind: 'consume-required'; readonly expected: WithdrawalIntentRecord; readonly next: WithdrawalIntentRecord; readonly authorizeExecution: false };
+
+/**
+ * Pure storage contract only, not an atomic consumer or verifier. A real consumer must
+ * verify the exact issued message, lock/CAS it, create the withdrawal and commit together.
+ * Even a planned first consumption never grants execution authority here.
+ */
+export function planWithdrawalIntentConsumption(input: {
+  intent: WithdrawalIntent; record: WithdrawalIntentRecord | null;
+  nowMs: number; withdrawalId: string;
+}): WithdrawalIntentConsumptionPlan {
+  let message: string;
+  try { message = buildWithdrawalIntentMessage(input.intent); }
+  catch { return { kind: 'refused', reason: 'invalid resource-bound intent' }; }
+  if (!input.record) return { kind: 'unavailable', reason: 'issued intent record required' };
+  if (input.record.issuedMessage !== message) return { kind: 'refused', reason: 'intent differs from exact issued resource/message' };
+  if (input.record.state === 'consumed') {
+    return input.record.withdrawalId
+      ? { kind: 'reuse', withdrawalId: input.record.withdrawalId, authorizeExecution: false }
+      : { kind: 'refused', reason: 'consumed record lacks durable withdrawal' };
   }
-  for (let i = 0; i < input.length && input[i] === '1'; i++) {
-    bytes.push(0);
+  if (input.record.state !== 'issued' || input.record.withdrawalId !== null ||
+      !Number.isSafeInteger(input.nowMs) || input.nowMs < input.intent.issuedAtMs || input.nowMs >= input.intent.expiresAtMs ||
+      typeof input.withdrawalId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.withdrawalId)) {
+    return { kind: 'refused', reason: 'invalid issued state, withdrawal identity or intent lifetime' };
   }
-  const result = new Uint8Array(bytes.reverse());
-  if (result.length > 32) {
-    const leading = result.length - 32;
-    for (let i = 0; i < leading; i++) {
-      if (result[i] !== 0) throw new Error('Base58 string decodes to more than 32 bytes');
-    }
-    return result.slice(leading);
-  }
-  if (result.length < 32) {
-    const padded = new Uint8Array(32);
-    padded.set(result, 32 - result.length);
-    return padded;
-  }
-  return result;
+  return { kind: 'consume-required', expected: input.record,
+    next: { issuedMessage: message, state: 'consumed', withdrawalId: input.withdrawalId }, authorizeExecution: false };
 }

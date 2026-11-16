@@ -11,8 +11,7 @@ import {
   type ExecutionAuthorityVerdict,
   type ExecutionPrincipal,
   type GrantedExecutionAuthority,
-  type UserExecutionAuthority,
-  type VenueActionKind
+  type UserExecutionAuthority
 } from './execution-authority.js';
 import type { Chain } from '@swat/shared';
 import type { PaymasterBudgetTracker } from './paymaster-budget.js';
@@ -469,106 +468,37 @@ export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions
   };
 }
 
-/** Live, audited WAKE Vault Anchor program ID on Solana (ADR-0003 §3, S4-P12). */
+/** Known WAKE Vault program identifier; not evidence of audited deployment or user authority. */
 export const WAKE_VAULT_PROGRAM_ID = '6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS';
 
+/** Compatibility options only; none can enable unverified per-user Solana authority. */
 export interface UserSolanaAuthorityOptions {
-  /**
-   * The deployed WAKE Vault Anchor program ID.
-   * Defaults to WAKE_VAULT_PROGRAM_ID ('6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS').
-   */
+  /** Historical program identifier option, ignored while authority is unavailable. */
   readonly programId?: string;
-  /**
-   * Whether the live wake-vault program adapter is enabled.
-   * Defaults to true (toggled on after external audit completion).
-   */
+  /** Historical routing option, ignored; true does not establish deployed authority. */
   readonly enabled?: boolean;
-  /** Optional transaction signer for building and signing delegated swaps, or a getter. */
+  /** Historical signer option, never read or resolved while authority is unavailable. */
   readonly signer?: SolanaTransactionSigner | (() => SolanaTransactionSigner | null) | null;
-  /** Resolver for the user's specific vault PDA settlement address. */
+  /** Historical vault resolver, never read or called while authority is unavailable. */
   readonly loadUserVaultAddress?: (userId: string) => Promise<string | null>;
 }
 
 /**
- * Per-user authority on Solana — **live audited WAKE Vault program** (S4-P12, ADR-0003 §3).
- *
- * Routes per-user copy trades through the audited non-custodial WAKE Vault
- * program (6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS).
+ * Per-user Solana authority remains unavailable (S4-P12, ADR-0003 section 3).
+ * An injected signer, identifier or vault resolver is not verified deployed
+ * user-scoped authority. Refuse without even reading compatibility options.
  */
 export function createUserSolanaAuthority(
-  options?: UserSolanaAuthorityOptions
+  _options?: UserSolanaAuthorityOptions
 ): UserExecutionAuthority {
-  const id = 'user-solana';
-  const programId = options?.programId ?? WAKE_VAULT_PROGRAM_ID;
-
-  if (options?.enabled === false) {
-    return createUnavailableUserAuthority({
-      id,
-      chain: 'solana',
-      code: 'authority-solana-delegate-unavailable',
-      reason:
-        'Per-user Solana authority is disabled '
-        + '(S4-P12, ADR-0003 section 3); live routing is inactive'
-    });
-  }
-
-  return {
-    id,
+  return createUnavailableUserAuthority({
+    id: 'user-solana',
     chain: 'solana',
-    serves: servesUser,
-    async authorize(request) {
-      if (request.principal.kind !== 'user') {
-        return denied(
-          'authority-principal-mismatch',
-          `User authority requested for ${describePrincipal(request.principal)}`
-        );
-      }
-
-      const supportedActions: VenueActionKind[] = ['venue-trade', 'token-spend-permission'];
-      const rejection = rejectUnsupportedAction(id, request, supportedActions);
-      if (rejection) return rejection;
-
-      const resolveSigner = () => {
-        if (typeof options?.signer === 'function') {
-          return options.signer();
-        }
-        return options?.signer ?? null;
-      };
-      const signer = resolveSigner();
-
-      if (request.action === 'venue-trade' && !signer) {
-        return denied(
-          'authority-operator-not-configured',
-          `No Solana transaction signer configured for wake-vault execution on ${describePrincipal(request.principal)}`
-        );
-      }
-
-      const userVaultAddress = options?.loadUserVaultAddress
-        ? await options.loadUserVaultAddress(request.principal.userId)
-        : null;
-
-      const settlementAddress = userVaultAddress || `solana:vault:${programId}:${request.principal.userId}`;
-
-      return {
-        kind: 'granted',
-        authority: {
-          adapterId: id,
-          chain: 'solana',
-          principal: request.principal,
-          settlementAddress,
-          signingAddress: signer ? signer.publicKey : null,
-          capabilities: signer ? ['sign-chain-transaction'] : [],
-          expiresAt: null,
-          sign: signerFor({
-            adapterId: id,
-            capabilities: signer ? ['sign-chain-transaction'] : [],
-            solana: signer,
-            typedData: null
-          })
-        }
-      };
-    }
-  };
+    code: 'authority-solana-delegate-unavailable',
+    reason:
+      'Per-user Solana authority is unavailable: deployed, audited user-scoped '
+      + 'vault execution capability is not verified (S4-P12, ADR-0003 section 3)'
+  });
 }
 
 /**
@@ -605,14 +535,11 @@ export function createExecutionAuthorityAdapters(
   deps: OperatorAuthorityDeps,
   userSolanaOptions?: UserSolanaAuthorityOptions
 ): readonly UserExecutionAuthority[] {
-  // Do NOT fall back to operator signer for user authority (EXE-01 / CRY-01)
-  const solanaSigner = userSolanaOptions?.signer;
+  // Do not inspect/copy user options or borrow operator authority while the
+  // deployed user-scoped Solana mechanism remains unavailable.
   return [
     createOperatorSolanaAuthority(deps.solana),
-    createUserSolanaAuthority({
-      signer: solanaSigner,
-      ...userSolanaOptions
-    }),
+    createUserSolanaAuthority(userSolanaOptions),
     createOperatorRobinhoodAuthority(deps.robinhoodChain),
     createUserRobinhoodAuthority(),
     createOperatorPolymarketAuthority(deps.polygon),

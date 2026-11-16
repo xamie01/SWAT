@@ -1,0 +1,22 @@
+{
+  "scope": "package27-deploy-source-only",
+  "sourceFiles": [
+    "deploy/systemd/swat-api.service",
+    "deploy/systemd/swat-trade-executor.service",
+    "deploy/systemd/swat-billing-sweep.service",
+    "deploy/systemd/swat-billing-sweep.timer",
+    "deploy/crontab.example",
+    ".woodpecker.yaml",
+    ".woodpecker/ci.yaml",
+    "DEPLOYMENT.md",
+    "deploy/systemd/swat-web.service",
+    "deploy/systemd/swat-lp.service",
+    "deploy/tools/package27-deploy-artifacts.py",
+    "deploy/tools/package27-deploy-artifacts.lock.json",
+    "deploy/tools/package27-deploy-python-install.py",
+    "deploy/tools/package27-deploy-python.lock.json"
+  ],
+  "verifier": "threats/sequential-fixes/package27-deploy-verifier.py",
+  "runtimeAcceptance": false,
+  "typescriptHarness": "pending-not-used"
+}

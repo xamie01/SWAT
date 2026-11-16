@@ -20,6 +20,33 @@ describe('trade eligibility by signal pattern', () => {
     expect(mayPatternTrade('source_trade')).toBe(true);
   });
 
+  it('checks entry safety and score at the final pattern seam rather than only earlier logging', () => {
+    const admission = {
+      direction: 'buy' as const, score: 90, minimumScore: 80, suppressTrade: false,
+      safety: { isSafe: false }
+    };
+    expect(mayPatternTrade('source_trade', admission)).toBe(false);
+    expect(mayPatternTrade('source_trade', { ...admission, direction: 'sell', score: 10 })).toBe(true);
+  });
+
+  it.each(['snipe', 'accumulation', 'rotation', 'exit', 'unknown'])('never reclassifies %s as an owned source exit', pattern => {
+    expect(mayPatternTrade(pattern, {
+      direction: 'sell', score: 10, minimumScore: 80, suppressTrade: false, safety: { isSafe: false }
+    })).toBe(false);
+  });
+
+  it('keeps explicit suppression effective even for a deteriorating source exit', () => {
+    expect(mayPatternTrade('source_trade', {
+      direction: 'sell', score: 10, minimumScore: 80, suppressTrade: true, safety: { isSafe: false }
+    })).toBe(false);
+  });
+
+  it.each([10, Number.NaN, -1, 101])('does not let entry score %s use the reducing exemption', score => {
+    expect(mayPatternTrade('source_trade', {
+      direction: 'buy', score, minimumScore: 80, suppressTrade: false, safety: { isSafe: true }
+    })).toBe(false);
+  });
+
   it.each<SignalPatternType>(['snipe', 'accumulation', 'rotation', 'exit'])(
     'refuses to trade the %s cluster pattern',
     (pattern) => {

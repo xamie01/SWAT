@@ -17,10 +17,12 @@ describe('independence queries (S4-M10, S4-M11)', () => {
 
       const result = await checkWalletClusterIndependence('solana:unclustered-wallet');
       expect(result).toEqual({
+        assessment: 'unassessed',
         clustered: false,
         clusterType: null,
         clusterName: null,
-        warning: null
+        memberships: [],
+        warning: 'Control independence is unassessed. No cluster membership is not evidence of independent control.'
       });
     });
 
@@ -61,10 +63,11 @@ describe('independence queries (S4-M10, S4-M11)', () => {
         'polygon'
       );
       expect(result).toEqual({
+        assessment: 'unassessed',
         isHub: false,
         label: null,
         hubName: null,
-        reason: null
+        reason: 'Control independence is unassessed. Not blacklisted is not evidence of independent control.'
       });
     });
 
@@ -79,6 +82,7 @@ describe('independence queries (S4-M10, S4-M11)', () => {
         'polygon'
       );
       expect(result).toEqual({
+        assessment: 'hub',
         isHub: true,
         label: 'exchange',
         hubName: 'Binance 14',

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "incremental": false,
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@swat/shared": ["packages/shared/src/types.ts"]
+    }
+  },
+  "files": [
+    "../../apps/trade-executor/src/execution-authority-adapters.ts",
+    "../../apps/trade-executor/src/execution-authority.ts",
+    "../../apps/trade-executor/src/package17-authority-bounded.sequential.test.ts",
+    "./package17-authority-bounded-20261114.config.ts"
+  ]
+}

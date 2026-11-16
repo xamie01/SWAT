@@ -86,6 +86,7 @@ export * from './polymarket-exit-queries.js';
  * everyone who does not. Pure; the caller fetches, this decides.
  */
 export * from './fanout-eligibility.js';
+export * from './package13-fanout-delivery.js';
 
 /**
  * Master membership cap (S4-M43/S4-M44). Separate from `master-capacity.js`: that

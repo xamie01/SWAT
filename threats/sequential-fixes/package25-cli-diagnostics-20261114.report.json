@@ -1,0 +1,522 @@
+{
+  "package": 25,
+  "scope": "Independent Spec diagnostic-gap correction at existing CLI rank/score only; user-assigned bounded follow-up",
+  "generatedUtc": "2026-11-14T16:41:22.192760+00:00",
+  "status": "bounded CLI diagnostic correction complete; native/runtime acceptance remains unavailable; independent new-hunk review pending",
+  "changedPaths": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+      "lineRanges": [
+        "519-532",
+        "615-627"
+      ],
+      "beforeSha256": "1a7f58657f9323855fdabb3a58e8bc84ed311ab03ea78648009e9881114775f9",
+      "sha256": "d3cafe7c153d15bf07410c79b043a206f7509f2206ceada1f5d7e9b07525ed1a",
+      "change": "Rank catches ValueError from get_settings, artifact resolution, and confinement before read/training imports. Score validates chain, then includes get_settings in existing load guard; native rank import occurs only after trusted artifact load. Existing _fail emits diagnostic and raises exit1. Config policy and other CLI functions unchanged."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "lineRanges": [
+        "1-242"
+      ],
+      "created": true,
+      "sha256": "e461eaee2c0a48e449a85db5d3f04b4139da39f74963708661235bd8ca69738e",
+      "change": "Nine actual CLI/config boundary methods using reviewed inert stdlib fixtures; prior 22-method test file unchanged."
+    }
+  ],
+  "methodReferences": [
+    {
+      "name": "test_01_rank_config_escape_diagnostic_before_downstream",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 139,
+      "endLine": 142
+    },
+    {
+      "name": "test_02_score_config_escape_diagnostic_before_downstream",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 144,
+      "endLine": 147
+    },
+    {
+      "name": "test_03_both_config_symlink_and_writable_root_diagnostics",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 149,
+      "endLine": 164
+    },
+    {
+      "name": "test_04_rank_artifact_symlink_diagnostic_before_read",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 166,
+      "endLine": 171
+    },
+    {
+      "name": "test_05_rank_rechecks_path_before_native_read",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 173,
+      "endLine": 181
+    },
+    {
+      "name": "test_06_rank_missing_artifact_keeps_existing_diagnostic",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 183,
+      "endLine": 185
+    },
+    {
+      "name": "test_07_score_loader_rejection_keeps_existing_diagnostic",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 187,
+      "endLine": 191
+    },
+    {
+      "name": "test_08_rank_allowed_path_reaches_inert_training_refusal",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 193,
+      "endLine": 203
+    },
+    {
+      "name": "test_09_unexpected_settings_error_not_swallowed",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "startLine": 205,
+      "endLine": 211
+    }
+  ],
+  "actualRuns": [
+    {
+      "record": {
+        "label": "package25-cli-diagnostics-20261114-red",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:35:55.785270+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 0.57,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-diagnostics-20261114-red.log"
+      },
+      "actualResult": {
+        "qualification": "actual CLI/config loaded with inert stdlib dependency fixtures; no real Typer/native/package initialization",
+        "executedMethods": [
+          "test_01_rank_config_escape_diagnostic_before_downstream",
+          "test_02_score_config_escape_diagnostic_before_downstream",
+          "test_03_both_config_symlink_and_writable_root_diagnostics",
+          "test_04_rank_artifact_symlink_diagnostic_before_read",
+          "test_05_rank_rechecks_path_before_native_read",
+          "test_06_rank_missing_artifact_keeps_existing_diagnostic",
+          "test_07_score_loader_rejection_keeps_existing_diagnostic",
+          "test_08_rank_allowed_path_reaches_inert_training_refusal",
+          "test_09_unexpected_settings_error_not_swallowed"
+        ],
+        "unittestAssertionCalls": {
+          "total": 19,
+          "byName": {
+            "assertRaises": 11,
+            "assertEqual": 3,
+            "assertTrue": 3,
+            "assertRaisesRegex": 2
+          },
+          "qualification": "unittest invocations only; Mock assertions additional, not counted"
+        },
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+            "passed": 4,
+            "failed": 5,
+            "failureAssertions": 0,
+            "errorAssertions": 8,
+            "skipped": 0,
+            "total": 9
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-red.json",
+      "logPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-red.log",
+      "logSha256": "6c8b9017123476a1e98457a091b9d3f61d081ebfc9602777792916adac56442c",
+      "resultSha256": "8edfffe3d5bf90aeff09ac2f70f6d29df8adc922105ff11740c8af61d64ad918"
+    },
+    {
+      "record": {
+        "label": "package25-cli-diagnostics-20261114-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:37:56.921590+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.367,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-diagnostics-20261114-green.log"
+      },
+      "actualResult": {
+        "qualification": "actual CLI/config loaded with inert stdlib dependency fixtures; no real Typer/native/package initialization",
+        "executedMethods": [
+          "test_01_rank_config_escape_diagnostic_before_downstream",
+          "test_02_score_config_escape_diagnostic_before_downstream",
+          "test_03_both_config_symlink_and_writable_root_diagnostics",
+          "test_04_rank_artifact_symlink_diagnostic_before_read",
+          "test_05_rank_rechecks_path_before_native_read",
+          "test_06_rank_missing_artifact_keeps_existing_diagnostic",
+          "test_07_score_loader_rejection_keeps_existing_diagnostic",
+          "test_08_rank_allowed_path_reaches_inert_training_refusal",
+          "test_09_unexpected_settings_error_not_swallowed"
+        ],
+        "unittestAssertionCalls": {
+          "total": 35,
+          "byName": {
+            "assertRaises": 11,
+            "assertEqual": 11,
+            "assertTrue": 11,
+            "assertRaisesRegex": 2
+          },
+          "qualification": "unittest invocations only; Mock assertions additional, not counted"
+        },
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+            "passed": 9,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 9
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-green.json",
+      "logPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-green.log",
+      "logSha256": "15d730c0f4cd0c416c8b52d47bbc1894c59c546300f295c2a147085f6c060e26",
+      "resultSha256": "77cc9f05e6a62a2dd91235d763fa8f868b1fd0d8af2ab4171af7e5d5888c2e5d"
+    },
+    {
+      "record": {
+        "label": "package25-cli-diagnostics-20261114-existing22-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:38:43.109202+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.92,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-diagnostics-20261114-existing22-green.log"
+      },
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "executedMethods": [
+          "test_01_solana_invalid_components",
+          "test_02_canonical_neighbors",
+          "test_03_evm_nonhex",
+          "test_04_storage_config_escape",
+          "test_05_storage_config_symlink",
+          "test_06_raw_boundary_before_nonempty_frame_write",
+          "test_07_raw_symlink_partition",
+          "test_08_raw_allowed_neighbor",
+          "test_09_raw_list_symlink",
+          "test_10_database_escape",
+          "test_11_inert_scoring_neighbor",
+          "test_12_schema_and_provenance_rejection",
+          "test_13_legacy_never_deserialized",
+          "test_14_artifact_symlink_read_write",
+          "test_15_mocked_training_export_neighbor",
+          "test_16_storage_subroot_cannot_override_project_trust",
+          "test_17_raw_canonical_identity_and_prefix_chain",
+          "test_18_export_rejects_out_of_subset_metadata_and_linear_leaves",
+          "test_19_json_numbers_reject_oversized_integer_as_value_error",
+          "test_20_numeric_missing_policies_and_multitree_order",
+          "test_21_json_file_and_complexity_bounds",
+          "test_22_mocked_numeric_training_dump_roundtrip"
+        ],
+        "unittestAssertionCalls": {
+          "total": 90,
+          "byName": {
+            "assertRaises": 50,
+            "assertEqual": 12,
+            "assertTrue": 1,
+            "assertIsNotNone": 21,
+            "assertFalse": 6
+          },
+          "qualification": "unittest assertion invocations only; inert Mock assertions additional, not counted"
+        },
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 22,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 22
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-existing22-green.json",
+      "logPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-existing22-green.log",
+      "logSha256": "6a5fe9b5bea00301e2d4bc6c06d27ba74a1f858cbaa7d7696930b14314665595",
+      "resultSha256": "07801e5adb2616df1524a4edc25b6f976e0f81521ac645b68713dc39cecb5fbd"
+    },
+    {
+      "record": {
+        "label": "package25-cli-diagnostics-20261114-source-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+          "contracts"
+        ],
+        "finishedUtc": "2026-11-14T16:39:11.264409+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.467,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-diagnostics-20261114-source-green.log"
+      },
+      "actualResult": {
+        "mode": "contracts",
+        "qualification": "SOURCE AST/static only; pytest/model runtime blocked",
+        "files": [
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/conftest.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/test_package25_ml_security.py",
+            "syntax": "passed"
+          }
+        ],
+        "staticAssertions": {
+          "passed": 8,
+          "failed": 0,
+          "skipped": 0
+        },
+        "failures": []
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-source-green.log",
+      "logPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114-source-green.log",
+      "logSha256": "61f348157ab0ee3987324fc62ad953aec05596972d2e0608161ca1716a5159c4",
+      "resultSha256": "61f348157ab0ee3987324fc62ad953aec05596972d2e0608161ca1716a5159c4"
+    }
+  ],
+  "acceptanceSummary": {
+    "red": {
+      "exitCode": 1,
+      "passedMethods": 4,
+      "failedMethods": 5,
+      "failureAssertions": 0,
+      "errorAssertions": 8,
+      "skipped": 0,
+      "totalMethods": 9,
+      "unittestAssertionInvocations": 19
+    },
+    "green": {
+      "exitCode": 0,
+      "passedMethods": 9,
+      "failedMethods": 0,
+      "failureAssertions": 0,
+      "errorAssertions": 0,
+      "skipped": 0,
+      "totalMethods": 9,
+      "unittestAssertionInvocations": 35
+    },
+    "existing22": {
+      "exitCode": 0,
+      "passedMethods": 22,
+      "failedMethods": 0,
+      "failureAssertions": 0,
+      "errorAssertions": 0,
+      "skipped": 0,
+      "unittestAssertionInvocations": 90
+    },
+    "sourceChecks": {
+      "exitCode": 0,
+      "passed": 8,
+      "failed": 0,
+      "compiledFiles": 6,
+      "qualification": "compile/AST only, no imports or source execution"
+    }
+  },
+  "redGreenQualification": [
+    "Actual prewrite red established on unchanged CLI hash1a7f5865: methods01-05 failed with eight uncaught ValueError errors (method03 has four failing subtests); methods06-09 already passed. No fabricated red or native test claims.",
+    "Green methods01-05 verify real traversal/symlink/permission/leaf/recheck guards become existing _fail exit1 plus one console diagnostic, and no model/provider/storage/read calls. Red unexpected exceptions abort before those positive no-call assertions; the assertions were reached and passed in green.",
+    "Methods06-09 preserve missing-artifact and loader-error diagnostics, allow trusted path to reach inert training ImportError diagnostic, and prove unexpected RuntimeError is not swallowed. Allowed training fixture never parses parquet or imports native libraries.",
+    "CLI green counts35 unittest invocations:11 assertRaises,11 assertEqual,11 assertTrue,2 assertRaisesRegex. Inert Mock call assertions are additional and not counted. Existing22 counts90 separately; do not combine source assertions with runtime methods."
+  ],
+  "callgraph": {
+    "rankBefore": "get_settings -> Settings.artifact_path -> Path.exists -> confined_path -> pl.read_parquet, all before existing training ValueError handler",
+    "scoreBefore": "get_settings before load_ranker ValueError guard; both commands imported native ranking module before config guard",
+    "rankAfter": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:519-532 get_settings/artifact_path/exists/confined_path inside ValueError guard -> _fail at526; training/artifact imports after guard at529-530; native read at532",
+    "scoreAfter": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:615-627 chain guard -> get_settings/load_ranker inside existing ValueError guard -> _fail at624; native rank import at627, providers at632/639 after load",
+    "diagnostic": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:46-48 existing _fail unchanged: prints message then raises typer.Exit(1); tests use inert local CliExit stand-in only"
+  },
+  "importSafety": {
+    "reviewedFullImportAndFixtureGraphBeforeExecution": true,
+    "command": "/usr/bin/python3 -I -S",
+    "loadedActualSource": [
+      "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+      "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py"
+    ],
+    "graph": "Empty synthetic pattern_ml/choice/providers packages prevent package initialization or fallback. Real config top-level imports only stdlib plus inert yaml/dotenv modules; _load_env mocked before any settings call. Whole actual CLI module loaded with inert polars, typer, rich, storage, choice rank/artifact/provider modules; decorators return original functions, Option returns explicit default, Console captures output, CliExit is local exception. No real Typer/Rich/native/storage/provider module loaded. All command parameters explicitly provided. Existing22 uses previously reviewed actual config/storage/artifact with inert dependency mocks and AST literal FEATURE_COLUMNS; source checker only reads/compiles six files.",
+    "fixtures": "Private disposable runner TMPDIR paths, temporary symlinks/permissions and opaque never-parsed text; synthetic environment cleared per method; no real dotenv/secret reads, deserialization, network, DB/Redis/container/service/keygen/signing/financial action.",
+    "pythonNodeGuardIsSandbox": false,
+    "runnerCaveat": "Runner always records outboundNetworkAndCredentialReadsGuarded=true; Node preload does not sandbox Python. Safety follows from reviewed finite stdlib/import/mock graph, not that generic field."
+  },
+  "executionControls": {
+    "cpu": 0,
+    "everyShellCommandStarts": "taskset -c 0",
+    "sharedLock": "/tmp/swat-package11-checks.lock",
+    "historicalRunner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "bashTimeoutMs": 600000,
+    "childTimeoutSeconds": 240,
+    "heapSettingMB": 512,
+    "focusedOnly": true,
+    "runnerHarnessGuardsEdited": false,
+    "ledger": "Only mandatory runner normal commands.jsonl append; no direct global-ledger edits."
+  },
+  "selectedFilesAndHashes": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+      "sha256": "d3cafe7c153d15bf07410c79b043a206f7509f2206ceada1f5d7e9b07525ed1a"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "sha256": "e461eaee2c0a48e449a85db5d3f04b4139da39f74963708661235bd8ca69738e"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "sha256": "917fe27c79c425aede7f4dfab029db123d8e7a8adee071e87b3448ef5836128c"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+      "sha256": "0a89c2d9655d65161a952b9f4a6719bebb1fca6c906276565137726e020d72a0"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+      "sha256": "d9c0926802926412163200c73636133c3f037e462450102f3eb96c432e8ed155"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/schema.py",
+      "sha256": "21d716b3af4bea3ea04fcf538c6e4a1c33779e3c3c46d38a74287686feea371c"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+      "sha256": "42d8c5faa2fdfb3b1e214969447347cb7adedb14c68dfdc18e430e502e15d7be"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+      "sha256": "f9580c889248a7a0a4155ad57e1644c756a2c05a401d3f9359266a2fe9d278b9"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/conftest.py",
+      "sha256": "53214aca7b87e457c975ee74dd9e24c711e839ace1692cc137e4cc0b6189ed92"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/test_package25_ml_security.py",
+      "sha256": "f8273effa45c6b6165276ecaa30f555be455aec5ced410d473e4f9e74eaf77b3"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs",
+      "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114.report.json",
+      "sha256": "d2bcd1a684c8620675c7d9064863d7877240843935eb168a52f87304345d34f4"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114.report.md",
+      "sha256": "91b4d3b045047fb5b60dcc3264ffd13b68ef9b75f4a1fc960e55f3d110378b13"
+    }
+  ],
+  "preservedFingerprints": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "expectedSha256": "917fe27c79c425aede7f4dfab029db123d8e7a8adee071e87b3448ef5836128c",
+      "actualSha256": "917fe27c79c425aede7f4dfab029db123d8e7a8adee071e87b3448ef5836128c",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+      "expectedSha256": "42d8c5faa2fdfb3b1e214969447347cb7adedb14c68dfdc18e430e502e15d7be",
+      "actualSha256": "42d8c5faa2fdfb3b1e214969447347cb7adedb14c68dfdc18e430e502e15d7be",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+      "expectedSha256": "f9580c889248a7a0a4155ad57e1644c756a2c05a401d3f9359266a2fe9d278b9",
+      "actualSha256": "f9580c889248a7a0a4155ad57e1644c756a2c05a401d3f9359266a2fe9d278b9",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "expectedSha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "actualSha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114.report.json",
+      "expectedSha256": "d2bcd1a684c8620675c7d9064863d7877240843935eb168a52f87304345d34f4",
+      "actualSha256": "d2bcd1a684c8620675c7d9064863d7877240843935eb168a52f87304345d34f4",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114.report.md",
+      "expectedSha256": "91b4d3b045047fb5b60dcc3264ffd13b68ef9b75f4a1fc960e55f3d110378b13",
+      "actualSha256": "91b4d3b045047fb5b60dcc3264ffd13b68ef9b75f4a1fc960e55f3d110378b13",
+      "unchanged": true
+    }
+  ],
+  "review": {
+    "independentSpecInput": "User relayed Low severity, High confidence uncaught trust ValueError diagnostic gap; fixed only assigned rank/score boundaries.",
+    "priorStandards0Scope": "Prior Standards0 covered old four ranges only; it is not acceptance of new CLI correction.",
+    "newHunkReview": "Focused self-review and tracked CLI git diff --check produced no whitespace errors. New CLI/fixture independent review pending; not claimed complete.",
+    "priorReport": "Prior artifact-recovery JSON/MD remain byte-identical; evidence stored separately."
+  },
+  "limitations": [
+    "Direct actual Python CLI functions with inert fixtures, not real Typer argument parsing/terminal formatting or native inference.",
+    "Only ValueError translation at assigned config/path/load seams. Other errors including RuntimeError still propagate; native Parquet errors are outside this narrow config diagnostic guard.",
+    "Existing same-user filesystem race and native LightGBM parity/runtime gaps unchanged. No arbitrary approval or capability enabled.",
+    "Remaining pricing/report leaves explicitly excluded by user and unchanged in this pass.",
+    "Normal live config still has dotenv fallback behavior; only tests mock _load_env before settings access. No real environment file read during this work."
+  ],
+  "outOfOwnershipWiring": "None required or edited."
+}

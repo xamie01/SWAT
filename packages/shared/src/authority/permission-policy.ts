@@ -94,6 +94,7 @@
 
 import {
   describeUserOperationCall,
+  getTrustedEvmFunction,
   type EvmFunctionDescriptor,
   type EvmUserOperationCallInput
 } from './evm-calldata.js';
@@ -635,62 +636,56 @@ function assertBounded(amount: bigint, ruleId: string, field: string): void {
 
 function assertApprovalIsConstrained(rule: AuthorityRule): void {
   const { scope, conditions } = rule;
-
-  if (scope.kind === 'contract-call') {
-    const fn = scope.functionName;
-    if (ALLOWANCE_FUNCTIONS.includes(fn)) {
-      const hasSpender = conditions.some(
-        (c) => c.field === `${fn}.spender` && ADDRESS_OPS.includes(c.op)
-      );
-      if (!hasSpender) {
-        throw new AuthorityPolicyError(
-          'authority-policy-invalid-unbounded-approval',
-          `rule ${rule.id}: "${fn}" is permitted with no constraint on ${fn}.spender — an unconstrained spender lets the key approve an attacker who then drains the token without ever calling the router (ADR-0003 §2.1)`
-        );
-      }
-      const hasBound = conditions.some(
-        (c) =>
-          ALLOWANCE_AMOUNT_ARGS.some((arg) => c.field === `${fn}.${arg}`) &&
-          AMOUNT_BOUND_OPS.includes(c.op)
-      );
-      if (!hasBound) {
-        throw new AuthorityPolicyError(
-          'authority-policy-invalid-unbounded-approval',
-          `rule ${rule.id}: "${fn}" is permitted with no bound on the amount; add a uint_lte on ${fn}.{${ALLOWANCE_AMOUNT_ARGS.join('|')}}`
-        );
-      }
-      return;
+  const requireCondition = (field: string, ops: readonly AuthorityConditionOp[]) => {
+    if (!conditions.some(c => c.field === field && ops.includes(c.op))) {
+      throw new AuthorityPolicyError('authority-policy-invalid-unbounded-approval', `rule ${rule.id}: mandatory semantic constraint missing on ${field}`);
     }
-    if (OPERATOR_APPROVAL_FUNCTIONS.includes(fn)) {
-      const hasOperator = conditions.some(
-        (c) => c.field === `${fn}.operator` && ADDRESS_OPS.includes(c.op)
-      );
-      if (!hasOperator) {
-        throw new AuthorityPolicyError(
-          'authority-policy-invalid-unbounded-approval',
-          `rule ${rule.id}: "${fn}" grants blanket operator authority; constrain ${fn}.operator to an allowlist`
-        );
+  };
+  if (scope.kind === 'contract-call') {
+    const descriptor = getTrustedEvmFunction(scope.selector);
+    if (!descriptor || descriptor.name !== scope.functionName || descriptor.name === 'execute') {
+      throw new AuthorityPolicyError('authority-policy-invalid-unbounded-approval', `rule ${rule.id}: unsupported or mismatched trusted ABI; swap economics require a reviewed registry`);
+    }
+    if (descriptor.name === 'approve') {
+      requireCondition('approve.spender', ADDRESS_OPS);
+      requireCondition('approve.amount', AMOUNT_BOUND_OPS);
+    } else if (descriptor.name === 'transfer') {
+      requireCondition('transfer.to', ['address_is_owner']);
+      requireCondition('transfer.amount', AMOUNT_BOUND_OPS);
+    }
+    for (const condition of conditions) {
+      if (condition.field.startsWith('call.')) continue;
+      const arg = descriptor.args.find(arg => `${descriptor.name}.${arg.name}` === condition.field);
+      if (!arg || (arg.type === 'address' ? !ADDRESS_OPS.includes(condition.op) : !['uint_lte', 'uint_eq'].includes(condition.op))) {
+        throw new AuthorityPolicyError('authority-policy-invalid-field-path', `rule ${rule.id}: condition does not match trusted ABI field type`);
       }
     }
     return;
   }
-
-  if (!ALLOWANCE_PRIMARY_TYPES.includes(scope.primaryType)) return;
-  const hasAddressConstraint = conditions.some((c) => ADDRESS_OPS.includes(c.op));
-  if (!hasAddressConstraint) {
-    throw new AuthorityPolicyError(
-      'authority-policy-invalid-unbounded-approval',
-      `rule ${rule.id}: primary type "${scope.primaryType}" grants spending authority and carries no address constraint (S4-M13 moves the approve check onto these fields)`
-    );
-  }
-  const hasAmountBound = conditions.some((c) => AMOUNT_BOUND_OPS.includes(c.op));
-  if (!hasAmountBound) {
-    throw new AuthorityPolicyError(
-      'authority-policy-invalid-unbounded-approval',
-      `rule ${rule.id}: primary type "${scope.primaryType}" grants spending authority and carries no amount bound`
-    );
+  const schema = Object.hasOwn(SIGNED_SCHEMAS, scope.primaryType) ? SIGNED_SCHEMAS[scope.primaryType] : undefined;
+  if (!schema) throw new AuthorityPolicyError('authority-policy-invalid-unbounded-approval', `rule ${rule.id}: unsupported signed schema (batches/witnesses are unavailable)`);
+  for (const [field, ops] of Object.entries(schema)) requireCondition(field, ops);
+  for (const condition of conditions) {
+    if (condition.field.startsWith('struct.')) continue;
+    if (!schema[condition.field]?.includes(condition.op)) {
+      throw new AuthorityPolicyError('authority-policy-invalid-field-path', `rule ${rule.id}: condition does not match trusted signed field type`);
+    }
   }
 }
+
+/** Only static, complete schemas. Domain/type encoding and final signer integration remain external. */
+const SIGNED_SCHEMAS: Readonly<Record<string, Readonly<Record<string, readonly AuthorityConditionOp[]>>>> = {
+  Permit: {
+    'message.owner': ['address_is_owner'], 'message.spender': ADDRESS_OPS,
+    'message.value': AMOUNT_BOUND_OPS, 'message.nonce': ['uint_eq'],
+    'message.deadline': ['uint_lte_now_plus']
+  },
+  PermitSingle: {
+    'message.details.token': ['address_in'], 'message.spender': ADDRESS_OPS,
+    'message.details.amount': AMOUNT_BOUND_OPS, 'message.details.nonce': ['uint_eq'],
+    'message.details.expiration': ['uint_lte_now_plus'], 'message.sigDeadline': ['uint_lte_now_plus']
+  }
+};
 
 function compileRule(raw: unknown, index: number): AuthorityRule {
   const record = asRecord(raw, `rules[${index}]`);
@@ -1050,6 +1045,9 @@ function evaluateCondition(
           condition.field
         );
       }
+      if (value < 0n || value > MAX_UINT256) {
+        return denyVerdict('authority-deny-condition-failed', 'unsigned field outside uint256', rule.id, condition.field);
+      }
       if (condition.op === 'uint_lte' && value > condition.max) {
         return denyVerdict(
           'authority-deny-condition-failed',
@@ -1067,6 +1065,9 @@ function evaluateCondition(
         );
       }
       if (condition.op === 'uint_lte_now_plus') {
+        if (value <= BigInt(context.nowSeconds)) {
+          return denyVerdict('authority-deny-condition-failed', 'signed deadline/allowance expiration has passed', rule.id, condition.field);
+        }
         const ceiling = BigInt(context.nowSeconds) + BigInt(condition.maxSecondsAhead);
         if (value > ceiling) {
           return denyVerdict(
@@ -1105,6 +1106,7 @@ function evaluateCondition(
 function ruleMatchesAction(rule: AuthorityRule, action: AuthorityAction): boolean {
   if (rule.scope.kind === 'contract-call') {
     if (action.kind !== 'contract-call') return false;
+    if (rule.scope.functionName !== action.functionName) return false;
     if (rule.scope.selector !== action.selector.toLowerCase()) return false;
     const target = normalizeEvmAddress(action.target);
     return target !== null && rule.scope.targets.includes(target);
@@ -1124,6 +1126,17 @@ export function evaluateAuthorityAction(
   action: AuthorityAction,
   context: AuthorityEvaluationContext
 ): AuthorityVerdict {
+  // Revalidate persisted/hand-built policy and final decoded shape. Types are not runtime authority.
+  try {
+    compileAuthorityPolicy(policy);
+  } catch {
+    return unresolvedVerdict('authority-action-undecodable', 'invalid or unsupported semantic policy', null, null);
+  }
+  if (!Number.isSafeInteger(context.nowSeconds) || context.nowSeconds < 0 ||
+      (context.grantExpiresAtSeconds !== undefined && context.grantExpiresAtSeconds !== null &&
+       (!Number.isSafeInteger(context.grantExpiresAtSeconds) || context.grantExpiresAtSeconds < 0))) {
+    return unresolvedVerdict('authority-action-undecodable', 'invalid authorization clock or expiry', null, null);
+  }
   if (action.chainId !== policy.chainId) {
     return denyVerdict(
       'authority-deny-chain-mismatch',
@@ -1172,6 +1185,42 @@ export function evaluateAuthorityAction(
   }
 
   const rule = matched[0]!;
+  if (action.kind === 'contract-call') {
+    const descriptor = getTrustedEvmFunction(action.selector);
+    if (!descriptor || descriptor.name !== action.functionName || typeof action.value !== 'bigint' || action.value < 0n || action.value > MAX_UINT256 ||
+        Object.keys(action.args).length !== descriptor.args.length || descriptor.args.some(arg => {
+          const value = action.args[arg.name];
+          return arg.type === 'address' ? typeof value !== 'string' || normalizeEvmAddress(value) === null
+            : arg.type === 'uint256' ? typeof value !== 'bigint' || value < 0n || value > MAX_UINT256 : true;
+        })) {
+      return unresolvedVerdict('authority-action-undecodable', 'final call differs from trusted ABI', rule.id, null);
+    }
+  } else {
+    const schema = Object.hasOwn(SIGNED_SCHEMAS, action.primaryType) ? SIGNED_SCHEMAS[action.primaryType] : undefined;
+    const actualFields: string[] = [];
+    const collect = (node: AuthorityStructNode, prefix: string, depth: number): boolean => {
+      if (depth > 3 || typeof node !== 'object' || node === null || Array.isArray(node)) return false;
+      for (const [key, value] of Object.entries(node)) {
+        const path = `${prefix}.${key}`;
+        if (typeof value === 'object' && value !== null) { if (!collect(value, path, depth + 1)) return false; }
+        else actualFields.push(path);
+      }
+      return true;
+    };
+    if (!schema || !collect(action.message, 'message', 0) || actualFields.length !== Object.keys(schema).length || actualFields.some(field => !Object.hasOwn(schema, field))) {
+      return unresolvedVerdict('authority-action-undecodable', 'final message differs from trusted signed schema', rule.id, null);
+    }
+    for (const [field, ops] of Object.entries(schema)) {
+      const resolved = resolveField(action, rule, field);
+      if (resolved.kind !== 'value' || (ops.some(op => ADDRESS_OPS.includes(op))
+          ? typeof resolved.value !== 'string' || normalizeEvmAddress(resolved.value) === null
+          : typeof resolved.value !== 'bigint' || resolved.value < 0n || resolved.value > MAX_UINT256 ||
+            (field === 'message.details.amount' && resolved.value >= MAX_UINT160) ||
+            ((field.endsWith('.expiration') || field.endsWith('.nonce')) && action.primaryType === 'PermitSingle' && resolved.value >= (1n << 48n)))) {
+        return unresolvedVerdict('authority-action-undecodable', 'final signed field differs from trusted type', rule.id, field);
+      }
+    }
+  }
 
   if (action.kind === 'contract-call' && action.value > rule.maxNativeValue) {
     return denyVerdict(

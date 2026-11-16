@@ -1,6 +1,6 @@
 # Package 11 — integrated source remediation report
 
-Date: 2026-11-13. Status: **IN-PROGRESS**. Six concurrent aspect owners completed feasible source safeguards; a separate integration owner connected the public polling and health callers. This coordinator report records their final delivered findings and evidence. Independent integrated Standards/Spec review is pending at this checkpoint.
+Date: 2026-11-13. Status: **IN-PROGRESS**. Six concurrent aspect owners completed feasible source safeguards; a separate integration owner connected the public polling and health callers. Independent review found four Medium residual source gaps, then the integrator corrected all four with red/green evidence. Latest permitted gate: **489 passed / 42 files, zero failures/skips**, focused source-and-test noEmit640 exit0. Both limited independent corrected-source rechecks report **zero remaining supported findings**. See [independent review](package11-independent-review.md). The 444/42 gate below is historical before review corrections. Runtime and functional source gates still prevent package closure.
 
 ## Outcome
 
@@ -51,6 +51,33 @@ All test/compiler workloads used CPU 0, shared flock and the credential/network-
 Combined run finished `2026-11-13T22:36:51.890603Z`. Original typecheck/red tests and historical malformed command line 11 were not rewritten. The eight compiler diagnostics were missing mock return fields/undefined mock returns/fetch fixture cast, corrected minimally without changing production policy.
 
 Primary evidence: [test JSON](package11-integration-final-guarded.json), [test log](package11-integration-final-guarded.log), [focused compiler log](package11-integration-source-tests-typecheck-green-640.log), [authority/ledger validation](package11-integration-authority-ledger-validation.log).
+
+## Review-driven correction checkpoint
+
+All four supported Medium residual findings were corrected by the integrator:
+
+1. Monotonic trade-page deadline checks before requests, after fetch/read/parse and before return; body cancellation retained (`polymarket.ts:129–204,271`).
+2. Explicit active/closed/accepting-orders boolean evidence, supported snake-case normalization and unknown resolution when absent (`polymarket-helpers.ts:185–274`).
+3. Ordinary parse/context failures qualify partial in direct results and tracked returned/recorded evidence; scope/counters preserved and caller evidence not mutated (`polymarket.ts:535–537`, `ingestion-health.ts:90–95`).
+4. Every supplied supported condition/risk/lifecycle/end-date/tick alias is validated and must agree canonically; Gamma/CLOB/tick validation cannot silently fall through (`polymarket-helpers.ts:190–235`, `polymarket.ts:335–440`).
+
+| Evidence | Actual result |
+|---|---|
+| package11-review-trade-monotonic-red / green | 4 failed, then 4 passed; 65 filtered skips |
+| package11-review-lifecycle-unknown-red / green | 11 failed, then 11 passed; 118 filtered skips |
+| package11-review-metadata-alias-helper-red / green | 11 failed, 1 passed; then 12 passed; 56 filtered skips |
+| package11-review-metadata-alias-provider-red / green | 6 failed, 8 passed; then 14 passed; 73 filtered skips |
+| package11-review-known-partial-red / green | 4 failed, then 4 passed; 91 filtered skips |
+| package11-review-affected-neighbors | Exit0; 202 passed / 8 actual files, no failures/skips |
+| package11-review-source-tests-typecheck-640 | Exit0; focused source/test noEmit, zero diagnostics |
+| package11-review-final-guarded | **Exit0; 489 passed / 42 actual files, zero failures/skips** |
+| package11-review-ledger-validation | Exit0; evidence exists and statuses preserved |
+
+Final combined run finished `2026-11-13T23:20:46.921743Z`. The affected selection named a nonexistent acceptance neighbor, which contributed no tests; the real runtime-capability test ran in the final combined selection. This does not invalidate actual 202/8 or 489/42 counts and is not hidden as extra coverage. The historical 444/42 is separate, not summed.
+
+Both original reviewers completed limited corrected-source rechecks: **Standards zero remaining supported findings; Spec both original findings resolved with no supported introduced root defect**. They inspected retained 489/42 and compiler evidence without rerunning. HEAD/source/test fingerprints remained stable at `08c822d470554ef1f05e701b1abbed7dcb3dbc54` throughout rechecks. This is bounded approval of the four corrections/touched neighbors, not full-HEAD, runtime or financial acceptance. Quarantine and unresolved source/schema/runtime/venue/retry gates unchanged. No source/code edits by the coordinator, live operations or Git mutation by the integrator.
+
+This closes only these corrected source boundaries, not the remaining package/functionality/runtime gates. Final coordinator ledger validation (`package11-final-report-ledger-validation.log`) exited0: **87 evidence references all exist**, retained489/42 result matches, package11 in-progress,01–10qualified and12–29pending, independent rechecks recorded.
 
 ## Why package 11 remains open
 

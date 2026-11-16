@@ -54,8 +54,8 @@ describe('canonical copy-trade lifecycle', () => {
         priceUsd: '10',
         eventAt,
         observedAt,
-        confirmationState: 'confirmed' as const,
-        confirmationEvidenceId: `${fixture.sourceEventPrefix}confirmation-1`
+        confirmationState: 'observed' as const,
+        confirmationEvidenceId: `${fixture.sourceEventPrefix}observation-1`
       };
 
       const first = await recordSourceTradeEvent(input);
@@ -69,7 +69,9 @@ describe('canonical copy-trade lifecycle', () => {
       expect(first.inserted).toBe(true);
       expect(replay.inserted).toBe(false);
       expect(replay.event.id).toBe(first.event.id);
-      expect(replay.position.confirmedQuantity).toBe('10');
+      expect(replay.position).toBeNull();
+      expect(replay.eligibleForCopy).toBe(false);
+      expect(retrieved?.confirmationState).toBe('observed');
       expect(retrieved?.id).toBe(first.event.id);
 
       await expect(recordSourceTradeEvent({ ...input, quantity: '11' }))
@@ -77,7 +79,7 @@ describe('canonical copy-trade lifecycle', () => {
     });
   });
 
-  it('rebuilds an out-of-order source position and removes reversed evidence', async () => {
+  it('withholds position reconstruction and rejects unverified confirmation transitions', async () => {
     await withLifecycleFixture(async (fixture) => {
       const sell = await recordSourceTradeEvent({
         chain: fixture.chain,
@@ -92,13 +94,11 @@ describe('canonical copy-trade lifecycle', () => {
         priceUsd: '10',
         eventAt: new Date('2026-01-01T12:05:00.000Z'),
         observedAt,
-        confirmationState: 'confirmed',
-        confirmationEvidenceId: `${fixture.sourceEventPrefix}sell-confirmed`
+        confirmationState: 'observed',
+        confirmationEvidenceId: `${fixture.sourceEventPrefix}sell-observed`
       });
-      expect(sell.position).toMatchObject({
-        confirmedQuantity: '0',
-        unmatchedReductionQuantity: '4'
-      });
+      expect(sell.position).toBeNull();
+      expect(sell.eligibleForCopy).toBe(false);
 
       const buy = await recordSourceTradeEvent({
         chain: fixture.chain,
@@ -113,30 +113,25 @@ describe('canonical copy-trade lifecycle', () => {
         priceUsd: '10',
         eventAt: new Date('2026-01-01T12:00:00.000Z'),
         observedAt: new Date('2026-01-01T12:06:00.000Z'),
-        confirmationState: 'confirmed',
-        confirmationEvidenceId: `${fixture.sourceEventPrefix}buy-confirmed`
+        confirmationState: 'observed',
+        confirmationEvidenceId: `${fixture.sourceEventPrefix}buy-observed`
       });
-      expect(buy.position).toMatchObject({
-        confirmedQuantity: '6',
-        totalAcquiredQuantity: '10',
-        totalReducedQuantity: '4',
-        unmatchedReductionQuantity: '0'
-      });
-      expect(Number(buy.position.costBasisUsd)).toBe(60);
+      expect(buy.position).toBeNull();
+      expect(buy.eligibleForCopy).toBe(false);
 
-      const reversed = await advanceSourceTradeConfirmation({
-        sourceTradeId: buy.event.id,
-        confirmationState: 'reversed',
-        evidenceId: `${fixture.sourceEventPrefix}buy-reversed`,
-        observedAt: new Date('2026-01-01T12:07:00.000Z')
-      });
-      expect(reversed.position).toMatchObject({
-        confirmedQuantity: '0',
-        costBasisUsd: '0',
-        totalAcquiredQuantity: '0',
-        totalReducedQuantity: '4',
-        unmatchedReductionQuantity: '4'
-      });
+      for (const confirmationState of ['confirmed', 'finalized', 'reversed'] as const) {
+        await expect(advanceSourceTradeConfirmation({
+          sourceTradeId: buy.event.id,
+          confirmationState,
+          evidenceId: `${fixture.sourceEventPrefix}buy-${confirmationState}`,
+          observedAt: new Date('2026-01-01T12:07:00.000Z')
+        })).rejects.toThrow('Source confirmation verifier is unavailable');
+      }
+      expect((await getSourceTradeByIdentity({
+        chain: fixture.chain,
+        sourceEventType: 'transaction',
+        sourceEventId: `${fixture.sourceEventPrefix}buy`
+      }))?.confirmationState).toBe('observed');
     });
   });
 

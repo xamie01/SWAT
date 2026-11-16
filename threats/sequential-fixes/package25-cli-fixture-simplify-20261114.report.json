@@ -1,0 +1,291 @@
+{
+  "scope": "Remove sole Low unused-option fixture smell only",
+  "generatedUtc": "2026-11-14T16:55:22.146477+00:00",
+  "changedPaths": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "lineRange": "125-128",
+      "beforeSha256": "e461eaee2c0a48e449a85db5d3f04b4139da39f74963708661235bd8ca69738e",
+      "sha256": "ff651e70c20ac7ea76dea8ee6e26d4252dc37edd8f07cedd7a2a7848ade1e8ab",
+      "change": "Removed unused allow_read/allow_load/allow_train keyword options and their conditionals; no-call assertions now unconditional. All test cases/local positive patches unchanged.",
+      "onlyAssignedReplacementVerified": true
+    }
+  ],
+  "actualRuns": [
+    {
+      "record": {
+        "label": "package25-cli-fixture-simplify-20261114-cli-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:53:15.315029+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.578,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-fixture-simplify-20261114-cli-green.log"
+      },
+      "result": {
+        "qualification": "actual CLI/config loaded with inert stdlib dependency fixtures; no real Typer/native/package initialization",
+        "executedMethods": [
+          "test_01_rank_config_escape_diagnostic_before_downstream",
+          "test_02_score_config_escape_diagnostic_before_downstream",
+          "test_03_both_config_symlink_and_writable_root_diagnostics",
+          "test_04_rank_artifact_symlink_diagnostic_before_read",
+          "test_05_rank_rechecks_path_before_native_read",
+          "test_06_rank_missing_artifact_keeps_existing_diagnostic",
+          "test_07_score_loader_rejection_keeps_existing_diagnostic",
+          "test_08_rank_allowed_path_reaches_inert_training_refusal",
+          "test_09_unexpected_settings_error_not_swallowed"
+        ],
+        "unittestAssertionCalls": {
+          "total": 35,
+          "byName": {
+            "assertRaises": 11,
+            "assertEqual": 11,
+            "assertTrue": 11,
+            "assertRaisesRegex": 2
+          },
+          "qualification": "unittest invocations only; Mock assertions additional, not counted"
+        },
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+            "passed": 9,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 9
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-fixture-simplify-20261114-cli-green.json",
+      "resultSha256": "77cc9f05e6a62a2dd91235d763fa8f868b1fd0d8af2ab4171af7e5d5888c2e5d",
+      "logSha256": "7c6a25d578f1009a65e6a6d0dbaf67579148c795ea0d3bdb03047209ca59250b"
+    },
+    {
+      "record": {
+        "label": "package25-cli-fixture-simplify-20261114-boundary-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:53:52.517167+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 2.704,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-fixture-simplify-20261114-boundary-green.log"
+      },
+      "result": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "executedMethods": [
+          "test_01_solana_invalid_components",
+          "test_02_canonical_neighbors",
+          "test_03_evm_nonhex",
+          "test_04_storage_config_escape",
+          "test_05_storage_config_symlink",
+          "test_06_raw_boundary_before_nonempty_frame_write",
+          "test_07_raw_symlink_partition",
+          "test_08_raw_allowed_neighbor",
+          "test_09_raw_list_symlink",
+          "test_10_database_escape",
+          "test_11_inert_scoring_neighbor",
+          "test_12_schema_and_provenance_rejection",
+          "test_13_legacy_never_deserialized",
+          "test_14_artifact_symlink_read_write",
+          "test_15_mocked_training_export_neighbor",
+          "test_16_storage_subroot_cannot_override_project_trust",
+          "test_17_raw_canonical_identity_and_prefix_chain",
+          "test_18_export_rejects_out_of_subset_metadata_and_linear_leaves",
+          "test_19_json_numbers_reject_oversized_integer_as_value_error",
+          "test_20_numeric_missing_policies_and_multitree_order",
+          "test_21_json_file_and_complexity_bounds",
+          "test_22_mocked_numeric_training_dump_roundtrip"
+        ],
+        "unittestAssertionCalls": {
+          "total": 90,
+          "byName": {
+            "assertRaises": 50,
+            "assertEqual": 12,
+            "assertTrue": 1,
+            "assertIsNotNone": 21,
+            "assertFalse": 6
+          },
+          "qualification": "unittest assertion invocations only; inert Mock assertions additional, not counted"
+        },
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 22,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 22
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-fixture-simplify-20261114-boundary-green.json",
+      "resultSha256": "07801e5adb2616df1524a4edc25b6f976e0f81521ac645b68713dc39cecb5fbd",
+      "logSha256": "5f1322327519ff173b5cb6e0c7f2b386c7f6eee8d6027a9cf2416f9556a920d6"
+    },
+    {
+      "record": {
+        "label": "package25-cli-fixture-simplify-20261114-source-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+          "contracts"
+        ],
+        "finishedUtc": "2026-11-14T16:54:18.450028+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.828,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-cli-fixture-simplify-20261114-source-green.log"
+      },
+      "result": {
+        "mode": "contracts",
+        "qualification": "SOURCE AST/static only; pytest/model runtime blocked",
+        "files": [
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/conftest.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/test_package25_ml_security.py",
+            "syntax": "passed"
+          }
+        ],
+        "staticAssertions": {
+          "passed": 8,
+          "failed": 0,
+          "skipped": 0
+        },
+        "failures": []
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-fixture-simplify-20261114-source-green.log",
+      "resultSha256": "61f348157ab0ee3987324fc62ad953aec05596972d2e0608161ca1716a5159c4",
+      "logSha256": "61f348157ab0ee3987324fc62ad953aec05596972d2e0608161ca1716a5159c4"
+    }
+  ],
+  "summary": {
+    "cli": {
+      "passedMethods": 9,
+      "failed": 0,
+      "errors": 0,
+      "exit": 0,
+      "unittestAssertions": 35
+    },
+    "boundary": {
+      "passedMethods": 22,
+      "failed": 0,
+      "errors": 0,
+      "exit": 0,
+      "unittestAssertions": 90
+    },
+    "static": {
+      "passed": 8,
+      "failed": 0,
+      "exit": 0,
+      "compiledFiles": 6
+    }
+  },
+  "red": "No new red run: structural removal of unused options; previously executed helper behavior retained. No fabricated failure evidence.",
+  "preservedFingerprints": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+      "sha256": "d3cafe7c153d15bf07410c79b043a206f7509f2206ceada1f5d7e9b07525ed1a",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "sha256": "917fe27c79c425aede7f4dfab029db123d8e7a8adee071e87b3448ef5836128c",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+      "sha256": "42d8c5faa2fdfb3b1e214969447347cb7adedb14c68dfdc18e430e502e15d7be",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+      "sha256": "f9580c889248a7a0a4155ad57e1644c756a2c05a401d3f9359266a2fe9d278b9",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-cli-diagnostics-20261114.report.json",
+      "sha256": "d79895e90e25cd3b5fc6fec5d03ff1a0af3e1e9f249216d94181f977771e8ff4",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114.report.json",
+      "sha256": "d2bcd1a684c8620675c7d9064863d7877240843935eb168a52f87304345d34f4",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114.report.md",
+      "sha256": "91b4d3b045047fb5b60dcc3264ffd13b68ef9b75f4a1fc960e55f3d110378b13",
+      "unchanged": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "unchanged": true
+    }
+  ],
+  "importSafety": "Reviewed existing full CLI/config inert fixture graph and saved boundary/static graph unchanged; /usr/bin/python3 -I -S, empty synthetic packages, inert Typer/Polars/Rich/storage/model/providers, mocked dotenv before settings, private opaque temp fixtures. No native/package initialization/network/secret/service/DB/Redis/container/signing/financial action. Node guard is not a Python sandbox.",
+  "controls": {
+    "cpu": 0,
+    "sharedLock": "/tmp/swat-package11-checks.lock",
+    "runner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "bashTimeoutMs": 600000,
+    "childTimeoutSeconds": 240,
+    "heapSettingMB": 512,
+    "gitCommandsThisCleanup": []
+  },
+  "gitClarification": {
+    "priorCLIFollowup": "Prior CLI pass ran the read-only command taskset -c 0 git -C /home/xahmie/Documents/SWAT diff --check -- pattern-ml/src/pattern_ml/cli.py. Earlier artifact recovery also used read-only git status/diff/diff --check. Those were Git invocations, not Git mutations.",
+    "clarification": "Any earlier shorthand implying no Git invocation should be understood as no Git mutation; read-only Git usage did occur and is recorded here without rewriting prior evidence. No Git command was needed or run in this cleanup."
+  },
+  "review": {
+    "userReportedIndependentSpec": "Sole Low resolved; zero new findings",
+    "userReportedIndependentStandards": "Zero documented violations; one Low unused-helper-option smell addressed here",
+    "newIndependentReview": "Not newly executed in this cleanup"
+  },
+  "limitations": "Native/full runtime and prior pricing/report/race limitations unchanged. Only one fixture helper edited; no production source, historical reports, harness/guard or direct global-ledger edit. Mandatory runner normal commands.jsonl append only."
+}

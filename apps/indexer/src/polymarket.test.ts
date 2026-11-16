@@ -13,7 +13,7 @@ import {
   upsertToken,
   upsertWallet
 } from '@swat/db';
-import { backfillPolymarketWallet, fetchConfirmedPolymarketTradePages, pollPolymarketResolutions } from './polymarket.js';
+import { backfillPolymarketWallet, createMetadataBudget, fetchGammaMarket, fetchConfirmedPolymarketTradePages, pollPolymarketResolutions } from './polymarket.js';
 import { parseConfirmedPolymarketTrade } from './polymarket-helpers.js';
 
 vi.mock('@swat/db', async (importOriginal) => ({
@@ -111,6 +111,91 @@ describe('Polymarket confirmed-trade backfill', () => {
     vi.mocked(refreshWalletActivity).mockResolvedValue([]);
   });
 
+  it.each(['open Gamma', 'closed Gamma', 'CLOB'] as const)(
+    'refuses invalid supported aliases from %s before projection or alternate-provider bypass', async stage => {
+      const invalid = { ...market, condition_id: CONDITION_ID, neg_risk: true,
+        tokens: [{ token_id: TOKEN_YES, outcome: 'Yes' }],
+        end_date_iso: market.endDate, minimum_tick_size: 0.01 };
+      let metadataCalls = 0;
+      const fetchImpl = vi.fn(async () => {
+        metadataCalls++;
+        if (stage === 'open Gamma') return jsonResponse(metadataCalls === 1 ? [invalid] : [market]);
+        if (stage === 'closed Gamma') return jsonResponse(metadataCalls === 1 ? [] : metadataCalls === 2 ? [invalid] : [market]);
+        return jsonResponse(metadataCalls < 3 ? [] : invalid);
+      });
+      await expect(fetchGammaMarket(CONDITION_ID, fetchImpl, createMetadataBudget(undefined))).rejects.toThrow(/aliases/);
+      expect(metadataCalls).toBe(stage === 'open Gamma' ? 1 : stage === 'closed Gamma' ? 2 : 3);
+    }
+  );
+
+  it.each([
+    { condition_id: `0x${'d'.repeat(64)}` }, { condition_id: null },
+    { neg_risk: true }, { minimumTickSize: ['0.01'] }, { minimumTickSize: '0.02' },
+    { accepting_orders: false }, { accepting_orders: null }
+  ])('refuses supplied metadata aliases before context upsert %j', async override => {
+    vi.mocked(getPolymarketOutcomeContext).mockResolvedValue(persistedContext);
+    let metadataCalls = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes('/v2/trades')) return jsonResponse([trade]);
+      return jsonResponse([metadataCalls++ === 0 ? { ...market, ...override } : market]);
+    });
+    const result = await backfillPolymarketWallet(QUERY_WALLET, { fetchImpl, publish: vi.fn() });
+    expect(result).toMatchObject({ inserted: 0, failed: 1 });
+    expect(metadataCalls).toBe(1);
+    expect(upsertPolymarketContext).not.toHaveBeenCalled();
+    expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([{ minimumTickSize: ['0.01'] }, { minimumTickSize: '0.02' }, { minimumTickSize: null }])(
+    'refuses supplied tick fallback aliases before context upsert %j', async override => {
+      vi.mocked(getPolymarketOutcomeContext).mockResolvedValue(persistedContext);
+      const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes('/v2/trades')) return jsonResponse([trade]);
+        if (url.includes('/tick-size')) return jsonResponse({ minimum_tick_size: '0.01', ...override });
+        return jsonResponse([{ ...market, orderPriceMinTickSize: undefined }]);
+      });
+      const result = await backfillPolymarketWallet(QUERY_WALLET, { fetchImpl, publish: vi.fn() });
+      expect(result).toMatchObject({ inserted: 0, failed: 1 });
+      expect(upsertPolymarketContext).not.toHaveBeenCalled();
+      expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+    }
+  );
+
+  it('normalizes explicit CLOB snake state while keeping observations quarantined', async () => {
+    vi.mocked(getPolymarketOutcomeContext).mockResolvedValue({ ...persistedContext, resolutionStatus: 'unknown' });
+    const publish = vi.fn();
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/v2/trades')) return jsonResponse([trade]);
+      if (url.includes('gamma-api')) return jsonResponse([]);
+      return jsonResponse({ condition_id: CONDITION_ID, question: market.question,
+        active: true, closed: false, accepting_orders: true, neg_risk: false,
+        end_date_iso: market.endDate, minimum_tick_size: '0.01',
+        tokens: [{ token_id: TOKEN_YES, outcome: 'Yes' }, { token_id: TOKEN_NO, outcome: 'No' }] });
+    });
+    const result = await backfillPolymarketWallet(QUERY_WALLET, { fetchImpl, publish });
+    expect(result).toMatchObject({ inserted: 0, failed: 0, skipped: 1,
+      evidence: { observed: 1, quarantined: 1, accepted: 0, confirmation: 'withheld' } });
+    expect(upsertPolymarketContext).toHaveBeenCalledWith(expect.objectContaining({
+      acceptingOrders: true, negRisk: false, resolutionStatus: 'unknown' }));
+    expect(recordConfirmedPolymarketTrade).not.toHaveBeenCalled();
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it.each([{ closed: undefined }, { closed: 'false' }, { acceptingOrders: undefined }, { active: undefined }])(
+    'refuses unknown lifecycle metadata before context persistence %j', async override => {
+      vi.mocked(getPolymarketOutcomeContext).mockResolvedValue(persistedContext);
+      const fetchImpl = vi.fn(async (input: string | URL | Request) => String(input).includes('/v2/trades')
+        ? jsonResponse([trade]) : jsonResponse([{ ...market, ...override }]));
+      const result = await backfillPolymarketWallet(QUERY_WALLET, { fetchImpl, publish: vi.fn() });
+      expect(result).toMatchObject({ inserted: 0, failed: 1 });
+      expect(upsertPolymarketContext).not.toHaveBeenCalled();
+      expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+    }
+  );
+
   it.each([{ tick: true }, { tick: ['0.01'] }, { tick: { value: 0.01 } }])('refuses nonscalar tick evidence %j before persistence', async ({ tick }) => {
     vi.mocked(getPolymarketOutcomeContext).mockResolvedValue(persistedContext);
     const fetchImpl = vi.fn(async (input: string | URL | Request) => String(input).includes('/v2/trades')
@@ -119,6 +204,21 @@ describe('Polymarket confirmed-trade backfill', () => {
     expect(result).toMatchObject({ inserted: 0, failed: 1 });
     expect(upsertPolymarketContext).not.toHaveBeenCalled();
     expect(recordSourceTradeEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(['parse', 'context'] as const)('reports ordinary %s failure as known partial evidence', async stage => {
+    vi.mocked(getPolymarketOutcomeContext).mockResolvedValue(persistedContext);
+    const rows = [{ ...trade, ...(stage === 'parse' ? { asset: undefined } : { outcome: 'No' }) }, trade];
+    const result = await backfillPolymarketWallet(QUERY_WALLET, {
+      fetchImpl: backfillFixtureFetch(rows), publish: vi.fn()
+    });
+    expect(result).toMatchObject({ fetched: 2, inserted: 0, skipped: 1, failed: 1, evidence: {
+      observed: 1, quarantined: 1, accepted: 0, completeness: 'partial',
+      confirmation: 'withheld', scope: 'provider-pagination'
+    } });
+    expect(recordSourceTradeEvent).toHaveBeenCalledOnce();
+    expect(recordConfirmedPolymarketTrade).not.toHaveBeenCalled();
+    expect(insertParsedTransaction).not.toHaveBeenCalled();
   });
 
   it('reports empty history as unknown completeness and withheld confirmation', async () => {
@@ -786,6 +886,49 @@ describe('Polymarket resolution polling', () => {
 });
 
 describe('Polymarket trade paging', () => {
+  it.each(['fetch', 'read', 'parse', 'return'] as const)(
+    'refuses completed %s work after the monotonic deadline without waiting for timer dispatch', async stage => {
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const body = new ReadableStream<Uint8Array>({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('[]'));
+        controller.close();
+      } });
+      const response = new Response(body);
+      const cancel = vi.spyOn(body, 'cancel');
+      let signal: AbortSignal | null | undefined;
+      const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        signal = init?.signal;
+        if (stage === 'fetch') now = 11;
+        return response;
+      });
+      const originalParse = JSON.parse;
+      if (stage === 'parse') vi.spyOn(JSON, 'parse').mockImplementation((...args: Parameters<typeof JSON.parse>) => {
+        const result = originalParse(...args); now = 11; return result;
+      });
+      if (stage === 'read') {
+        const getReader = body.getReader.bind(body);
+        vi.spyOn(body, 'getReader').mockImplementation(() => {
+          const reader = getReader();
+          const read = reader.read.bind(reader);
+          vi.spyOn(reader, 'read').mockImplementation(async () => { const result = await read(); now = 11; return result; });
+          return reader;
+        });
+      }
+      if (stage === 'return') vi.spyOn(JSON, 'parse').mockImplementation((...args: Parameters<typeof JSON.parse>) => {
+        originalParse(...args);
+        // A terminal-envelope property can consume synchronous validation time after parsing.
+        return { data: [], pagination: { get next_cursor() { now = 11; return null; }, has_more: false } };
+      });
+      try {
+        await expect(fetchConfirmedPolymarketTradePages({ user: QUERY_WALLET, fetchImpl, timeoutMs: 10 }))
+          .rejects.toThrow('operation deadline exceeded');
+        expect(signal?.aborted).toBe(true);
+        if (stage === 'fetch') expect(cancel).toHaveBeenCalled();
+      } finally { vi.restoreAllMocks(); }
+    }
+  );
+
   const USER = `0x${'3'.repeat(40)}`;
 
   function page(count: number, timestampBase: number): unknown[] {

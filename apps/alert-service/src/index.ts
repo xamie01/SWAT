@@ -1,4 +1,13 @@
 import { Queue, Worker } from 'bullmq';
+import { randomUUID } from 'node:crypto';
+import {
+  claimSignalNotification,
+  beginSignalNotificationSend,
+  completeSignalNotification,
+  markSignalNotificationUncertain,
+  releaseSignalNotification
+} from '../../../packages/db/src/package24-delivery-notifications.js';
+import { sendSignalTelegram } from './package24-delivery-telegram.js';
 import { Redis } from 'ioredis';
 import {
   completeIngestionHealthAlert,
@@ -376,46 +385,27 @@ async function formatSignalAlert(payload: SignalAlertPayload): Promise<string> {
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
-async function deliverSignal(payload: SignalAlertPayload) {
-  let lockKey = '';
-  if (payload.signalId) {
-    lockKey = `swat:alert:claim:${payload.signalId}`;
-    const claimed = await redis.set(lockKey, '1', 'EX', 60, 'NX');
-    if (!claimed) return { sent: false, reason: 'locked by another worker' };
-
-    const [existing] = await query<{ alerted_at: Date | null }>(
-      `SELECT alerted_at FROM signals WHERE id = $1`,
-      [payload.signalId]
-    );
-    if (existing && existing.alerted_at) {
-      await redis.del(lockKey);
-      return { sent: false, reason: 'already alerted' };
-    }
-  }
-
-  try {
-    const message = await formatSignalAlert(payload);
-    await sendTelegram(message);
-
-    if (payload.signalId) {
-      await query(
-        `UPDATE signals SET alerted_at = NOW(), status = CASE WHEN status = 'pending' THEN 'alerted' ELSE status END WHERE id = $1 AND alerted_at IS NULL`,
-        [payload.signalId]
-      );
-    }
-
-    return { sent: true };
-  } finally {
-    if (lockKey) {
-      await redis.del(lockKey).catch(() => {});
-    }
-  }
-}
+const notification = {
+  ownerToken: randomUUID,
+  claim: claimSignalNotification,
+  beginSend: beginSignalNotificationSend,
+  complete: completeSignalNotification,
+  uncertain: markSignalNotificationUncertain,
+  release: releaseSignalNotification,
+  format: formatSignalAlert,
+  // No retry-after sleep/retry loop on this path. An uncertain attempt is held
+  // for reconciliation; Telegram offers no external idempotency guarantee.
+  send: (message: string) => sendSignalTelegram(message, {
+    token: telegramToken,
+    chatId: telegramChatId,
+    transport: fetch
+  })
+};
 
 const worker = new Worker(
   QUEUES.alerts,
   (job) => deliverQueuedAlert(job.data, {
-    deliverSignal,
+    notification,
     sendOperational: sendOperationalTelegram
   }),
   { connection: redis }

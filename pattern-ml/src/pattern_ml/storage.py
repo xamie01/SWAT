@@ -16,13 +16,16 @@ Two tiers on purpose:
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
+import stat
+import tempfile
 from typing import Any
 
 import duckdb
 import polars as pl
 
-from .config import get_settings
+from .config import CHAINS, KolRosterError, _normalize_address, confined_path, get_settings
 from .schema import CANONICAL_TRADE_SCHEMA, POSITION_SCHEMA, conform, empty_frame
 
 
@@ -31,7 +34,7 @@ class Storage:
 
     def __init__(self, db_path: Path | None = None) -> None:
         settings = get_settings()
-        self._db_path = db_path or settings.db_path
+        self._db_path = confined_path(db_path or settings.db_path)
         self._conn: duckdb.DuckDBPyConnection | None = None
         settings.ensure_dirs()
 
@@ -40,7 +43,7 @@ class Storage:
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
         if self._conn is None:
-            self._conn = duckdb.connect(str(self._db_path))
+            self._conn = duckdb.connect(str(confined_path(self._db_path)))
             self._init_schema()
         return self._conn
 
@@ -89,25 +92,49 @@ class Storage:
     def write_raw_parquet(self, chain: str, kol_address: str, df: pl.DataFrame) -> Path:
         """Persist one KOL's raw pull. Content-addressed, so re-pulling the
         same history overwrites nothing and creates no duplicate file."""
+        if chain not in CHAINS:
+            raise ValueError("Unsupported raw storage chain")
+        try:
+            address = _normalize_address(kol_address, chain)
+        except KolRosterError as exc:
+            raise ValueError("Invalid raw storage address") from exc
         settings = get_settings()
-        partition = settings.raw_dir / chain / kol_address
+        partition = confined_path(settings.raw_dir / chain / address, root=settings.raw_dir)
         partition.mkdir(parents=True, exist_ok=True)
 
-        fingerprint = f"{chain}:{kol_address}:{df.height}"
-        if "timestamp" in df.columns and df.height:
-            col = df["timestamp"]
-            fingerprint += f":{col.min()}:{col.max()}"
-        name = hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
-
-        path = partition / f"{name}.parquet"
-        if not path.exists():
-            df.write_parquet(path, compression="zstd")
-        return path
+        fd, filename = tempfile.mkstemp(prefix=".raw-", suffix=".tmp", dir=partition)
+        os.close(fd)
+        tmp = confined_path(Path(filename), root=settings.raw_dir)
+        try:
+            df.write_parquet(tmp, compression="zstd")
+            tmp = confined_path(tmp, root=settings.raw_dir)
+            digest = _raw_digest(tmp)
+            path = confined_path(partition / f"{digest}.parquet", root=settings.raw_dir)
+            if path.exists():
+                if not path.is_file() or _raw_digest(path) != digest:
+                    raise ValueError("Raw staging content does not match its fingerprint")
+            else:
+                # Exclusive publication, never overwrite an existing pull. Native
+                # writers still require a trusted non-concurrent same-user root.
+                os.link(tmp, path, follow_symlinks=False)
+            return path
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def list_raw_parquet(self, chain: str | None = None) -> list[Path]:
         settings = get_settings()
-        root = settings.raw_dir / chain if chain else settings.raw_dir
-        return sorted(root.rglob("*.parquet")) if root.exists() else []
+        if chain is not None and chain not in CHAINS:
+            raise ValueError("Unsupported raw storage chain")
+        root = confined_path(settings.raw_dir / chain if chain else settings.raw_dir)
+        # Validate entries, not just filenames: directory symlinks must not be
+        # silently skipped or traversed by an implementation-specific glob.
+        for entry in root.rglob("*") if root.exists() else []:
+            confined_path(entry, root=settings.raw_dir)
+        paths = sorted(confined_path(path, root=settings.raw_dir)
+                       for path in root.rglob("*.parquet")) if root.exists() else []
+        if any(not path.is_file() for path in paths):
+            raise ValueError("Raw Parquet entries must be regular files")
+        return paths
 
     # -- trades --------------------------------------------------------------
 
@@ -231,6 +258,19 @@ class Storage:
             """,
             [key, last_ts, last_ref],
         )
+
+
+def _raw_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("Raw staging must be a regular file")
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+        os.fsync(handle.fileno())
+    return digest.hexdigest()
 
 
 def _filters(**kwargs: str | None) -> tuple[str, list[Any]]:

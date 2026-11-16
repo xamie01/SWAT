@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@swat/shared": ["threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts"],
+      "@solana/web3.js": ["packages/shared/node_modules/@solana/web3.js"],
+      "zod": ["packages/shared/node_modules/zod"],
+      "pg": ["packages/db/node_modules/@types/pg"],
+      "vitest/config": ["node_modules/vitest/dist/config.d.ts"]
+    },
+    "listFiles": true
+  },
+  "files": [
+    "../../tests/integration/chaos.integration.test.ts",
+    "../../tests/unit/package28-chaos-containment.test.ts",
+    "./package28-chaos-containment-20261114-focused.config.ts",
+    "./package28-chaos-containment-20261114-neighbors.config.ts"
+  ]
+}

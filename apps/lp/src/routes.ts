@@ -488,15 +488,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     }
 
     try {
-      try {
-        await trackLpWallet({
-          chain: body.chain as LpChain,
-          walletAddress: body.masterWalletAddress,
-          label: 'Copied LP Master'
-        });
-      } catch {
-        // Best-effort if already tracked or duplicate
-      }
+      // Subscriptions are tenant data; only the service-key routes may manage
+      // the platform wallet registry. Discovery onboarding needs its own proof.
       const subscription = await createLpCopySubscription(scope, {
         masterWalletAddress: body.masterWalletAddress,
         chain: body.chain as LpChain,

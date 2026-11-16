@@ -1,0 +1,138 @@
+{
+  "task": "package28-canonical-path-20261114",
+  "finding": "Supported Low Spec: WHATWG pathname normalization accepted literal dot-segment endpoint declarations",
+  "status": "bounded source correction qualified; runtime/schema/infrastructure acceptance unavailable",
+  "lineConvention": "1-based inclusive",
+  "changes": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/tests/integration/helpers/package28-isolation.ts",
+      "changedLines": [46, 47, 51],
+      "totalLines": 53,
+      "beforeSha256": "86881f7f8457677bf292b6c47d6bbea13723a93112927c8e103225b64a9141af",
+      "afterSha256": "5cae8a0fe2957ba8c0824850c86dbafa81cbe1693117ba02a3a724288b8a1347",
+      "effect": "Extract original literal path and require exact canonical path alongside URL.pathname. Unconditional missing-baseline refusal at line 35 unchanged. No imports or I/O added."
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts",
+      "changedLines": "69-77",
+      "totalLines": 175,
+      "beforeSha256": "4b247f9984c3edbf8a51a91270820bd270d081020a227e32af6c30a6a6f787c7",
+      "redGreenNeighborSha256": "9eacae6e3c5e11b93fb05e79798a2c6953435d83f6fe2f3ca0aaac7f626ca27c",
+      "effect": "Four endpoint-stage regressions: PostgreSQL /other/../target and /./target; Redis /./0 and /other/../0. Existing missing-baseline and manual certificate/digest/table/scope_policy rejection tests unchanged."
+    }
+  ],
+  "safety": {
+    "shellCpuAffinity": [0],
+    "sharedExclusiveLock": "/tmp/swat-package11-checks.lock",
+    "runner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "invocationPrefix": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "bashTimeoutMilliseconds": 600000,
+    "runnerChildTimeoutSeconds": 240,
+    "testsNodeHeapMB": 512,
+    "compilerNodeHeapMB": 640,
+    "compilerOnly640Label": "package28-canonical-path-20261114-noemit-640",
+    "testPool": "forks",
+    "testWorkers": 1,
+    "fileParallelism": false,
+    "maxConcurrency": 1,
+    "syntheticEnvironment": true,
+    "offlineNetworkAndCredentialReadPreload": true,
+    "testSafety": "pg query/connect blocked; ioredis construction blocked; direct DB-client factory instrumented and not reached by guarded helper calls",
+    "selection": "Qualified createPackageConfig with literal existing reviewed test files; no CLI filters",
+    "notPerformed": ["actual integration suite/config/script execution", "live DB/Redis connections", "services/containers", "network/credential access", "key generation/signing", "install", "migration/schema cleanup", "deploy", "Git", "manual global-ledger edits", "chaos or existing-isolation edits/execution"],
+    "ledger": "Only mandated run-check.py automatic append of test/compiler records and a separate report-verification record; no manual ledger modification"
+  },
+  "runs": [
+    {
+      "label": "package28-canonical-path-20261114-red",
+      "command": ["/home/xahmie/Documents/SWAT/node_modules/.bin/vitest", "run", "--config", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-focused.config.ts"],
+      "finishedUtc": "2026-11-14T16:49:02.946089+00:00",
+      "elapsedSeconds": 11.29,
+      "exitCode": 1,
+      "passed": 52, "failed": 4, "pending": 0, "total": 56, "actualFileCount": 1,
+      "actualManifest": [{"path": "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts", "passed": 52, "failed": 4}],
+      "redMeaning": "Exactly four new dot-segment cases expected endpoint refusal but received missing-baseline refusal, proving literal malformed paths passed endpoint validation without enabling execution.",
+      "json": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-red.json", "sha256": "2a769c03f4ce7a1ff1265ee9577b2ca1ec18e5235f16ea1538b044894fff0761"},
+      "log": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-red.log", "sha256": "13fba9bfd2f0934782014370c91720fa6b9e6039200a7ae5666d3a729ddfa002"}
+    },
+    {
+      "label": "package28-canonical-path-20261114-green",
+      "command": ["/home/xahmie/Documents/SWAT/node_modules/.bin/vitest", "run", "--config", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-focused.config.ts"],
+      "finishedUtc": "2026-11-14T16:51:24.524538+00:00",
+      "elapsedSeconds": 6.518,
+      "exitCode": 0,
+      "passed": 56, "failed": 0, "pending": 0, "total": 56, "actualFileCount": 1,
+      "actualManifest": [{"path": "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts", "passed": 56, "failed": 0}],
+      "json": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-green.json", "sha256": "0911e0ed72f834c766c5e94e06357e101b90b283160f307b2a575a0b3ca502b8"},
+      "log": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-green.log", "sha256": "aec4e5c9f7c1fee2aecb1dc6a3f7044029b328044ba76c697bd004fb362cc018"}
+    },
+    {
+      "label": "package28-canonical-path-20261114-neighbor",
+      "command": ["/home/xahmie/Documents/SWAT/node_modules/.bin/vitest", "run", "--config", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-neighbor.config.ts"],
+      "finishedUtc": "2026-11-14T16:52:43.763454+00:00",
+      "elapsedSeconds": 18.538,
+      "exitCode": 0,
+      "passed": 75, "failed": 0, "pending": 0, "total": 75, "actualFileCount": 4,
+      "actualManifest": [
+        {"path": "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts", "passed": 56, "failed": 0},
+        {"path": "/home/xahmie/Documents/SWAT/packages/db/src/database-policy.sequential.test.ts", "passed": 6, "failed": 0},
+        {"path": "/home/xahmie/Documents/SWAT/packages/db/src/migrations.test.ts", "passed": 7, "failed": 0},
+        {"path": "/home/xahmie/Documents/SWAT/packages/shared/src/address.test.ts", "passed": 6, "failed": 0}
+      ],
+      "json": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-neighbor.json", "sha256": "b3822a3435c2208072efb89a5aba6d7baad99491799817d9594bf2b568b584c6"},
+      "log": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-neighbor.log", "sha256": "3232beae910fd6294faa1f82e5ac8033796b702f8afe7d570729f073cfbaa1e2"}
+    },
+    {
+      "label": "package28-canonical-path-20261114-noemit-640",
+      "command": ["/home/xahmie/Documents/SWAT/node_modules/.bin/tsc", "--project", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114.typecheck.json", "--noEmit", "--listFiles"],
+      "finishedUtc": "2026-11-14T16:53:37.717437+00:00",
+      "elapsedSeconds": 18.576,
+      "exitCode": 0,
+      "mode": {"typescript": "5.9.3", "target": "ES2022", "strict": true, "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "incremental": false, "skipLibCheck": true},
+      "explicitSourceAndTestRoots": [
+        "/home/xahmie/Documents/SWAT/tests/integration/helpers/package28-isolation.ts",
+        "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts",
+        "/home/xahmie/Documents/SWAT/packages/shared/src/address.test.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/migrations.test.ts",
+        "/home/xahmie/Documents/SWAT/packages/db/src/database-policy.sequential.test.ts",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-focused.config.ts",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-neighbor.config.ts"
+      ],
+      "compilerListedFileCount": 306,
+      "nonNodeModulesSourceCount": 20,
+      "importSafety": "Compiler reads transitive DB client/runtime/role/numeric sources and guarded helpers for type analysis only; it does not execute them. Root integration config/script/CLI were not executed. Exact complete compiler manifest is in the retained --listFiles log.",
+      "limitation": "Focused ESNext/Bundler aliases do not qualify deployed NodeNext, emitted dist, loaders, services or infrastructure.",
+      "log": {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-noemit-640.log", "sha256": "5f3fbd279233a89d2c29b56c14f3bd3a34df6db3f1995d9e8be42a3c3d18a2cf"}
+    }
+  ],
+  "counting": "Counts are per run and actual testResults files, not aggregate suite counts; focused and neighbor runs overlap and must not be summed.",
+  "newConfigurationFingerprints": [
+    {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-focused.config.ts", "lines": 2, "sha256": "68867edd11935b0c3a36892b7c89b8f47f23c3b76ea5b0e98e36c1a2af83d186"},
+    {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114-neighbor.config.ts", "lines": 7, "sha256": "b317d8a7e187ea1e2a3878c754bea0a5c4b4ba7adc5d82dbf6388368409c9927"},
+    {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-canonical-path-20261114.typecheck.json", "lines": 26, "sha256": "e550635320ac4c9154ed2df6a5670ef962624c247a195376c498492046695c72"}
+  ],
+  "preservation": {
+    "verifiedComparisons": 10,
+    "testFingerprintUnchangedFromRedThroughGreenNeighbor": true,
+    "inheritedFilesAndSupport": [
+      {"path": "/home/xahmie/Documents/SWAT/tests/unit/package28-existing-isolation.test.ts", "sha256": "ef9e30332f6af183b0a62c9f2ef59340aa4c4826c32fd2bd44a487e98d802473"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114.report.json", "sha256": "eae32d62d89a7c6c8a745466cb921a83fac4a65caa564d90321621ec5d7f9b9a"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-neighbor-final.json", "sha256": "c8fce5b93a2c6c6ca8485c3a40fe07e0827af6a22cadadf2adba9ca1e5e21b1f"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-neighbor-final.log", "sha256": "890e6ae5cf5d12b5f5e3b424b8320f71f177f5064fb1ee83a8788ae83dbee449"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-existing-red.json", "sha256": "9d8dc04232032d30b556cb27480e6a5ebbf7a495373528cfe101938286154ecf"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts", "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py", "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts", "sha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930"},
+      {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs", "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf"}
+    ],
+    "baseConfigFingerprint": {"path": "/home/xahmie/Documents/SWAT/tsconfig.base.json", "sha256": "aeba8b3fe294e242c4fe667500becf0d8eb1130aa0e59943afe488de5e0542b8"},
+    "retainedFullNeighborRed": "Historical 74 passed/1 failed across 5 actual files, exit 1, remains intact. This bounded 4-file safe-neighbor green excludes the complete existing-isolation file and does not supersede that red.",
+    "chaosOwnership": "Other owner active on chaos source/new regression. This checkpoint neither edits nor certifies that owner's work."
+  },
+  "remainingGaps": [
+    "No independently generated clean canonical catalog bound to exact unified migration digest/core profile; installed constraints, indexes, functions, triggers, RLS, roles/grants unverified.",
+    "No actual disposable endpoint/infrastructure verification. Canonical declarations still unconditionally refuse execution; manual flags, fake certificates, table presence and scope_policy cannot enable it.",
+    "Pure source preflight containment is not runtime/schema/infrastructure acceptance or certification of every alternative direct integration entrypoint.",
+    "Chaos remediation remains the disjoint owner's responsibility; no claim that inherited full-neighbor failure is resolved by this correction."
+  ]
+}

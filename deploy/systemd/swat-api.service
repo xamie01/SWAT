@@ -5,17 +5,40 @@ Wants=redis.service pgbouncer.service
 
 [Service]
 Type=simple
-User=swat
-WorkingDirectory=/root/SWAT
+User=swat-api
+Group=swat-api
+WorkingDirectory=/opt/swat/current/apps/api
 Environment=NODE_ENV=production
-EnvironmentFile=/root/SWAT/.env
-ExecStart=/usr/bin/node /root/SWAT/apps/api/dist/index.js
+Environment=HOME=/var/lib/swat-api
+EnvironmentFile=/etc/swat/api.env
+ExecStartPre=/usr/bin/python3 -I -S /opt/swat/current/deploy/tools/ops-readiness.py --verify-only --service api --release /opt/swat/current
+ExecStart=/usr/bin/node /opt/swat/current/apps/api/dist/index.js
+Environment=TRADING_MODE=paper
+Environment=AUTO_EXECUTE=false
+Environment=LIVE_ENABLED_CHAINS=
+Environment=DISABLE_BILLING_SWEEPER_DAEMON=true
+StateDirectory=swat-api
+StateDirectoryMode=0700
+RuntimeDirectory=swat-api
+RuntimeDirectoryMode=0700
+UMask=0077
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
 
-# Sandboxing and security hardening
-ProtectSystem=full
+# Code/releases must be root-owned, readable by swat-api, and not writable by any service principal.
+# Provision /etc/swat/api.env root:swat-api 0640; do not put secrets in the release.
+# StateDirectory/RuntimeDirectory are the only persistent/runtime write locations.
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
 ProtectHome=true
 NoNewPrivileges=true
 PrivateTmp=true

@@ -1,6 +1,7 @@
 import { query } from './client.js';
-import { withTransaction } from './transaction.js';
 import type { Chain } from '@swat/shared';
+import type { CopyExecutionRecord } from './copy-trade-lifecycle.js';
+import { assertExactExitQuantity } from './lot-allocation.js';
 
 export interface CloseAllLotJob {
   readonly claimId?: string;
@@ -11,6 +12,10 @@ export interface CloseAllLotJob {
   readonly tokenMint: string;
   readonly chain: Chain;
   readonly sellTokenAmount: number;
+  readonly requestedBaseQuantity: string;
+  readonly masterWalletAddress: string;
+  readonly targetAccount: string;
+  readonly acquisitionExecutionMode: CopyExecutionRecord['executionMode'];
   readonly jobId: string;
 }
 
@@ -22,6 +27,9 @@ type CloseAllLotRow = {
   token_mint: string;
   chain: Chain;
   remaining_quantity: string;
+  master_wallet_address: string;
+  target_account: string;
+  execution_mode: CopyExecutionRecord['executionMode'];
 };
 
 /**
@@ -41,12 +49,23 @@ export async function listCloseAllLotJobs(): Promise<CloseAllLotJob[]> {
        lot.signal_id,
        lot.token_mint,
        lot.chain,
+       lot.master_wallet_address,
+       position.target_account,
+       acquisition.execution_mode,
        lot.remaining_quantity::text
        FROM user_wallet_subscriptions subscription
        JOIN copy_position_master_lots lot
          ON lot.user_id = subscription.user_id
         AND lot.master_wallet_address = subscription.wallet_address
         AND lot.remaining_quantity > 0
+       JOIN copy_positions position ON position.id = lot.position_id
+         AND position.user_id IS NOT DISTINCT FROM lot.user_id
+         AND position.chain = lot.chain AND position.token_mint = lot.token_mint
+       JOIN copy_executions acquisition ON acquisition.id = lot.acquisition_execution_id
+         AND acquisition.user_id IS NOT DISTINCT FROM lot.user_id
+         AND acquisition.target_account = position.target_account
+         AND acquisition.chain = lot.chain AND acquisition.token_mint = lot.token_mint
+         AND acquisition.direction = 'buy'
       WHERE subscription.state = 'winding_down'
         AND subscription.close_all_requested_at IS NOT NULL
       ORDER BY subscription.user_id, subscription.wallet_address,
@@ -55,9 +74,11 @@ export async function listCloseAllLotJobs(): Promise<CloseAllLotJob[]> {
 
   return rows.map((row) => {
     const quantity = Number(row.remaining_quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
+    if (typeof row.remaining_quantity !== 'string' || !/^\d+(?:\.\d+)?$/.test(row.remaining_quantity)
+        || !Number.isFinite(quantity) || quantity <= 0) {
       throw new Error(`Close-all lot ${row.lot_id} has invalid remaining quantity`);
     }
+    assertExactExitQuantity(row.remaining_quantity);
     return {
       userId: row.user_id,
       walletAddress: row.wallet_address,
@@ -66,6 +87,10 @@ export async function listCloseAllLotJobs(): Promise<CloseAllLotJob[]> {
       tokenMint: row.token_mint,
       chain: row.chain,
       sellTokenAmount: quantity,
+      requestedBaseQuantity: row.remaining_quantity,
+      masterWalletAddress: row.master_wallet_address,
+      targetAccount: row.target_account,
+      acquisitionExecutionMode: row.execution_mode,
       jobId: `close-all-${row.user_id}-${row.lot_id}`
     };
   });
@@ -94,6 +119,17 @@ export async function endCompletedCloseAllSubscriptions(): Promise<number> {
            WHERE lot.user_id = subscription.user_id
              AND lot.master_wallet_address = subscription.wallet_address
              AND lot.remaining_quantity > 0
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM copy_executions execution
+          LEFT JOIN source_trades source ON source.id = execution.source_trade_id
+          LEFT JOIN copy_position_master_lots exit_lot ON exit_lot.id = execution.exit_lot_id
+          WHERE execution.user_id IS NOT DISTINCT FROM subscription.user_id
+            AND execution.direction = 'sell'
+            AND execution.state NOT IN ('failed', 'cancelled', 'confirmed')
+            AND (execution.reserved_base_quantity > 0 OR execution.exit_lot_id IS NOT NULL)
+            AND (source.wallet_address = subscription.wallet_address
+              OR exit_lot.master_wallet_address = subscription.wallet_address)
         )
       RETURNING subscription.user_id`
   );

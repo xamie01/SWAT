@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "incremental": false,
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@swat/shared": ["threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts"],
+      "@solana/web3.js": ["packages/shared/node_modules/@solana/web3.js"]
+    }
+  },
+  "files": [
+    "../../packages/db/src/lot-allocation.ts",
+    "../../packages/db/src/copy-trade-lifecycle.ts",
+    "../../packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+    "../../packages/db/src/lot-allocation.test.ts",
+    "../../packages/db/src/copy-trade-lifecycle.sequential.test.ts",
+    "./package15-lot-claim-recovery-20261114.config.ts"
+  ]
+}

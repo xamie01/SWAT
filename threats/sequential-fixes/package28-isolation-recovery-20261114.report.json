@@ -1,0 +1,107 @@
+{
+  "package": 28,
+  "date": "2026-11-14",
+  "status": "bounded-source-containment-tested; full-runtime-schema-isolation-unavailable",
+  "scope": "Integrated defensive preflight and pure isolation fixtures only. No package28 API limiter/index/auth/me or DB client/tenancy/migrations/history changes.",
+  "authority": [
+    "/home/xahmie/Documents/SWAT/threats/SEQUENTIAL-FIX-LEDGER.md:7,44",
+    "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/data-indexer-review.md:34-36 (PF-DATA-16/17/18)",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md:95-99"
+  ],
+  "changes": [
+    {"path":"/home/xahmie/Documents/SWAT/scripts/test-integration.sh","changedLines":"1-13 (replaces unsafe acquisition/migration/acceptance entrypoint)","sha256":"54a01d896b62ad342b1e402f4378a008e051a1f16b422ddddcc4b0e3f65cb839","effect":"Only --preflight-only is accepted. Invokes connected pure CLI; no service acquisition, migration, cleanup or suite invocation."},
+    {"path":"/home/xahmie/Documents/SWAT/vitest.integration.config.ts","changedLines":"1-6 (guard-before-import and removal of dotenv/fallback/env mutations); final file 1-18","sha256":"1c4ff4f1542020f7caa2c02f7a552eadcd912980e1cdf3b18e574bebe4686f28","effect":"Only static import is pure guard; assertion at line5 precedes dynamic Vitest import at line6. Historical test selection/timeouts remain. Never executed."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/integration/helpers/package28-isolation.ts","changedLines":"new 1-51","sha256":"86881f7f8457677bf292b6c47d6bbea13723a93112927c8e103225b64a9141af","effect":"No imports/I/O. Requires explicit disposable intent, canonical UUIDv4, core profile, exact canonical 127.0.0.1 nondefault ports, run-specific database/Redis namespace, no URL options/fragments/encoded aliases or conflicting generic endpoints. Always blocks at missing independently generated canonical schema and infrastructure verification; no env/manual certificate can enable execution."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/integration/helpers/schema-guard.ts","changedLines":"1-10 (replaces table/column existence acceptance)","sha256":"4fd995eba4a5b07b088b2e832a02a2adcd46ee46f4eba79659bf51dba35e50f2","effect":"Connected pure assertion before any DB import/construction/connect. No scope_policy/manual table-existence fallback."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/integration/helpers/lifecycle-fixture.ts","changedLines":"1-10,24-33,47-49,63-66,293; final file 1-314","sha256":"a1e437d3fdf1b12b33c013bd231ec24f9c543380d687a56899628358db43c531","effect":"Unique UUID/field SHA256-derived 32-byte public Solana identities, not keypairs. Direct pure address imports replace broad shared barrel. Assertion before callback and cleanup DB dynamic import. Existing cleanup SQL unchanged; address selectors no longer name another fixture."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/integration/global-setup.ts","changedLines":"1-9 (remove static DB import and DB close path)","sha256":"4d5d9bbab7c53a8d04be364c08283871e8f814b534a77724a3cb95be81a3971f","effect":"Only calls connected pure schema guard; no DB construction even during module import."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/package28-isolation-preflight.ts","changedLines":"new 1-12","sha256":"6cc67a457aa57d3514358038fab1b3779ff60ca394adc4e1b37dcb3f8b4aef35","effect":"Preflight-only CLI with controlled refusal/exit1. Static inspection/compiler only; never executed."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts","changedLines":"new 1-166","sha256":"4b247f9984c3edbf8a51a91270820bd270d081020a227e32af6c30a6a6f787c7","effect":"52 pure/mock/static assertions: hostile endpoint/profile/namespace fixtures; no certificate enabling; AST root wiring; mocked DB import/query counts stay zero; lifecycle callback blocked."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/unit/package28-existing-isolation.test.ts","changedLines":"6-9,20-21; final file 1-45","sha256":"ef9e30332f6af183b0a62c9f2ef59340aa4c4826c32fd2bd44a487e98d802473","effect":"Explicit inert preflight mock only for cleanup selector seam, plus actual public-key 32-byte parsing. All four original test bodies retained, including unresolved chaos static failure."}
+  ],
+  "preserved": [
+    {"path":"/home/xahmie/Documents/SWAT/packages/db/src/ci-setup.ts","sha256":"e9e0cd12c8b76ad008c4faac982719efa1b3c0105d754943e211a705bdc73d13","reason":"Already pure disabled bootstrap. Existing safe policy test passed; no edit necessary."},
+    {"path":"/home/xahmie/Documents/SWAT/packages/db/src/migration-discovery.ts","sha256":"ed6b8a985ff9bbebd2936850ab72e395ab7a9a3995dc50e1ad97b84cf583838a","reason":"Unified core discovery preserved. Isolation preflight requires explicit core rather than changing migration owner compatibility."},
+    {"path":"/home/xahmie/Documents/SWAT/packages/db/src/client.ts","sha256":"4a2069cf92c48f40817af17c1ee2207ea40b02304f57047df1cdd63b4f5e0af0","reason":"Read for type/import safety; never executed or edited. Appears in noEmit transitive source manifest only."},
+    {"path":"/home/xahmie/Documents/SWAT/tests/integration/chaos.integration.test.ts","sha256":"7f2e441f876f22c10f7fd28a02c4857b39bb8b0c88377f92636f019d51d44e63","reason":"Destructive integration operations outside pure guard/fixture scope remain unchanged/unexecuted. Static historical red retained."},
+    {"path":"/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-existing-red.json","sha256":"9d8dc04232032d30b556cb27480e6a5ebbf7a495373528cfe101938286154ecf","reason":"Saved prior actual red retained unchanged: 4 failed, 0 passed, 1 actual test file; Vitest suite total2 is not file total. Historical command exit not freshly verified."}
+  ],
+  "checkPolicy": {
+    "allShellCommandsBegin": "taskset -c 0",
+    "lock": "/tmp/swat-package11-checks.lock",
+    "runner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "runnerSha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+    "runnerTimeoutSeconds": 240,
+    "bashTimeoutMilliseconds": 600000,
+    "nodeHeapMB": 512,
+    "vitest": "3.2.6; forks; min/max workers1; fileParallelism=false; maxConcurrency1",
+    "cliGrammar": "vitest run --config <absolute literal-manifest config>; no CLI filters/overrides",
+    "harness": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+    "harnessSha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+    "offlineGuardSha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "testSafetySha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+    "globalRunnerLedger": "Only mandated runner append to existing commands.jsonl occurred; no manual ledger mutation. Initial report-only extraction encountered an inherited blank/non-JSON line and exited1; subsequent read skipped malformed records without editing them."
+  },
+  "runs": [
+    {"label":"package28-isolation-recovery-20261114-red","kind":"actual fresh static pre-import red before source correction","exit":1,"files":1,"passed":0,"failed":1,"elapsedSeconds":7.52,"reportSha256":"016545b036747bf11d86a76ab51cad01b95aaeba39d630da9df185d66215307a","note":"Failed on actual root static imports dotenv/config and vitest/config. The test file later grew; red-stage test fingerprint was not captured. Raw actual red JSON/log retained."},
+    {"label":"package28-isolation-recovery-20261114-focused","kind":"initial green","exit":0,"files":1,"passed":51,"failed":0,"elapsedSeconds":5.82},
+    {"label":"package28-isolation-recovery-20261114-neighbor","kind":"safe exact neighbor manifest with unresolved static chaos red","exit":1,"files":5,"passed":74,"failed":1,"elapsedSeconds":14.871},
+    {"label":"package28-isolation-recovery-20261114-source-test-noemit","kind":"focused compiler red","exit":2,"elapsedSeconds":9.406,"note":"never assertion made retained mocked cleanup unreachable, TS2339/TS2351/TS2349/TS7031. Corrected public assertion contract to void without weakening unconditional runtime throw."},
+    {"label":"package28-isolation-recovery-20261114-source-test-noemit-green","kind":"focused compiler green","exit":0,"elapsedSeconds":8.129},
+    {"label":"package28-isolation-recovery-20261114-focused-final","kind":"final focused green","exit":0,"files":1,"passed":52,"failed":0,"elapsedSeconds":4.248,"reportSha256":"d7c9dc2c48c19e41d347ed0986cb0404812ce953d7319d55312135747e67dc77"},
+    {"label":"package28-isolation-recovery-20261114-neighbor-final","kind":"final exact neighbor manifest with unresolved static chaos red","exit":1,"files":5,"passed":74,"failed":1,"elapsedSeconds":7.616,"reportSha256":"c8fce5b93a2c6c6ca8485c3a40fe07e0827af6a22cadadf2adba9ca1e5e21b1f"},
+    {"label":"package28-isolation-recovery-20261114-source-test-noemit-final","kind":"final focused source+test compiler green","exit":0,"elapsedSeconds":7.683,"logSha256":"6f36012297520f2dde0014584dac7dc1fc87f218d36013f6073fcd53aaf5203a"},
+    {"label":"package28-isolation-recovery-20261114-safe-neighbor","kind":"clean separate literal safe neighbor manifest; does not supersede retained historical red","exit":0,"files":4,"passed":71,"failed":0,"elapsedSeconds":6.506,"reportSha256":"7e531938d7432d62e1a74ab5cb985863a4c52cfd887d32921f1772c3fd1138dd"}
+  ],
+  "evidenceNaming": "Every fresh run's absolute log is /home/xahmie/Documents/SWAT/threats/sequential-fixes/<label>.log; every Vitest raw actual report is the same prefix with .json. All labels unique. No inherited run artifact overwritten.",
+  "actualFinalManifests": {
+    "focused": [{"path":"/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts","passed":52,"failed":0}],
+    "neighbor": [
+      {"path":"/home/xahmie/Documents/SWAT/tests/unit/package28-existing-isolation.test.ts","passed":3,"failed":1},
+      {"path":"/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts","passed":52,"failed":0},
+      {"path":"/home/xahmie/Documents/SWAT/packages/db/src/database-policy.sequential.test.ts","passed":6,"failed":0},
+      {"path":"/home/xahmie/Documents/SWAT/packages/db/src/migrations.test.ts","passed":7,"failed":0},
+      {"path":"/home/xahmie/Documents/SWAT/packages/shared/src/address.test.ts","passed":6,"failed":0}
+    ],
+    "safeNeighbor": "Exactly neighbor manifest minus the complete historical isolation file: 71/4 passed; no test-name filtering. All final runs0 skipped/pending/todo. Runs overlap; totals are not summed.",
+    "remainingFailure": "package28 existing isolation regressions (pure database mock) chaos does not kill every PostgreSQL or Redis peer. Detects unchanged CLIENT KILL TYPE normal; missing application_name scoping remains too."
+  },
+  "compiler": {
+    "config": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114.typecheck.json",
+    "configSha256": "605eb6b3ac8c788db58b66c02dd1e00c7471a7547cd329aaf512b3b68c9b66cb",
+    "mode": "TypeScript5.9.3 strict ESNext/Bundler, targetES2022, noEmit, incremental=false, skipLibCheck=true, installed declaration aliases; source+test roots and transitive sources; no modules executed",
+    "command": "/home/xahmie/Documents/SWAT/node_modules/.bin/tsc --project /home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114.typecheck.json --noEmit --listFiles",
+    "actualFiles": 310,
+    "actualNonNodeModulesSources": 23,
+    "manifest": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-source-test-noemit-final.log",
+    "scope": "All changed TS sources/tests including root integration config and CLI were typechecked, never run. DB client/runtime/role/numeric are transitive compiler-only reads. Safe-neighbor config added after compiler final and not included; its imported harness and every selected test were covered.",
+    "notCertified": "Aliases/source Bundler noEmit do not certify deployed NodeNext, emitted dist, service launch, runtime TS loader or infrastructure. No root/full build."
+  },
+  "importSafety": [
+    "Preflight module has no static/dynamic/require imports or filesystem/network calls; AST check retained.",
+    "Root integration config and shell/CLI only statically read/AST/typechecked; never imported/executed by checks.",
+    "Schema helper and global setup now pure. Mocked DB factory is instrumented and not called on refusals; query/callback counters zero. Canonically valid declaration fixture still refuses at absent baseline before DB imports.",
+    "Lifecycle fixture loads node crypto and direct shared address/type/validation modules, not the side-effectful shared barrel. PublicKey only; no Keypair.generate/signing/keygen. DB dynamic import is behind preflight. Cleanup seam explicitly mocks both preflight and DB; that mock is not a schema certificate.",
+    "Reviewed safe neighbors: address uses pure address/validation; migrations uses filesystem reads/hash discovery only; policy test reads SQL/source and imports already-refusing ci-setup. No migration runner/client/service/Redis/actual integration test import.",
+    "Mandated runner synthetic env and offline net/credential-read preload retained; pg/ioredis test-safety retained. Mock safety is not a general live-infrastructure acceptance sandbox."
+  ],
+  "remainingGapsAndOwnerNeeds": [
+    "Full runtime/schema isolation remains unavailable. Missing independently generated clean canonical catalog bound exact unified migration digest/core profile; constraints/indexes/functions/triggers/RLS policies/roles/grants and actual installed catalog equality unverified. No baseline/certificate generated or accepted.",
+    "Endpoint syntax, explicit intent and namespace are declarations only, not proof of actual disposable PG/Redis ownership. All valid declarations still fail closed; no configuration can enable this source entrypoint.",
+    "Destructive chaos operations remain out of this pure-guard scope. Future owner must scope PostgreSQL disruption by proven run-specific application/backend identity and Redis by owned client identity; avoid all-peer kills. Static historical test intentionally remains failing.",
+    "Direct alternate config/import of unchanged integration files can construct DB modules without the root guard. This assignment contains the authorized script/root/schema/lifecycle entrypoints, not arbitrary CLI bypass or all integration files. Do not run any alternate integration path.",
+    "Lifecycle UUID-derived public fixtures and mocked cleanup values establish source isolation, not real two-run survival, full ownership-qualified database cleanup/RLS or integration fixture inventory acceptance.",
+    "ci-setup bootstrap remains disabled; migration-discovery legacy lp-to-core compatibility preserved. No DB clients, role policies, migration SQL/history or global ledger were modified to make tests pass.",
+    "No independent Standards/Spec agent review spawned, per instruction. Bounded author static review and pure tests only. Package28 is not closed; API limiter qualification untouched.",
+    "Actual integration suite/config/script, PG/Redis/services/containers, schema cleanup/connect, credentials/keygen/install/deploy and all Git commands were not run. No dist/service/runtime or infrastructure acceptance claimed."
+  ],
+  "evidenceConfigs": [
+    {"path":"/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-red.config.ts","lines":"new1-2","sha256":"68867edd11935b0c3a36892b7c89b8f47f23c3b76ea5b0e98e36c1a2af83d186"},
+    {"path":"/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-focused.config.ts","lines":"new1-2","sha256":"68867edd11935b0c3a36892b7c89b8f47f23c3b76ea5b0e98e36c1a2af83d186"},
+    {"path":"/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-neighbor.config.ts","lines":"new1-8","sha256":"394391ed212b2eafa8014f26addf67f620f46dab4a901d5ab5538848ac9008cd"},
+    {"path":"/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114-safe-neighbor.config.ts","lines":"new1-9","sha256":"0ac37d5ecaf462a200433938f0e9247a16fc386a2c3459ef52370edf19f89474"},
+    {"path":"/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-isolation-recovery-20261114.typecheck.json","lines":"new1-34","sha256":"605eb6b3ac8c788db58b66c02dd1e00c7471a7547cd329aaf512b3b68c9b66cb"}
+  ],
+  "evidenceVerification": {"label":"package28-isolation-recovery-20261114-evidence-verify","exit":0,"verifiedFingerprints":19,"note":"Read-only Python stdlib validation under same shared lock/runner verified source/preserved/config SHA256 values and JSON; measured compiler config34lines corrected from37 in report afterward. No source or evidence hash changed."},
+  "reportFormat": "Durable JSON report only. A Markdown report was not created under the higher-priority prohibition on writing report/summary/findings/analysis .md files."
+}

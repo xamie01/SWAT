@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@swat/shared": ["packages/shared/src/index.ts"],
+      "@swat/db": ["packages/db/src/index.ts"]
+    }
+  },
+  "files": [
+    "../../packages/db/src/polymarket-perps.ts",
+    "../../packages/db/src/package23-perps.sequential.test.ts",
+    "../../apps/api/src/routes/me.ts",
+    "../../apps/api/src/routes/package23-perps-close.sequential.test.ts"
+  ]
+}

@@ -12,17 +12,15 @@ import {
   beginWindDown,
   requestCloseAll,
   query,
-  recordExecutionGrant,
+  getWalletScoringReadiness,
   checkWalletClusterIndependence,
   checkWalletHubStatus,
   listAuthWallets,
   getPerpsInstruments,
   getPerpsAccount,
   getUserPerpsPositions,
-  upsertPerpsAccount,
-  upsertPerpsPosition,
-  recordPerpsOrder,
   closePerpsPosition,
+  PerpsCloseUnavailableError,
   type UserScope
 } from '@swat/db';
 import {
@@ -31,16 +29,16 @@ import {
   capabilitiesFor,
   chainSchema,
   createWalletBackfillJob,
-  EnvMasterKeyWrapper,
-  fetchClobCredentialsFromSignature,
   isValidAddressForChain,
   resolveChainAddress,
-  sealSecret,
   tierAllowsChain,
-  type Chain,
-  type WrapContext
+  type Chain
 } from '@swat/shared';
 import { requireUser } from '../auth/plugin.js';
+const perpsReducingCapability = () => ({
+  state: 'blocked-on-external-capability', supported: false,
+  unavailableReasons: ['authorized-reducing-execution-unavailable', 'provider-receipt-reconciliation-unavailable']
+});
 
 /**
  * Per-user routes (Stage 2).
@@ -141,24 +139,14 @@ export async function registerMeRoutes(
       [scope.userId]
     );
 
-    const defaultChains = [
-      { chain: 'solana', asset: 'USDC', balanceUsd: 0, balanceNative: 0 },
-      { chain: 'robinhood-chain', asset: 'USDC', balanceUsd: 0, balanceNative: 0 },
-      { chain: 'polygon', asset: 'USDC', balanceUsd: 0, balanceNative: 0 }
-    ];
-
-    const balances = balanceRows.length > 0
-      ? balanceRows.map((b) => ({
-          chain: b.chain,
-          asset: b.asset,
-          balanceUsd: b.usd != null ? Number(b.usd) : Number(b.amount || 0),
-          balanceNative: Number(b.amount || 0),
-          updatedAt: b.fetched_at ? new Date(b.fetched_at).toISOString() : new Date().toISOString()
-        }))
-      : defaultChains.map((d) => ({
-          ...d,
-          updatedAt: new Date().toISOString()
-        }));
+    const balances = balanceRows.map((b) => ({
+      chain: b.chain,
+      asset: b.asset,
+      balanceUsd: b.usd != null ? Number(b.usd) : null,
+      valuationAssessment: b.usd != null ? 'observed-runtime-unverified' : 'unassessed',
+      balanceNative: Number(b.amount),
+      updatedAt: b.fetched_at ? new Date(b.fetched_at).toISOString() : null
+    }));
 
     const subscriptions = await query<{
       wallet_address: string;
@@ -285,36 +273,19 @@ export async function registerMeRoutes(
     });
   });
 
-  app.post('/v1/me/positions/:id/exit', async (request, reply) => {
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-    const { id } = request.params as { id: string };
-
-    const updated = await query<{ id: string }>(
-      `UPDATE copy_positions SET confirmed_quantity = 0 WHERE id = $1 AND user_id = $2 AND confirmed_quantity > 0 RETURNING id`,
-      [id, scope.userId]
-    );
-    if (updated.length === 0) {
-      return reply.code(409).send({ error: 'Position not found, already closed, or confirmed quantity is zero' });
-    }
-
-    return reply.send({ success: true, message: 'Position exit confirmed and closed in local state', positionId: id });
-  });
-
-  app.post('/v1/me/positions/close-all', async (request, reply) => {
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-
-    const updated = await query<{ id: string }>(
-      `UPDATE copy_positions SET confirmed_quantity = 0 WHERE user_id = $1 AND confirmed_quantity > 0 RETURNING id`,
-      [scope.userId]
-    );
-    return reply.send({
-      success: true,
-      closedCount: updated.length,
-      message: `${updated.length} open position(s) closed successfully in local state`
+  // A local quantity update is not a financial exit. No authorized canonical
+  // reducing handoff and receipt settlement is available at these entry points.
+  const unavailablePositionExit = async (request: FastifyRequest, reply: FastifyReply) => {
+    reply.header('Cache-Control', 'no-store');
+    if (!requireUser(request, reply)) return;
+    return reply.code(503).send({
+      code: 'POSITION_EXIT_UNAVAILABLE', supported: false,
+      unavailableReasons: ['authorized-reducing-handoff-unavailable', 'provider-receipt-reconciliation-unavailable'],
+      message: 'Financial exit is unavailable here. Exposure was not changed and no order was queued.'
     });
-  });
+  };
+  app.post('/v1/me/positions/:id/exit', unavailablePositionExit);
+  app.post('/v1/me/positions/close-all', unavailablePositionExit);
 
   // ─── Non-Custodial Vault & Custody Status ────────────────────────────────────
   app.get('/v1/me/vault', async (request, reply) => {
@@ -346,12 +317,16 @@ export async function registerMeRoutes(
     return reply.send({
       solana: {
         pdaAddress: null, rentLamports: null, solGasReserve: null, solGasUsd: null,
-        solMinGasUsd: null, hasMinimumGas: false, status: 'unsupported', executionSupported: false
+        solMinGasUsd: null, hasMinimumGas: false, status: 'unsupported', executionSupported: false,
+        capabilityState: 'blocked-on-external-capability',
+        unavailableReasons: ['deployed-authority-verification-unavailable', 'authorized-live-executor-unavailable']
       },
       robinhood: {
         smartAccountAddress: null,
         accountAddress: authWallets.find((w) => w.chainKind === 'evm')?.address ?? null,
         sessionKeyStatus: 'unsupported', executionSupported: false,
+        capabilityState: 'intentionally-unavailable',
+        unavailableReasons: ['deployed-delegation-implementation-unavailable', 'authorized-live-executor-unavailable'],
         expiresAt: null, sponsoredOpsUsedToday: 0, dailyCap: 0
       },
       polymarket: {
@@ -527,52 +502,16 @@ export async function registerMeRoutes(
       if (recovered.toLowerCase() !== address.toLowerCase()) return reply.code(403).send({ error: 'invalid-signer-proof' });
     } catch { return reply.code(403).send({ error: 'invalid-signer-proof' }); }
 
-    try {
-      // 1. Call Polymarket CLOB to create or derive L2 credentials using the user's signature
-      const creds = await fetchClobCredentialsFromSignature({
-        address,
-        signature,
-        timestampSeconds,
-        nonce
-      });
-
-      // 2. Envelope-seal the credentials
-      const wrapper = new EnvMasterKeyWrapper();
-      const wrapContext: WrapContext = {
-        userId: scope.userId,
-        chainKind: 'evm',
-        keyVersion: 1
-      };
-      const secretPayload = JSON.stringify({
-        apiKey: creds.apiKey,
-        secret: creds.secret,
-        passphrase: creds.passphrase,
-        signerAddress: address.toLowerCase()
-      });
-      const sealedSecret = await sealSecret(secretPayload, wrapContext, wrapper);
-
-      const grant = await recordExecutionGrant(scope, {
-        chain: 'polygon', grantKind: 'polymarket_signer', accountAddress: address,
-        sealedSecret, keyVersion: 1,
-        scopePolicy: { derivedAt: new Date().toISOString(), nonce, authorizationOnly: true }
-      }, { replace: true });
-
-      return reply.send({
-        success: true,
-        grantId: grant.id,
-        address,
-        credentialsRecorded: true,
-        localOnly: true, executionSupported: false,
-        message: 'Polymarket L2 credentials recorded locally. No on-chain deposit wallet or live execution was established.'
-      });
-    } catch (err: any) {
-      if (err?.name === 'ExecutionGrantConflictError') return reply.code(409).send({ error: 'grant-conflict', message: 'Grant replacement rejected; previous grant preserved.' });
-      request.log.error(err, '[polymarket-clob] Failed to derive credentials');
-      return reply.code(400).send({
-        error: 'Polymarket L2 authentication failed',
-        message: 'Failed to authenticate with Polymarket CLOB', requestId: request.id
-      });
-    }
+    // No separately authorized wrap-only service or durable resource-context
+    // writer exists. Do not acquire external credentials that cannot be safely
+    // recorded, or reconstruct a symmetric wrapper in this API process.
+    return reply.code(503).send({
+      error: 'credential-sealing-unavailable',
+      code: 'CREDENTIAL_SEALING_UNAVAILABLE',
+      credentialsRecorded: false,
+      executionSupported: false,
+      message: 'Credential enrollment is unavailable: separately authorized wrapping and durable resource binding are not configured.'
+    });
   });
 
   // ─── Suggested Alpha Masters Discovery ───────────────────────────────────────
@@ -1065,15 +1004,9 @@ export async function registerMeRoutes(
       getUserPerpsPositions(scope.userId, 'open')
     ]);
     return reply.send({
-      account: account ?? {
-        user_id: scope.userId,
-        total_account_value: '0',
-        available_order_margin: '0',
-        total_initial_margin: '0',
-        total_maintenance_margin: '0',
-        withdrawable: '0',
-        in_liquidation: false
-      },
+      account,
+      accountAssessment: account ? 'observed-runtime-unverified' : 'unassessed',
+      reducingExecution: perpsReducingCapability(),
       positions
     });
   });
@@ -1082,11 +1015,18 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
     const { id } = request.params as { id: string };
-    const success = await closePerpsPosition(id, scope.userId);
-    if (!success) {
+    try {
+      await closePerpsPosition(id, scope.userId);
       return reply.code(404).send({ error: 'Position not found or already closed' });
+    } catch (error) {
+      if (!(error instanceof PerpsCloseUnavailableError)) throw error;
+      return reply.code(503).send({
+        code: error.code,
+        supported: false,
+        reducingExecution: perpsReducingCapability(),
+        message: error.message
+      });
     }
-    return reply.send({ success: true, positionId: id, status: 'closed' });
   });
 }
 

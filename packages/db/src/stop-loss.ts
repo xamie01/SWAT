@@ -1,4 +1,5 @@
 import type { Chain } from '@swat/shared';
+import type { CopyExecutionRecord } from './copy-trade-lifecycle.js';
 import { query } from './client.js';
 
 /**
@@ -31,6 +32,11 @@ export interface OpenPositionSnapshot {
   userId: string | null;
   /** Stable master-lot identity; absent for legacy aggregate rows. */
   positionKey?: string | null;
+  /** Exact lot wire quantity and immutable acquisition scope; never inferred from a number. */
+  openQuantityExact?: string;
+  masterWalletAddress?: string;
+  targetAccount?: string;
+  acquisitionExecutionMode?: CopyExecutionRecord['executionMode'];
   tokenMint: string;
   chain: Chain;
   openQuantity: number;
@@ -83,6 +89,9 @@ export interface StopLossClaimInput {
  * second scorer process cannot queue a duplicate sell.
  */
 export async function claimStopLossTrigger(input: StopLossClaimInput): Promise<boolean> {
+  if (input.positionKey !== undefined && input.positionKey !== null && input.positionKey !== '') {
+    throw new Error('A lot stop-loss requires a canonical lot exit, not a signal trigger claim');
+  }
   const rows = await query<{ signal_id: string }>(
     `INSERT INTO signal_stop_losses (
        account, signal_id, chain, token_mint,

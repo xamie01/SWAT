@@ -39,6 +39,8 @@ describe('chain-aware scoring queries', () => {
     expect(sql.match(/\.chain = \$2/g)).toHaveLength(3);
     expect(values).toEqual(['polygon:0xabc', 'polygon']);
     expect(metrics).toEqual({
+      assessment: 'unassessed',
+      assessmentReason: 'source-economics-and-control-unverified',
       chain: 'polygon',
       winRate: 0.75,
       realizedRoi: 0.2,
@@ -57,6 +59,8 @@ describe('chain-aware scoring queries', () => {
     }]);
 
     await expect(getWalletMetrics('polygon:0xabc', 'polygon')).resolves.toEqual({
+      assessment: 'unassessed',
+      assessmentReason: 'source-economics-and-control-unverified',
       chain: 'polygon',
       winRate: 0.75,
       realizedRoi: 0.2,
@@ -102,13 +106,14 @@ describe('chain-aware scoring queries', () => {
     expect(vi.mocked(client.query).mock.calls[0]?.[0]).toContain('SELECT w.address, w.chain');
   });
 
-  it('preserves chain identity while deleting pruned wallets', async () => {
+  it('does not cascade-delete from unverified diagnostic metrics', async () => {
     vi.mocked(client.query).mockResolvedValue([
       { address: 'polygon:0xabc', chain: 'polygon' }
     ]);
 
-    await expect(pruneUnprofitableBigBuyers()).resolves.toBe(1);
-    expect(deleteWalletCascade).toHaveBeenCalledWith('polygon:0xabc', 'polygon');
+    await expect(pruneUnprofitableBigBuyers()).resolves.toBe(0);
+    expect(client.query).not.toHaveBeenCalled();
+    expect(deleteWalletCascade).not.toHaveBeenCalled();
   });
 });
 

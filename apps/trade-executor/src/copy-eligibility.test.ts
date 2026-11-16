@@ -8,6 +8,7 @@ vi.hoisted(() => {
 });
 
 import type { CopyEligibilityFacts } from '@swat/db';
+import type { ExecutionPolicyInput } from './policy.js';
 import {
   COPY_ELIGIBILITY_ACCOUNT,
   enforceCopyEligibility,
@@ -63,6 +64,67 @@ describe('enforceCopyEligibility', () => {
     expect(decision.allowed).toBe(true);
     expect(recordRejection).not.toHaveBeenCalled();
   });
+
+  it('does not strand a scoped owned exit when its source is paused and has lost entry activity', async () => {
+    const scope = {
+      account: 'operator', chain: 'solana' as const, tokenMint: 'solana:TOKEN',
+      masterWalletAddress: 'solana:WALLET'
+    };
+    const snapshot = {
+      scope, policyId: 'subscription-1', revision: 'revision-1', mode: 'paper' as const,
+      mirrors: 'sells-only' as const, autoExecute: true, killed: false, maxSlippageBps: 50
+    };
+    const input = {
+      ...signal,
+      policy: {
+        scope, direction: 'sell' as const, score: 10, minimumScore: 80,
+        platformMode: 'live' as const, queued: snapshot, current: snapshot,
+        ownedExit: {
+          scope, lotId: 'lot-1', availableQuantity: '4', requestedQuantity: '2',
+          acquisitionMode: 'paper' as const, maxSlippageBps: 50
+        }
+      }
+    };
+    const decision = await enforceCopyEligibility(input, deps({
+      loadFacts: async () => ({
+        ...facts({ walletStatus: 'paused', clusterSelected: false, walletTradeCount: 0, sourceActivityUsd: 0 }),
+        tokenMint: scope.tokenMint, direction: 'sell' as const
+      })
+    }));
+    expect(decision.allowed).toBe(true);
+  });
+
+  it.each(['stopped', 'stale', 'wrong-token', 'wrong-side', 'wrong-master', 'unowned'] as const)(
+    'retains source/policy fencing for a reducing exit when %s', async condition => {
+      const scope = {
+        account: 'operator', chain: 'solana' as const, tokenMint: 'solana:TOKEN', masterWalletAddress: 'solana:WALLET'
+      };
+      const snapshot = {
+        scope, policyId: 'subscription-1', revision: 'revision-1', mode: 'paper' as const,
+        mirrors: 'sells-only' as const, autoExecute: true, killed: false, maxSlippageBps: 50
+      };
+      const policy: ExecutionPolicyInput = {
+        scope, direction: 'sell', score: 10, minimumScore: 80, platformMode: 'live',
+        queued: snapshot, current: { ...snapshot, killed: condition === 'stopped' },
+        ownedExit: condition === 'unowned' ? null : {
+          scope, lotId: 'lot-1', availableQuantity: '4', requestedQuantity: '2',
+          acquisitionMode: 'paper', maxSlippageBps: 50
+        }
+      };
+      const decision = await enforceCopyEligibility({ ...signal, policy }, deps({
+        loadFacts: async () => ({
+          ...facts({
+            walletStatus: 'paused', clusterSelected: false, sourceActivityUsd: 0, walletTradeCount: 0,
+            eventAt: condition === 'stale' ? new Date('2026-08-01T11:30:00Z') : facts().eventAt,
+            walletAddress: condition === 'wrong-master' ? 'solana:OTHER' : scope.masterWalletAddress
+          }),
+          tokenMint: condition === 'wrong-token' ? 'solana:OTHER' : scope.tokenMint,
+          direction: condition === 'wrong-side' ? 'buy' as const : 'sell' as const
+        })
+      }));
+      expect(decision.allowed).toBe(false);
+    }
+  );
 
   it('measures activity over the configured lookback window', async () => {
     const loadFacts = vi.fn(async () => facts());

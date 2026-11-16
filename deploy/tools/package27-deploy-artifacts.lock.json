@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "approval": "pending",
+  "runtimeImage": null,
+  "tool": {
+    "name": "vercel",
+    "version": "65.11.0",
+    "entrypoint": "node_modules/vercel/dist/index.js",
+    "files": []
+  },
+  "artifact": {
+    "files": []
+  }
+}

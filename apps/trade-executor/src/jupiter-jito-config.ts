@@ -5,7 +5,7 @@ import {
   createRedisJupiterJitoStore,
   type JupiterJitoRuntime
 } from './jupiter-jito-runtime.js';
-import { createSolanaSignerFromEnvironment, type SolanaSigner } from './solana-signer.js';
+import { createSolanaSignerFromEnvironment, SOLANA_SIGNING_UNAVAILABLE, type SolanaSigner } from './solana-signer.js';
 
 /**
  * Environment wiring and live-readiness gate for the Jupiter + Jito path
@@ -93,7 +93,7 @@ export function createJupiterJitoRuntimeFromEnvironment(
 ): { runtime: JupiterJitoRuntime; signer: SolanaSigner } | null {
   const environmentSigner = createSolanaSignerFromEnvironment();
   if (!environmentSigner) {
-    setJupiterJitoUnavailable('SOLANA_PRIVATE_KEY or an RPC URL is not configured');
+    setJupiterJitoUnavailable(SOLANA_SIGNING_UNAVAILABLE);
     return null;
   }
 

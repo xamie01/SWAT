@@ -138,6 +138,44 @@ describe('confirmed Polymarket trade parsing', () => {
 });
 
 describe('Polymarket market context parsing', () => {
+  const requiredContext = {
+    conditionId: CONDITION_ID, question: 'Fixture', endDate: '2026-08-01T00:00:00Z',
+    outcomes: ['Yes', 'No'], clobTokenIds: [TOKEN_YES, TOKEN_NO],
+    active: true, closed: false, acceptingOrders: true, negRisk: false, orderPriceMinTickSize: '0.01'
+  };
+
+  it.each([
+    { active: undefined }, { active: 'true' }, { closed: undefined }, { closed: 'false' },
+    { acceptingOrders: undefined }, { acceptingOrders: null }
+  ])('refuses absent or malformed explicit lifecycle evidence %j', override => {
+    expect(() => parsePolymarketMarketContext({ ...requiredContext, ...override }, CONDITION_ID)).toThrow();
+  });
+
+  it('retains unknown resolution without inventing unresolved and normalizes explicit CLOB order state', () => {
+    const context = parsePolymarketMarketContext({ ...requiredContext,
+      acceptingOrders: undefined, accepting_orders: false
+    }, CONDITION_ID);
+    expect(context).toMatchObject({ active: true, closed: false, acceptingOrders: false, resolutionStatus: 'unknown' });
+  });
+
+  it.each([
+    { condition_id: `0x${'d'.repeat(64)}` }, { condition_id: null },
+    { neg_risk: true }, { neg_risk: 'false' },
+    { minimumTickSize: '0.02' }, { minimumTickSize: ['0.01'] },
+    { minimum_tick_size: null }, { accepting_orders: false }, { accepting_orders: 'true' },
+    { end_date: '2027-08-01T00:00:00Z' }, { end_date_iso: null }
+  ])('rejects every conflicting or malformed supported metadata alias %j', override => {
+    expect(() => parsePolymarketMarketContext({ ...requiredContext, ...override }, CONDITION_ID)).toThrow();
+  });
+
+  it('accepts canonical-equivalent supported metadata aliases without losing explicit state', () => {
+    expect(parsePolymarketMarketContext({ ...requiredContext,
+      condition_id: CONDITION_ID.toUpperCase(), neg_risk: false,
+      minimumTickSize: '1e-2', minimum_tick_size: '0.0100', accepting_orders: true,
+      end_date: '2026-08-01T00:00:00.000Z', end_date_iso: '2026-08-01T01:00:00+01:00'
+    }, CONDITION_ID)).toMatchObject({ conditionId: CONDITION_ID, negRisk: false, tickSize: 0.01, acceptingOrders: true });
+  });
+
   it('maps JSON-encoded outcomes to full token IDs and required market state', () => {
     const context = parsePolymarketMarketContext({
       conditionId: CONDITION_ID,
@@ -181,6 +219,7 @@ describe('Polymarket market context parsing', () => {
       clobTokenIds: JSON.stringify([TOKEN_YES, TOKEN_NO]),
       active: true,
       closed: false,
+      acceptingOrders: true,
       negRisk: false,
       orderPriceMinTickSize: 0.01,
       ...override

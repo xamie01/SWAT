@@ -1,0 +1,80 @@
+{
+  "metadata": {
+    "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts": {
+      "sha256": "236a79587af6edd684d00878c985fc81e1a7e0e9a0d601b9dcd66d9fa6fbcaed",
+      "size": 2030,
+      "mtime_ns": 1793960881890033306,
+      "inode": 4092327
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.test.ts": {
+      "sha256": "738619bc5d3cb27cb00534b2fb4c288efe35fa38378da3633575e94e0b298c47",
+      "size": 4014,
+      "mtime_ns": 1785876204752171152,
+      "inode": 4064161
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.test.ts": {
+      "sha256": "8fd094963d8d07c95a63bab3bc5c3816ef0b8b1f05f5688b91c609bdf46dfc68",
+      "size": 6013,
+      "mtime_ns": 1793960882040031638,
+      "inode": 4089032
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts": {
+      "sha256": "9ad98edb8a4ce646c8ce7f7f98408bf78d0d42416aaa29369619662efc3e8197",
+      "size": 4086,
+      "mtime_ns": 1794614494549991166,
+      "inode": 4064375
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts": {
+      "sha256": "c5370deed0a7973c9c898f7dea07fc24449b0fe97b7b84c2e0a7aa03a4c96669",
+      "size": 21313,
+      "mtime_ns": 1794676434253593223,
+      "inode": 4088703
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.ts": {
+      "sha256": "1503ec2a14148b390c441abd6dc2317456522b976365c5e11b06e734646f303e",
+      "size": 5218,
+      "mtime_ns": 1794615285875504429,
+      "inode": 4064210
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.ts": {
+      "sha256": "3105fca7aaa38a53897918ea8b02fe862438a4dccc41d2cc59fd75852d863e74",
+      "size": 16282,
+      "mtime_ns": 1794676345683831334,
+      "inode": 4092309
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.ts": {
+      "sha256": "bd37c987c645739c4d393c12bfb94c7e12946817e41d65c798750206d444fb7f",
+      "size": 2893,
+      "mtime_ns": 1785876204753171255,
+      "inode": 4064162
+    },
+    "/home/xahmie/Documents/SWAT/packages/db/src/close-all.ts": {
+      "sha256": "3f917c1aba607b538d13b2986d157d11d5536906fa74626d5d17b8b0988a0259",
+      "size": 5508,
+      "mtime_ns": 1794614877628922024,
+      "inode": 4096066
+    },
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-acquisition-recovery-20261114-neighbors.config.ts": {
+      "sha256": "d3163a415cadfbb6550b0f3836665117ce1eb0274a432452cfba293730fce07f",
+      "size": 323,
+      "mtime_ns": 1794679997788959513,
+      "inode": 5541763
+    }
+  },
+  "importsReviewedBeforeExecution": true,
+  "manifest": [
+    "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/pnl-math.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/stop-loss.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts",
+    "/home/xahmie/Documents/SWAT/packages/db/src/pnl-queries.test.ts"
+  ],
+  "qualification": {
+    "allocator": "lot-allocation has type-only pg/shared/lifecycle imports; pure allocator executes, no lifecycle import",
+    "pnlmath": "pure math no runtime imports",
+    "stoploss": "client query mocked; shared/lifecycle type-only imports",
+    "package14": "client mocked, complete shared fetchTokenPriceUsd/isChain facade, close-all/pnl/stoploss/allocator safe actual modules",
+    "pnl": "client mocked, shared fetchTokenPriceUsd/isChain mocked, pure pnl math; stoploss snapshot type-only import",
+    "excluded": "Full old lifecycle suite not independently import-qualified or executed. No DB/network/service execution."
+  }
+}

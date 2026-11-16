@@ -1,0 +1,106 @@
+{
+  "reportId": "package15-lot-claim-recovery-20261114",
+  "status": "bounded-source-corrected-mocked-green-runtime-blocked",
+  "repository": "/home/xahmie/Documents/SWAT",
+  "scope": {
+    "sourceCorrections": [
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+      "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts"
+    ],
+    "newRegression": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts",
+    "existingTestsEdited": [],
+    "noWholeLifecycleRefactor": true,
+    "inheritedDirtySourcePreserved": true,
+    "noGitCommands": true,
+    "noGlobalLedgerOrOtherOwnerEvidenceEdits": true
+  },
+  "contractAndAudit": [
+    {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md", "lines": "23-36", "requirement": "package14/15 same-client master availability and DB-proved replay scope"},
+    {"path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/ledger.json", "lines": "385-422", "ids": ["PF-EXE-04", "PF-EXE-05", "PF-EXE-09", "SIG-03", "SIG-04", "PF-EXE-06", "SIG-02"]},
+    {"path": "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/execution-review.md", "lines": "53-58,68-70,93-95,149-154", "finding": "No-lot aggregate fallback, outstanding master reservations, exit scope/mode identity"},
+    {"path": "/home/xahmie/Documents/SWAT/docs/adr/0007-master-attributed-inventory.md", "lines": "35-38,58-68,94-120,138-158", "qualification": "ADR requires broader coherent dual-ledger/runtime integration; NOT closed by this work"},
+    {"path": "/home/xahmie/Documents/SWAT/docs/adr/0001-tenancy-key.md", "lines": "44-77", "requirement": "user_id distinct from settlement target; null is operator"},
+    {"path": "/home/xahmie/Documents/SWAT/packages/db/sql/058_copy_position_lots.sql", "lines": "7-33,62-91", "reviewOnly": true},
+    {"path": "/home/xahmie/Documents/SWAT/packages/db/sql/061_copy_position_lot_exits.sql", "lines": "3-42,53-71", "reviewOnly": true}
+  ],
+  "corrections": [
+    {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "1208-1320,1513-1750", "description": "requestCopyExecution and claimSourceSignalForCopyExecution now invoke actual getMasterSellAvailabilityWithClient on their transaction PoolClient before reservation INSERT. Removed both legacy master_lots aggregate fallbacks and Number(executionBase). Canonical advisory key precedes source replay execution-row locking. Source fraction/position evidence and unavailable verifier fence preserved."},
+    {"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts", "lines": "1374-1500", "description": "Explicit claim discovers only a lock key, then locks actual position and reloads actual lot/acquisition/source provenance, refusing missing/changed scope. No ensure/create position fallback. Existing replay JOINs actual lot, position, buy acquisition and buy source; SQL payload boolean checks master/account/tenant/chain/token/signal/mode/origin/trigger and exact NUMERIC equality. Replays precede availability to avoid charging their own reservation twice. New explicit claims invoke same-client availability and insert its exact string as requested/reserved quantity before history/rebuild."},
+    {"path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts", "lines": "6-9,92-227", "description": "Exact positive plain decimal string validation bounded to256characters. Implicit full quantity allowed only with identified explicit lot. Canonical advisory [targetAccount,chain,tokenMint,userId], position FOR UPDATE and ordered master lots FOR UPDATE. Empty held rows refuse. Acquisition/source joins make untrusted provenance visible rather than hiding corrupt lots. Pending explicit exits prove acquisition/source/mode/origin; invalid attribution becomes unscoped and blocks. All arithmetic remains SQL NUMERIC with text outputs."}
+  ],
+  "conservativeRefusals": [
+    "Missing position, held lots, lot/acquisition/source identity, or availability decision refuses rather than selling aggregate legacy inventory.",
+    "Same-master source versus explicit reservations, repeated same-lot claims, and mixed acquisition modes are blocked because no trustworthy per-lot reservation allocations schema exists.",
+    "Unattributed active/nonzero-reserved sells block; terminal rows with positive retained liability remain counted. Master pending totals are subtracted while aggregate availability is independently bounded.",
+    "Numeric requested base authority at these reservation boundaries now refuses; exact strings are required. Legacy quote/financial evidence/post-fill number arithmetic was not globally refactored.",
+    "Source confirmation verifier remains false. Actual source request/claim tests exercise refusal; wiring behind the false fence is structural source checking, not a fabricated success-path authorization capability.",
+    "A canonical reservation is not current-policy authorization, a venue order, a successful close, or economic completion. None is claimed."
+  ],
+  "checks": [
+    {"label": "package15-lot-claim-recovery-20261114-red-a", "kind": "fresh-pre-source-correction-regression", "exit": 1, "actualFiles": 1, "total": 31, "passed": 7, "failed": 24, "pending": 0, "todo": 0, "manifest": ["/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts"], "result": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-red-a.json", "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-red-a.log", "loadBearingRed": "Actual claim resolved instead of rejecting master-unavailable/overlapping decisions; unequal precise replay quantities collided as Number and were accepted."},
+    {"label": "package15-lot-claim-recovery-20261114-green-b", "kind": "post-source-correction", "exit": 0, "actualFiles": 1, "total": 31, "passed": 31, "failed": 0, "pending": 0, "todo": 0, "manifest": ["/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts"], "result": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-green-b.json"},
+    {"label": "package15-lot-claim-recovery-20261114-neighbors-c", "kind": "retained-reviewed-neighbors", "exit": 1, "actualFiles": 4, "total": 66, "passed": 65, "failed": 1, "pending": 0, "todo": 0, "manifest": [{"path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.sequential.test.ts", "passed": 25}, {"path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts", "passed": 4}, {"path": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts", "passed": 5, "failed": 1}, {"path": "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts", "passed": 31}], "result": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-neighbors-c.json", "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-neighbors-c.log", "outOfScopeFailure": "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts:40 mark-to-market lot snapshot lacks openQuantityExact/masterWalletAddress/targetAccount/acquisitionExecutionMode. PNL producer correction separately assigned by coordinator; no test weakening or PNL edit here."},
+    {"label": "package15-lot-claim-recovery-20261114-source-test-noemit-d-640", "kind": "focused-compiler-red", "exit": 2, "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-source-test-noemit-d-640.log", "diagnostic": "New fixture reservations helper erased values property, TS2339 at test:89. Corrected helper input type; no production type loosening."},
+    {"label": "package15-lot-claim-recovery-20261114-final-green-e", "kind": "final-owned-regression", "exit": 0, "actualFiles": 1, "total": 32, "passed": 32, "failed": 0, "pending": 0, "todo": 0, "manifest": ["/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts"], "result": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-final-green-e.json", "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-final-green-e.log", "changesSinceFirstGreen": "Complete inert execution fixture fields, explicit null-operator scope assertion, source advisory lock before replay row lock, SQL mixed pending mode IS DISTINCT FROM."},
+    {"label": "package15-lot-claim-recovery-20261114-source-test-noemit-f-640", "kind": "final-focused-source-and-test-compiler", "exit": 0, "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-source-test-noemit-f-640.log", "config": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.typecheck.json", "sourceAlias": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts", "module": "ESNext", "moduleResolution": "Bundler", "qualification": "noEmit, no incremental/build; real source reexports types/address/copy lifecycle, no declaration stubs; compiler traversal includes real client/transaction/quote dependencies but executes no application imports. Not whole workspace or package14 producer compile."}
+  ],
+  "executionSafety": {
+    "everyShellPrefix": "taskset -c 0",
+    "allTestsAndCompilersSharedLock": "/tmp/swat-package11-checks.lock",
+    "runner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "bashTimeoutMs": 600000,
+    "runnerChildTimeoutSeconds": 240,
+    "testsNodeHeapMB": 512,
+    "focusedCompilerNodeHeapMB": 640,
+    "compilerLabelsEnd640": true,
+    "workers": 1,
+    "pool": "forks",
+    "fileParallelism": false,
+    "literalExistingCreatePackageConfigListsOnly": true,
+    "cliFilters": false,
+    "configs": ["/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.config.ts", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-neighbors.config.ts"],
+    "importsReviewedBeforeExecution": "New actual lifecycle regression mocks ./client.js and ./transaction.js and uses complete inert @swat/shared facade; real lot helper plus quote valuation have only type imports/pure functions. Existing lifecycle sequential mocks client and transaction; shared source barrel/dependencies reviewed and global pg/ioredis setup mocks plus outbound/credential guard remain. Existing package14 mocks client/shared price; close-all/stop-loss/PnL modules read and real price not called. Allocator pure tests have type-only lifecycle dependency. No unsafe historical service/worker suite selected.",
+    "notPerformed": ["DB connect/query", "services", "Redis", "network", "credential access", "signing", "key generation", "financial actions", "migration application", "deploy", "install", "Git", "cleanup", "historical repair", "broad builds", "nested agents"]
+  },
+  "fingerprints": {
+    "preCorrectionSourceSha256": {
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts": "2af2c4a2336eee110accde7740489dd8549af8b2a379eede85bb98ac2ba7b683",
+      "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts": "601c65b0480cc222c10f45f291ccd0209f737afc889fa16a932d1930efeb3fff"
+    },
+    "finalSha256": {
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59",
+      "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts": "785dacfb948032b97a7ce3f791b9ba6f0404ef5e52479b292c574dfa678a96a5",
+      "/home/xahmie/Documents/SWAT/packages/db/src/package15-lot-claim-recovery.sequential.test.ts": "8b33ce3c81733b6429af60d201884b3fc235632edd36c0feecb8d949cbec8966",
+      "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.test.ts": "236a79587af6edd684d00878c985fc81e1a7e0e9a0d601b9dcd66d9fa6fbcaed",
+      "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.sequential.test.ts": "4126d97f186a815abd3a5cfe8d1f622fd84c6c85e99d136c0803b54195404c99",
+      "/home/xahmie/Documents/SWAT/packages/db/src/package14-exits.sequential.test.ts": "9ad98edb8a4ce646c8ce7f7f98408bf78d0d42416aaa29369619662efc3e8197",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.config.ts": "fb546e90741347a5f8e5167e88fc8fe8566cf9eee79a1552a503a81a82914035",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114-neighbors.config.ts": "e24ed208d92cad7601c1fc269b0807c13aa6771632db046d2888ad5232da35aa",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.typecheck.json": "249e52d21de5186f4a00db273f4e8f11cb0f23d4b502ed62b3897b413cde4709",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts": "6d0095d2adc3fdbe7db2b472821fe8a19e141121bd6385b3e37d18bdff40bb19",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930"
+    },
+    "qualification": "Final fingerprints sampled after final green and compiler; existing selected tests/historical harness untouched by this owner. Red/first-green/neighbors used31 tests; final added1 null-operator assertion and fixture type/data corrections. No pre-red test fingerprint captured; do not treat final test hash as the red test snapshot."
+  },
+  "review": {
+    "standards": "Bounded local review against ADR0001/0007: tenant/settlement distinction, exact master inventory, canonical lock topology, no aggregate fallback, no fake schema respected at owned reservation seam. Full ADR0007 economic integration remains open. Small repeated join predicates are intentional explicit trust checks; no whole-module abstraction/refactor added.",
+    "spec": "Bounded owned availability/reservation/replay contract implemented. Source success branches structurally checked behind permanent false verifier. No worker/trade/global barrel or PNL source changes. Runtime and producer scope excluded rather than made green by weakening tests.",
+    "qualification": "Local two-axis review only; no independent spawned reviewers or Git diff invoked due explicit task constraints."
+  },
+  "pendingGates": [
+    "Separately owned PNL mark-to-market lot snapshot producer gap retained as neighbors-c failure at package14 test:40; coordinator assigned correction separately.",
+    "Actual worker DB-loaded exit scope/master/account/acquisition-mode validation and current tenant/operator policy/kill/authority recheck before simulation/venue/signing; immutable master absent from CopyExecutionRecord and must stay DB-joined, never inferred from queued payload.",
+    "Source confirmation verifier remains unavailable at lifecycle:286; no historical confirmed labels promoted into trading authority.",
+    "Full exact per-lot allocations, aggregate/master concurrent fill settlement, evidence/trade/fee/capacity atomic commit and durable recovery before acknowledgment remain outside these claim-boundary corrections.",
+    "Installed schema/RLS roles/tenant context and transaction authorization are not verified; missing trustworthy schema/data must refuse. No proposal schema or capability fabricated/applied.",
+    "Submitted/ambiguous/partial exit reconciliation and terminal economic history coherence, source-specific unmatched reductions, manual aggregate/redemption races remain pending integration.",
+    "Database concurrency/SQL arithmetic/schema execution and full end-to-end economic runtime tests NOT run or certified; mocked fixtures execute actual TypeScript lifecycle but return selected query results, not PostgreSQL semantics.",
+    "Historical attribution, potentially incompatible acquired lots and old reservation repair are untouched; no cleanup/backfill/history repair."
+  ],
+  "deliverable": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.report.json",
+  "markdownReport": null,
+  "markdownQualification": "Separate Markdown report not written: governing agent instructions prohibit report/summary/findings Markdown files. Durable JSON contains paths, line references, evidence, hashes and all gates; concise findings returned directly."
+}

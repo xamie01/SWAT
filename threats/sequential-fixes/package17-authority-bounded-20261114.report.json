@@ -1,0 +1,273 @@
+{
+  "package": 17,
+  "scope": "Bounded synthetic user-Solana authority refusal only",
+  "status": "Containment implemented; inert regression and focused noEmit pass; not delegated execution completion",
+  "workspace": "/home/xahmie/Documents/SWAT",
+  "branch": "fix/sequential-threat-remediation",
+  "observedHead": "08c822d470554ef1f05e701b1abbed7dcb3dbc54",
+  "completedAfterUtc": "2026-11-14T15:35:53.763117+00:00",
+  "assignmentCorrection": {
+    "originalAllowedPath": "/home/xahmie/Documents/SWAT/packages/shared/src/user-solana-authority.ts",
+    "originalPathExists": false,
+    "investigation": "Read/stat and file/symbol searches proved the requested module absent. No disconnected helper was created. Initial ownership blocker was reported before edits.",
+    "coordinatorCorrection": "Coordinator explicitly reassigned actual execution-authority-adapters.ts exclusively for createUserSolanaAuthority, the factory Solana-options path, the dedicated new inert test, and uniquely named focused evidence. This superseded the mistaken source-path assignment; no other executor owner was active.",
+    "currentOwnershipBlocker": false
+  },
+  "approvedRemediation": [
+    "/home/xahmie/Documents/SWAT/threats/02-synthesis-and-remediation.md section 4.1: deny unresolved users before signer/transport, remove synthetic settlement, preserve operator and unrelated user refusals",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md section 17/offchain18: injected signer/default synthetic vault must remain unavailable; no environment/certificate/quote enablement",
+    "/home/xahmie/Documents/SWAT/docs/adr/0003-delegated-execution-authority.md section 3: deployed audited user-scoped program authority is an external gate"
+  ],
+  "changedFiles": [
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/package17-authority-bounded.sequential.test.ts",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.config.ts",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.typecheck.json",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.report.json"
+  ],
+  "sourceCorrection": {
+    "file": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts",
+    "beforeSha256": "1540f044c173fe486d22ae5b8b4e594b6ea07f7d9e350b34be2a2f9c73a8d43e",
+    "afterSha256": "bbc38d2ff5fe69b1abfd8fb238df5e744652d37486206efa1e2cbb9d0c8af5da",
+    "lineReferences": {
+      "knownProgramConstantAndCompatibilityOptions": "471-485",
+      "unconditionalUnavailableConstructor": "491-504",
+      "factoryOpaqueOptionsPassThrough": "534-548"
+    },
+    "rootBugBefore": "Constructor read programId/enabled. Authorization resolved signer and vault, read publicKey, fabricated solana:vault:<program>:<user> without a resolved vault, and returned granted authority. Factory read signer and spread every enumerable option before entering the constructor. Keyless token-spend requests also returned a fabricated discovery grant.",
+    "minimalCorrection": "Replace the entire synthetic grant path with the existing createUnavailableUserAuthority helper. Factory passes the opaque optional object unchanged, never reading properties or enumerating/spreading it. Remove the obsolete Solana-only VenueActionKind type import. Correct misleading audited/default-live documentation in this same bounded block.",
+    "publicContractPreserved": {
+      "constructor": "createUserSolanaAuthority(options?: UserSolanaAuthorityOptions): UserExecutionAuthority",
+      "factory": "createExecutionAuthorityAdapters(deps: OperatorAuthorityDeps, userSolanaOptions?: UserSolanaAuthorityOptions): readonly UserExecutionAuthority[]",
+      "options": ["programId?: string", "enabled?: boolean", "signer?: SolanaTransactionSigner | (() => SolanaTransactionSigner | null) | null", "loadUserVaultAddress?: (userId: string) => Promise<string | null>"],
+      "programConstant": "WAKE_VAULT_PROGRAM_ID retains 6t6dRetG3Hns4vCfZaj392e9bZ6uTEEmvL37KnDWErfS as an identifier, not deployment/audit evidence",
+      "adapterShape": ["id=user-solana", "chain=solana", "serves(user)=true", "serves(operator)=false", "authorize(request): Promise<ExecutionAuthorityVerdict>"],
+      "denialCode": "authority-solana-delegate-unavailable",
+      "reason": "Per-user Solana authority is unavailable: deployed, audited user-scoped vault execution capability is not verified (S4-P12, ADR-0003 section 3) (requested for user:<id>)"
+    },
+    "noOptionReads": true,
+    "noSignerResolutionOrPublicKeyRead": true,
+    "noVaultResolutionOrSyntheticGrant": true,
+    "noEnvironmentOverrideOrReadyTrue": true,
+    "unrelatedOperatorAndEvmBodiesUnchanged": true
+  },
+  "callersReviewedReadOnly": [
+    {
+      "file": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/index.ts",
+      "lines": "1127-1165",
+      "finding": "createExecutorJobPorts binds createExecutionAuthorityRegistry(createExecutionAuthorityAdapters(...)) with operator dependencies and no user-Solana options. The actual existing factory is corrected, not a disconnected replacement. No entrypoint was imported or executed."
+    },
+    {
+      "file": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts",
+      "lines": "63-70,280-316,327-399",
+      "finding": "Stable verdict/adapter vocabulary and registry principal/chain routing guards remain unchanged. Only Chain is type-imported; this module is pure at runtime."
+    },
+    {
+      "file": "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts",
+      "lines": "417-436",
+      "finding": "Registration uses the existing keyless deriveWakeVaultAddress observation/identity helper. It is not a grant of live execution authority. This route was not changed or executed."
+    },
+    {
+      "file": "/home/xahmie/Documents/SWAT/packages/shared/src/authority/solana-vault-address.ts",
+      "lines": "1-7",
+      "finding": "PublicKey PDA derivation explicitly does not certify deployment. Preserved unchanged and not executed. No synthetic discovery grant was preserved because it was not a proven safe observation path."
+    },
+    {
+      "file": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.test.ts",
+      "lines": "340-419,421-480",
+      "finding": "Located actual existing adapter suite. Its old synthetic live-grant/signing expectations are incompatible with containment; not edited or run. Dedicated new inert tests replace neither that file nor global coverage."
+    }
+  ],
+  "importReviewBeforeRed": {
+    "runtimeGraph": "Dedicated test -> execution-authority-adapters.ts -> execution-authority.ts; Vitest test API only. Shared Chain and PaymasterBudgetTracker imports are explicit type-only and erased. There is no runtime shared-barrel, paymaster singleton, SDK, executor entrypoint, custody, provider, DB, Redis or service import in this graph.",
+    "sharedBarrelInspected": "/home/xahmie/Documents/SWAT/packages/shared/src/index.ts was reviewed read-only; it exports broad queue/provider/authority surfaces. It is not runtime-imported by this focused test.",
+    "paymasterInspected": "/home/xahmie/Documents/SWAT/apps/trade-executor/src/paymaster-budget.ts has an environment-reading singleton. It is type-only in the adapter and was not runtime-imported.",
+    "compilerAlias": "Focused @swat/shared -> packages/shared/src/types.ts resolves the only used Chain type without traversing the broad shared barrel. This is typecheck-only, not a mocked authority or runtime override.",
+    "testAuthorityMocked": false,
+    "syntheticSigningReceiptsReturned": false,
+    "fixtures": "Opaque account/program strings; throwing enumerable getters, Proxy get/ownKeys/descriptor traps, throwing publicKey getter, inert signer/vault counters. No key material or actual signing. Operator controls use null signers and do not invoke returned signing functions."
+  },
+  "harnessQualification": {
+    "factory": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+    "factorySha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+    "independentReview": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness-independent-review.md corrected-source limited Standards/Spec rechecks",
+    "qualification": "Current factory fingerprint matches independently qualified corrected harness; original canonical-path glob and actual-file/CLI gate findings resolved. No harness edit, provisional historical run acceptance, or new harness selftest run by this owner.",
+    "explicitConfig": "createPackageConfig(['literal absolute existing dedicated test path'])",
+    "actualManifestValidated": true,
+    "actualFilesEachRun": 1,
+    "vitestSuiteCountIsNotFileCount": 4
+  },
+  "executionBoundary": {
+    "prefix": "taskset -c 0 flock -x /tmp/swat-package11-checks.lock python3 /home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "directNode": "/usr/bin/node",
+    "directVitest": "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+    "directTsc": "/home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc",
+    "vitestArguments": ["run", "--config", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.config.ts"],
+    "tscArguments": ["--noEmit", "--project", "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.typecheck.json"],
+    "testHeapMiB": 512,
+    "tscHeapMiB": 640,
+    "allTscLabelsEnd640": true,
+    "pool": "forks",
+    "minWorkers": 1,
+    "maxWorkers": 1,
+    "fileParallelism": false,
+    "maxConcurrency": 1,
+    "runnerChildTimeoutSeconds": 240,
+    "toolTimeoutMilliseconds": 600000,
+    "checksSerializedSameLock": true,
+    "allShellsBeganTasksetCpu0": true,
+    "offlineGuardsUnchanged": true,
+    "allEvidenceLabelsFresh": true
+  },
+  "runs": [
+    {
+      "label": "package17-authority-bounded-20261114-red",
+      "phase": "Fresh red against unchanged actual authority source before root correction",
+      "exitCode": 1,
+      "elapsedSeconds": 3.442,
+      "actualFiles": 1,
+      "total": 20,
+      "passed": 0,
+      "failed": 20,
+      "skipped": 0,
+      "pending": 0,
+      "todo": 0,
+      "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-red.json",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-red.log",
+      "observation": "Reproduced construction/factory property access, synthetic grants with injected inert signer, publicKey/vault access and keyless token-spend fabricated grant. Failures are actual app assertions/getter errors, not a startup/provider failure."
+    },
+    {
+      "label": "package17-authority-bounded-20261114-green",
+      "exitCode": 0,
+      "elapsedSeconds": 3.139,
+      "actualFiles": 1,
+      "total": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "pending": 0,
+      "todo": 0,
+      "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-green.json",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-green.log"
+    },
+    {
+      "label": "package17-authority-bounded-20261114-neighbors-green",
+      "phase": "Same dedicated file expanded with enabled states and inert adapter/operator/EVM compatibility controls; no existing neighboring suites",
+      "exitCode": 0,
+      "elapsedSeconds": 3.549,
+      "actualFiles": 1,
+      "total": 33,
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "pending": 0,
+      "todo": 0,
+      "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-neighbors-green.json",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-neighbors-green.log"
+    },
+    {
+      "label": "package17-authority-bounded-20261114-noemit-640",
+      "exitCode": 2,
+      "elapsedSeconds": 9.666,
+      "diagnostics": 7,
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-noemit-640.log",
+      "failure": "One inert throwing publicKey getter inferred void rather than string; six TS1470 import.meta errors because inherited NodeNext treats threat harness files as CommonJS. Evidence retained. Fixed only getter return annotation and focused owner compiler module=ESNext/moduleResolution=Bundler, matching independently qualified harness compiler precedent. No harness/source widening or dependency installation."
+    },
+    {
+      "label": "package17-authority-bounded-20261114-noemit-recheck-640",
+      "exitCode": 0,
+      "elapsedSeconds": 6.228,
+      "diagnostics": 0,
+      "strict": true,
+      "noEmit": true,
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-noemit-recheck-640.log"
+    },
+    {
+      "label": "package17-authority-bounded-20261114-final-green",
+      "phase": "Final exact test fixture after type-only getter annotation",
+      "exitCode": 0,
+      "elapsedSeconds": 2.543,
+      "actualFiles": 1,
+      "total": 33,
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "pending": 0,
+      "todo": 0,
+      "json": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-final-green.json",
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-final-green.log"
+    }
+  ],
+  "review": {
+    "mode": "Bounded local owner review only, no additional agents",
+    "standardsFindings": 0,
+    "specFindings": 0,
+    "independentPackage17Review": "Pending; not inferred from harness qualification or owner self-review",
+    "diffCheckExit": 0,
+    "reviewBasis": "Exact actual adapter diff plus new test/config; existing factory/helper conventions, accepted ADR and explicit corrected assignment. No synthetic authority path, options reads, readiness override, signing fixture or unrelated EVM/operator implementation change remains. Mechanical obsolete type-only import removal is required by deleting its only use."
+  },
+  "historicalRedEvidence": {
+    "existingAuthorityRedLocated": false,
+    "unrelatedPackage17RedArtifacts": [
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-signer-red.json",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-prewrite-red.json",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-recovery-red.json",
+      "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-recovery-red-valid.json"
+    ],
+    "qualification": "Located/read historical signer and durability JSON; not authority-seam red and not rerun, overwritten, deleted, summed or retroactively accepted. Fresh package17 authority red was recorded before source correction."
+  },
+  "sha256Final": {
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.ts": "bbc38d2ff5fe69b1abfd8fb238df5e744652d37486206efa1e2cbb9d0c8af5da",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/package17-authority-bounded.sequential.test.ts": "2ff80f5a250baf3e2add7405813eb308a35f84781d516a0b94523a2e390756ee",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.config.ts": "d4f73c6291e04af7b99978fde681439a4a018af4b0ab70404c0e07a0f3a5e688",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114.typecheck.json": "39782585e360b699157f21a3e52476f9458b32cd12c763500193a6769622225c",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-red.json": "1b5c4cf0732c670678ec757d23a48409b50bf8d6cdf7915233f7d86f091d33f5",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-green.json": "a65450dcab2eca6decff02aa7670da2a518afb2d59e707ee963ac6b0257abee4",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-neighbors-green.json": "18b21df110db88f263987527023a4e8c4046f78372967cfcedde2f2a03b7195c",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-final-green.json": "d5d551596dfd1f71d7f0e70cf59fadb2c9cfa04c9b39f2408014b9f27d2bae71",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-red.log": "06f4cce67096bfb38cfd42cf79cc71114ea89620efe81ae287dcf17c36630c7d",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-green.log": "bd5bc180abbadfeedebcf223d2bc4a9fd56eddee2ffbbd35a352cd9cb9f6e7a6",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-neighbors-green.log": "cdbf81fac1f1ebf50416865023dc697a0922de6757314fdaab3e087ae2faad71",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-noemit-640.log": "6e0affac42e8a8c65a7ae7a6d2b528b8b815a9091da978e4959c1f7af2f48dad",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-noemit-recheck-640.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-authority-bounded-20261114-final-green.log": "c1b1a78fbbedc894e5b694cda9e4bea563a8a6aebf59da1521a94b29a18bb174"
+  },
+  "sha256PreservedBeforeAndAfter": {
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority-adapters.test.ts": "a6fe194c945e0c152eeb28385f5187693d60ec0d07c7f511704b621fc2243dd0",
+    "/home/xahmie/Documents/SWAT/apps/trade-executor/src/execution-authority.ts": "2e232a5ec14028dfda0724ae006e33bd497de24a9d1e4e436cf00747ad5210aa",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/index.ts": "7d0f4d42a05154efe87931866fae45bb1eda33394620d80f92744877837728f5",
+    "/home/xahmie/Documents/SWAT/apps/api/src/routes/me.ts": "921d679f36242243e245086d266d9cc99fe9627e84af75f61360a918b0b45d9d",
+    "/home/xahmie/Documents/SWAT/packages/shared/src/authority/solana-vault-address.ts": "d09da12ca83b1aef913d9c6e557b3e839397a09efd4411eede9a1f59f3959f60",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-signer-red.json": "1db2b9d79d57043ce74f95053299123bb66a58d565887254adffc778963aab66",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-prewrite-red.json": "87e7f35d6f4b36bcd36c1ecd00d9aab429832b4e9cf2e4ef97b728a7fcc84922",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-recovery-red.json": "a1fa6f759df115a861c37ae5dde641d67e08a4633b5a60c3a4a31e5439de4a93",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package17-solana-recovery-red-valid.json": "47fb3a59fd891aafab962093452752ba4340c7edcb00b07d42602794fc956471"
+  },
+  "safety": {
+    "additionalAgentsSpawned": 0,
+    "realKeygenSigningCustodyUsed": false,
+    "apiProviderNetworkServicesUsed": false,
+    "databaseRedisUsed": false,
+    "installsMigrationsGitWritesDeletesUsed": false,
+    "oldAdapterOrSignerSuitesRun": false,
+    "policyPerpsHarnessLedgerSourceEdited": false,
+    "executorEntrypointSharedIndexMeEdited": false,
+    "historicalEvidencePreserved": true,
+    "outsideOwnedPrefixWrites": "Only unchanged authorized runner-managed cache/tmp/logs and commands.jsonl append; no source/global ledger or historical artifact edits.",
+    "providerFailures": 0,
+    "nonAppInvestigationError": "First read-only evidence aggregation failed JSONDecodeError because global commands.jsonl has non-JSON/blank lines. No file was modified; owner-label-filtered parsing succeeded. This is not an application/test/compiler/provider failure."
+  },
+  "blockersAndLimits": [
+    "No current unsafe scope/resource blocker after coordinator's source-path correction.",
+    "Independent bounded package17 Standards/Spec review remains pending; owner local review is not independent acceptance.",
+    "Installed genuine user-scoped Solana authority, audited deployment, custody and venue execution remain unverified; containment intentionally refuses all user authorization, including old synthetic discovery grants.",
+    "Existing adapter tests retain historical grant/signing expectations and were deliberately not executed or edited under this assignment.",
+    "Focused ESNext/Bundler source+test noEmit with a Chain-only source alias is not full-package NodeNext/dist/runtime/build acceptance.",
+    "No package11 observation/verifier/finality/quarantine/history/economic gate, policy, perps, harness, ledger, shared barrel or service availability is changed or accepted.",
+    "Real instruction/CPI/final-byte verification, funded service/custody/provider/database/schema/role/deployment/financial execution acceptance remain external gates. No receipt, readiness, execution completion or full-repository approval is fabricated."
+  ]
+}

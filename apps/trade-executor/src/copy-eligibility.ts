@@ -1,6 +1,7 @@
 import type { CopyEligibilityFacts, CopyEligibilityRejection } from '@swat/db';
 import type { Chain } from '@swat/shared';
 import { evaluateCopyPolicy } from '@swat/shared';
+import { evaluateExecutionPolicy, type ExecutionPolicyInput } from './policy.js';
 
 /**
  * The copy-eligibility policy for the canonical claim boundary.
@@ -39,25 +40,35 @@ export type CopyEligibilityDecision =
   | { allowed: true; facts: CopyEligibilityFacts }
   | { allowed: false; reasons: string[] };
 
+export interface ExecutionCopyEligibilityFacts extends CopyEligibilityFacts {
+  /** Immutable source identity, required whenever current execution policy is supplied. */
+  tokenMint?: string;
+  direction?: 'buy' | 'sell';
+}
+
 export interface CopyEligibilityDependencies {
   loadFacts: (input: {
     signalId: string;
     activityLookbackMs: number;
     now: Date;
-  }) => Promise<CopyEligibilityFacts | null>;
+  }) => Promise<ExecutionCopyEligibilityFacts | null>;
   recordRejection: (input: CopyEligibilityRejection) => Promise<unknown>;
   thresholds: CopyEligibilityThresholds;
   now?: () => Date;
 }
 
 export async function enforceCopyEligibility(
-  input: { account: string; signalId: string; chain: Chain },
+  input: {
+    account: string; signalId: string; chain: Chain;
+    /** Current policy/lot facts loaded by the worker; never a queue-supplied bypass. */
+    policy?: ExecutionPolicyInput;
+  },
   dependencies: CopyEligibilityDependencies
 ): Promise<CopyEligibilityDecision> {
   const { thresholds } = dependencies;
   const now = dependencies.now?.() ?? new Date();
 
-  let facts: CopyEligibilityFacts | null;
+  let facts: ExecutionCopyEligibilityFacts | null;
   try {
     facts = await dependencies.loadFacts({
       signalId: input.signalId,
@@ -83,17 +94,32 @@ export async function enforceCopyEligibility(
   if (facts.chain !== input.chain) {
     return reject(input, dependencies, facts, ['source-chain-mismatch'], now);
   }
+  if (facts.signalId !== input.signalId) {
+    return reject(input, dependencies, facts, ['source-signal-mismatch'], now);
+  }
+
+  let reducing = false;
+  if (input.policy) {
+    if (input.policy.scope.account !== input.account || input.policy.scope.chain !== facts.chain
+      || input.policy.scope.masterWalletAddress !== facts.walletAddress
+      || input.policy.scope.tokenMint !== facts.tokenMint || input.policy.direction !== facts.direction) {
+      return reject(input, dependencies, facts, ['source-policy-scope-mismatch'], now);
+    }
+    const policy = evaluateExecutionPolicy(input.policy);
+    if (!policy.allowed) return reject(input, dependencies, facts, [policy.reason], now);
+    reducing = policy.reducing;
+  }
 
   const decision = evaluateCopyPolicy({
     chain: facts.chain,
-    selectedWallet: facts.walletKnown && facts.walletStatus === 'active',
+    selectedWallet: reducing || (facts.walletKnown && facts.walletStatus === 'active'),
     selectedCluster: facts.clusterSelected,
     eventAt: facts.eventAt,
     now,
     maxEventAgeMs: thresholds.maxEventAgeMs,
     maxClockSkewMs: thresholds.maxClockSkewMs,
     sourceActivityUsd: facts.sourceActivityUsd,
-    minimumSourceActivityUsd: thresholds.minimumSourceActivityUsd,
+    minimumSourceActivityUsd: reducing ? 0 : thresholds.minimumSourceActivityUsd,
     // The remaining gates in `evaluateCopyPolicy` have owners elsewhere and are
     // passed satisfied so this boundary reports only what it actually decided:
     // liquidity and token safety by the signal-engine screen that has to pass
@@ -112,13 +138,13 @@ export async function enforceCopyEligibility(
   });
 
   const reasons = [...decision.reasons];
-  if (!facts.walletKnown) {
+  if (!reducing && !facts.walletKnown) {
     reasons.push('source-wallet-untracked');
   }
   // `evaluateCopyPolicy` measures activity in USD only. A wallet can clear a USD
   // floor on a single outsized trade while having no track record at all, which
   // is the case a count floor catches.
-  if (facts.walletTradeCount < thresholds.minimumSourceTradeCount) {
+  if (!reducing && facts.walletTradeCount < thresholds.minimumSourceTradeCount) {
     reasons.push('source-trade-count-below-minimum');
   }
 

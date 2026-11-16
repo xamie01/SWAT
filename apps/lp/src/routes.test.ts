@@ -583,6 +583,8 @@ describe('LP routes (Track H)', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().id).toBe('sub-1');
       expect(dbMocks.createLpCopySubscription).toHaveBeenCalled();
+      // A subscriber must never onboard or overwrite service-owned registry data.
+      expect(dbMocks.trackLpWallet).not.toHaveBeenCalled();
       await app.close();
     });
 

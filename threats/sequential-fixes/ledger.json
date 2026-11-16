@@ -309,7 +309,24 @@
         "threats/sequential-fixes/package11-integration-final-guarded.json",
         "threats/sequential-fixes/package11-integration-final-guarded.log",
         "threats/sequential-fixes/package11-integration-ledger-validation.log",
-        "threats/sequential-fixes/package11-integration-authority-ledger-validation.log"
+        "threats/sequential-fixes/package11-integration-authority-ledger-validation.log",
+        "threats/sequential-fixes/package11-integration-report.md",
+        "threats/sequential-fixes/package11-independent-review.md",
+        "threats/sequential-fixes/package11-review-trade-monotonic-red.json",
+        "threats/sequential-fixes/package11-review-trade-monotonic-green.json",
+        "threats/sequential-fixes/package11-review-lifecycle-unknown-red.json",
+        "threats/sequential-fixes/package11-review-lifecycle-unknown-green.json",
+        "threats/sequential-fixes/package11-review-metadata-alias-helper-red.json",
+        "threats/sequential-fixes/package11-review-metadata-alias-helper-green.json",
+        "threats/sequential-fixes/package11-review-metadata-alias-provider-red.json",
+        "threats/sequential-fixes/package11-review-metadata-alias-provider-green.json",
+        "threats/sequential-fixes/package11-review-known-partial-red.json",
+        "threats/sequential-fixes/package11-review-known-partial-green.json",
+        "threats/sequential-fixes/package11-review-affected-neighbors.json",
+        "threats/sequential-fixes/package11-review-source-tests-typecheck-640.log",
+        "threats/sequential-fixes/package11-review-final-guarded.json",
+        "threats/sequential-fixes/package11-review-final-guarded.log",
+        "threats/sequential-fixes/package11-review-ledger-validation.log"
       ],
       "notes": [
         "Proceeding in the existing order: bounded provider pagination first, then truthful finality, stable identity, wallet-net quantities and unknown market context. No runtime/provider certification implied.",
@@ -319,7 +336,11 @@
         "2026-11-13 generic Polygon checkpoint: public EVM backfill explicitly unavailable before invocation-level RPC/DB/pricing/legacy publication, containing unsupported transfer classification; separate Polymarket and reviewed Robinhood routes preserved. Initial incomplete-fixture red retained; complete-fixture red inserted1, guard green19/3files. Current permitted selection321passed/31files/0failed/0skipped; focused source typecheck640exit0. Bounded Standards0hard violations/0new smells; Spec0findings and callers traced. Module-level Redis initialization is outside invocation guarantee. Functional Polygon classifier/history repair/native identity/finality/metadata freshness and DB/poll bounds/health/runtime remain open; package11 in-progress. No live operations, commits or pushes.",
         "2026-11-13 end-to-end source integration checkpoint: six aspect artifacts are handoff snapshots, not independent integrated verdicts. Public Polymarket resolution polling now uses the durable fenced SQL store with bounded shared metadata reader/budget and no economic writes, rejecting partial coverage and blocked economic resolution even when metadata coverage completes. Alert display distinguishes UNREADY, displays readiness/completeness/confirmation and nullable observed/quarantined/accepted counters, and keeps nonhealthy stale reservation compatibility. Missing-schema public seam red1failed then green1passed/63filteredskips; alert display red1failed3passed then green4passed. Focused integration104passed/6files followed by contract-fixture/actual-counter checks77passed/3files; these are separate checkpoints, not summed. Expanded source/test noEmit640 first exit2 with8test-fixture diagnostics, then exit0 after minimal mock corrections. ONE final permitted combined guarded selection package11-integration-final-guarded:444passed/42resultfiles/0failed/0skipped, exit0, finished2026-11-13T22:36:51.890603+00:00; not fullrepo/build/runtime acceptance. Original red evidence, malformed commands.jsonl line11 and repeated historical labels preserved. Independent Standards/Spec review remains pending.",
         "Package11 remains IN-PROGRESS: containment withholds new source eligibility/copying and economic resolution, not completed financial functionality. No trusted confirmation verifier/promotion/reversal, native fill identity/durable correction linkage, functional Polygon classifier, historical repair/downstream reconciliation, artifact/deployed Node compatibility, installed schema/least-privilege global capabilities/topology/real transaction and transport acceptance or venue certification established. Poll-progress/evidence DDL and SQL070 remain UNAPPLIED; no auto migration/fallback. Existing-execution early-return retry is an explicitly later-package dependency, not rewritten. Legacy Polymarket precision/key/projection and fee-schema/rawSQL authority gates retained. Package01-10 qualified statuses unchanged and12-29pending. No installs/live services/providers/DB/Redis/credentials/signing/orders/funds/deployments/commits/pushes/resets/clean performed by this integration agent; inherited dirty/untracked evidence preserved.",
-        "2026-11-13 authority drift observed after checks: baselineHead remains8905505595802c21053118b5fab3fd53a8a1654c, but read-only history now shows externally created5d0558d5530ae7af3ecea2edfb3bda43d0cbccec at22:34:22Z and99c0e16469934b235372df342de8abc8a2c1a155 at22:35:11Z. This integration agent issued no git mutation/commit/push/reset/clean. Integrated source/config matches current HEAD byte-for-byte; final combined gate ran across this external history change. Normal Vitest temporary/cache effects remain, including externally tracked temporary SSR files now deleted by test cleanup; no manual recovery attempted. Do not claim checkout-wide no commits or treat external commits as authorized release acceptance. Coordinator notified; independent review must retain baseline and account for drift."
+        "2026-11-13 post-independent-review corrections: all four supported Medium residuals corrected at authorized public seams. Trade reader now captures performance.now deadline and checks before each request, after completed fetch/read/synchronous parse and before return while preserving abort/late-body cancellation. Market context requires explicit supported active/closed/accepting-orders boolean evidence and retains unknown resolution if absent; CLOB accepting_orders is normalized, never defaulted. Shared metadata alias validation checks every supplied supported condition/risk/lifecycle/end-date/tick alias for scalar validity and canonical agreement before Gamma/CLOB/tick fallback projection or upsert; validation errors cannot silently bypass to alternate provider responses. Ordinary parse/context failed items qualify direct backfill evidence partial, and tracked completed failed results return/record partial without changing counters/scope or mutating caller evidence. Quarantine, no economic settlement and later-package boundaries unchanged.",
+        "2026-11-13 correction red/green evidence, separate checkpoints not summed: package11-review-trade-monotonic red4failed then green4passed/65filteredskips/1file; lifecycle-unknown red11failed then green11passed/118filteredskips/2files; metadata-alias-helper red11failed1passed then green12passed/56filteredskips/1file; metadata-alias-provider red6failed8passed then green14passed/73filteredskips/1file; known-partial red4failed then green4passed/91filteredskips/2files. Affected-neighbors exit0:202passed/8actualresultfiles/0failed/0skipped; command named a nonexistent polymarket-acceptance neighbor which contributed no file/tests, while the real package11-acceptance-runtime-capability neighbor is included in final selection. Focused source/test noEmit640 package11-review-source-tests-typecheck-640 exit0,70.353s, finished2026-11-13T23:18:28.191263+00:00, no compiler diagnostics or further fixture edits. ONE stable post-correction permitted combined gate package11-review-final-guarded exit0:489passed/42actualresultfiles/0failed/0skipped,106.113s, finished2026-11-13T23:20:46.921743+00:00. This is actual JSON evidence, not summing the historical444/42 pre-correction gate or focused results. All checks CPU0/sharedflock/offline synthetic source aliases; not fullrepo/build/artifact/deployed DB/runtime financial acceptance.",
+        "2026-11-13 review disposition and authority: package11-integration-report.md and package11-independent-review.md are existing coordinator-owned historical snapshots, documenting444/42 before these four corrections; no independent corrected-source pass is claimed. Main will dispatch limited independent rechecks of these FOUR; pending at stable handoff. Read-only current HEAD remained08c822d470554ef1f05e701b1abbed7dcb3dbc54 throughout correction checks, distinct from fixed baseline8905505595802c21053118b5fab3fd53a8a1654c and earlier99c0e16 checkpoint. Spec's earlier no-reviewed-source/config-delta comparison and Standards stopped hash snapshot are not final-current-HEAD approval. This agent made no git mutations, recovery, commits, resets, clean, installs, live calls or migrations; inherited dirty/untracked evidence and coordinator Markdown edits preserved. Historical malformed commands.jsonl line11/repeated labels and all red results retained. Package11 IN-PROGRESS and native identity/verifier/promotion/history/schema/least-privilege/runtime/transport/precision/venue gates remain open; package01-10 qualifications and12-29pending unchanged.",
+        "2026-11-13 authority drift observed after checks: baselineHead remains8905505595802c21053118b5fab3fd53a8a1654c, but read-only history now shows externally created5d0558d5530ae7af3ecea2edfb3bda43d0cbccec at22:34:22Z and99c0e16469934b235372df342de8abc8a2c1a155 at22:35:11Z. This integration agent issued no git mutation/commit/push/reset/clean. Integrated source/config matches current HEAD byte-for-byte; final combined gate ran across this external history change. Normal Vitest temporary/cache effects remain, including externally tracked temporary SSR files now deleted by test cleanup; no manual recovery attempted. Do not claim checkout-wide no commits or treat external commits as authorized release acceptance. Coordinator notified; independent review must retain baseline and account for drift.",
+        "2026-11-13 final limited independent rechecks: Standards reports zero remaining supported findings in its monotonic-deadline/lifecycle gaps and directly touched alias neighbors; Spec reports both original completeness/metadata-alias findings resolved with no supported introduced root defect at touched boundaries. Reviewers inspected retained red/green, final489passed/42files/0failed/0skipped and focused source/test noEmit640exit0 evidence, not rerun. HEAD08c822d470554ef1f05e701b1abbed7dcb3dbc54 and supplied source/test fingerprints stayed stable throughout rechecks. Coordinator updated package11-independent-review.md, package11-integration-report.md, package11-notes.md and Markdown ledger. These are bounded source verdicts, not full-HEAD, financial or runtime approval. All four review findings source-resolved; package11 remains IN-PROGRESS for legitimate native identity/verifier/promotion/reversal/republication, historical repair/downstream reconciliation, unapplied schema/global privileges/topology/transport/artifact/venue and deferred existing-execution retry gates. Package01-10 qualified and12-29pending unchanged."
       ]
     },
     {
@@ -334,9 +355,13 @@
         "SIG-07"
       ],
       "seams": "Metric eligibility and cluster/hub admission with explicit unknowns",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "13",
@@ -348,9 +373,13 @@
         "EXE-02"
       ],
       "seams": "Canonical source claim and sequential operator/two-tenant fan-out",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "14",
@@ -365,9 +394,25 @@
         "SIG-04"
       ],
       "seams": "Close-all/stop-loss producer to canonical execution/evidence/trade persistence",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114.report.json",
+        "threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114-red-a.json",
+        "threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114-green-e.json",
+        "threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114-neighbors-c.json",
+        "threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114-source-test-noemit-f.log",
+        "threats/sequential-fixes/package14-pnl-bounded-independent-review-20261114.md",
+        "threats/sequential-fixes/package14-acquisition-proof-20261114.report.json",
+        "threats/sequential-fixes/package14-acquisition-proof-20261114-red-a.json",
+        "threats/sequential-fixes/package14-acquisition-proof-20261114-green-c.json",
+        "threats/sequential-fixes/package14-acquisition-proof-20261114-neighbors-d.json",
+        "threats/sequential-fixes/package14-acquisition-proof-20261114-source-test-noemit-e-640.log"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded PNL snapshot producer correction projects exact remaining_quantity::text plus actual lot master, target account and acquisition mode through source/acquisition/position joins; numeric diagnostic PNL unchanged. Existing package14 test preserved: fresh red17passed1failed/2files then final21passed/2files. Safe neighbors70passed/5files includes lot32/allocator4/exits6/math13/stoploss15, does not replace historical65pass1fail4 manifest. Focused ESNext/Bundler actual-source noEmit512exit0. Main validated40source/evidence/related fingerprints, raw manifests/counts and runner exits. Independent Standards0; original projection Spec0 revised by narrow follow-up to1High inactive/mismatched acquisition evidence ownership gap. Actual lot evidence must match same acquisition and active applied confirmed/finalized application scope; exclusive PNL correction completed: same-acquisition confirmed/finalized evidence and active scoped application proof, no history repair. Actual red21pass12fail/2, final33pass/2,safe38pass/4, retained green manifests deduplicate65/5 (not a new combined run), focused noEmit640exit0/zero diagnostics/25projectfiles. Independent evidence validation91logicalhash checks all matched, rawmanifest/runner/import qualification verified. Corrected independent Spec resolves priorHigh with0new; Standards predecessor providerfailed twice/noverdict retained; fresh narrow corrected Standards found0documentedviolations/0actionablesmells. Both corrected source review axes complete for this PNL producer only. Scorer startup still lacks claimExit injection; tenant exits block, installed RLS/schema/current authority/worker/settlement/history remain unverified. Exact snapshot is not execution authority or package closure."
+      ]
     },
     {
       "sequence": "15",
@@ -379,9 +424,25 @@
         "SIG-02"
       ],
       "seams": "Source/explicit lot exit reservations and concurrent fill allocation",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package15-lot-claim-recovery-20261114.report.json",
+        "threats/sequential-fixes/package15-lot-claim-recovery-20261114-red-a.json",
+        "threats/sequential-fixes/package15-lot-claim-recovery-20261114-final-green-e.json",
+        "threats/sequential-fixes/package15-lot-claim-recovery-20261114-neighbors-c.json",
+        "threats/sequential-fixes/package15-lot-claim-recovery-20261114-source-test-noemit-f-640.log",
+        "threats/sequential-fixes/package15-lot-claim-bounded-independent-review-20261114.md",
+        "threats/sequential-fixes/package15-acquisition-proof-20261114-red-a.json",
+        "threats/sequential-fixes/package15-acquisition-recovery-20261114-final-report-e.json",
+        "threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-green-a.json",
+        "threats/sequential-fixes/package15-acquisition-recovery-20261114-neighbors-d.json",
+        "threats/sequential-fixes/package15-acquisition-recovery-20261114-focused-noemit-b-640.log"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded lot claim recovery: actual same-client availability before reservations at request/source/explicit claim boundaries; legacy aggregate fallback removed; explicit replay joins real lot/position/acquisition/source provenance and SQL NUMERIC equality. Fresh red7passed24failed/1actualfile, firstgreen31/1, final32/1; retained neighbors65passed1failed/4files exposes separately assigned PNL snapshot producer. Focused source+test ESNext/Bundler noEmit640exit0 after fixture-type compiler failure. Coordinator validated all14current source/test/harness fingerprints, four actual manifests/counts and runner exits. Independent Standards0 completed; Spec found oneHigh acquisition-evidence/application provenance gap: acquisition/source joins omit actual lot evidence-to-execution equality and active applied confirmation; reversed application can leave positive lot. Exclusive correction produced actual acquisitionred32pass42fail/1; no subsequent source/check/report/status response. Original owner's edit authority revoked; cancellation tool twice returned inconsistent not-running/status-running, not confirmed. Replacement confirmed two stable owned-hash observations, preserved old red/config/test, and completed bounded evidence/application joins plus SHARE-locked explicit reload. Reported focused74green1/safe65green5/noEmit640exit0/16projectfiles, unique final-report-e; independent corrected Standards/Spec and evidence validation now active, not acceptance. No history repair. Source verifierfalse unchanged, source-success wiring structurally checked only. SQL/DB concurrency/schema/RLS/current policy/worker/settlement/history remain unverified or unfinished; reservation is not settlement or package closure."
+      ]
     },
     {
       "sequence": "16",
@@ -395,9 +456,19 @@
         "EXE-03"
       ],
       "seams": "Owned exits bypass entry-only checks but respect explicit stops/current policy",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package16-exact-policy-recovery-final.md",
+        "threats/sequential-fixes/package16-exact-policy-green-20261114h.json",
+        "threats/sequential-fixes/package16-exact-policy-noemit-20261114i-640.log",
+        "threats/sequential-fixes/package16-23-bounded-independent-review.md",
+        "threats/sequential-fixes/package16-17-23-28-29-bounded-20261114o.json"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded correction: reducing exit quantities are plain positive exact decimal strings, bounded to256characters before BigInt comparison; no runtime Number coercion. Neighbor fixtures corrected. Qualified explicit152passed/3actualfiles/0failed/pending/todo; focused source+test noEmit640exit0. Numeric defect established by previous source review, not an executed red of new fixtures. Independent bounded Standards0/Spec0 source reviews completed. Actual enqueue/worker/current-policy/lot reservation integration and genuine source/settlement capabilities remain open; not full package or runtime acceptance."
+      ]
     },
     {
       "sequence": "17",
@@ -411,9 +482,20 @@
         "EXE-07"
       ],
       "seams": "Runtime pending store, transport and durable canonical settlement",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package17-authority-bounded-20261114.report.json",
+        "threats/sequential-fixes/package17-authority-bounded-20261114-red.json",
+        "threats/sequential-fixes/package17-authority-bounded-20261114-final-green.json",
+        "threats/sequential-fixes/package17-authority-bounded-20261114-noemit-recheck-640.log",
+        "threats/sequential-fixes/package17-28-bounded-independent-review.md",
+        "threats/sequential-fixes/package16-17-23-28-29-bounded-20261114o.json"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded synthetic user-Solana authority containment in actual adapter/factory: unconditional unavailable before compatibilityoption/getter/proxy/signer/key/vault reads; no fabricated grant. Actualred20failed/1 then20green/1,expanded/final33green/1; focusedESNext/BundlernoEmit640exit0 after retained initialfailure. New inerttest only, existing unsafe grant/signing suite unexecuted/unmodified; EVM/operator bodies/publicshape preserved. Independent bounded Standards0/Spec0 completed; two predecessor Standards provider failures retained, replacement returned source-only verdict. Not completed durableJito/receipt/userauthority functionality; genuine deployment/custody/finalbytes/settlement and priorruntimeobligations remainblocked/unverified."
+      ]
     },
     {
       "sequence": "18",
@@ -427,9 +509,13 @@
         "CHAIN-01"
       ],
       "seams": "Signer intent validation and owner-approved contract policy",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "19",
@@ -445,9 +531,13 @@
         "SIG-08"
       ],
       "seams": "Atomic spend/capacity reservation and current stop/policy checks",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "20",
@@ -459,9 +549,13 @@
         "SIG-09"
       ],
       "seams": "Fan-out outbox/recovery and clean-skip outcomes",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "21",
@@ -479,9 +573,13 @@
         "CRY-05"
       ],
       "seams": "Envelope context/version, single-use exact intents and semantic ABI policies",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "22",
@@ -497,9 +595,13 @@
         "SEC-05"
       ],
       "seams": "User LP API to registry/build/risk/worker state",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "23",
@@ -513,9 +615,21 @@
         "SEC-07"
       ],
       "seams": "Owned financial closure and isolated order helper fail-closed capability",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package23-perps-recovery-notes.md",
+        "threats/sequential-fixes/package23-perps-close-red-20261114g.json",
+        "threats/sequential-fixes/package23-perps-close-green-20261114j.json",
+        "threats/sequential-fixes/package23-perps-close-noemit-20261114k-640.log",
+        "threats/sequential-fixes/package23-perps-neighbors-20261114l.json",
+        "threats/sequential-fixes/package16-23-bounded-independent-review.md",
+        "threats/sequential-fixes/package16-17-23-28-29-bounded-20261114o.json"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded perps containment: actual red4passed13failed/2files then green17passed/2files/0failed/pending/todo; focused source+test noEmit640exit0. Tenant account/position/order queries scoped; close SELECTs owned open/closing and refuses with typed503/no financial mutation or success claim; open portfolio includes closing liabilities. Independent bounded Standards0/Spec0 completed. Later safe-neighbor checkpoint27passed/5files includes focused17, never sum as44. This is safe refusal, not functioning venue close. Historical hidden exposure/schema/RLS/roles/real reducing execution/receipt/reconciliation and Trojan durable distributed intent remain unavailable or unverified."
+      ]
     },
     {
       "sequence": "24",
@@ -529,9 +643,13 @@
         "SEC-09"
       ],
       "seams": "Notification lease/outbox and persisted wallet backfill intent",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "25",
@@ -543,9 +661,33 @@
         "SEC-10"
       ],
       "seams": "Local artifact loading and storage-root containment",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114.report.json",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114.report.md",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114-root-red.json",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114-address-red.json",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114-export-red-b.json",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114-semantics-red.json",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114-boundary-final-green.json",
+        "threats/sequential-fixes/package25-artifact-recovery-20261114-source-final-green.log",
+        "threats/sequential-fixes/package25-artifact-bounded-independent-review-20261114.md",
+        "threats/sequential-fixes/package25-cli-diagnostics-20261114.report.json",
+        "threats/sequential-fixes/package25-cli-diagnostics-20261114-red.json",
+        "threats/sequential-fixes/package25-cli-diagnostics-20261114-green.json",
+        "threats/sequential-fixes/package25-cli-diagnostics-20261114-existing22-green.json",
+        "threats/sequential-fixes/package25-cli-diagnostics-20261114-source-green.log",
+        "threats/sequential-fixes/package25-cli-fixture-simplify-20261114.report.json",
+        "threats/sequential-fixes/package25-cli-fixture-simplify-20261114-cli-green.json",
+        "threats/sequential-fixes/package25-cli-fixture-simplify-20261114-boundary-green.json",
+        "threats/sequential-fixes/package25-cli-fixture-simplify-20261114-source-green.log"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded ML recovery actual root/subroot permission/symlink containment, matching chain-prefix/canonical raw fingerprint, strict bounded JSON numeric lambda-rank export feature/metadata/linearleaf/oversizedinteger correction. Preserved historical and new staged red evidence; final22methods/90unittestassertcalls,8separatestaticchecks/sixsyntaxfiles exit0; source-check result is log-only, not invented JSON. Main verified four changed hashes and final evidence. Independent bounded Standards0 completed; Spec subsequently found oneLow CLI trust-error diagnostic gap. Inert stdlib mocks only/no native deserialization/import/install. Native parity/float boundaries, same-user filesystem races, pricing cache/report leaves and full PF-SEC-10 closure remain open.",
+        "2026-11-14 narrow rank/score diagnostic correction: actual red4passed5failed/9methods with8errorassertions exit1, green9methods/35unittestassertcalls exit0; independent correction review resolved sole SpecLow/0new, Standards0violations/1Low unused-fixture-options smell. Fixture simplification completed preserving ninecases/productionhashes; fresh9/35calls,22/90calls and8staticchecks exit0; main hash/rawresults/runnerexit validated. Independent narrow Standards recheck resolves sole heuristic0violations/0smells. Prior report noGit shorthand clarified by addendum: actual read-only Git invocations occurred, no Git mutation. Existing22boundary methods/90assertcalls and8separate static checks remained green; counts overlap and are never combined with Vitest. Main validated both changed hashes, raw results/log hashes and runner exits. Native Typer/Parquet/model/runtime and prior filesystem limitations remain excluded; no full package closure."
+      ]
     },
     {
       "sequence": "26",
@@ -562,9 +704,13 @@
         "CHAIN-07"
       ],
       "seams": "Owner/config authorization, account/program constraints and local program test fixtures",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification."
+      ]
     },
     {
       "sequence": "27",
@@ -580,9 +726,20 @@
         "INF-06"
       ],
       "seams": "CI artifact/tool boundaries, systemd working paths and install policy",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package27-deploy-static-neighbors-20261114p.json",
+        "threats/sequential-fixes/package27-deploy-static-neighbors-20261114p.log",
+        "threats/sequential-fixes/package27-deploy-bounded-review-20261114.md",
+        "threats/sequential-fixes/package27-cron-permissions-red-20261114q.json",
+        "threats/sequential-fixes/package27-cron-permissions-green-20261114r.json",
+        "threats/sequential-fixes/package27-deploy-static-neighbors-20261114s.json"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 source-only revalidation20staticassertions/3distinctneighbors/14inputs exit0; independent Spec found Medium cron pgpass permission recipe defect. Template header corrected only: pgpass swat:swat0600, nonsecret pgservice root:swat0640. New source-only red1pass2fail/3methods exit1 then3green exit0; post-correction20static/3neighbors exit0. Fresh narrow cron Standards0/Spec0 resolved sole supported finding; no broad deployment Standards verdict after providerfailedtwice. No installer/psql/helper/unit/CI/realcredential/systempermission operation. Missing approved OCI/tool/output/Python inventory remains pending; source-disabled publish retained. Not whole-package or runtime/deployment acceptance."
+      ]
     },
     {
       "sequence": "28",
@@ -600,9 +757,37 @@
         "TEST-03"
       ],
       "seams": "Bounded early-IP/parsed-account limiter, disposable infrastructure guard and unique fixtures",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package28-limiter-bounded-20261114.report.json",
+        "threats/sequential-fixes/package28-limiter-bounded-20261114-red-a.json",
+        "threats/sequential-fixes/package28-limiter-bounded-20261114-green-b.json",
+        "threats/sequential-fixes/package28-limiter-bounded-20261114-typecheck-b-640.log",
+        "threats/sequential-fixes/package17-28-bounded-independent-review.md",
+        "threats/sequential-fixes/package16-17-23-28-29-bounded-20261114o.json",
+        "threats/sequential-fixes/package28-isolation-recovery-20261114.report.json",
+        "threats/sequential-fixes/package28-isolation-recovery-20261114-red.json",
+        "threats/sequential-fixes/package28-isolation-recovery-20261114-focused-final.json",
+        "threats/sequential-fixes/package28-isolation-recovery-20261114-neighbor-final.json",
+        "threats/sequential-fixes/package28-isolation-recovery-20261114-safe-neighbor.json",
+        "threats/sequential-fixes/package28-isolation-recovery-20261114-source-test-noemit-final.log",
+        "threats/sequential-fixes/package28-isolation-bounded-independent-review-20261114.md",
+        "threats/sequential-fixes/package28-canonical-path-20261114.report.json",
+        "threats/sequential-fixes/package28-canonical-path-20261114-red.json",
+        "threats/sequential-fixes/package28-canonical-path-20261114-green.json",
+        "threats/sequential-fixes/package28-canonical-path-20261114-neighbor.json",
+        "threats/sequential-fixes/package28-canonical-path-20261114-noemit-640.log",
+        "threats/sequential-fixes/package28-chaos-containment-20261114.report.json",
+        "threats/sequential-fixes/package28-chaos-containment-20261114-focused-final-a.json",
+        "threats/sequential-fixes/package28-chaos-containment-20261114-neighbors-final-a.json",
+        "threats/sequential-fixes/package28-chaos-containment-20261114-noemit-b-640.log"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 bounded limiter integration: genuine module first-import config validation before eager DB dependencies; config/trustProxy before Fastify and independent IP/account limiter before auth/routes; obsolete duplicate registrations removed preserving auth scope. Red15passed2failed/17total/1file, finalgreen15passed/1samefile includes both redfailedcases; countchange from broader consolidated malformed-input/bounds/inject coverage documented and verified. Focused ESNext/BundlernoEmit640exit0 after retained initial compilerfailure; API index/DB graph not compiled/executed. Independent bounded Standards0/Spec0 source review completed; neither reviewer executed runtime checks. Processlocal limiter only; realauth/ingress/multiprocess/sharedstore and four historical integrationisolation failures remain unverified/outside bounded fix.",
+        "2026-11-14 pre-import isolation containment: pure guard/root config/schema/global setup/script refuse before DB construction; canonical UUID-scoped public fixtures without keys. Actual fresh staticred1failed/1file then final52passed/1file; fullneighbors74passed1failed/5files retained for actual all-peer chaos risk; separate safe71passed/4files does not supersede failure. Focused ESNext/Bundler source+test noEmit512exit0 after public never fixture compiler error. Coordinator validated20current source/preserved/config hashes, actual manifests/counts and runner exits before follow-up edits. Independent Standards0/Spec1Low literal dot-segment pathname normalization gap (not operational bypass because all valid declarations still unconditionally refuse). Canonical-path correction reproduced red52pass4fail/1 then56green/1 and75safe/4/noEmit640exit0, actual literal path checked; main22hashcomparisons/rawmanifests/runnerexits verified. Disjoint chaos containment removed broad PG/Redis kills/default endpoint and refuses before dynamic infrastructure imports; final2green/1/noEmit640exit0 after retained initialcompiler2. Main54hashcomparisons/rawresults/runnerexits verified. Complete current neighbors59pass1fail/2 retained for unchanged application_name predicate assertion; no cosmetic predicate or operational session proof invented. Fresh independent corrected Standards found0documentedviolations/0actionablesmells; corrected Spec resolved priorLow with0newfindings and supported honest chaos containment. Both read-only reviewers retained actual operational-scoping failure, no runtime certification. Independent genuine canonical catalog/infrastructure proof, alternate direct imports/runtime/RLS/cleanup remain unavailable; no env certificate or actual integration execution accepted."
+      ]
     },
     {
       "sequence": "29",
@@ -627,9 +812,18 @@
         "RUN-06"
       ],
       "seams": "Final focused/full-safe regressions, source closure and explicit operational blockers",
-      "status": "pending",
-      "evidence": [],
-      "notes": []
+      "status": "in-progress",
+      "evidence": [
+        "threats/sequential-fixes/package12-29-parallel-assignment.md",
+        "threats/sequential-fixes/package29-acceptance-csv-report.md",
+        "threats/sequential-fixes/package29-csv-qualified-20261114m.json",
+        "threats/sequential-fixes/package29-csv-noemit-20261114n-640.log",
+        "threats/sequential-fixes/package16-17-23-28-29-bounded-20261114o.json"
+      ],
+      "notes": [
+        "User authorized concurrent package12–29 implementation ownership; assigned and launched, not fixed or accepted. See exclusive file matrix and retained safety/resource constraints. Test/compiler execution remains serialized CPU0 under one shared flock. Source corrections, regression evidence, integration and independent reviews pending; package11 unavailable verifier/quarantine/economic blocking preserved. Assignment evidence is coordination, not verification.",
+        "2026-11-14 fresh qualified retained CSV closure:17passed/1actualfile/0failed/pending/todo; focused route/auth/test noEmit640exit0. Complete mockedDB/injectedprincipals/realregisteredroute and roleguard; prefixes and CSV syntax checked, unauthorizedzeroDB, JSONunchanged. Existing bounded CSV Standards/Spec zero findings; earlier provisional evidence preserved, not retroactively accepted. Remaining15retainedID obligations and combinedsource/build/schema/privilege/runtime gates remain open, no fullpackage29 acceptance."
+      ]
     }
   ]
 }

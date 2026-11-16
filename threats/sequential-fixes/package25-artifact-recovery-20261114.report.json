@@ -1,0 +1,961 @@
+{
+  "package": 25,
+  "finding": "PF-SEC-10",
+  "status": "bounded source/mock remediation complete; native/full runtime acceptance unavailable; not full PF-SEC-10 closure",
+  "generatedUtc": "2026-11-14T16:18:31.100107+00:00",
+  "requirements": {
+    "finding": "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/secondary-contract-review.md:164-174",
+    "integrationContract": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md:83-85"
+  },
+  "changedPaths": [
+    {
+      "lines": [
+        "11-13",
+        "121-155",
+        "200-217"
+      ],
+      "beforeSha256": "79ed34ac59ea972b4c91eef15fa5e87687489a0a6935e38f864bbefbc83a7663",
+      "change": "Require subroots beneath PROJECT_ROOT; reject symlink ancestors and group/world-writable or foreign-user package subtree; match imported address prefixes to declared chain.",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "sha256": "917fe27c79c425aede7f4dfab029db123d8e7a8adee071e87b3448ef5836128c"
+    },
+    {
+      "lines": [
+        "102"
+      ],
+      "beforeSha256": "23637b16297f6488de44de8e86d648cf5ee128049b1b25ec10bdb78acfd5705d",
+      "change": "Fingerprint canonical address, not raw alias; inherited public validation and path checks preserved.",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+      "sha256": "0a89c2d9655d65161a952b9f4a6719bebb1fca6c906276565137726e020d72a0"
+    },
+    {
+      "lines": [
+        "30-39",
+        "145-158",
+        "167-168"
+      ],
+      "beforeSha256": "5b0c47e42a8febcebbd9ae0785bc005acdb32c588c4422cf1e6483cfcdffb442",
+      "change": "Oversized integer rejected as ValueError; strict integer scalar dump metadata; optional named/Column_i feature order checked; all linear-leaf markers refused.",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+      "sha256": "d9c0926802926412163200c73636133c3f037e462450102f3eb96c432e8ed155"
+    },
+    {
+      "lines": [
+        "68-89",
+        "197-308",
+        "310-342"
+      ],
+      "beforeSha256": "e5cb92925a963491d8c8f06d78301a49d3c61df86dd5f876af08397e418d8285",
+      "change": "Private temporary fixtures independent of ambient umask; seven additional actual-helper methods; counted unittest assertions and executed method reporting.",
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+      "sha256": "42d8c5faa2fdfb3b1e214969447347cb7adedb14c68dfdc18e430e502e15d7be"
+    }
+  ],
+  "selectedFilesAndHashes": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+      "sha256": "42d8c5faa2fdfb3b1e214969447347cb7adedb14c68dfdc18e430e502e15d7be",
+      "changedThisRecovery": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+      "sha256": "f9580c889248a7a0a4155ad57e1644c756a2c05a401d3f9359266a2fe9d278b9",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "sha256": "917fe27c79c425aede7f4dfab029db123d8e7a8adee071e87b3448ef5836128c",
+      "changedThisRecovery": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+      "sha256": "0a89c2d9655d65161a952b9f4a6719bebb1fca6c906276565137726e020d72a0",
+      "changedThisRecovery": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+      "sha256": "d9c0926802926412163200c73636133c3f037e462450102f3eb96c432e8ed155",
+      "changedThisRecovery": true
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/schema.py",
+      "sha256": "21d716b3af4bea3ea04fcf538c6e4a1c33779e3c3c46d38a74287686feea371c",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+      "sha256": "1a7f58657f9323855fdabb3a58e8bc84ed311ab03ea78648009e9881114775f9",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/conftest.py",
+      "sha256": "53214aca7b87e457c975ee74dd9e24c711e839ace1692cc137e4cc0b6189ed92",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/test_package25_ml_security.py",
+      "sha256": "f8273effa45c6b6165276ecaa30f555be455aec5ced410d473e4f9e74eaf77b3",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/rank.py",
+      "sha256": "2b3c300bae30a3b76a7a8d7184aca74c1a75992dcac41156668f4b689bd61b56",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/index/normalize.py",
+      "sha256": "793b5749f9bdc0cfcee14d927d97947753b68c946ab15f2e7c78b7f3344970d7",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/prices.py",
+      "sha256": "f90c13c2d24d8fd772c7b02080c33d974c7f73ab5808e6be93e50cc6129d4a08",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/report.py",
+      "sha256": "453a3875ffc3e847cdc4da15ff857e76008cf982c9d2cbc6be773d733a33db53",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/__init__.py",
+      "sha256": "c73279d7e209aeafd7d1c8314e9e39ec111b2f8e0b74569ec55c81c1b8dbb594",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/__init__.py",
+      "sha256": "24fa7e94412105b2ae2c4921cd489c2890a7ab72cedb262c9593f264b2befd8c",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/scripts/setup-server.sh",
+      "sha256": "42933a8fc842a364e57d489712cf3afa511ee7611ad12218f6c46b85855ee9af",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/prices.py.tmp.12222.de7a35e086f0",
+      "sha256": "b2cef19cb198a63f71fc176199e6617229c4f8561589887d94533405d48b4994",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs",
+      "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md",
+      "sha256": "efdcb600ef9312f8362d81c26e8e39d6a18826fbe86874a998b1079ca031c596",
+      "changedThisRecovery": false
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/post-fix-8905505/secondary-contract-review.md",
+      "sha256": "707a21e778f8cd921bae29b8fec212139cea986bfedfd3d6e4ba0478422b9be1",
+      "changedThisRecovery": false
+    }
+  ],
+  "actualRuns": [
+    {
+      "record": {
+        "label": "package25-ml-pytest-availability-20261113a",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "-c",
+          "import importlib.machinery,json,pathlib,sys; paths=[\"/usr/lib/python3/dist-packages\",\"/usr/local/lib/python3.12/dist-packages\"]; names=[\"pytest\",\"_pytest\",\"duckdb\",\"polars\",\"numpy\",\"lightgbm\",\"typer\"]; result={n:importlib.machinery.PathFinder.find_spec(n,paths) is not None for n in names}; print(json.dumps({\"python\":sys.version,\"availability\":result,\"runtime\":\"blocked: required pytest/ML dependencies unavailable; no installs; no site startup or live imports\",\"pythonNodePreloadIsSandbox\":False},indent=2)); raise SystemExit(0 if all(result.values()) else 3)"
+        ],
+        "finishedUtc": "2026-11-13T23:57:04.495895+00:00",
+        "exitCode": 3,
+        "elapsedSeconds": 0.067,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-ml-pytest-availability-20261113a.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-ml-pytest-availability-20261113a.log",
+      "logSha256": "373b2dccc8228a1bb610e4552f0169e6176e0b812e80bb0106365a1d58640294"
+    },
+    {
+      "record": {
+        "label": "package25-ml-boundary-red-20261114b",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T00:03:09.220965+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 0.267,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-ml-boundary-red-20261114b.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-ml-boundary-red-20261114b.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 2,
+            "failed": 13,
+            "failureAssertions": 22,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 15
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-ml-boundary-red-20261114b.json",
+      "logSha256": "560df8f3004e782e8ab968c43a769f68c25930f86adf99889d6b42d5cbe8c4fa"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-inherited-boundary",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T15:57:59.188457+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 5.006,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-inherited-boundary.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-inherited-boundary.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 14,
+            "failed": 1,
+            "failureAssertions": 0,
+            "errorAssertions": 1,
+            "skipped": 0,
+            "total": 15
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-inherited-boundary.json",
+      "logSha256": "d267190b25cf0266f995bde1dc5e05ba87aaf7a73ebbce4f21c9292a9d9df419"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-root-red",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:03:39.590648+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 4.598,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-root-red.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-root-red.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 15,
+            "failed": 1,
+            "failureAssertions": 1,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 16
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-root-red.json",
+      "logSha256": "6783cbae4b984c47718bd52195819e953c52474f30fb99be180addb5faa42dbe"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-root-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:05:10.072415+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.771,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-root-green.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-root-green.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 16,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 16
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-root-green.json",
+      "logSha256": "a0e8cdccd403c484dd812f645d7dbfd4a89650d4629e47572e9c9d2cc1c9fdb9"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-address-red",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:06:03.220661+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 0.518,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-address-red.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-address-red.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 16,
+            "failed": 1,
+            "failureAssertions": 1,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 17
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-address-red.json",
+      "logSha256": "be320736a29f6deebd02d4854fc50c245b26cde11bcc1207a5e3a5d15388301f"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-address-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:07:19.704244+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.922,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-address-green.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-address-green.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 17,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 17
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-address-green.json",
+      "logSha256": "abdd0cde1697fad184b60fee973a7bcbdc5b4a028e8d2e522dd18568c8cdb16a"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-export-red",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:08:18.798816+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 0.621,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-export-red.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-export-red.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 17,
+            "failed": 1,
+            "failureAssertions": 2,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 18
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-export-red.json",
+      "logSha256": "724eb1e1f96a4eb6895589c384493928cba45e932033e49f71b11e314cd7a5cd"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-export-red-b",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:09:04.712773+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 2.328,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-export-red-b.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-export-red-b.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 17,
+            "failed": 1,
+            "failureAssertions": 5,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 18
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-export-red-b.json",
+      "logSha256": "48aa7e5df5df010221aff161f6aead3de9a811ff2f698d623555ebf55d2445c2"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-export-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:10:31.969396+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 5.055,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-export-green.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-export-green.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 18,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 18
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-export-green.json",
+      "logSha256": "ac52318246df868708e43cec9f9b46cbb0d8099ee2c869169b6cf331fe4d3ac8"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-semantics-red",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:12:15.219188+00:00",
+        "exitCode": 1,
+        "elapsedSeconds": 1.477,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-semantics-red.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-semantics-red.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 21,
+            "failed": 1,
+            "failureAssertions": 0,
+            "errorAssertions": 1,
+            "skipped": 0,
+            "total": 22
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-semantics-red.json",
+      "logSha256": "e713d46a01ce7ed98cc39a2f18a82615825a165d946958bd27c3c9c7846faec5"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-boundary-final-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+        ],
+        "finishedUtc": "2026-11-14T16:15:11.571548+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 1.577,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-boundary-final-green.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-boundary-final-green.log",
+      "actualResult": {
+        "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+        "executedMethods": [
+          "test_01_solana_invalid_components",
+          "test_02_canonical_neighbors",
+          "test_03_evm_nonhex",
+          "test_04_storage_config_escape",
+          "test_05_storage_config_symlink",
+          "test_06_raw_boundary_before_nonempty_frame_write",
+          "test_07_raw_symlink_partition",
+          "test_08_raw_allowed_neighbor",
+          "test_09_raw_list_symlink",
+          "test_10_database_escape",
+          "test_11_inert_scoring_neighbor",
+          "test_12_schema_and_provenance_rejection",
+          "test_13_legacy_never_deserialized",
+          "test_14_artifact_symlink_read_write",
+          "test_15_mocked_training_export_neighbor",
+          "test_16_storage_subroot_cannot_override_project_trust",
+          "test_17_raw_canonical_identity_and_prefix_chain",
+          "test_18_export_rejects_out_of_subset_metadata_and_linear_leaves",
+          "test_19_json_numbers_reject_oversized_integer_as_value_error",
+          "test_20_numeric_missing_policies_and_multitree_order",
+          "test_21_json_file_and_complexity_bounds",
+          "test_22_mocked_numeric_training_dump_roundtrip"
+        ],
+        "unittestAssertionCalls": {
+          "total": 90,
+          "byName": {
+            "assertRaises": 50,
+            "assertEqual": 12,
+            "assertTrue": 1,
+            "assertIsNotNone": 21,
+            "assertFalse": 6
+          },
+          "qualification": "unittest assertion invocations only; inert Mock assertions additional, not counted"
+        },
+        "testResults": [
+          {
+            "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+            "passed": 22,
+            "failed": 0,
+            "failureAssertions": 0,
+            "errorAssertions": 0,
+            "skipped": 0,
+            "total": 22
+          }
+        ]
+      },
+      "resultPath": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-boundary-final-green.json",
+      "logSha256": "a2678a78d22abb25a47e24d481285cc4e817be32869df30c5c9cc277d2bb4c7a"
+    },
+    {
+      "record": {
+        "label": "package25-artifact-recovery-20261114-source-final-green",
+        "command": [
+          "/usr/bin/python3",
+          "-I",
+          "-S",
+          "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_source_checks.py",
+          "contracts"
+        ],
+        "finishedUtc": "2026-11-14T16:15:34.217408+00:00",
+        "exitCode": 0,
+        "elapsedSeconds": 0.573,
+        "cpuAffinity": [
+          0
+        ],
+        "syntheticEnvironment": true,
+        "outboundNetworkAndCredentialReadsGuarded": true,
+        "log": "threats/sequential-fixes/package25-artifact-recovery-20261114-source-final-green.log"
+      },
+      "log": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package25-artifact-recovery-20261114-source-final-green.log",
+      "actualResult": {
+        "mode": "contracts",
+        "qualification": "SOURCE AST/static only; pytest/model runtime blocked",
+        "files": [
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/conftest.py",
+            "syntax": "passed"
+          },
+          {
+            "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/test_package25_ml_security.py",
+            "syntax": "passed"
+          }
+        ],
+        "staticAssertions": {
+          "passed": 8,
+          "failed": 0,
+          "skipped": 0
+        },
+        "failures": []
+      },
+      "logSha256": "61f348157ab0ee3987324fc62ad953aec05596972d2e0608161ca1716a5159c4"
+    }
+  ],
+  "finalBoundaryResult": {
+    "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+    "executedMethods": [
+      "test_01_solana_invalid_components",
+      "test_02_canonical_neighbors",
+      "test_03_evm_nonhex",
+      "test_04_storage_config_escape",
+      "test_05_storage_config_symlink",
+      "test_06_raw_boundary_before_nonempty_frame_write",
+      "test_07_raw_symlink_partition",
+      "test_08_raw_allowed_neighbor",
+      "test_09_raw_list_symlink",
+      "test_10_database_escape",
+      "test_11_inert_scoring_neighbor",
+      "test_12_schema_and_provenance_rejection",
+      "test_13_legacy_never_deserialized",
+      "test_14_artifact_symlink_read_write",
+      "test_15_mocked_training_export_neighbor",
+      "test_16_storage_subroot_cannot_override_project_trust",
+      "test_17_raw_canonical_identity_and_prefix_chain",
+      "test_18_export_rejects_out_of_subset_metadata_and_linear_leaves",
+      "test_19_json_numbers_reject_oversized_integer_as_value_error",
+      "test_20_numeric_missing_policies_and_multitree_order",
+      "test_21_json_file_and_complexity_bounds",
+      "test_22_mocked_numeric_training_dump_roundtrip"
+    ],
+    "unittestAssertionCalls": {
+      "total": 90,
+      "byName": {
+        "assertRaises": 50,
+        "assertEqual": 12,
+        "assertTrue": 1,
+        "assertIsNotNone": 21,
+        "assertFalse": 6
+      },
+      "qualification": "unittest assertion invocations only; inert Mock assertions additional, not counted"
+    },
+    "testResults": [
+      {
+        "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+        "passed": 22,
+        "failed": 0,
+        "failureAssertions": 0,
+        "errorAssertions": 0,
+        "skipped": 0,
+        "total": 22
+      }
+    ]
+  },
+  "finalSourceResult": {
+    "mode": "contracts",
+    "qualification": "SOURCE AST/static only; pytest/model runtime blocked",
+    "files": [
+      {
+        "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+        "syntax": "passed"
+      },
+      {
+        "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+        "syntax": "passed"
+      },
+      {
+        "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py",
+        "syntax": "passed"
+      },
+      {
+        "file": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py",
+        "syntax": "passed"
+      },
+      {
+        "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/conftest.py",
+        "syntax": "passed"
+      },
+      {
+        "file": "/home/xahmie/Documents/SWAT/pattern-ml/tests/test_package25_ml_security.py",
+        "syntax": "passed"
+      }
+    ],
+    "staticAssertions": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "failures": []
+  },
+  "methodLineReferences": [
+    {
+      "name": "test_01_solana_invalid_components",
+      "line": 91,
+      "endLine": 94,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_02_canonical_neighbors",
+      "line": 96,
+      "endLine": 99,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_03_evm_nonhex",
+      "line": 101,
+      "endLine": 103,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_04_storage_config_escape",
+      "line": 105,
+      "endLine": 108,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_05_storage_config_symlink",
+      "line": 110,
+      "endLine": 113,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_06_raw_boundary_before_nonempty_frame_write",
+      "line": 115,
+      "endLine": 121,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_07_raw_symlink_partition",
+      "line": 123,
+      "endLine": 131,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_08_raw_allowed_neighbor",
+      "line": 133,
+      "endLine": 138,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_09_raw_list_symlink",
+      "line": 140,
+      "endLine": 146,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_10_database_escape",
+      "line": 148,
+      "endLine": 150,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_11_inert_scoring_neighbor",
+      "line": 152,
+      "endLine": 155,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_12_schema_and_provenance_rejection",
+      "line": 157,
+      "endLine": 161,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_13_legacy_never_deserialized",
+      "line": 163,
+      "endLine": 169,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_14_artifact_symlink_read_write",
+      "line": 171,
+      "endLine": 184,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_15_mocked_training_export_neighbor",
+      "line": 186,
+      "endLine": 194,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_16_storage_subroot_cannot_override_project_trust",
+      "line": 197,
+      "endLine": 206,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_17_raw_canonical_identity_and_prefix_chain",
+      "line": 209,
+      "endLine": 222,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_18_export_rejects_out_of_subset_metadata_and_linear_leaves",
+      "line": 225,
+      "endLine": 244,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_19_json_numbers_reject_oversized_integer_as_value_error",
+      "line": 247,
+      "endLine": 250,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_20_numeric_missing_policies_and_multitree_order",
+      "line": 252,
+      "endLine": 264,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_21_json_file_and_complexity_bounds",
+      "line": 266,
+      "endLine": 290,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    },
+    {
+      "name": "test_22_mocked_numeric_training_dump_roundtrip",
+      "line": 292,
+      "endLine": 307,
+      "path": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py"
+    }
+  ],
+  "redQualification": [
+    "Historical red-b inspected unchanged: exit1, 15 methods, 2 passed/13 failed, 22 failureAssertions/0 errors. Historical source-stage hashes not recorded; do not equate it with current dirty source.",
+    "Recovery inherited check exit1: 14 passed/1 error, scoring neighbor rejected fixture permissions. Fixed fixture to explicit mode0600/private umask, did not weaken file policy.",
+    "Root-red method16: 15 passed/1 failed, one actual failure on external subroot. Follow-on writable-root assertion not reached until green.",
+    "Address-red method17: 16 passed/1 failed, one actual canonical alias fingerprint assertion. Prefix cases not reached until green.",
+    "Export-red: 17 passed/1 failed, two failures then aborted method; export-red-b: 17 passed/1 failed, five actual rejection subcase failures.",
+    "Semantics-red: 21 passed/1 error, actual oversized integer OverflowError; positive missing-policy/bounds/split roundtrip methods20-22 already passed, no invented red.",
+    "Final-green: 22 passed/0 failed/0 errors/0 skipped, 90 unittest assertion invocations (50 assertRaises,12 assertEqual,1 assertTrue,21 assertIsNotNone,6 assertFalse); inert Mock assertions additional and not included. Source checks separately 8 passed/0 failed, six files compiled without execution."
+  ],
+  "importSafety": {
+    "python": "/usr/bin/python3 -I -S",
+    "reviewedBeforeExecution": true,
+    "actualLoadedSource": [
+      "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/config.py",
+      "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py",
+      "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/package25_artifacts.py"
+    ],
+    "graph": "Fake pattern_ml/choice packages with empty __path__; yaml,dotenv,duckdb,polars inert mocks; schema inert module; FEATURE_COLUMNS extracted by AST literal_eval only. Config module top level does not read env files; _load_env mocked before settings calls; dotenv mock raises if called. No CLI/rank/providers/package initialization or native import executed. Test file itself only stdlib imports. Source checker reads/parses/compiles six selected files but never imports or executes them.",
+    "fixtures": "Private disposable temp directory under runner TMPDIR; JSON and opaque text/bytes only, inert frame and booster.dump_model mocks; no serialized pickle/joblib/native artifact created or loaded.",
+    "pythonNodePreloadIsSandbox": false,
+    "runnerRecordCaveat": "Historical runner emits outboundNetworkAndCredentialReadsGuarded=true for every language. This is not a Python sandbox guarantee; safety here relies on reviewed finite import/fixture graph and isolated stdlib invocation."
+  },
+  "executionControls": {
+    "everyShellCommandPrefixed": "taskset -c 0",
+    "sharedLock": "/tmp/swat-package11-checks.lock",
+    "runner": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+    "bashTimeoutMs": 600000,
+    "childTimeoutSeconds": 240,
+    "heapSettingMB": 512,
+    "broadRuns": false,
+    "runnerUnchanged": true,
+    "runnerLedgerSideEffect": "Only mandatory historical runner appended its normal command records to commands.jsonl; no direct ledger/harness/guard edits."
+  },
+  "realPublicSeams": {
+    "cliRank": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:518-519,585-590 save_ranker on actual training result; inherited wiring unchanged",
+    "cliScore": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/cli.py:609-620 load_ranker before provider construction at625-647; source-checked only",
+    "rawWrite": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py:89-110 actual helper exercised with nonempty inert frame",
+    "rawListAndDB": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/storage.py:32-44,113-123; DB is inert and never connected",
+    "scoreCandidates": "/home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/choice/rank.py:331-346 actual predict interface observed in source, native frame runtime not run"
+  },
+  "remainingGaps": [
+    "Required pytest/numpy/polars/duckdb/lightgbm/typer unavailable in historical probe exit3; no new installs or native availability claims. Existing pytest security fixtures only source-compiled, never accepted as executed tests.",
+    "JSON supports bounded scalar numeric <= trees only (8MiB,1024 trees,50000 nodes,depth64), finite values, declared ordered features and None/NaN/Zero policies. No categorical/linear/averaged/multiclass/native deserialization fallback. No native LightGBM parity or exact float32 boundary/zero-threshold equivalence proven.",
+    "Same-user ownership/permissions and declared producer are local operator checks, not signatures, external producer authentication, model quality, financial safety or approval. Concurrent same-user/root ancestor replacement and file mutation races remain; native Parquet/DuckDB path I/O is not descriptor-anchored. Shared ancestors outside package subtree must be trusted operationally.",
+    "New permission rejection is deliberately fail-closed: ambient group-writable package/storage paths require operator correction; no filesystem permission changes to real paths performed.",
+    "Pricing cache remaining unchecked leaf: /home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/prices.py:35-44,101-103. Inherited temporary prices.py.tmp file preserved and never promoted.",
+    "Archival/report remaining unchecked run_id/source/destination/leaf paths: /home/xahmie/Documents/SWAT/pattern-ml/src/pattern_ml/report.py:48-69,93,139,180,188-237; legacy model.pkl archive listing is copy-only, not deserialization. This bounded recovery does not certify all ML filesystem seams.",
+    "Raw fingerprint remains existing height/time summary, not a hash of entire frame; only canonical identity bug corrected, no broad storage redesign."
+  ],
+  "review": {
+    "type": "focused self-review of spec, import graph, dirty diff and live seam references; not independent parallel review",
+    "gitDiffCheck": "No whitespace errors in inspected tracked config/storage paths",
+    "preservation": "Inherited cli/config/storage/normalize/conftest/script changes retained; only four listed recovery files edited. No Git mutation, historical deletion, network, dotenv real files, services, DB/Redis/container, keygen/signing/financial action."
+  },
+  "outOfOwnershipWiring": "No out-of-ownership wiring required or edited; global integration contracts/ledgers untouched except mandatory runner-owned append."
+}

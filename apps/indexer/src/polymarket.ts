@@ -21,6 +21,8 @@ import {
 import {
   parseConfirmedPolymarketTrade,
   parsePolymarketMarketContext,
+  PolymarketMetadataValidationError,
+  validatePolymarketMetadataAliases,
   type ConfirmedPolymarketTrade
 } from './polymarket-helpers.js';
 import {
@@ -124,6 +126,12 @@ export async function fetchConfirmedPolymarketTradePages(input: {
   }
   const timeoutMs = input.timeoutMs ?? 30_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new Error('Invalid Polymarket trade deadline');
+  const deadlineAt = performance.now() + timeoutMs;
+  const checkDeadline = () => {
+    if (performance.now() >= deadlineAt) {
+      throw new Error('Polymarket trade history incomplete: operation deadline exceeded');
+    }
+  };
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let rejectDeadline!: (reason: Error) => void;
@@ -150,12 +158,17 @@ export async function fetchConfirmedPolymarketTradePages(input: {
         url.searchParams.set('cursor', cursor);
       }
 
+      checkDeadline();
       const fetchResponse = input.fetchImpl(url.toString(), { signal: controller.signal, redirect: 'error' })
         .then((response) => {
           if (controller.signal.aborted) void response.body?.cancel().catch(() => {});
           return response;
         });
       const response = await Promise.race([fetchResponse, deadline]);
+      if (performance.now() >= deadlineAt) {
+        void response.body?.cancel().catch(() => {});
+        checkDeadline();
+      }
       if (!response.ok) {
         void response.body?.cancel().catch(() => {});
         throw new Error(`Polymarket Data API returned status ${response.status}`);
@@ -165,7 +178,9 @@ export async function fetchConfirmedPolymarketTradePages(input: {
       const chunks: Uint8Array[] = [];
       let pageBytes = 0;
       while (true) {
+        checkDeadline();
         const result = await Promise.race([reader.read(), deadline]);
+        checkDeadline();
         if (result.done) break;
         pageBytes += result.value.byteLength;
         totalBytes += result.value.byteLength;
@@ -186,6 +201,7 @@ export async function fetchConfirmedPolymarketTradePages(input: {
         }
         return value;
       }) as unknown;
+      checkDeadline();
       let page: unknown[] = [];
       let nextCursor: string | null = null;
       let hasMore: boolean | undefined = undefined;
@@ -252,6 +268,7 @@ export async function fetchConfirmedPolymarketTradePages(input: {
       }
     }
 
+    checkDeadline();
     return rawTrades;
   } finally {
     clearTimeout(timer);
@@ -333,24 +350,15 @@ export async function fetchGammaMarket(
     );
     {
       if (Array.isArray(payload)) {
-        const match = payload.find(
-          (m: any) =>
-            typeof m === 'object' &&
-            m !== null &&
-            (m.conditionId?.toLowerCase() === normTarget || m.condition_id?.toLowerCase() === normTarget)
-        );
-        if (match) {
-          return {
-            ...match,
-            negRisk: typeof (match as any).negRisk === 'boolean'
-              ? (match as any).negRisk
-              : (match as any).neg_risk
-          };
-        }
+        const match = payload
+          .filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null)
+          .map(validatePolymarketMetadataAliases)
+          .find(m => m.conditionId === normTarget);
+        if (match) return match;
       }
     }
   } catch (error) {
-    if (error instanceof PolymarketMetadataBudgetError) throw error;
+    if (error instanceof PolymarketMetadataBudgetError || error instanceof PolymarketMetadataValidationError) throw error;
     // Fall through to closed markets
   }
 
@@ -363,24 +371,15 @@ export async function fetchGammaMarket(
     );
     {
       if (Array.isArray(payload)) {
-        const match = payload.find(
-          (m: any) =>
-            typeof m === 'object' &&
-            m !== null &&
-            (m.conditionId?.toLowerCase() === normTarget || m.condition_id?.toLowerCase() === normTarget)
-        );
-        if (match) {
-          return {
-            ...match,
-            negRisk: typeof (match as any).negRisk === 'boolean'
-              ? (match as any).negRisk
-              : (match as any).neg_risk
-          };
-        }
+        const match = payload
+          .filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null)
+          .map(validatePolymarketMetadataAliases)
+          .find(m => m.conditionId === normTarget);
+        if (match) return match;
       }
     }
   } catch (error) {
-    if (error instanceof PolymarketMetadataBudgetError) throw error;
+    if (error instanceof PolymarketMetadataBudgetError || error instanceof PolymarketMetadataValidationError) throw error;
     // Fall through to CLOB fallback
   }
 
@@ -395,19 +394,16 @@ export async function fetchGammaMarket(
       if (clobData && Array.isArray(clobData.tokens)
           && typeof clobData.condition_id === 'string'
           && clobData.condition_id.toLowerCase() === normTarget) {
+        const validated = validatePolymarketMetadataAliases(clobData);
         return {
-          ...clobData,
-          conditionId: clobData.condition_id,
+          ...validated,
           outcomes: (clobData.tokens as any[]).map((t) => t.outcome),
-          clobTokenIds: (clobData.tokens as any[]).map((t) => t.token_id),
-          negRisk: clobData.neg_risk,
-          endDate: clobData.end_date_iso ?? clobData.end_date,
-          orderPriceMinTickSize: clobData.minimum_tick_size
+          clobTokenIds: (clobData.tokens as any[]).map((t) => t.token_id)
         };
       }
     }
   } catch (error) {
-    if (error instanceof PolymarketMetadataBudgetError) throw error;
+    if (error instanceof PolymarketMetadataBudgetError || error instanceof PolymarketMetadataValidationError) throw error;
     // Ignore
   }
 
@@ -420,7 +416,7 @@ async function fetchTickSize(asset: string, fetchImpl: FetchImplementation, budg
     fetchImpl,
     budget
   ) as Record<string, unknown>;
-  return payload.minimum_tick_size ?? payload.minimumTickSize;
+  return validatePolymarketMetadataAliases(payload).orderPriceMinTickSize;
 }
 
 async function ensurePolymarketContext(
@@ -440,15 +436,8 @@ async function ensurePolymarketContext(
   // The DB projection has no provider retrieval evidence. contextComplete and
   // updated_at cannot prove freshness or undo historically fabricated defaults.
   const rawMarket = await fetchGammaMarket(trade.conditionId, fetchImpl, budget);
-  const hasTickSize = rawMarket.orderPriceMinTickSize !== undefined
-    || rawMarket.minimumTickSize !== undefined;
+  const hasTickSize = rawMarket.orderPriceMinTickSize !== undefined;
   const fallbackTickSize = hasTickSize ? undefined : await fetchTickSize(trade.asset, fetchImpl, budget);
-  const tickEvidence = rawMarket.orderPriceMinTickSize ?? rawMarket.minimumTickSize ?? fallbackTickSize;
-  // Provider evidence must be a numeric scalar, not an object/boolean coerced by Number().
-  if (typeof tickEvidence !== 'number'
-      && (typeof tickEvidence !== 'string' || !/^\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(tickEvidence))) {
-    throw new Error(`Invalid Polymarket tick evidence for ${trade.asset}`);
-  }
   const market = parsePolymarketMarketContext(rawMarket, trade.conditionId, fallbackTickSize);
   if (new Set(market.outcomes.map((outcome) => outcome.tokenId)).size !== market.outcomes.length
       || new Set(market.outcomes.map((outcome) => outcome.outcome.toLowerCase())).size !== market.outcomes.length) {
@@ -543,7 +532,9 @@ export async function backfillPolymarketWallet(
   let observed = 0;
   let quarantined = 0;
   let accepted = 0;
-  const evidence = () => observedIngestionEvidence(observed, quarantined, accepted, 'unknown', 'provider-pagination');
+  const evidence = () => observedIngestionEvidence(
+    observed, quarantined, accepted, failed > 0 ? 'partial' : 'unknown', 'provider-pagination'
+  );
   let lastEventAt: Date | null = null;
   let sourceTradeFailure: SourceTradePersistenceError | null = null;
   const rawTrades = await fetchConfirmedPolymarketTradePages({

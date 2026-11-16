@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  },
+  "files": [
+    "../../apps/api/src/package28-limiter.ts",
+    "../../apps/api/src/package28-limiter.test.ts",
+    "./package28-limiter-bounded-20261114.config.ts"
+  ]
+}

@@ -1,19 +1,24 @@
 # ==============================================================================
-# SWAT / WAKE Production Cron Schedule
+# SWAT / WAKE Production Cron Schedule (alternative to the billing systemd timer)
 # ==============================================================================
-# Run as the swat system user or install via `crontab -e -u swat`
-#
-# Environment settings
+# Install for the unprivileged swat user; do not also enable the billing timer.
+# /opt/swat/current is a root-owned, swat-readable immutable release outside homes.
+# The operator provisions /var/log/swat writable by swat (0700).
+# /etc/swat/pg_service.conf: root:swat 0640 (non-secret connection settings).
+# /etc/swat/pgpass: swat:swat 0600; libpq rejects group/other access.
+# Never put passwords/URLs in a crontab or argv.
+# swat-maintenance must be a separately reviewed least-privilege database role.
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 MAILTO=""
+PGSERVICEFILE=/etc/swat/pg_service.conf
+PGPASSFILE=/etc/swat/pgpass
+PGSERVICE=swat-maintenance
 
-# 1. Daily Subscription Tier Downgrade Sweep (Midnight UTC)
-# Downgrades expired paid subscriptions (Operator / Ultra) back to 'free' and writes audit log.
-0 0 * * * cd /root/SWAT && /usr/bin/node apps/api/dist/cron/billing-sweep.js >> /var/log/swat/billing-sweep.log 2>&1
+# Prefer swat-billing-sweep.timer: systemd loads its scoped EnvironmentFile safely.
+# Cron billing is intentionally omitted: do not source an environment file as shell.
 
-# 2. Daily Database Vacuum & Analyze (03:00 UTC)
-0 3 * * * /usr/bin/psql "postgresql://swat:swat@127.0.0.1:5432/swat" -c "VACUUM ANALYZE;" >> /var/log/swat/db-vacuum.log 2>&1
+# Daily Database Vacuum & Analyze (03:00 UTC)
+0 3 * * * /usr/bin/psql --no-password -c "VACUUM ANALYZE;" >> /var/log/swat/db-vacuum.log 2>&1
 
-# 3. Weekly pg_stat_statements reset (Sunday 04:00 UTC)
-0 4 * * 0 /usr/bin/psql "postgresql://swat:swat@127.0.0.1:5432/swat" -c "SELECT pg_stat_statements_reset();" >> /dev/null 2>&1
+# Optional privileged statistics reset is omitted from the application-user schedule.

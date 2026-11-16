@@ -22,7 +22,7 @@ import { TRADE_QUEUES_BY_CHAIN } from '@swat/shared';
 import {
   FANOUT_JOB_ID_SEPARATOR,
   TRADE_JOB_NAME,
-  enqueueFanoutTradeJobs,
+  enqueueFanoutTradeJobs as enqueueWithDelivery,
   operatorTradeJobId,
   planFanoutTradeJobs,
   summariseFanout,
@@ -30,6 +30,14 @@ import {
   type FanoutJobPlan,
   type FanoutTradeQueue
 } from './fanout-enqueue.js';
+
+// Mocked durable transaction boundary: this suite pins only queue descriptors.
+function enqueueFanoutTradeJobs(queueFor: (chain: FanoutJobPlan['chain']) => FanoutTradeQueue, jobs: FanoutJobPlan) {
+  return enqueueWithDelivery(queueFor, jobs, {
+    prepare: vi.fn().mockResolvedValue([jobs.operator, ...jobs.users]),
+    queued: vi.fn().mockResolvedValue(undefined)
+  });
+}
 
 /**
  * One job per `(signal, user)` — `S4-14`.
@@ -198,11 +206,12 @@ describe('the legacy operator path', () => {
     expect(add.mock.calls[0]![2]).toMatchObject({ jobId: `source-trade-${SIGNAL_ID}` });
   });
 
-  it('is enqueued when the fan-out could not run at all', async () => {
+  it('refuses an unknown source fan-out before operator-only enqueue', async () => {
     const { add, queueFor } = spyQueue();
-    await enqueueFanoutTradeJobs(queueFor, planFanoutTradeJobs(jobInput({ plan: null })));
-    expect(add).toHaveBeenCalledTimes(1);
-    expect(add.mock.calls[0]![1]).not.toHaveProperty('userId');
+    await expect((async () => enqueueFanoutTradeJobs(
+      queueFor, planFanoutTradeJobs(jobInput({ plan: null }))
+    ))()).rejects.toThrow(/enumeration is incomplete/);
+    expect(add).not.toHaveBeenCalled();
   });
 
   it('is still enqueued alongside the user jobs when subscribers exist', async () => {

@@ -25,6 +25,8 @@ import { withTransaction } from './transaction.js';
 import {
   allocateLotsForMasterSell,
   assertLotAllocationComplete,
+  assertExactExitQuantity,
+  getMasterSellAvailabilityWithClient,
   type PositionLot
 } from './lot-allocation.js';
 
@@ -1209,9 +1211,10 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
 }> {
   const sourceTradeId = assertIdentifier('sourceTradeId', input.sourceTradeId, 128);
   const userId = normalizeTenantId(input.userId);
-  const requestedBase = input.requestedBaseQuantity === null || input.requestedBaseQuantity === undefined
-    ? null
-    : decimal('requestedBaseQuantity', input.requestedBaseQuantity);
+  if (input.requestedBaseQuantity !== null && input.requestedBaseQuantity !== undefined) {
+    assertExactExitQuantity(input.requestedBaseQuantity);
+  }
+  const requestedBase = input.requestedBaseQuantity ?? null;
   const requestedQuote = input.requestedQuoteQuantity === null || input.requestedQuoteQuantity === undefined
     ? null
     : decimal('requestedQuoteQuantity', input.requestedQuoteQuantity);
@@ -1305,42 +1308,13 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
     let cappedBase = requestedBase;
     if (source.direction === 'sell') {
       if (!requestedBase) throw new Error('Sell executions require requestedBaseQuantity');
-      const available = await client.query<{ capped: string | null }>(
-        `WITH pos AS (
-           SELECT id, confirmed_quantity, reserved_sell_quantity
-             FROM copy_positions
-            WHERE target_account = $1
-              AND chain = $2
-              AND token_mint = $3
-              AND user_id IS NOT DISTINCT FROM $5
-            FOR UPDATE
-         ),
-         master_lots AS (
-           SELECT COALESCE(SUM(remaining_quantity), 0) AS total_remaining,
-                  COUNT(*) AS lot_count
-             FROM copy_position_master_lots
-            WHERE position_id = (SELECT id FROM pos)
-              AND master_wallet_address = $6
-         )
-         SELECT CASE
-                  WHEN pos.confirmed_quantity - pos.reserved_sell_quantity <= 0 THEN NULL
-                  WHEN (SELECT lot_count FROM master_lots) > 0 AND (SELECT total_remaining FROM master_lots) <= 0 THEN NULL
-                  ELSE LEAST(
-                    $4::numeric,
-                    pos.confirmed_quantity - pos.reserved_sell_quantity,
-                    CASE
-                      WHEN (SELECT lot_count FROM master_lots) > 0 THEN (SELECT total_remaining FROM master_lots)
-                      ELSE $4::numeric
-                    END
-                  )::text
-                END AS capped
-           FROM pos`,
-        [target.prefixed, source.chain, source.token_mint, requestedBase, userId, source.wallet_address]
-      );
-      cappedBase = available.rows[0]?.capped ?? null;
-      if (!cappedBase) {
-        throw new Error('No unreserved confirmed copy position is available to sell');
-      }
+      const available = await getMasterSellAvailabilityWithClient(client, {
+        targetAccount: target.prefixed, userId, chain: source.chain, tokenMint: source.token_mint,
+        masterWalletAddress: source.wallet_address, executionMode: input.executionMode,
+        requestedBaseQuantity: requestedBase
+      });
+      cappedBase = available.quantity;
+      if (!cappedBase) throw new Error(available.reason ?? 'Master inventory availability is unknown');
     }
 
     const inserted = await client.query<CopyExecutionDbRow>(
@@ -1407,69 +1381,121 @@ export async function claimLotExitExecutionWithClient(
   if (!['close-all', 'stop-loss', 'manual', 'redemption'].includes(input.trigger)) {
     throw new Error('Unknown lot exit trigger');
   }
-  const requested = input.requestedBaseQuantity === undefined
-    ? null
-    : decimal('requestedBaseQuantity', input.requestedBaseQuantity);
+  if (input.requestedBaseQuantity !== undefined) assertExactExitQuantity(input.requestedBaseQuantity);
+  const requested = input.requestedBaseQuantity ?? null;
   const identity = ['lot-exit', lotId, userId ?? '', input.trigger, requestId]
     .join(COPY_IDENTITY_SEPARATOR);
   const clientOrderId = `swat-${createHash('sha256').update(identity).digest('hex')}`;
-  const ownership = await client.query<{
+  type LotOwner = {
     position_id: string;
     target_account: string;
     chain: Chain;
     token_mint: string;
+    master_wallet_address: string;
     signal_id: string | null;
     execution_mode: CopyExecutionMode;
-  }>(
-    `SELECT lot.position_id, position.target_account, lot.chain, lot.token_mint,
-            lot.signal_id, acquisition.execution_mode
+  };
+  const ownershipSql = `SELECT lot.position_id, position.target_account, lot.chain, lot.token_mint,
+            lot.master_wallet_address, lot.signal_id, acquisition.execution_mode
        FROM copy_position_master_lots lot
        JOIN copy_positions position ON position.id = lot.position_id
+         AND position.user_id IS NOT DISTINCT FROM lot.user_id
+         AND position.chain = lot.chain AND position.token_mint = lot.token_mint
        JOIN copy_executions acquisition ON acquisition.id = lot.acquisition_execution_id
-      WHERE lot.id = $1 AND lot.user_id IS NOT DISTINCT FROM $2
-        AND position.user_id IS NOT DISTINCT FROM $2`,
-    [lotId, userId]
+         AND acquisition.user_id IS NOT DISTINCT FROM lot.user_id
+         AND acquisition.target_account = position.target_account
+         AND acquisition.chain = lot.chain AND acquisition.token_mint = lot.token_mint
+         AND acquisition.direction = 'buy'
+         AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id
+         AND acquisition.source_trade_id = lot.source_trade_id
+       JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id
+         AND evidence.execution_id = acquisition.id
+         AND evidence.confirmation_state IN ('confirmed', 'finalized')
+       JOIN copy_position_applications application ON application.evidence_id = evidence.id
+         AND application.execution_id = acquisition.id AND application.active
+         AND application.position_id = lot.position_id
+         AND application.user_id IS NOT DISTINCT FROM lot.user_id
+         AND application.target_account = acquisition.target_account
+         AND application.chain = lot.chain AND application.token_mint = lot.token_mint
+       JOIN source_trades source ON source.id = lot.source_trade_id
+         AND source.chain = lot.chain AND source.token_mint = lot.token_mint
+         AND source.wallet_address = lot.master_wallet_address AND source.direction = 'buy'
+      WHERE lot.id = $1 AND lot.user_id IS NOT DISTINCT FROM $2`;
+  // Discover only the lock key; reload the immutable scope under those locks.
+  const discovered = (await client.query<LotOwner>(ownershipSql, [lotId, userId])).rows[0];
+  if (!discovered) throw new Error('Lot exit does not match the owning tenant/acquisition');
+  const scope = [discovered.target_account, discovered.chain, discovered.token_mint, userId];
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(scope)]);
+  const position = await client.query<{ id: string }>(
+    `SELECT id FROM copy_positions WHERE target_account = $1 AND chain = $2 AND token_mint = $3
+       AND user_id IS NOT DISTINCT FROM $4 FOR UPDATE`, scope
   );
-  const owner = ownership.rows[0];
-  if (!owner) throw new Error('Lot exit does not match the owning tenant');
-  await client.query(
-    `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-    [JSON.stringify([owner.target_account, owner.chain, owner.token_mint, userId])]
-  );
-  await ensureCopyPosition(client, owner.target_account, owner.chain, owner.token_mint, userId);
+  if (position.rows[0]?.id !== discovered.position_id) throw new Error('Lot exit position is unavailable');
+  const owner = (await client.query<LotOwner>(
+    `${ownershipSql} FOR UPDATE OF lot FOR SHARE OF acquisition, source, evidence, application`, [lotId, userId]
+  )).rows[0];
+  if (!owner || owner.position_id !== discovered.position_id
+      || owner.target_account !== discovered.target_account || owner.chain !== discovered.chain
+      || owner.token_mint !== discovered.token_mint
+      || owner.master_wallet_address !== discovered.master_wallet_address
+      || owner.execution_mode !== discovered.execution_mode || owner.signal_id !== discovered.signal_id) {
+    throw new Error('Lot exit immutable acquisition scope changed');
+  }
   const existing = await client.query<CopyExecutionDbRow>(
-    `SELECT ${COPY_EXECUTION_COLUMNS} FROM copy_executions
-      WHERE chain = $1 AND target_account = $2 AND client_order_id = $3`,
-    [owner.chain, owner.target_account, clientOrderId]
+    `SELECT ${COPY_EXECUTION_COLUMNS.split(',').map(column => `execution.${column.trim()}`).join(', ')},
+       (execution.exit_lot_id = $5::uuid AND execution.exit_trigger = $6
+        AND execution.user_id IS NOT DISTINCT FROM $7::uuid
+        AND ($4::numeric IS NULL OR execution.requested_base_quantity = $4::numeric)
+        AND execution.requested_base_quantity > 0
+        AND execution.signal_id IS NOT DISTINCT FROM lot.signal_id
+        AND execution.target_account = position.target_account
+        AND execution.chain = lot.chain AND execution.token_mint = lot.token_mint
+        AND execution.execution_mode = acquisition.execution_mode
+        AND execution.direction = 'sell' AND execution.source_trade_id IS NULL
+        AND execution.source_sell_fraction IS NULL AND execution.source_position_before_quantity IS NULL
+        AND lot.master_wallet_address = $8 AND position.id = $9::uuid
+        AND acquisition.source_trade_id = lot.source_trade_id
+        AND source.wallet_address = lot.master_wallet_address) AS payload_matches
+     FROM copy_executions execution
+     JOIN copy_position_master_lots lot ON lot.id = $5::uuid
+       AND lot.user_id IS NOT DISTINCT FROM $7::uuid
+     JOIN copy_positions position ON position.id = lot.position_id
+       AND position.user_id IS NOT DISTINCT FROM lot.user_id
+       AND position.chain = lot.chain AND position.token_mint = lot.token_mint
+     JOIN copy_executions acquisition ON acquisition.id = lot.acquisition_execution_id
+       AND acquisition.user_id IS NOT DISTINCT FROM lot.user_id
+       AND acquisition.target_account = position.target_account
+       AND acquisition.chain = lot.chain AND acquisition.token_mint = lot.token_mint
+       AND acquisition.direction = 'buy'
+       AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id
+     JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id
+       AND evidence.execution_id = acquisition.id
+       AND evidence.confirmation_state IN ('confirmed', 'finalized')
+     JOIN copy_position_applications application ON application.evidence_id = evidence.id
+       AND application.execution_id = acquisition.id AND application.active
+       AND application.position_id = lot.position_id
+       AND application.user_id IS NOT DISTINCT FROM lot.user_id
+       AND application.target_account = acquisition.target_account
+       AND application.chain = lot.chain AND application.token_mint = lot.token_mint
+     JOIN source_trades source ON source.id = lot.source_trade_id
+       AND source.chain = lot.chain AND source.token_mint = lot.token_mint AND source.direction = 'buy'
+     WHERE execution.chain = $1 AND execution.target_account = $2 AND execution.client_order_id = $3
+     FOR UPDATE OF execution`,
+    [owner.chain, owner.target_account, clientOrderId, requested, lotId, input.trigger, userId,
+      owner.master_wallet_address, owner.position_id]
   );
   if (existing.rows[0]) {
-    const execution = existing.rows[0];
-    if (execution.exit_lot_id !== lotId || execution.exit_trigger !== input.trigger
-      || execution.user_id !== userId
-      || (requested !== null && Number(execution.requested_base_quantity) !== Number(requested))) {
-      throw new Error('Lot exit identity collision with different requested quantities');
+    if (existing.rows[0].payload_matches !== true) {
+      throw new Error('Lot exit identity collision with different requested quantities or acquisition scope');
     }
-    return { execution: mapCopyExecution(execution), created: false };
+    return { execution: mapCopyExecution(existing.rows[0]), created: false };
   }
-  const lot = await client.query<{ quantity: string; available: boolean }>(
-    `SELECT COALESCE($3::numeric, lot.remaining_quantity)::text AS quantity,
-            lot.remaining_quantity > 0
-              AND COALESCE($3::numeric, lot.remaining_quantity) <= lot.remaining_quantity
-              AND COALESCE($3::numeric, lot.remaining_quantity)
-                <= position.confirmed_quantity - position.reserved_sell_quantity AS available
-       FROM copy_position_master_lots lot
-       JOIN copy_positions position ON position.id = lot.position_id
-      WHERE lot.id = $1 AND lot.user_id IS NOT DISTINCT FROM $2
-      FOR UPDATE OF lot`,
-    [lotId, userId, requested]
-  );
-  if (!lot.rows[0]?.available) throw new Error('No unreserved confirmed lot inventory is available to sell');
-  const active = await client.query<{ id: string }>(
-    `SELECT id FROM copy_executions WHERE exit_lot_id = $1
-        AND state NOT IN ('failed', 'cancelled', 'confirmed')`,
-    [lotId]
-  );
-  if (active.rows.length > 0) throw new Error('Lot already has an active exit execution');
+  const available = await getMasterSellAvailabilityWithClient(client, {
+    targetAccount: owner.target_account, userId, chain: owner.chain, tokenMint: owner.token_mint,
+    masterWalletAddress: owner.master_wallet_address, executionMode: owner.execution_mode,
+    exitLotId: lotId, ...(requested === null ? {} : { requestedBaseQuantity: requested })
+  });
+  if (!available.quantity) throw new Error(available.reason ?? 'Master inventory availability is unknown');
   const inserted = await client.query<CopyExecutionDbRow>(
     `INSERT INTO copy_executions (
        signal_id, source_trade_id, exit_lot_id, exit_trigger, chain, target_account,
@@ -1478,7 +1504,7 @@ export async function claimLotExitExecutionWithClient(
      ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 'sell', $8, $9, $10::numeric, $10::numeric)
      RETURNING ${COPY_EXECUTION_COLUMNS}`,
     [owner.signal_id, lotId, input.trigger, owner.chain, owner.target_account,
-      userId, owner.token_mint, owner.execution_mode, clientOrderId, lot.rows[0].quantity]
+      userId, owner.token_mint, owner.execution_mode, clientOrderId, available.quantity]
   );
   const execution = inserted.rows[0];
   if (!execution) throw new Error('Lot exit insert did not return a row');
@@ -1527,9 +1553,10 @@ export async function claimSourceSignalForCopyExecution(input: {
 }> {
   const signalId = assertIdentifier('signalId', input.signalId, 128);
   const userId = normalizeTenantId(input.userId);
-  const requestedBase = input.requestedBaseQuantity === null || input.requestedBaseQuantity === undefined
-    ? null
-    : decimal('requestedBaseQuantity', input.requestedBaseQuantity);
+  if (input.requestedBaseQuantity !== null && input.requestedBaseQuantity !== undefined) {
+    assertExactExitQuantity(input.requestedBaseQuantity);
+  }
+  const requestedBase = input.requestedBaseQuantity ?? null;
   const requestedQuote = input.requestedQuoteQuantity === null || input.requestedQuoteQuantity === undefined
     ? null
     : decimal('requestedQuoteQuantity', input.requestedQuoteQuantity);
@@ -1583,7 +1610,21 @@ export async function claimSourceSignalForCopyExecution(input: {
     if (source.direction !== signal.source_side) {
       throw new Error('Source signal direction no longer matches its immutable source event');
     }
+    // Retries cannot promote historical labels or return a submittable execution
+    // while the source verifier is unavailable.
+    if (!getSourceConfirmationReadiness().ready) {
+      return {
+        execution: null,
+        created: false,
+        claimed: false,
+        reason: 'Source confirmation verifier is unavailable'
+      };
+    }
     const target = resolveChainAddress(input.targetAccount, source.chain);
+    // All source/explicit reservation and replay paths take the same position
+    // advisory key BEFORE execution-row locks; no new authorization is implied.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId])]);
     // Tenant-scoped, mirroring `uq_copy_executions_source_target_mode_user`
     // (050_copy_tenancy.sql). Unscoped, tenant B's claim for a shared paper
     // `target_account` would find tenant A's row and return it as B's own
@@ -1606,18 +1647,6 @@ export async function claimSourceSignalForCopyExecution(input: {
         throw new Error('Copy execution source identity is linked to a different signal');
       }
       return { execution: mapCopyExecution(existing), created: false, claimed: false };
-    }
-
-    // Existing-execution replay above is intentionally unchanged here; its
-    // retry/submission guard belongs to the separately ordered execution work.
-    // Fresh claims must not trust historical confirmation labels.
-    if (!getSourceConfirmationReadiness().ready) {
-      return {
-        execution: null,
-        created: false,
-        claimed: false,
-        reason: 'Source confirmation verifier is unavailable'
-      };
     }
 
     // Deliberately NOT tenant-scoped. A signal is a shared detection, not a
@@ -1721,47 +1750,18 @@ export async function claimSourceSignalForCopyExecution(input: {
     let executionBase = requestedBase;
     let executionQuote = requestedQuote;
     if (source.direction === 'sell') {
-      // SIG-02: Size sell against master's attributed lots rather than aggregate inventory
-      const availableResult = await client.query<{ requested_base: string | null }>(
-        `WITH pos AS (
-           SELECT id, confirmed_quantity, reserved_sell_quantity
-             FROM copy_positions
-            WHERE target_account = $1
-              AND chain = $2
-              AND token_mint = $3
-              AND user_id IS NOT DISTINCT FROM $5
-            FOR UPDATE
-         ),
-         master_lots AS (
-           SELECT COALESCE(SUM(remaining_quantity), 0) AS total_remaining,
-                  COUNT(*) AS lot_count
-             FROM copy_position_master_lots
-            WHERE position_id = (SELECT id FROM pos)
-              AND master_wallet_address = $6
-         )
-         SELECT CASE
-                  WHEN pos.confirmed_quantity - pos.reserved_sell_quantity <= 0 THEN NULL
-                  WHEN (SELECT lot_count FROM master_lots) > 0 AND (SELECT total_remaining FROM master_lots) <= 0 THEN NULL
-                  ELSE LEAST(
-                    pos.confirmed_quantity - pos.reserved_sell_quantity,
-                    CASE
-                      WHEN (SELECT lot_count FROM master_lots) > 0
-                        THEN (SELECT total_remaining FROM master_lots) * $4::numeric
-                      ELSE (pos.confirmed_quantity - pos.reserved_sell_quantity) * $4::numeric
-                    END
-                  )::text
-                END AS requested_base
-           FROM pos`,
-        [target.prefixed, source.chain, source.token_mint, sourceSellFraction, userId, source.wallet_address]
-      );
-      executionBase = availableResult.rows[0]?.requested_base ?? null;
+      const available = await getMasterSellAvailabilityWithClient(client, {
+        targetAccount: target.prefixed, userId, chain: source.chain, tokenMint: source.token_mint,
+        masterWalletAddress: source.wallet_address, executionMode: input.executionMode,
+        ...(requestedBase === null ? {} : { requestedBaseQuantity: requestedBase }),
+        sourceSellFraction: sourceSellFraction!
+      });
+      executionBase = available.quantity;
       executionQuote = null;
-      if (!executionBase || Number(executionBase) <= 0) {
+      if (!executionBase) {
         return {
-          execution: null,
-          created: false,
-          claimed: false,
-          reason: 'No unreserved confirmed copied position is available to sell'
+          execution: null, created: false, claimed: false,
+          reason: available.reason ?? 'Master inventory availability is unknown'
         };
       }
     }

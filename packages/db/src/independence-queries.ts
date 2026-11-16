@@ -2,26 +2,31 @@ import type { Chain } from '@swat/shared';
 import { query } from './client.js';
 import type { FunderLabel } from './independence.js';
 
-export interface WalletIndependenceWarning {
-  readonly clustered: boolean;
+export interface WalletClusterMembership {
   readonly clusterType: 'funding' | 'behavioral' | null;
   readonly clusterName: string | null;
-  readonly warning: string | null;
+}
+
+export interface WalletIndependenceWarning {
+  readonly assessment: 'suspected-coordination' | 'unassessed';
+  readonly clustered: boolean;
+  /** Compatibility summary only; the complete evidence is in memberships. */
+  readonly clusterType: 'funding' | 'behavioral' | null;
+  readonly clusterName: string | null;
+  readonly memberships: readonly WalletClusterMembership[];
+  readonly warning: string;
 }
 
 export interface WalletHubStatus {
+  readonly assessment: 'hub' | 'unassessed';
+  /** False means no observed hub evidence, not positively independent control. */
   readonly isHub: boolean;
   readonly label: FunderLabel | null;
   readonly hubName: string | null;
-  readonly reason: string | null;
+  readonly reason: string;
 }
 
-/**
- * Checks whether a candidate wallet belongs to a funding or behavioral cluster (S4-M10).
- *
- * This check is advisory: it produces a descriptive warning to surface to the user,
- * but never blocks a subscription outright (a user may knowingly copy a clustered wallet).
- */
+/** Advisory evidence from every cluster; absent membership is not independence. */
 export async function checkWalletClusterIndependence(
   walletAddress: string
 ): Promise<WalletIndependenceWarning> {
@@ -33,57 +38,48 @@ export async function checkWalletClusterIndependence(
        FROM cluster_memberships cm
        JOIN wallet_clusters c ON c.id = cm.cluster_id
       WHERE cm.wallet_address = $1
-      LIMIT 1`,
+      ORDER BY c.cluster_type, c.name, c.id`,
     [walletAddress]
   );
 
-  if (rows.length === 0) {
-    return {
-      clustered: false,
-      clusterType: null,
-      clusterName: null,
-      warning: null
-    };
-  }
-
-  const row = rows[0]!;
-  const clusterType = (row.cluster_type === 'funding' || row.cluster_type === 'behavioral')
-    ? row.cluster_type
-    : null;
-
-  const warning = clusterType === 'funding'
-    ? `Wallet belongs to funding cluster "${row.name ?? 'unknown'}". Shared funding suggests common control or Sybil coordination.`
-    : clusterType === 'behavioral'
-      ? `Wallet belongs to behavioral cluster "${row.name ?? 'unknown'}". Co-movement suggests shared strategy or bot ring.`
-      : `Wallet belongs to cluster "${row.name ?? 'unknown'}".`;
+  const memberships: WalletClusterMembership[] = rows.map((row) => ({
+    clusterType: row.cluster_type === 'funding' || row.cluster_type === 'behavioral' ? row.cluster_type : null,
+    clusterName: row.name
+  }));
+  const warnings = memberships.map((membership) => membership.clusterType === 'funding'
+    ? `Wallet belongs to funding cluster "${membership.clusterName ?? 'unknown'}". Shared funding suggests common control or Sybil coordination.`
+    : membership.clusterType === 'behavioral'
+      ? `Wallet belongs to behavioral cluster "${membership.clusterName ?? 'unknown'}". Co-movement suggests shared strategy or bot ring.`
+      : `Wallet belongs to cluster "${membership.clusterName ?? 'unknown'}".`);
 
   return {
-    clustered: true,
-    clusterType,
-    clusterName: row.name ?? null,
-    warning
+    assessment: memberships.length > 0 ? 'suspected-coordination' : 'unassessed',
+    clustered: memberships.length > 0,
+    clusterType: memberships.length === 1 ? memberships[0]!.clusterType : null,
+    clusterName: memberships.length === 1 ? memberships[0]!.clusterName : null,
+    memberships,
+    warning: warnings.length > 0 ? warnings.join(' ') : 'Control independence is unassessed. No cluster membership is not evidence of independent control.'
   };
 }
 
-/**
- * Checks whether a candidate wallet is an exchange or infrastructure hub (S4-M11).
- *
- * Unlike cluster warnings, hub status blocks subscription: an exchange hot wallet
- * or bridge is infrastructure, not a trading strategy.
- */
+/** Same-chain aliases are aggregated; a negative blacklist lookup cannot clear control. */
 export async function checkWalletHubStatus(
   walletAddress: string,
   rawAddress: string,
-  _chain: Chain
+  chain: Chain
 ): Promise<WalletHubStatus> {
   const rows = await query<{ status: string; nickname: string | null }>(
-    `SELECT status, nickname FROM wallets WHERE address = $1 OR address = $2 LIMIT 1`,
-    [walletAddress, rawAddress]
+    `SELECT status, nickname FROM wallets
+      WHERE (address = $1 OR address = $2) AND chain = $3
+      ORDER BY address`,
+    [walletAddress, rawAddress, chain]
   );
+  const hub = rows.find((row) => row.status === 'blacklisted');
 
-  if (rows.length > 0 && rows[0]!.status === 'blacklisted') {
-    const hubName = rows[0]!.nickname ?? 'Exchange Hub';
+  if (hub) {
+    const hubName = hub.nickname ?? 'Exchange Hub';
     return {
+      assessment: 'hub',
       isHub: true,
       label: 'exchange',
       hubName,
@@ -92,9 +88,10 @@ export async function checkWalletHubStatus(
   }
 
   return {
+    assessment: 'unassessed',
     isHub: false,
     label: null,
     hubName: null,
-    reason: null
+    reason: 'Control independence is unassessed. Not blacklisted is not evidence of independent control.'
   };
 }

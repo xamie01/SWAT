@@ -1,25 +1,13 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "--- Starting Integration Test Suite ---"
+# This entrypoint is intentionally preflight-only until an independently
+# generated canonical schema and actual disposable infrastructure are qualified.
+# Never acquire infrastructure, migrate, clean up, or launch an acceptance suite.
+if [[ $# -ne 1 || "$1" != "--preflight-only" ]]; then
+  printf '%s\n' 'Integration execution unavailable; use --preflight-only (no services or tests launched).' >&2
+  exit 1
+fi
 
-# G7-T2: Start Docker fixtures
-echo "Spinning up Docker integration fixtures..."
-docker compose up -d postgres redis
-
-echo "Waiting for services to be ready..."
-sleep 5
-
-# G7-T3: Database Migration
-echo "Running database migrations..."
-pnpm db:migrate
-
-# G7-T4: Run Unit and Package-level Tests
-echo "Running unit and package-level tests (execution config, risk math, parsing)..."
-pnpm test
-
-# G7-T1, G7-T5: Verify End-to-End Acceptance Goals
-echo "Running End-to-End Acceptance Verification..."
-pnpm tsx scripts/verify-acceptance.ts
-
-echo "--- Integration Test Suite Completed Successfully ---"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+exec node --import "$ROOT/node_modules/tsx/dist/loader.mjs" "$ROOT/tests/package28-isolation-preflight.ts" --preflight-only

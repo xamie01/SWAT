@@ -2,12 +2,25 @@ import { query } from './client.js';
 import { deleteWalletCascade } from './wallets.js';
 import type { Chain, WalletScoreInput, WalletTier } from '@swat/shared';
 
+/** Legacy aggregates remain diagnostic until source, cost and control evidence exists. */
+export interface WalletMetricsAssessment extends WalletScoreInput {
+  assessment: 'unassessed';
+  assessmentReason: 'source-economics-and-control-unverified';
+}
+
+export function getWalletScoringReadiness(): Readonly<{
+  ready: false;
+  reason: WalletMetricsAssessment['assessmentReason'];
+}> {
+  return { ready: false, reason: 'source-economics-and-control-unverified' };
+}
+
 function finiteMetric(value: number | string | null | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export async function getWalletMetrics(address: string, chain: Chain): Promise<WalletScoreInput> {
+export async function getWalletMetrics(address: string, chain: Chain): Promise<WalletMetricsAssessment> {
   const rows = await query<{
     win_rate: number | string | null;
     realized_roi: number | string | null;
@@ -133,10 +146,15 @@ export async function getWalletMetrics(address: string, chain: Chain): Promise<W
     realizedRoi:      finiteMetric(row?.realized_roi),
     earlyEntryScore:  finiteMetric(row?.early_entry_score),
     consistencyScore: finiteMetric(row?.consistency_score),
+    assessment: 'unassessed',
+    assessmentReason: getWalletScoringReadiness().reason,
   };
 }
 
 export async function updateWalletScore(address: string, score: number, tier: WalletTier, metrics: WalletScoreInput) {
+  // NULL is declared nullable in 001_init.sql; this is not installed-schema acceptance.
+  // Preserve diagnostic metrics, but never persist them as verified skill.
+  const ready = getWalletScoringReadiness().ready;
   await query(`
     UPDATE wallets SET
       composite_score    = $1,
@@ -149,8 +167,8 @@ export async function updateWalletScore(address: string, score: number, tier: Wa
     WHERE address = $7
       AND chain = $8
   `, [
-    score,
-    tier,
+    ready ? score : null,
+    ready ? tier : 'speculative',
     metrics.winRate,
     metrics.realizedRoi,
     metrics.earlyEntryScore,
@@ -235,6 +253,7 @@ export async function pauseUnsubscribedWallets() {
 }
 
 export async function promoteHighScoringDiscoveredWallets() {
+  if (!getWalletScoringReadiness().ready) return;
   await query(`
     UPDATE wallets SET priority = 'high'
     WHERE source = 'discovered'
@@ -296,6 +315,7 @@ export async function findUnprofitableBigBuyers(
  * the number removed.
  */
 export async function pruneUnprofitableBigBuyers(minTrades = 5): Promise<number> {
+  if (!getWalletScoringReadiness().ready) return 0;
   const wallets = await findUnprofitableBigBuyers(minTrades);
   for (const wallet of wallets) {
     await deleteWalletCascade(wallet.address, wallet.chain);

@@ -130,7 +130,9 @@ export type FunderIndependenceCode =
   /** No degree available (never counted, or not a finite non-negative count). */
   | 'degree-unknown'
   /** Degree is fine, but the hub-label list was never consulted. */
-  | 'hub-label-unchecked';
+  | 'hub-label-unchecked'
+  /** A lookup found no affirmative ordinary-wallet control evidence. */
+  | 'control-unverified';
 
 export interface FunderIndependenceInput {
   /** Chain-prefixed funder address, carried through onto the result. */
@@ -297,13 +299,22 @@ export function assessFunderIndependence(
     };
   }
 
+  if (label !== 'individual') {
+    return {
+      ...base,
+      verdict: 'unassessed',
+      code: 'control-unverified',
+      message: `${input.funder} has no affirmative individual-control assessment. A missing hub label is not independent control.`
+    };
+  }
+
   return {
     ...base,
     verdict: 'independent',
     code: 'degree-within-cap',
     message:
       `${input.funder} funded ${degree} distinct wallets, within `
-      + `[${minFundedWallets}, ${maxFunderDegree}], and carries no hub label.`
+      + `[${minFundedWallets}, ${maxFunderDegree}], with an affirmative individual-control label.`
   };
 }
 

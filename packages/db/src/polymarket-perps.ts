@@ -1,4 +1,5 @@
 import { query } from './client.js';
+import { forUser, scopedQuery } from './tenancy.js';
 
 export interface PerpsInstrumentRecord {
   instrument_id: number;
@@ -138,7 +139,8 @@ export async function upsertPerpsAccount(account: {
   withdrawable: string;
   inLiquidation?: boolean;
 }): Promise<PerpsAccountRecord> {
-  const rows = await query<PerpsAccountRecord>(
+  const rows = await scopedQuery<PerpsAccountRecord>(
+    forUser(account.userId),
     `INSERT INTO polymarket_perps_accounts (
        user_id, total_account_value, available_order_margin,
        total_initial_margin, total_maintenance_margin,
@@ -167,7 +169,8 @@ export async function upsertPerpsAccount(account: {
 }
 
 export async function getPerpsAccount(userId: string): Promise<PerpsAccountRecord | null> {
-  const rows = await query<PerpsAccountRecord>(
+  const rows = await scopedQuery<PerpsAccountRecord>(
+    forUser(userId),
     `SELECT * FROM polymarket_perps_accounts WHERE user_id = $1 LIMIT 1`,
     [userId]
   );
@@ -190,7 +193,8 @@ export async function upsertPerpsPosition(position: {
   stopLossPrice?: string | null;
   status?: 'open' | 'closing' | 'closed' | 'liquidated';
 }): Promise<PerpsPositionRecord> {
-  const rows = await query<PerpsPositionRecord>(
+  const rows = await scopedQuery<PerpsPositionRecord>(
+    forUser(position.userId),
     `INSERT INTO polymarket_perps_positions (
        user_id, instrument_id, symbol, side, size,
        entry_price, leverage, initial_margin, maintenance_margin,
@@ -222,11 +226,12 @@ export async function getUserPerpsPositions(
   userId: string,
   status = 'open'
 ): Promise<PerpsPositionRecord[]> {
-  return query<PerpsPositionRecord>(
-    `SELECT * FROM polymarket_perps_positions 
-      WHERE user_id = $1 AND status = $2 
+  return scopedQuery<PerpsPositionRecord>(
+    forUser(userId),
+    `SELECT * FROM polymarket_perps_positions
+      WHERE user_id = $1 AND status = ANY($2::text[])
       ORDER BY updated_at DESC`,
-    [userId, status]
+    [userId, status === 'open' ? ['open', 'closing'] : [status]]
   );
 }
 
@@ -246,7 +251,8 @@ export async function recordPerpsOrder(order: {
   builderFeeRate?: string;
   rawResponse?: Record<string, unknown> | null;
 }): Promise<PerpsOrderRecord> {
-  const rows = await query<PerpsOrderRecord>(
+  const rows = await scopedQuery<PerpsOrderRecord>(
+    forUser(order.userId),
     `INSERT INTO polymarket_perps_orders (
        user_id, client_order_id, venue_order_id, instrument_id,
        symbol, side, order_type, price, quantity, filled_quantity,
@@ -273,12 +279,41 @@ export async function recordPerpsOrder(order: {
   return rows[0]!;
 }
 
-export async function closePerpsPosition(positionId: string, userId: string): Promise<boolean> {
-  const result = await query(
-    `UPDATE polymarket_perps_positions 
-        SET status = 'closed', updated_at = NOW() 
-      WHERE id = $1 AND user_id = $2 AND status = 'open'`,
+export function perpsReducingCapability() {
+  return {
+    state: 'blocked-on-external-capability' as const,
+    supported: false as const,
+    unavailableReasons: ['authorized-reducing-execution-unavailable', 'provider-receipt-reconciliation-unavailable']
+  };
+}
+
+/** Scoped owned exposure is a prerequisite, never execution or settlement authority. */
+export async function getOwnedPerpsReducingCapability(positionId: string, userId: string) {
+  const rows = await scopedQuery<PerpsPositionRecord>(
+    forUser(userId),
+    `SELECT * FROM polymarket_perps_positions
+      WHERE id = $1 AND user_id = $2 AND status IN ('open', 'closing')
+      LIMIT 1`,
     [positionId, userId]
   );
-  return (result.length ?? 0) > 0;
+  const position = rows[0];
+  if (!position) return null;
+  return { ...perpsReducingCapability(), positionId: position.id,
+    exposureStatus: position.status, requestedQuantityExact: position.size,
+    reducingSide: position.side === 'LONG' ? 'SELL' as const : 'BUY' as const };
+}
+
+export class PerpsCloseUnavailableError extends Error {
+  readonly code = 'PERPS_CLOSE_UNAVAILABLE';
+  readonly capability = perpsReducingCapability();
+
+  constructor() {
+    super('Financial close is unavailable: reducing execution and reconciliation are not configured');
+    this.name = 'PerpsCloseUnavailableError';
+  }
+}
+
+export async function closePerpsPosition(positionId: string, userId: string): Promise<boolean> {
+  if (!await getOwnedPerpsReducingCapability(positionId, userId)) return false;
+  throw new PerpsCloseUnavailableError();
 }

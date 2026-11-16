@@ -378,6 +378,11 @@ def normalize_file(
     path: Path | str, chain: str, sol_usd: dict[str, float] | None = None
 ) -> pl.DataFrame:
     """Normalize one raw Parquet file, tagging rows with their provenance."""
+    from ..config import CHAINS, confined_path, get_settings
+
+    if chain not in CHAINS:
+        raise ValueError(f"Unknown chain: {chain}")
+    path = confined_path(Path(path), root=get_settings().raw_dir)
     df = pl.read_parquet(path)
     if df.is_empty():
         return empty_frame(CANONICAL_TRADE_SCHEMA)

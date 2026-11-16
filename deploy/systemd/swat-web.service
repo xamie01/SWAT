@@ -1,0 +1,45 @@
+[Unit]
+Description=SWAT / WAKE Next.js Web Console
+After=network.target swat-api.service
+
+[Service]
+Type=simple
+User=swat-web
+Group=swat-web
+WorkingDirectory=/opt/swat/current/apps/web
+Environment=NODE_ENV=production
+Environment=HOME=/var/lib/swat-web
+Environment=TRADING_MODE=paper
+Environment=AUTO_EXECUTE=false
+Environment=LIVE_ENABLED_CHAINS=
+EnvironmentFile=/etc/swat/web.env
+ExecStartPre=/usr/bin/python3 -I -S /opt/swat/current/deploy/tools/ops-readiness.py --verify-only --service web --release /opt/swat/current
+ExecStart=/usr/bin/node /opt/swat/current/apps/web/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+StateDirectory=swat-web
+StateDirectoryMode=0700
+RuntimeDirectory=swat-web
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+# Provision the root-owned release and /etc/swat/web.env root:swat-web 0640.
+# Operator must provision only .next/cache as a symlink to /var/lib/swat-web/cache
+# before making the release immutable. Do not grant write access to code/.next.
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

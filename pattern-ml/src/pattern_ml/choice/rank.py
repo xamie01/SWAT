@@ -311,6 +311,11 @@ def _make_ranker(seed: int):
         colsample_bytree=0.8,
         reg_lambda=1.0,
         random_state=seed,
+        n_jobs=1,
+        # Match the bounded JSON contract; never create unsupported leaf/split
+        # semantics and rely on an inference approximation to erase them.
+        linear_tree=False,
+        zero_as_missing=False,
         verbose=-1,
     )
 

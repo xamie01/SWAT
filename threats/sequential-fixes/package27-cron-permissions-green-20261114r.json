@@ -1,0 +1,16 @@
+{
+  "kind": "source-only-cron-provisioning-regression",
+  "testFile": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package27-cron-permissions-20261114.test.py",
+  "sourceFiles": [
+    "/home/xahmie/Documents/SWAT/deploy/crontab.example"
+  ],
+  "sourceSha256": "92d1e4953104f00e4fb823d0f20d982287cd902bdaa2d6f94a03046d38a40908",
+  "methodsRun": 3,
+  "passed": 3,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 0,
+  "deploymentOrCredentialAccessExecuted": false,
+  "libpqRuntimeExecuted": false,
+  "exitCode": 0
+}

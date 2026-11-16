@@ -1,90 +1,61 @@
 when:
   - event: [push, pull_request, manual]
 
-services:
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: swat_integration
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: swat
-    ports:
-      - 5432
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - 6379
-
+# Default CI is credential-free static verification only. No DB/Redis containers,
+# developer .env copying, migrations, network acquisition or broad test imports.
+# Mutable tags below are NOT approved production/build runtime identities.
 steps:
-  - name: prepare
-    image: node:22-slim
+  - name: ops-static
+    image: python:3.11-slim
     commands:
-      - corepack enable
-      - corepack prepare pnpm@10.2.0 --activate
-      - pnpm install --frozen-lockfile
-      - cp .env.example .env
-      - sed -i "s|localhost:5432|postgres:5432|g" .env
-      - sed -i "s|127.0.0.1:5432|postgres:5432|g" .env
-      - sed -i "s|localhost:6379|redis:6379|g" .env
-      - sed -i "s|127.0.0.1:6379|redis:6379|g" .env
-      - sed -i "s|:5432/swat|:5432/swat_integration|g" .env
-      - sed -i "s|POSTGRES_DB=swat|POSTGRES_DB=swat_integration|g" .env
-      - echo "INTEGRATION_DATABASE_URL=postgresql://swat:swat@postgres:5432/swat_integration" >> .env
-      - pnpm check:secrets
-      - pnpm check:env
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock python3 -I -S deploy/tests/ops_static_test.py
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock python3 -I -S deploy/tools/ops-readiness.py --verify-only > ops-input-inventory.json
 
-  - name: verify
-    image: node:22-slim
+  - name: candidate-build
+    image: python:3.11-slim
+    depends_on: [ops-static]
+    when:
+      - event: manual
+        # Disabled until this is an approved immutable image containing exact
+        # Node22/pnpm10.2.0, util-linux and the complete offline dependency tree.
+        evaluate: 'false'
     environment:
-      DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
-      INTEGRATION_DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
-      ADMIN_DATABASE_URL: postgresql://postgres:swat@postgres:5432/swat_integration
-      REDIS_URL: redis://redis:6379
-    commands:
-      - corepack enable
-      - corepack prepare pnpm@10.2.0 --activate
-      - pnpm db:init:ci
-      - pnpm db:migrate
-      - pnpm typecheck
-
-  - name: test
-    image: node:22-slim
-    environment:
-      DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
-      INTEGRATION_DATABASE_URL: postgresql://swat:swat@postgres:5432/swat_integration
-      REDIS_URL: redis://redis:6379
+      NODE_ENV: test
       TRADING_MODE: paper
-      AUTO_EXECUTE: "false"
-      API_KEY: swat-ci-key
-      NEXT_PUBLIC_API_KEY: swat-ci-key
+      AUTO_EXECUTE: 'false'
+      LIVE_ENABLED_CHAINS: ''
     commands:
-      - corepack enable
-      - corepack prepare pnpm@10.2.0 --activate
-      - pnpm test
-      - pnpm build
-      - pnpm test:integration
+      - test "$(pnpm --version)" = 10.2.0
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=512 pnpm check:secrets
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=512 pnpm check:env
+      # Emit dependencies before checking consumers; never root turbo build/test.
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=640 pnpm --filter @swat/shared build
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=640 pnpm --filter @swat/db build
+      - for app in api indexer signal-engine trade-executor scorer discovery alert-service lp; do taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=640 pnpm --filter "@swat/$app" build || exit; done
+      - for pkg in shared db api indexer signal-engine trade-executor scorer discovery alert-service lp web; do taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=640 pnpm --filter "@swat/$pkg" typecheck || exit; done
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=640 pnpm typecheck:tools
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock env NODE_OPTIONS=--max-old-space-size=640 pnpm exec tsc --noEmit -p tsconfig.integration.json
+      - taskset -c 0 flock -x /tmp/swat-package11-checks.lock python3 -I -S deploy/tools/ops-readiness.py --verify-only > ops-build-input-inventory.json
+      # Not a deployable build: separate reviewed literal-file regressions,
+      # isolated migration twice/staging-copy replay, fresh Next/native builds,
+      # runtime dependency closure and signed build evidence remain gates.
+
+  - name: acquire-deploy-artifacts
+    image: python:3.11-slim
+    depends_on: [candidate-build]
+    when:
+      - event: manual
+        evaluate: 'false'
+    commands:
+      - env -i PATH=/usr/local/bin:/usr/bin:/bin python3 -I -S deploy/tools/package27-deploy-artifacts.py acquire
 
   - name: deploy-vercel
-    image: node:22-slim
+    image: python:3.11-slim
+    depends_on: [acquire-deploy-artifacts]
     when:
-      - event: push
-        branch: main
-    environment:
-      VERCEL_TOKEN:
-        from_secret: vercel_token
-      VERCEL_ORG_ID:
-        from_secret: vercel_org_id
-      VERCEL_PROJECT_ID:
-        from_secret: vercel_project_id
+      - event: manual
+        evaluate: 'false'
+    # No from_secret references in pending source. A future manual approval must
+    # separately review immutable image, lock, isolation and minimal secret scope.
     commands:
-      - corepack enable
-      - corepack prepare pnpm@10.2.0 --activate
-      - npm install -g vercel@65.11.0
-      - cd apps/web
-      - ln -s ../../node_modules/.pnpm node_modules/.pnpm || true
-      - vercel pull --yes --environment=production --token=$VERCEL_TOKEN
-      - vercel build --prod --token=$VERCEL_TOKEN
-      - cp -r .vercel ../../.vercel
-      - cd ../..
-      - vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN --yes
+      - python3 -I -S deploy/tools/package27-deploy-artifacts.py publish

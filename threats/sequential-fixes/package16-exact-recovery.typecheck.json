@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": { "@swat/shared": ["packages/shared/src/index.ts"], "@swat/db": ["packages/db/src/index.ts"] }
+  },
+  "files": [
+    "../../apps/trade-executor/src/policy.ts",
+    "../../apps/trade-executor/src/policy.test.ts",
+    "../../apps/trade-executor/src/copy-eligibility.ts",
+    "../../apps/trade-executor/src/copy-eligibility.test.ts",
+    "../../apps/signal-engine/src/trade-eligibility.ts",
+    "../../apps/signal-engine/src/trade-eligibility.test.ts"
+  ]
+}

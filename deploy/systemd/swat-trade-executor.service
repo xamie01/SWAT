@@ -5,11 +5,22 @@ Wants=redis.service pgbouncer.service
 
 [Service]
 Type=simple
-User=swat
-WorkingDirectory=/root/SWAT
+User=swat-trade-executor
+Group=swat-trade-executor
+WorkingDirectory=/opt/swat/current/apps/trade-executor
 Environment=NODE_ENV=production
-EnvironmentFile=/root/SWAT/.env
-ExecStart=/usr/bin/node /root/SWAT/apps/trade-executor/dist/index.js
+Environment=HOME=/var/lib/swat-trade-executor
+Environment=TRADING_MODE=paper
+Environment=AUTO_EXECUTE=false
+Environment=LIVE_ENABLED_CHAINS=
+EnvironmentFile=/etc/swat/trade-executor.env
+ExecStartPre=/usr/bin/python3 -I -S /opt/swat/current/deploy/tools/ops-readiness.py --verify-only --service trade-executor --release /opt/swat/current
+ExecStart=/usr/bin/node /opt/swat/current/apps/trade-executor/dist/index.js
+StateDirectory=swat-trade-executor
+StateDirectoryMode=0700
+RuntimeDirectory=swat-trade-executor
+RuntimeDirectoryMode=0700
+UMask=0077
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -18,8 +29,18 @@ LimitNOFILE=65536
 Environment=TRADE_CONCURRENCY_SOLANA=5
 Environment=TRADE_CONCURRENCY_POLYGON=3
 
-# Sandboxing and security hardening
-ProtectSystem=full
+# Code/releases must be root-owned, readable by swat-trade-executor, and not writable by any service principal.
+# Provision /etc/swat/trade-executor.env root:swat-trade-executor 0640 outside the release.
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
 ProtectHome=true
 NoNewPrivileges=true
 PrivateTmp=true

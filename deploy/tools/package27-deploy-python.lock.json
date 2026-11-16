@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "approval": "pending",
+  "pythonVersion": null,
+  "pythonSha256": null,
+  "pipVersion": null,
+  "pipFiles": [],
+  "wheels": []
+}

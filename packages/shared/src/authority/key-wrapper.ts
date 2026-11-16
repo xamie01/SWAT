@@ -4,28 +4,74 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
  * Context passed to KeyWrapper wrap/unwrap operations (`S4-4`).
  * Both AWS KMS, Vault Transit, and AES-GCM require this context for AAD binding.
  */
-export interface WrapContext {
+/** v1 is migration-only: its three-field AAD cannot establish resource ownership. */
+export interface LegacyWrapContext {
   readonly userId: string;
   readonly chainKind: 'evm' | 'solana';
   readonly keyVersion: number;
 }
 
-/**
- * KeyWrapper interface for envelope encryption (`S4-4`, D11).
- *
- * Provides the abstraction seam separating data-key encryption from key-storage
- * backends. Allows transitioning from environment master keys (EnvMasterKeyWrapper)
- * to Vault Transit (VaultTransitWrapper) or AWS KMS with zero business-logic refactoring.
- */
-export interface KeyWrapper {
-  /** Stable id embedded in every SealedKey this wrapper produces (e.g. 'env:v1', 'null:v1'). */
+/** Values must come from the authenticated grant and trusted deployment domain. */
+export interface ResourceWrapContext extends LegacyWrapContext {
+  readonly contextVersion: 2;
+  readonly deploymentId: string;
+  readonly chainId: string;
+  readonly accountAddress: string;
+  readonly grantId: string;
+  readonly grantKind: string;
+  readonly purpose: string;
+}
+
+export type WrapContext = LegacyWrapContext | ResourceWrapContext;
+
+/** Capability interfaces are not proof of a separately authorized KMS identity. */
+export interface KeySealer {
   readonly id: string;
   wrap(dataKey: Buffer, context: WrapContext): Promise<Buffer>;
+}
+export interface KeyUnwrapper {
+  readonly id: string;
   unwrap(wrapped: Buffer, context: WrapContext): Promise<Buffer>;
+}
+export interface KeyWrapper extends KeySealer, KeyUnwrapper {}
+
+function requireContextString(value: unknown, field: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256 ||
+      value.trim() !== value || /[\u0000-\u0020\u007f|]/.test(value)) {
+    throw new Error(`[custody] invalid ${field}`);
+  }
+}
+
+export function assertResourceWrapContext(context: WrapContext): asserts context is ResourceWrapContext {
+  if (!context || !('contextVersion' in context) || context.contextVersion !== 2) {
+    throw new Error('[custody] resource context v2 required; legacy context is migration-only');
+  }
+  for (const field of ['userId', 'deploymentId', 'chainId', 'accountAddress', 'grantId', 'grantKind', 'purpose'] as const) {
+    requireContextString(context[field], field);
+  }
+  if (context.chainKind !== 'evm' && context.chainKind !== 'solana') throw new Error('[custody] invalid chain kind');
+  if (!Number.isSafeInteger(context.keyVersion) || context.keyVersion <= 0) throw new Error('[custody] invalid key version');
+  if (context.chainKind === 'evm' &&
+      (!/^[1-9][0-9]*$/.test(context.chainId) || !/^0x[0-9a-f]{40}$/.test(context.accountAddress))) {
+    throw new Error('[custody] EVM network and account must be canonical');
+  }
+}
+
+export function buildLegacyWrapAad(context: LegacyWrapContext): Buffer {
+  requireContextString(context.userId, 'userId');
+  if (context.chainKind !== 'evm' && context.chainKind !== 'solana') throw new Error('[custody] invalid chain kind');
+  if (!Number.isSafeInteger(context.keyVersion) || context.keyVersion <= 0) throw new Error('[custody] invalid key version');
+  if ('contextVersion' in context) throw new Error('[custody] resource context cannot be downgraded to legacy');
+  return Buffer.from(`${context.userId}|${context.chainKind}|${context.keyVersion}`, 'utf8');
 }
 
 export function buildWrapAad(context: WrapContext): Buffer {
-  return Buffer.from(`${context.userId}|${context.chainKind}|${context.keyVersion}`, 'utf8');
+  assertResourceWrapContext(context);
+  return Buffer.from(JSON.stringify([
+    'SWAT-AUTHORITY-ENVELOPE', 2, context.deploymentId, context.userId,
+    context.chainKind, context.chainId, context.accountAddress, context.grantId,
+    context.grantKind, context.purpose, context.keyVersion
+  ]), 'utf8');
 }
 
 /**
@@ -40,21 +86,18 @@ export class EnvMasterKeyWrapper implements KeyWrapper {
   private readonly masterKey: Buffer;
 
   constructor(options?: { masterKey?: Buffer | string; version?: number }) {
-    const version = options?.version ?? 1;
+    const rawKey = options?.masterKey;
+    if (!rawKey) {
+      throw new Error('[custody] EnvMasterKeyWrapper requires explicit masterKey; API wrapping must use a separately authorized service');
+    }
+    const version = options?.version;
+    if (!Number.isSafeInteger(version) || !version || version <= 0) {
+      throw new Error('[custody] EnvMasterKeyWrapper requires an explicit positive version');
+    }
     this.id = `env:v${version}`;
 
-    let rawKey = options?.masterKey ?? process.env.CUSTODY_MASTER_KEY;
-    if (!rawKey) {
-      // If neither is provided, check if CUSTODY_MASTER_KEY_HEX or default is set
-      rawKey = process.env.CUSTODY_MASTER_KEY_HEX;
-    }
-
-    if (!rawKey) {
-      throw new Error('[custody] EnvMasterKeyWrapper requires CUSTODY_MASTER_KEY to be configured');
-    }
-
     if (Buffer.isBuffer(rawKey)) {
-      this.masterKey = rawKey;
+      this.masterKey = Buffer.from(rawKey);
     } else if (rawKey.length === 64 && /^[0-9a-fA-F]+$/.test(rawKey)) {
       this.masterKey = Buffer.from(rawKey, 'hex');
     } else {
@@ -96,7 +139,8 @@ export class EnvMasterKeyWrapper implements KeyWrapper {
     const ciphertext = wrapped.subarray(28);
 
     const decipher = createDecipheriv('aes-256-gcm', this.masterKey, iv);
-    decipher.setAAD(buildWrapAad(context));
+    // Legacy AAD is reachable only through the explicit migration reader.
+    decipher.setAAD('contextVersion' in context ? buildWrapAad(context) : buildLegacyWrapAad(context));
     decipher.setAuthTag(tag);
 
     try {

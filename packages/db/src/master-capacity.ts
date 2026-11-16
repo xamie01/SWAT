@@ -1,3 +1,4 @@
+import type { PoolClient, QueryResultRow } from 'pg';
 import type { Chain } from '@swat/shared';
 import { DEFAULT_SLIPPAGE_BPS } from '@swat/shared';
 import { query } from './client.js';
@@ -780,7 +781,8 @@ export function assessMasterCapacity(input: MasterCapacityInput): MasterCapacity
     if (input.activeFollowerCount > softCap) binding.push('follower-soft-cap');
   }
 
-  const primaryUnassessable = priceImpact === null;
+  const primaryUnassessable = priceImpact === null || input.observation.coverage !== 'accounted';
+  const capacityUnassessable = primaryUnassessable || followerSoftCap === null;
   if (primaryUnassessable) binding.push('unassessable-primary');
 
   // ── Resolve ───────────────────────────────────────────────────────────
@@ -812,23 +814,12 @@ export function assessMasterCapacity(input: MasterCapacityInput): MasterCapacity
       + `exceeds the ${fs.softCap} soft cap. This layer is venue-blind by construction; the `
       + 'price-impact cap is the primary control.'
       + (priceImpact === null ? ' The primary cap could not be evaluated (see unassessed).' : '');
-  } else if (primaryUnassessable) {
-    if (input.policy.unassessablePolicy === 'skip') {
-      outcome = 'skip';
-      code = 'capacity-not-assessable';
-      detail =
-        'The price-impact cap could not be evaluated and the caller declared '
-        + "unassessablePolicy: 'skip', so the cohort is skipped. Reasons: "
-        + unassessed.map((entry) => entry.reason).join(', ') + '.';
-    } else {
-      outcome = 'admit';
-      code = 'capacity-admitted-unassessed';
-      detail =
-        'The price-impact cap could not be evaluated and the caller declared '
-        + "unassessablePolicy: 'admit', so the cohort is admitted with only the crude "
-        + 'follower soft-cap applied. This is NOT a clean pass. Reasons: '
-        + unassessed.map((entry) => entry.reason).join(', ') + '.';
-    }
+  } else if (capacityUnassessable) {
+    outcome = 'skip';
+    code = 'capacity-not-assessable';
+    detail = 'Capacity is not fully assessable; unknown or partially priced obligations '
+      + 'cannot create free headroom. The cohort is skipped. Reasons: '
+      + unassessed.map((entry) => entry.reason).join(', ') + '.';
   } else {
     outcome = 'admit';
     code = 'capacity-within-limits';

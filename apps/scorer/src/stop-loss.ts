@@ -1,6 +1,6 @@
 import type { Chain } from '@swat/shared';
-import type { OpenPositionSnapshot, StopLossClaimInput } from '@swat/db';
-import { isStopLossBreached, positionDrawdownPct } from '@swat/db';
+import type { OpenPositionSnapshot, StopLossClaimInput, CopyExecutionRecord, LotExitExecutionInput } from '@swat/db';
+import { isStopLossBreached, positionDrawdownPct, assertLotExitExecutionMatches } from '@swat/db';
 
 /**
  * Stop-loss sweep. Runs on the back of the scorer's existing 5-minute
@@ -93,6 +93,12 @@ export type StopLossSellJob = {
    */
   userId?: string;
   positionKey?: string;
+  exitLotId?: string;
+  copyExecutionId?: string;
+  requestedBaseQuantity?: string;
+  masterWalletAddress?: string;
+  targetAccount?: string;
+  acquisitionExecutionMode?: CopyExecutionRecord['executionMode'];
 };
 
 export type StopLossAlert = {
@@ -107,6 +113,8 @@ export type StopLossSweepDependencies = {
   positions: OpenPositionSnapshot[];
   resolvePolicy: (account: string, chain: Chain) => Promise<{ stopLossPct: number }>;
   claim: (input: StopLossClaimInput) => Promise<boolean>;
+  /** Required for tenant/lot exits. Missing wiring blocks, never uses legacy signal claims. */
+  claimExit?: (input: LotExitExecutionInput) => Promise<{ execution: CopyExecutionRecord; created: boolean }>;
   release: (account: string, signalId: string, positionKey?: string | null) => Promise<void>;
   /**
    * `chain` is passed explicitly rather than left for the caller to re-derive
@@ -221,6 +229,45 @@ export async function runStopLossSweep(
     const drawdownPct = positionDrawdownPct(position);
     if (drawdownPct === null) continue;
     result.breached++;
+
+    // Tenant balances without immutable lot/acquisition scope are not an exit authority.
+    // Canonical reservations survive queue failure; the same request id retries safely.
+    if (position.userId !== null || position.positionKey != null) {
+      const jobId = `stop-loss-${account}-${position.signalId}-${position.positionKey}`;
+      try {
+        if (!dependencies.claimExit || !position.positionKey || !position.openQuantityExact
+            || !position.masterWalletAddress || !position.targetAccount || !position.acquisitionExecutionMode) {
+          throw new Error('Stop-loss requires canonical lot exit wiring and exact acquisition scope');
+        }
+        const identity = {
+          userId: position.userId, signalId: position.signalId, exitLotId: position.positionKey,
+          chain: position.chain, tokenMint: position.tokenMint, requestedBaseQuantity: position.openQuantityExact,
+          masterWalletAddress: position.masterWalletAddress, targetAccount: position.targetAccount,
+          acquisitionExecutionMode: position.acquisitionExecutionMode
+        };
+        const claim = await dependencies.claimExit({ lotId: position.positionKey,
+          userId: position.userId, requestId: jobId, trigger: 'stop-loss',
+          requestedBaseQuantity: position.openQuantityExact });
+        assertLotExitExecutionMatches(claim.execution, identity, 'stop-loss');
+        if (claim.execution.state !== 'requested' && claim.execution.state !== 'simulated') {
+          result.alreadyTriggered++;
+          continue;
+        }
+        await dependencies.enqueueSell({ ...identity,
+          ...(position.userId === null ? { userId: undefined } : { userId: position.userId }),
+          positionKey: position.positionKey, copyExecutionId: claim.execution.id,
+          score: 100, direction: 'sell', stopLoss: true, sellTokenAmount: position.openQuantity
+        }, jobId, position.chain);
+      } catch (error) {
+        console.error(`[scorer] canonical stop-loss claim/enqueue failed for ${position.positionKey}`, error);
+        result.failed++;
+        continue;
+      }
+      result.queued++;
+      await dependencies.publishAlert(formatStopLossAlert(position, policy.stopLossPct, drawdownPct))
+        .catch(error => console.error(`[scorer] stop-loss alert failed for ${position.signalId}`, error));
+      continue;
+    }
 
     let claimed: boolean;
     try {

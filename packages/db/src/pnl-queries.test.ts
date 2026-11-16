@@ -361,6 +361,82 @@ describe('markToMarketOpenPositions per-tenant grouping (S4-M46)', () => {
     });
   });
 
+  // This fixture models only the named SQL guard at the mocked query boundary.
+  // It is a generated-query/projection regression, not PostgreSQL execution proof.
+  it.each([
+    ['missing acquisition evidence', 'evidence.id = lot.acquisition_evidence_id'],
+    ['evidence from another execution', 'evidence.execution_id = acquisition.id'],
+    ['observed evidence', "evidence.confirmation_state IN ('confirmed', 'finalized')"],
+    ['reversed evidence with a still-positive lot', "evidence.confirmation_state IN ('confirmed', 'finalized')"],
+    ['application for another evidence', 'application.evidence_id = evidence.id'],
+    ['application for another execution', 'application.execution_id = acquisition.id'],
+    ['inactive applied application', 'application.active = TRUE'],
+    ['application on another position', 'application.position_id = position.id'],
+    ['application owned by another tenant', 'application.user_id IS NOT DISTINCT FROM lot.user_id'],
+    ['application on another target account', 'application.target_account = position.target_account'],
+    ['application on another chain', 'application.chain = lot.chain'],
+    ['application on another token', 'application.token_mint = lot.token_mint']
+  ])('does not expose exact ownership for %s (inert acquisition guard fixture)', async (_reason, predicate) => {
+    const retainedLot = {
+      lot_id: 'retained-lot', signal_id: 'shared-signal', user_id: 'user-a',
+      master_wallet_address: 'solana:master-a', token_mint: 'solana:token-1', chain: 'solana',
+      remaining_quantity: '10.000000000000000001', remaining_cost_basis_usd: '100',
+      target_account: 'solana:target-a', execution_mode: 'live'
+    };
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM trades t')) return [
+        buy({ user_id: 'user-a', token_amount: '10', amount_usd: '100', price_usd: '10' })
+      ];
+      if (sql.includes('FROM copy_position_master_lots lot')) {
+        // Without this predicate the old query admits this otherwise scoped lot.
+        return sql.includes(predicate) ? [] : [retainedLot];
+      }
+      return [];
+    });
+    mocks.fetchTokenPriceUsd.mockResolvedValue(5);
+
+    const result = await markToMarketOpenPositions();
+    expect(result.positions).toEqual([{
+      signalId: 'shared-signal', userId: 'user-a', tokenMint: 'solana:token-1', chain: 'solana',
+      openQuantity: 10, openCostBasisUsd: 100, unrealizedPnlUsd: -50, currentPriceUsd: 5
+    }]);
+    expect(result.updated).toBe(1);
+    const [sql] = mocks.query.mock.calls[1] as [string];
+    expect(sql).toContain(predicate);
+  });
+
+  it.each(['paper', 'shadow', 'live'] as const)(
+    'keeps %s acquisition scope on the owning tenant lot, not a co-holder or legacy aggregate', async mode => {
+      mocks.query
+        .mockResolvedValueOnce([
+          buy({ user_id: 'user-a', token_amount: '10', amount_usd: '100', price_usd: '10' }),
+          buy({ user_id: 'user-b', token_amount: '20', amount_usd: '200', price_usd: '10' }),
+          buy({ user_id: null, token_amount: '30', amount_usd: '300', price_usd: '10' })
+        ])
+        .mockResolvedValueOnce([{
+          lot_id: 'lot-user-a', signal_id: 'shared-signal', user_id: 'user-a',
+          master_wallet_address: 'solana:master-a', token_mint: 'solana:token-1', chain: 'solana',
+          remaining_quantity: '10.000000000000000001', remaining_cost_basis_usd: '100',
+          target_account: 'solana:target-a', execution_mode: mode
+        }]);
+      mocks.fetchTokenPriceUsd.mockResolvedValue(5);
+
+      const { positions } = await markToMarketOpenPositions();
+      expect(positions).toHaveLength(3);
+      expect(positions.find(position => position.userId === 'user-a')).toMatchObject({
+        positionKey: 'lot-user-a', openQuantityExact: '10.000000000000000001',
+        masterWalletAddress: 'solana:master-a', targetAccount: 'solana:target-a',
+        acquisitionExecutionMode: mode, openQuantity: 10, unrealizedPnlUsd: -50
+      });
+      for (const userId of ['user-b', null]) {
+        const aggregate = positions.find(position => position.userId === userId)!;
+        expect(aggregate.openQuantity).toBe(userId === null ? 30 : 20);
+        for (const field of ['positionKey', 'openQuantityExact', 'masterWalletAddress',
+          'targetAccount', 'acquisitionExecutionMode']) expect(aggregate).not.toHaveProperty(field);
+      }
+    }
+  );
+
   it('emits one keyed snapshot per open master lot while rolling up the signal once', async () => {
     mocks.query
       .mockResolvedValueOnce([
@@ -374,8 +450,10 @@ describe('markToMarketOpenPositions per-tenant grouping (S4-M46)', () => {
           master_wallet_address: 'solana:master-a',
           token_mint: 'solana:token-1',
           chain: 'solana',
-          remaining_quantity: '10',
-          remaining_cost_basis_usd: '100'
+          remaining_quantity: '10.000000000000000001',
+          remaining_cost_basis_usd: '100',
+          target_account: 'solana:target-live',
+          execution_mode: 'live'
         },
         {
           lot_id: 'lot-master-b',
@@ -384,21 +462,59 @@ describe('markToMarketOpenPositions per-tenant grouping (S4-M46)', () => {
           master_wallet_address: 'solana:master-b',
           token_mint: 'solana:token-1',
           chain: 'solana',
-          remaining_quantity: '5',
-          remaining_cost_basis_usd: '50'
+          remaining_quantity: '5.000000000000000002',
+          remaining_cost_basis_usd: '50',
+          target_account: 'solana:target-paper',
+          execution_mode: 'paper'
         }
       ])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mocks.fetchTokenPriceUsd.mockResolvedValue(5);
 
-    const result = await markToMarketOpenPositions();
+    // Exercise the actual query/projection with an inert client. Join predicates
+    // are structural checks only: this does not execute PostgreSQL or certify evidence.
+    const result = await markToMarketOpenPositions('shared-signal');
+    const [lotSql, lotParams] = mocks.query.mock.calls[1] as [string, unknown[]];
+    for (const predicate of [
+      'lot.remaining_quantity::text', 'lot.master_wallet_address',
+      'position.target_account', 'acquisition.execution_mode',
+      'position.id = lot.position_id',
+      'position.user_id IS NOT DISTINCT FROM lot.user_id',
+      'position.chain = lot.chain AND position.token_mint = lot.token_mint',
+      'acquisition.id = lot.acquisition_execution_id',
+      'acquisition.user_id IS NOT DISTINCT FROM lot.user_id',
+      'acquisition.target_account = position.target_account',
+      'acquisition.chain = lot.chain AND acquisition.token_mint = lot.token_mint',
+      "acquisition.direction = 'buy'",
+      'acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id',
+      'acquisition.source_trade_id = lot.source_trade_id',
+      'source.id = lot.source_trade_id',
+      'source.chain = lot.chain AND source.token_mint = lot.token_mint',
+      "source.wallet_address = lot.master_wallet_address AND source.direction = 'buy'",
+      'JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id',
+      'evidence.execution_id = acquisition.id',
+      "evidence.confirmation_state IN ('confirmed', 'finalized')",
+      'JOIN copy_position_applications application ON application.evidence_id = evidence.id',
+      'application.execution_id = acquisition.id',
+      'application.active = TRUE',
+      'application.position_id = position.id',
+      'application.user_id IS NOT DISTINCT FROM lot.user_id',
+      'application.target_account = position.target_account',
+      'application.chain = lot.chain AND application.token_mint = lot.token_mint',
+      '($1::uuid IS NULL OR lot.signal_id = $1)'
+    ]) expect(lotSql).toContain(predicate);
+    expect(lotParams).toEqual(['shared-signal']);
 
     expect(result.positions).toEqual([
       {
         signalId: 'shared-signal',
         userId: 'user-a',
         positionKey: 'lot-master-a',
+        openQuantityExact: '10.000000000000000001',
+        masterWalletAddress: 'solana:master-a',
+        targetAccount: 'solana:target-live',
+        acquisitionExecutionMode: 'live',
         tokenMint: 'solana:token-1',
         chain: 'solana',
         openQuantity: 10,
@@ -410,6 +526,10 @@ describe('markToMarketOpenPositions per-tenant grouping (S4-M46)', () => {
         signalId: 'shared-signal',
         userId: 'user-a',
         positionKey: 'lot-master-b',
+        openQuantityExact: '5.000000000000000002',
+        masterWalletAddress: 'solana:master-b',
+        targetAccount: 'solana:target-paper',
+        acquisitionExecutionMode: 'paper',
         tokenMint: 'solana:token-1',
         chain: 'solana',
         openQuantity: 5,

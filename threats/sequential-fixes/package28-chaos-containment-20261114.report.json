@@ -1,0 +1,531 @@
+{
+  "package": 28,
+  "date": "2026-11-14",
+  "status": "source-chaos-contained-runtime-unavailable-neighbor-static-failure-retained",
+  "scope": {
+    "existingEdited": [
+      "/home/xahmie/Documents/SWAT/tests/integration/chaos.integration.test.ts"
+    ],
+    "newRegression": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+    "otherWrites": "Only new prefixed threat evidence/config/report plus mandated runner artifacts/cache and runner automatic append; no manual global-ledger changes. Shared other-owner changes are not overwritten.",
+    "git": "No Git commands; existing branch and dirty checkout accepted as supplied."
+  },
+  "changes": [
+    "Direct chaos bootstrap calls existing pure preflight then unconditional missing exact owned session/baseline refusal before any dynamic dependencies; even a returning mocked preflight cannot enable imports.",
+    "No runtime Queue/Redis imports, constructors, default endpoint, peer-kill SQL or Redis CLIENT command remain. Type-only imports are erased.",
+    "PostgreSQL termination, Redis termination and withQueue helpers explicitly refuse; no SQL, callback, Redis key cleanup or infrastructure acquisition in those helpers.",
+    "Historical eight scenarios retained. Existing assertions, lifecycle state expectations and ledger checks preserved; unsafe fault setup blocks replaced rather than pretending faults occurred.",
+    "DB/shared barrel imports replaced with guarded exact module imports. Added explicit query row type only, no runtime SQL/API change."
+  ],
+  "sourceFingerprints": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/tests/integration/chaos.integration.test.ts",
+      "sha256": "da4e4259878c3e9da410e690cdb32b5b28d9a56d158cbd5aa4c80d8d174d1c92"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+      "sha256": "349a01825195504148d949763e2f2e373066bfe79ce44bd3d7b6982ed10c5567"
+    }
+  ],
+  "preservation": {
+    "sameScenarioNames": true,
+    "scenarioCount": 8,
+    "sameHistoricalAssertionLines": true,
+    "assertionLineCount": 28,
+    "existingIsolationTest": {
+      "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-existing-isolation.test.ts",
+      "sha256": "ef9e30332f6af183b0a62c9f2ef59340aa4c4826c32fd2bd44a487e98d802473"
+    },
+    "existingIsolationTestMatchesInheritedFingerprint": true,
+    "guardOwner": "No edits to guard/preflight/lifecycle/root config; another owner is active, current fingerprints are observations, not immutability claims."
+  },
+  "redStageArtifacts": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-inherited-source.txt",
+      "sha256": "7f2e441f876f22c10f7fd28a02c4857b39bb8b0c88377f92636f019d51d44e63"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-import-red-test.txt",
+      "sha256": "1ad8740799e97223e99700d64650657c5540d17e7e8344a67229ea5ed1c51fde"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-operations-red-source.txt",
+      "sha256": "e395ba286216a2f300241d717a0dd7adcfd557aed3fc99ece562d0bfac4b06a6"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-operations-red-test.txt",
+      "sha256": "96b5517f9f457df9791b4ffaa08482b307ca6c3671797e02bf8849b0654bf00d"
+    }
+  ],
+  "redGreen": {
+    "import": "Actual prewrite static red1failed/1file, green1passed/1file with inert bootstrap refusals; old source had six static infrastructure/helper/barrel imports.",
+    "operations": "Actual source red1passed+1failed/1file detecting default Redis endpoint and PostgreSQL all-peer SQL; green2passed/1file after removal and unavailable-helper checks.",
+    "final": "2passed/1file exit0; zero skipped/pending/todo. No real chaos module/test/config executed."
+  },
+  "neighbors": {
+    "final": "59passed/1failed/2actualfiles exit1; preflight56passed and existing-isolation3passed/1failed; no skips/pending/todo.",
+    "retainedFailure": "Existing chaos assertion still requires actual application_name = $1. No identity inventory/capability exists, so all-peer operation was removed rather than adding cosmetic predicate/comment. CLIENT KILL TYPE normal prohibition now passes. Existing test unedited.",
+    "countsAreNotAdditive": true
+  },
+  "runs": [
+    {
+      "label": "package28-chaos-containment-20261114-import-red-a",
+      "exitCode": 1,
+      "elapsedSeconds": 6.467,
+      "finishedUtc": "2026-11-14T16:54:03.849253+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-import-red-a.log",
+        "sha256": "eea1b363d78982b1bce4a0e44210f2a18bd1845c4cd24ced1fd5586cc2050b56"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-import-red-a.json",
+        "sha256": "7616c9eda52595584aba8ea79ac7df22eba145f699c4b70ad9010ac042fd558f"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+          "status": "failed",
+          "counts": {
+            "failed": 1
+          },
+          "failures": [
+            "package28 chaos direct-import containment (source-only inert bootstrap) refuses before any infrastructure import even when declarations look disposable or the outer guard returns"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "package28-chaos-containment-20261114-import-green-a",
+      "exitCode": 0,
+      "elapsedSeconds": 5.812,
+      "finishedUtc": "2026-11-14T16:55:20.625648+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-import-green-a.log",
+        "sha256": "f7902e3204a1aebc055c83f05951e40a626251ad27913a4c067baeb2e3394109"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-import-green-a.json",
+        "sha256": "019a7333d2f10c13beaec0421ed35ae546bbc151a2c76ee13a448d1ddaac9b90"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+          "status": "passed",
+          "counts": {
+            "passed": 1
+          },
+          "failures": []
+        }
+      ]
+    },
+    {
+      "label": "package28-chaos-containment-20261114-operations-red-a",
+      "exitCode": 1,
+      "elapsedSeconds": 11.259,
+      "finishedUtc": "2026-11-14T16:56:53.440417+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-operations-red-a.log",
+        "sha256": "21c44b712e2ccd8e2def593e67beee4abcc757b723b7d49e728e1766bff2b705"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-operations-red-a.json",
+        "sha256": "897b6c527660725b93b9df27c66e320fe65561e80030983c061dbea5aa8fbfa5"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+          "status": "failed",
+          "counts": {
+            "passed": 1,
+            "failed": 1
+          },
+          "failures": [
+            "package28 chaos direct-import containment (source-only inert bootstrap) has no executable all-peer kill or implicit Redis endpoint and unavailable helpers refuse without effects"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "package28-chaos-containment-20261114-focused-green-a",
+      "exitCode": 0,
+      "elapsedSeconds": 5.713,
+      "finishedUtc": "2026-11-14T17:00:15.785902+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused-green-a.log",
+        "sha256": "69f57d92728012fb1d001357c96d6c729d8937a385dca21c9c325fa2a903c951"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused-green-a.json",
+        "sha256": "364cfede2ca706af347b8cf9bbf69acab9f03ed07d11f16b0e5d50b58fd78a61"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+          "status": "passed",
+          "counts": {
+            "passed": 2
+          },
+          "failures": []
+        }
+      ]
+    },
+    {
+      "label": "package28-chaos-containment-20261114-noemit-a-640",
+      "exitCode": 2,
+      "elapsedSeconds": 16.72,
+      "finishedUtc": "2026-11-14T17:13:29.209523+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc",
+        "--noEmit",
+        "-p",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114.typecheck.json"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-noemit-a-640.log",
+        "sha256": "70e3393ff494b712352d4e93af6366065ca93d862777ad9ea8d2236fa88842fe"
+      }
+    },
+    {
+      "label": "package28-chaos-containment-20261114-neighbors-a",
+      "exitCode": 1,
+      "elapsedSeconds": 14.908,
+      "finishedUtc": "2026-11-14T17:14:01.933614+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors-a.log",
+        "sha256": "c65cee54eea66cc97e120fe77bd825921460c4bb5ff160b412c69d588dc1b31b"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors-a.json",
+        "sha256": "2d5e36d1e66836a5b3f8a45a2bb06879fb18109ba44ff1dd1ac54b8c97283621"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-existing-isolation.test.ts",
+          "status": "failed",
+          "counts": {
+            "passed": 3,
+            "failed": 1
+          },
+          "failures": [
+            "package28 existing isolation regressions (pure database mock) chaos does not kill every PostgreSQL or Redis peer"
+          ]
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts",
+          "status": "passed",
+          "counts": {
+            "passed": 56
+          },
+          "failures": []
+        }
+      ]
+    },
+    {
+      "label": "package28-chaos-containment-20261114-noemit-b-640",
+      "exitCode": 0,
+      "elapsedSeconds": 26.22,
+      "finishedUtc": "2026-11-14T17:16:56.154450+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc",
+        "--noEmit",
+        "-p",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114.typecheck.json"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-noemit-b-640.log",
+        "sha256": "5bb9a6481dc1adb41c40f1671fa34759249607d2873f0ae08794c9da1c6b2f82"
+      }
+    },
+    {
+      "label": "package28-chaos-containment-20261114-focused-final-a",
+      "exitCode": 0,
+      "elapsedSeconds": 10.853,
+      "finishedUtc": "2026-11-14T17:17:07.903455+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused-final-a.log",
+        "sha256": "def564d0f5eb8442a3992953aabe28081be637bdc8d4ef0e6794a58486b0e3e6"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused-final-a.json",
+        "sha256": "2529fc63fd7af113ab5fc5662965d74d6b41f00ed3671bca31b27618fbe983c5"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+          "status": "passed",
+          "counts": {
+            "passed": 2
+          },
+          "failures": []
+        }
+      ]
+    },
+    {
+      "label": "package28-chaos-containment-20261114-neighbors-final-a",
+      "exitCode": 1,
+      "elapsedSeconds": 15.291,
+      "finishedUtc": "2026-11-14T17:18:24.422031+00:00",
+      "command": [
+        "/usr/bin/node",
+        "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors.config.ts"
+      ],
+      "log": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors-final-a.log",
+        "sha256": "7b4429e0f7142b01b144afeb285b7f7aaf93696f69ab299f1ada1a72b2c2e87c"
+      },
+      "result": {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors-final-a.json",
+        "sha256": "52b00c8477ceb760718dd6741fc4e4e118ac560f0d44f95ade2c5c7cac13e364"
+      },
+      "actualManifest": [
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-existing-isolation.test.ts",
+          "status": "failed",
+          "counts": {
+            "passed": 3,
+            "failed": 1
+          },
+          "failures": [
+            "package28 existing isolation regressions (pure database mock) chaos does not kill every PostgreSQL or Redis peer"
+          ]
+        },
+        {
+          "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-preflight.test.ts",
+          "status": "passed",
+          "counts": {
+            "passed": 56
+          },
+          "failures": []
+        }
+      ]
+    }
+  ],
+  "configs": [
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts",
+      "sha256": "548069c883d2aaece5ef31a4e60b3a089408ce37ae067bf98b5e6625a1fac7d3"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors.config.ts",
+      "sha256": "36ed4ac943111e7c94bfd1e22de8cd0122dd44fe512be97c36053860fa265de6"
+    },
+    {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114.typecheck.json",
+      "sha256": "08219fe1a3ca7276ece498c62a79d6ddb3968dd9e1b0ba3e057beebb0c7dbdd0"
+    }
+  ],
+  "compiler": {
+    "finalExitCode": 0,
+    "initialExitCode": 2,
+    "initialDiagnostics": "Stale shared/dist Chain declarations (TS2678/TS2322) and untyped pool row return (TS2322). Fixed focused configuration via existing real source alias and owned query generic, no casts/stubs/DB source edits.",
+    "policy": "TypeScript5.9.3 strict ESNext/Bundler; noEmit incremental=false skipLibCheck; 640MB only labels ending -640; full root/build/NodeNext/dist/runtime not certified.",
+    "sourceAlias": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+      "sha256": "6d0095d2adc3fdbe7db2b472821fe8a19e141121bd6385b3e37d18bdff40bb19"
+    },
+    "manifestLog": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-noemit-b-640.log",
+      "sha256": "5bb9a6481dc1adb41c40f1671fa34759249607d2873f0ae08794c9da1c6b2f82"
+    },
+    "actualFiles": 415,
+    "actualNonNodeModulesFiles": 20,
+    "actualSourceManifest": [
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/client-runtime.ts",
+        "sha256": "265f73b0a970ac502f91baaddacfaa3baa5ebbdb562c0c6e813a9165a527487d"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/client.ts",
+        "sha256": "4a2069cf92c48f40817af17c1ee2207ea40b02304f57047df1cdd63b4f5e0af0"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/copy-trade-lifecycle.ts",
+        "sha256": "785dacfb948032b97a7ce3f791b9ba6f0404ef5e52479b292c574dfa678a96a5"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/database-role.ts",
+        "sha256": "b14d0d744d78b481573b032641402679447d9b09c4472702995a445dde8e9f9b"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/lot-allocation.ts",
+        "sha256": "6428b3db6b3074a2d6bed0888093d51389bd797b672912ceb10a492e57e74e59"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/numeric.ts",
+        "sha256": "ed015957d3d0b6ef79a95d7f1476599cc24e94ab4d5c996a52d248391934e1fb"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/quote-valuation.ts",
+        "sha256": "3b0b2d4954f35a4cf96c32b2098cff446bf983db3074b34e648cbd6ed4bf3d6d"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/db/src/transaction.ts",
+        "sha256": "675e7d1899b2ca681b14e2f81367a58526cf96d819e73e014d6632d4aa7994aa"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/shared/src/address.ts",
+        "sha256": "8edc44e3bce30b9a18082356596f8f70b52bebc3d13df83ecd0d4e8268d4a453"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/shared/src/copy-trade-lifecycle.ts",
+        "sha256": "4384db4b419fff32833afb622fbf4c65b8d36e3725568a540a16de3399ff5f67"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/shared/src/types.ts",
+        "sha256": "76cc2950a169555416d236dc07c657f52740ac1b439a2cd4546d91b78afe5fdd"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/packages/shared/src/validation.ts",
+        "sha256": "eef078359911ed8e584f5c51ff270864694d902944d9b45851f8710574b408dd"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/tests/integration/chaos.integration.test.ts",
+        "sha256": "da4e4259878c3e9da410e690cdb32b5b28d9a56d158cbd5aa4c80d8d174d1c92"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/tests/integration/helpers/lifecycle-fixture.ts",
+        "sha256": "a1e437d3fdf1b12b33c013bd231ec24f9c543380d687a56899628358db43c531"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/tests/integration/helpers/package28-isolation.ts",
+        "sha256": "5cae8a0fe2957ba8c0824850c86dbafa81cbe1693117ba02a3a724288b8a1347"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/tests/unit/package28-chaos-containment.test.ts",
+        "sha256": "349a01825195504148d949763e2f2e373066bfe79ce44bd3d7b6982ed10c5567"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+        "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package15-lot-claim-recovery-20261114.shared-source.ts",
+        "sha256": "6d0095d2adc3fdbe7db2b472821fe8a19e141121bd6385b3e37d18bdff40bb19"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-focused.config.ts",
+        "sha256": "548069c883d2aaece5ef31a4e60b3a089408ce37ae067bf98b5e6625a1fac7d3"
+      },
+      {
+        "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package28-chaos-containment-20261114-neighbors.config.ts",
+        "sha256": "36ed4ac943111e7c94bfd1e22de8cd0122dd44fe512be97c36053860fa265de6"
+      }
+    ]
+  },
+  "checkPolicy": {
+    "affinity": [
+      0
+    ],
+    "lock": "/tmp/swat-package11-checks.lock",
+    "runnerTimeoutSeconds": 240,
+    "bashTimeoutMilliseconds": 600000,
+    "testHeapMB": 512,
+    "compilerHeapMB": 640,
+    "vitest": "3.2.6 forks min/maxWorkers1 fileParallelism=false maxConcurrency1",
+    "explicitManifests": true,
+    "runner": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/run-check.py",
+      "sha256": "bc0995bd7a3d8020e0fc1ccec8a064efc60692efb643a8c9de3114a1034ea689"
+    },
+    "harness": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-harness.ts",
+      "sha256": "89f60f74d9ac0994ac92688ebee6a88b5bf64d3dfc18d841f228652d2e74459e"
+    },
+    "offlineGuard": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/offline-guard.cjs",
+      "sha256": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf"
+    },
+    "testSafety": {
+      "path": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/test-safety.ts",
+      "sha256": "8d50902d887ac313a06ebde73d5a39b977fc4067303e5b5fd654b5077e873930"
+    },
+    "installedVitestEntry": {
+      "path": "/home/xahmie/Documents/SWAT/node_modules/vitest/vitest.mjs",
+      "sha256": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6"
+    },
+    "installedCompilerEntry": {
+      "path": "/home/xahmie/Documents/SWAT/node_modules/typescript/bin/tsc",
+      "sha256": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0"
+    }
+  },
+  "importAudit": [
+    "New test loads only node:fs, Vitest, TypeScript and existing zero-import pure guard; reads chaos as text. AST-delimited bootstrap transpiles to an async inert require-port evaluator. Unknown imports reject; test module/body is never loaded or invoked.",
+    "Bootstrap behavior checked with empty env, syntactically disposable declarations and returning guard mock; actual pure guard/inner ownership refusal produce errors and zero import/effect counters.",
+    "Unavailable helper bodies source-inspected and transpiled independently with a throwing guard port. No DB/Redis API executes.",
+    "Neighbors reviewed full source: preflight uses pure/mock/static checks, DB mocked; existing isolation mocks preflight+DB for inert cleanup selectors. Direct address/validation/PublicKey parsing only, no signing/key generation.",
+    "Compiler reads actual DB/client/lifecycle and declaration graph only; no runtime application/native code execution. Existing compiler alias exports actual types/address/lifecycle, no fabricated APIs.",
+    "Report extraction uses python3 -I -S reviewed standard-library file/hash/JSON/regex only."
+  ],
+  "guidance": [
+    "/home/xahmie/Documents/SWAT/docs/plans/BUILDER-GUIDE.md:35-40",
+    "/home/xahmie/Documents/SWAT/docs/testing-aspects.md:70-74",
+    "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package12-29-integration-contracts.md:99-103"
+  ],
+  "review": {
+    "method": "Bounded author Standards/Spec source review against supplied task and guidance. Git and parallel/nested agents explicitly prohibited, so not invoked. No independent review claimed.",
+    "standards": "No fill fabrication, fixture/ledger/lifecycle assertions retained; no schema/history/client/guard edits; no credentials/live infrastructure.",
+    "spec": "Containment verified at reachable pure/inert bootstrap seam; exact identity capability absent => operation unavailable, incompatible existing assertion retained honestly."
+  },
+  "unresolvedGaps": [
+    "Independently generated canonical schema catalog bound unified migration digest/profile and verified disposable PG/Redis baseline absent.",
+    "Actual exact owned PID/client identity and application_name/run matches absent. Namespace/URL/environment/fixture identity is not proof. Chaos remains unavailable.",
+    "Source bootstrap mock/transpile coverage does not qualify real ESM/Vitest loader parity or infrastructure recovery, concurrency survival, RLS/schema, economics/fill correctness, runtime/financial acceptance.",
+    "Existing application_name static assertion remains red; do not replace it with ornamental source text or count retained refusal as chaos acceptance.",
+    "Other integration files/alternate entrypoints and guard owner changes outside scope not qualified. No broad integration/typecheck/build performed.",
+    "Final neighbor preflight56 reflects active disjoint guard owner current source; no claim that original preflight52 is unchanged."
+  ],
+  "notRun": [
+    "actual chaos suite/module or integration config/script",
+    "PostgreSQL/Redis/disruptive queries/client commands",
+    "services/containers/listeners/providers/live/credentials",
+    "install/migrate/cleanup/sign/keygen/financial/deploy/production",
+    "Git or nested agents"
+  ]
+}

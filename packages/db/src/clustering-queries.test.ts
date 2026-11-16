@@ -4,141 +4,105 @@ const mocks = vi.hoisted(() => {
   const clientQuery = vi.fn();
   const release = vi.fn();
   return {
-    clientQuery,
-    release,
-    // `on`/`off`: a real PoolClient is an EventEmitter, and withTransaction
-    // attaches an 'error' listener so a mid-transaction socket failure cannot
-    // crash the process. transaction.test.ts covers that behaviour itself.
+    clientQuery, release,
     connect: vi.fn(async () => ({ query: clientQuery, release, on: vi.fn(), off: vi.fn() })),
     query: vi.fn()
   };
 });
-
-vi.mock('./client.js', () => ({
-  pool: { connect: mocks.connect },
-  query: mocks.query
-}));
-
-import {
-  generateBehavioralClusters,
-  generateFundingClusters
-} from './clustering-queries.js';
+vi.mock('./client.js', () => ({ pool: { connect: mocks.connect }, query: mocks.query }));
+import { generateBehavioralClusters, generateFundingClusters } from './clustering-queries.js';
 import { MAX_FUNDER_DEGREE, MIN_FUNDED_WALLETS } from './independence.js';
 
-/** Collapse whitespace so an assertion is not hostage to SQL indentation. */
-function flat(sql: string): string {
-  return sql.replace(/\s+/g, ' ').trim();
+const flat = (sql: string): string => sql.replace(/\s+/g, ' ').trim();
+const calls = (): string[] => mocks.clientQuery.mock.calls.map(([sql]) => sql as string);
+function candidates(rows: unknown[]): void {
+  mocks.clientQuery.mockImplementation(async (sql: string) => ({
+    command: sql === 'COMMIT' ? 'COMMIT' : undefined,
+    rows: sql.includes('AS observed_funded_wallet_count') ? rows : []
+  }));
 }
 
 describe('cluster membership regeneration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.clientQuery.mockResolvedValue({ rows: [] });
+    candidates([]);
   });
 
   it('reconciles funding memberships inside one repeatable-read transaction', async () => {
     await generateFundingClusters();
-
-    const sqlCalls = mocks.clientQuery.mock.calls.map(([sql]) => sql as string);
-    expect(sqlCalls[0]).toBe('BEGIN ISOLATION LEVEL REPEATABLE READ');
-    expect(sqlCalls[1]).toContain("INSERT INTO wallet_clusters");
-    expect(sqlCalls[2]).toContain('DELETE FROM cluster_memberships');
-    expect(sqlCalls[2]).toContain("c.cluster_type = 'funding'");
-    expect(sqlCalls[2]).toContain('expected_memberships');
-    expect(sqlCalls[3]).toContain('INSERT INTO cluster_memberships');
-    expect(sqlCalls[4]).toContain("WHERE cluster_type = 'funding'");
-    expect(sqlCalls[5]).toContain('DELETE FROM wallet_clusters');
-    expect(sqlCalls[6]).toBe('COMMIT');
+    const sql = calls();
+    expect(sql[0]).toBe('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    expect(sql[1]).toContain('AS observed_funded_wallet_count');
+    expect(sql[2]).toContain('INSERT INTO wallet_clusters');
+    expect(sql[3]).toContain('DELETE FROM cluster_memberships');
+    expect(sql[3]).toContain("c.cluster_type = 'funding'");
+    expect(sql[3]).toContain('expected_memberships');
+    expect(sql[4]).toContain('INSERT INTO cluster_memberships');
+    expect(sql[5]).toContain("WHERE cluster_type = 'funding'");
+    expect(sql[6]).toContain('DELETE FROM wallet_clusters');
+    expect(sql[7]).toBe('COMMIT');
     expect(mocks.release).toHaveBeenCalledOnce();
   });
 
   it('reconciles behavioral memberships without touching other cluster types', async () => {
     await generateBehavioralClusters();
-
-    const sqlCalls = mocks.clientQuery.mock.calls.map(([sql]) => sql as string);
-    expect(sqlCalls[0]).toBe('BEGIN ISOLATION LEVEL REPEATABLE READ');
-    expect(sqlCalls[2]).toContain('DELETE FROM cluster_memberships');
-    expect(sqlCalls[2]).toContain("c.cluster_type = 'behavioral'");
-    expect(sqlCalls[2]).toContain('expected_memberships');
-    expect(sqlCalls[3]).toContain('INSERT INTO cluster_memberships');
-    expect(sqlCalls[4]).toContain("WHERE cluster_type = 'behavioral'");
-    expect(sqlCalls[5]).toContain('DELETE FROM wallet_clusters');
-    expect(sqlCalls[6]).toBe('COMMIT');
+    const sql = calls();
+    expect(sql[0]).toBe('BEGIN ISOLATION LEVEL REPEATABLE READ');
+    expect(sql[2]).toContain('DELETE FROM cluster_memberships');
+    expect(sql[2]).toContain("c.cluster_type = 'behavioral'");
+    expect(sql[2]).toContain('expected_memberships');
+    expect(sql[3]).toContain('INSERT INTO cluster_memberships');
+    expect(sql[4]).toContain("WHERE cluster_type = 'behavioral'");
+    expect(sql[5]).toContain('DELETE FROM wallet_clusters');
+    expect(sql[6]).toBe('COMMIT');
   });
 
   describe('funder degree bound (S4-M11)', () => {
-    it('bounds funder degree from above, not only below', async () => {
+    it('excludes both over-ceiling and below-minimum funders at policy admission', async () => {
+      candidates([
+        { wallet_a: 'solana:large', status: 'active', observed_funded_wallet_count: MAX_FUNDER_DEGREE + 1 },
+        { wallet_a: 'solana:small', status: 'active', observed_funded_wallet_count: MIN_FUNDED_WALLETS - 1 }
+      ]);
       await generateFundingClusters();
-
-      const clusterInsert = flat(mocks.clientQuery.mock.calls[1]?.[0] as string);
-      // The bug: a floor with no ceiling, so a CEX hot wallet that funded millions
-      // of addresses became one Funding Group.
-      expect(clusterInsert).not.toContain('COUNT(DISTINCT wr.wallet_b) >= 2');
-      expect(clusterInsert).toContain(
-        `HAVING COUNT(DISTINCT wr.wallet_b) BETWEEN ${MIN_FUNDED_WALLETS} `
-          + `AND ${MAX_FUNDER_DEGREE}`
-      );
+      expect(mocks.clientQuery.mock.calls[2]?.[1]).toEqual([[]]);
+      expect(calls()[1]).toContain('COUNT(DISTINCT wr.wallet_b)');
     });
 
-    it('excludes blacklisted funders as hubs, on top of the degree band', async () => {
+    it('excludes blacklisted and unassessed funders even inside the degree band', async () => {
+      candidates([
+        { wallet_a: 'solana:exchange', status: 'blacklisted', observed_funded_wallet_count: 3 },
+        { wallet_a: 'solana:unlabelled', status: 'active', observed_funded_wallet_count: 3 }
+      ]);
       await generateFundingClusters();
-
-      const clusterInsert = flat(mocks.clientQuery.mock.calls[1]?.[0] as string);
-      expect(clusterInsert).toContain('JOIN wallets funder ON funder.address = wr.wallet_a');
-      expect(clusterInsert).toContain("funder.status <> 'blacklisted'");
+      expect(calls()[1]).toContain('JOIN wallets funder ON funder.address = wr.wallet_a');
+      expect(mocks.clientQuery.mock.calls[2]?.[1]).toEqual([[]]);
     });
 
-    it('applies the identical eligibility rule to clusters and to memberships', async () => {
+    it('applies the identical assessed set to clusters and memberships', async () => {
       await generateFundingClusters();
-
-      // The two must not drift: a membership set computed from a looser rule than
-      // the cluster set would delete every member of a cluster just created, and a
-      // tighter one would leave hub clusters populated.
       const eligibility = /eligible_funders AS \((.*?)\) *,? *(?:expected_memberships|INSERT)/;
-      const fromInsert = eligibility.exec(
-        flat(mocks.clientQuery.mock.calls[1]?.[0] as string)
-      );
-      const fromDelete = eligibility.exec(
-        flat(mocks.clientQuery.mock.calls[2]?.[0] as string)
-      );
-      const fromMemberInsert = eligibility.exec(
-        flat(mocks.clientQuery.mock.calls[3]?.[0] as string)
-      );
-
-      // Guard the regex itself: a capture that matched nothing useful would make
-      // the equality below vacuously true.
-      expect(fromInsert?.[1]).toContain(
-        `HAVING COUNT(DISTINCT wr.wallet_b) BETWEEN ${MIN_FUNDED_WALLETS} `
-          + `AND ${MAX_FUNDER_DEGREE}`
-      );
-      expect(fromInsert?.[1]).toContain("funder.status <> 'blacklisted'");
-      expect(fromDelete?.[1]).toBe(fromInsert?.[1]);
-      expect(fromMemberInsert?.[1]).toBe(fromInsert?.[1]);
+      const insert = eligibility.exec(flat(calls()[2]!));
+      const remove = eligibility.exec(flat(calls()[3]!));
+      const memberInsert = eligibility.exec(flat(calls()[4]!));
+      expect(insert?.[1]).toContain('address = ANY($1::text[])');
+      expect(remove?.[1]).toBe(insert?.[1]);
+      expect(memberInsert?.[1]).toBe(insert?.[1]);
+      expect(mocks.clientQuery.mock.calls[3]?.[1]).toEqual(mocks.clientQuery.mock.calls[2]?.[1]);
+      expect(mocks.clientQuery.mock.calls[4]?.[1]).toEqual(mocks.clientQuery.mock.calls[2]?.[1]);
     });
 
     it('still tears down a cluster whose funder crossed the ceiling', async () => {
+      candidates([{ wallet_a: 'solana:large', status: 'active', observed_funded_wallet_count: MAX_FUNDER_DEGREE + 1 }]);
       await generateFundingClusters();
-
-      const sqlCalls = mocks.clientQuery.mock.calls.map(([sql]) => sql as string);
-      // Demotion needs no new statement: the funder drops out of
-      // expected_memberships, the DELETE empties the cluster, the recount zeroes
-      // wallet_count, and the final DELETE drops the row. Order is what makes that
-      // work, so it is asserted.
-      expect(flat(sqlCalls[2] ?? '')).toContain('DELETE FROM cluster_memberships');
-      expect(flat(sqlCalls[4] ?? '')).toContain('wallet_count =');
-      expect(flat(sqlCalls[5] ?? '')).toContain(
-        "DELETE FROM wallet_clusters WHERE cluster_type = 'funding' AND wallet_count < 2"
-      );
+      expect(flat(calls()[3]!)).toContain('DELETE FROM cluster_memberships');
+      expect(flat(calls()[5]!)).toContain('wallet_count =');
+      expect(flat(calls()[6]!)).toContain("DELETE FROM wallet_clusters WHERE cluster_type = 'funding' AND wallet_count < 2");
     });
   });
 
   it('rolls back and releases the client when reconciliation fails', async () => {
-    mocks.clientQuery
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockRejectedValueOnce(new Error('cluster write failed'))
-      .mockResolvedValueOnce({ rows: [] });
-
+    mocks.clientQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(new Error('cluster write failed')).mockResolvedValueOnce({ rows: [] });
     await expect(generateFundingClusters()).rejects.toThrow('cluster write failed');
     expect(mocks.clientQuery).toHaveBeenLastCalledWith('ROLLBACK');
     expect(mocks.release).toHaveBeenCalledOnce();

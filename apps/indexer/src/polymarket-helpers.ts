@@ -182,6 +182,58 @@ export function parseConfirmedPolymarketTrade(value: unknown): ConfirmedPolymark
   };
 }
 
+function booleanState(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') throw new Error(`Missing or invalid Polymarket ${field} state`);
+  return value;
+}
+
+export class PolymarketMetadataValidationError extends Error {}
+
+function metadataAliases<T extends string | boolean>(
+  raw: Record<string, unknown>, keys: readonly string[], normalize: (value: unknown) => T, field: string
+): T | undefined {
+  const values = keys.filter(key => raw[key] !== undefined).map(key => normalize(raw[key]));
+  if (values.some(value => value !== values[0])) throw new Error(`Conflicting Polymarket ${field} aliases`);
+  return values[0];
+}
+
+// Validate every supplied supported alias before a caller projects any of them.
+// Missing evidence stays missing; null, malformed and contradictory evidence cannot fall back.
+export function validatePolymarketMetadataAliases(raw: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const conditionId = metadataAliases(raw, ['conditionId', 'condition_id'], normalizeConditionId, 'condition ID');
+    const negRisk = metadataAliases(raw, ['negRisk', 'neg_risk'], value => booleanState(value, 'neg-risk'), 'neg-risk');
+    const active = metadataAliases(raw, ['active'], value => booleanState(value, 'active'), 'active');
+    const closed = metadataAliases(raw, ['closed'], value => booleanState(value, 'closed'), 'closed');
+    const acceptingOrders = metadataAliases(raw, ['acceptingOrders', 'accepting_orders'],
+      value => booleanState(value, 'accepting-orders'), 'accepting-orders');
+    const endDate = metadataAliases(raw, ['endDate', 'end_date_iso', 'end_date'], value => {
+      const date = new Date(nonEmptyString(value, 'end date'));
+      if (Number.isNaN(date.getTime())) throw new Error('Invalid Polymarket end date');
+      return date.toISOString();
+    }, 'end date');
+    const tick = metadataAliases(raw, ['orderPriceMinTickSize', 'minimumTickSize', 'minimum_tick_size'], value => {
+      const normalized = normalizePolymarketDecimal(value, 'tick size');
+      if (normalized !== '1' && !normalized.startsWith('0.')) throw new Error('Invalid Polymarket tick size');
+      return normalized;
+    }, 'tick size');
+    return {
+      ...raw,
+      ...(conditionId === undefined ? {} : { conditionId }),
+      ...(negRisk === undefined ? {} : { negRisk }),
+      ...(active === undefined ? {} : { active }),
+      ...(closed === undefined ? {} : { closed }),
+      ...(acceptingOrders === undefined ? {} : { acceptingOrders }),
+      ...(endDate === undefined ? {} : { endDate }),
+      ...(tick === undefined ? {} : { orderPriceMinTickSize: tick })
+    };
+  } catch (error) {
+    throw new PolymarketMetadataValidationError(
+      error instanceof Error ? error.message : 'Invalid Polymarket metadata aliases', { cause: error }
+    );
+  }
+}
+
 export function parsePolymarketMarketContext(
   value: unknown,
   expectedConditionId: string,
@@ -190,10 +242,8 @@ export function parsePolymarketMarketContext(
   if (!value || typeof value !== 'object') {
     throw new Error(`Missing Polymarket market context for ${expectedConditionId}`);
   }
-  const raw = value as Record<string, unknown>;
-  const conditionId = normalizeConditionId(
-    raw.conditionId ?? raw.condition_id ?? expectedConditionId
-  );
+  const raw = validatePolymarketMetadataAliases(value as Record<string, unknown>);
+  const conditionId = normalizeConditionId(raw.conditionId ?? expectedConditionId);
   if (conditionId !== normalizeConditionId(expectedConditionId)) {
     throw new Error(`Polymarket condition mismatch: expected ${expectedConditionId}, received ${conditionId}`);
   }
@@ -210,19 +260,16 @@ export function parsePolymarketMarketContext(
   if (Number.isNaN(endDate.getTime())) {
     throw new Error(`Invalid Polymarket end date: ${endDateValue}`);
   }
-  const tickSize = positiveNumber(
-    raw.orderPriceMinTickSize ?? raw.minimumTickSize ?? fallbackTickSize,
-    'tick size'
-  );
+  const tickSize = positiveNumber(normalizePolymarketDecimal(
+    raw.orderPriceMinTickSize ?? fallbackTickSize, 'tick size'
+  ), 'tick size');
   if (tickSize > 1) throw new Error(`Invalid Polymarket tick size: ${tickSize}`);
-  const active = raw.active === true;
-  const closed = raw.closed === true;
-  const acceptingOrders = typeof raw.acceptingOrders === 'boolean'
-    ? raw.acceptingOrders
-    : active && !closed;
+  const active = booleanState(raw.active, 'active');
+  const closed = booleanState(raw.closed, 'closed');
+  const acceptingOrders = booleanState(raw.acceptingOrders ?? raw.accepting_orders, 'accepting-orders');
   const resolutionStatus = typeof raw.umaResolutionStatus === 'string' && raw.umaResolutionStatus.trim()
     ? raw.umaResolutionStatus.trim()
-    : closed ? 'unknown' : 'unresolved';
+    : 'unknown';
 
   return {
     conditionId,

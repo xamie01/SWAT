@@ -67,6 +67,40 @@ const ELIGIBLE: ReadonlySet<SignalPatternType> = new Set(TRADE_ELIGIBLE_PATTERNS
  * without a compile error — and the honest answer for something we do not
  * recognise is "no". Fails closed: an unknown pattern alerts but never trades.
  */
-export function mayPatternTrade(patternType: string): boolean {
-  return ELIGIBLE.has(patternType as SignalPatternType);
+import type { SafetyResult } from './safety.js';
+
+/** This screen admits candidates, not orders or unverified source confirmations. */
+export interface SignalTradeAdmission {
+  readonly direction: 'buy' | 'sell';
+  readonly score: number;
+  readonly minimumScore: number;
+  readonly suppressTrade: boolean;
+  readonly safety: Pick<SafetyResult, 'isSafe'>;
+}
+
+export type SignalTradeEligibility =
+  | { readonly allowed: false; readonly reason: string }
+  | { readonly allowed: true; readonly requiresOwnedExit: boolean };
+
+export function evaluateSignalTradeEligibility(
+  patternType: string,
+  input: SignalTradeAdmission
+): SignalTradeEligibility {
+  if (!ELIGIBLE.has(patternType as SignalPatternType)) return { allowed: false, reason: 'discovery-only' };
+  if (input.suppressTrade !== false) return { allowed: false, reason: 'trade-suppressed' };
+  // A source sell may reach inventory enumeration despite deterioration. Only a
+  // fresh scoped held-lot read plus CURRENT policy can permit its execution.
+  if (input.direction === 'sell') return { allowed: true, requiresOwnedExit: true };
+  if (input.direction !== 'buy') return { allowed: false, reason: 'direction-invalid' };
+  if (input.safety.isSafe !== true) return { allowed: false, reason: 'entry-safety-refused' };
+  if (!Number.isFinite(input.score) || input.score < 0 || input.score > 100
+    || !Number.isFinite(input.minimumScore) || input.minimumScore < 0 || input.minimumScore > 100
+    || input.score < input.minimumScore) return { allowed: false, reason: 'entry-score-refused' };
+  return { allowed: true, requiresOwnedExit: false };
+}
+
+export function mayPatternTrade(patternType: string, admission?: SignalTradeAdmission): boolean {
+  return admission
+    ? evaluateSignalTradeEligibility(patternType, admission).allowed
+    : ELIGIBLE.has(patternType as SignalPatternType);
 }

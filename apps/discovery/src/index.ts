@@ -3,16 +3,19 @@ import cron from 'node-cron';
 import { Redis } from 'ioredis';
 import {
   createWalletBackfillJob,
-  isChain,
   QUEUES,
   REDIS_CHANNELS
 } from '@swat/shared';
 import {
   findFundedUnknownWallets,
   findFrequentCounterparties,
-  logDiscoveryRun,
-  upsertWallet
+  logDiscoveryRun
 } from '@swat/db';
+import {
+  persistDiscoveredWalletBackfill,
+  listPendingDiscoveryBackfills,
+  acknowledgeDiscoveryBackfill
+} from '../../../packages/db/src/discovery-queries.js';
 import { createDiscoveryRunner } from './runner.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -25,21 +28,24 @@ const runner = createDiscoveryRunner({
   findFundedUnknownWallets,
   findFrequentCounterparties,
   logDiscoveryRun,
-  upsertWallet: async (wallet) => {
-    const stored = await upsertWallet(wallet);
-    if (typeof stored?.address !== 'string' || !isChain(stored.chain)) {
-      throw new Error('Wallet upsert did not return a valid address and chain');
-    }
-    return {
-      address: stored.address,
-      chain: stored.chain
-    };
-  },
+  persistBackfill: persistDiscoveredWalletBackfill,
+  listPendingBackfills: listPendingDiscoveryBackfills,
+  acknowledgeBackfill: acknowledgeDiscoveryBackfill,
   enqueueBackfill: async (address, chain) => {
     const job = createWalletBackfillJob(address, chain);
-    await backfillQueue.add(job.name, job.data, job.options);
+    // Retain this discovery job's identity across a lost DB acknowledgement.
+    // Administrative removal/Redis loss still bounds queue idempotency.
+    await backfillQueue.add(job.name, job.data, { ...job.options, removeOnComplete: false });
   }
 });
+
+// Recovery is independent of discovery candidates and RUN_ON_STARTUP. Queue
+// acceptance is idempotent only while the stable BullMQ job ID is retained.
+const recoverBackfills = () => runner.recoverPendingBackfills().catch(error => {
+  console.error('[discovery] pending backfill recovery failed', error);
+});
+void recoverBackfills();
+cron.schedule('* * * * *', () => { void recoverBackfills(); }, { timezone: 'UTC' });
 
 cron.schedule(
   '30 2 * * *',

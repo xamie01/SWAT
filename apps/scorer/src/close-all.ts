@@ -1,5 +1,6 @@
 import type { Chain } from '@swat/shared';
 import type { CloseAllLotJob, CopyExecutionRecord, LotExitExecutionInput } from '@swat/db';
+import { assertLotExitExecutionMatches, assertLotExitJobIdentity } from '@swat/db';
 
 export interface CloseAllSweepResult {
   readonly scanned: number;
@@ -18,6 +19,10 @@ export interface CloseAllSellPayload {
   readonly closeAll: true;
   readonly exitLotId: string;
   readonly copyExecutionId: string;
+  readonly requestedBaseQuantity: string;
+  readonly masterWalletAddress: string;
+  readonly targetAccount: string;
+  readonly acquisitionExecutionMode: CopyExecutionRecord['executionMode'];
   readonly score: number;
 }
 
@@ -43,16 +48,20 @@ export async function runCloseAllSweep(deps: CloseAllSweepDeps): Promise<CloseAl
 
   for (const job of jobs) {
     try {
+      const identity = { ...job, exitLotId: job.lotId };
+      assertLotExitJobIdentity(identity);
       const claimResult = await deps.claimExit({
         lotId: job.lotId,
         userId: job.userId,
         requestId: job.jobId,
         trigger: 'close-all',
-        requestedBaseQuantity: job.sellTokenAmount.toString()
+        requestedBaseQuantity: job.requestedBaseQuantity
       });
+      assertLotExitExecutionMatches(claimResult.execution, identity, 'close-all');
       claimed++;
 
-      if (claimResult.execution.state !== 'confirmed' && claimResult.execution.state !== 'failed') {
+      // Submitted/partial/ambiguous jobs belong to reconciliation, not resubmission.
+      if (claimResult.execution.state === 'requested' || claimResult.execution.state === 'simulated') {
         await deps.enqueueSell(
           {
             signalId: job.signalId,
@@ -63,6 +72,10 @@ export async function runCloseAllSweep(deps: CloseAllSweepDeps): Promise<CloseAl
             closeAll: true,
             exitLotId: job.lotId,
             copyExecutionId: claimResult.execution.id,
+            requestedBaseQuantity: job.requestedBaseQuantity,
+            masterWalletAddress: job.masterWalletAddress,
+            targetAccount: job.targetAccount,
+            acquisitionExecutionMode: job.acquisitionExecutionMode,
             score: 100
           },
           job.jobId,

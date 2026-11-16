@@ -1,39 +1,37 @@
-import { Queue } from 'bullmq';
-import { Redis } from 'ioredis';
-import { afterAll, describe, expect, it } from 'vitest';
-import { resolveChainAddress } from '@swat/shared';
-import {
+import { assertPackage28IsolationPreflight } from './helpers/package28-isolation.js';
+import type { Queue as ChaosQueue } from 'bullmq';
+import type { Redis as ChaosRedis } from 'ioredis';
+import type { LifecycleFixture } from './helpers/lifecycle-fixture.js';
+
+/** Declarations, a fixture UUID and a queue name are not session ownership.
+ * No disposable baseline or exact owned backend/client inventory is available.
+ * Even a future returning preflight must not silently enable these test bodies.
+ */
+function assertChaosSessionOwnershipAvailable(): void {
+  throw new Error('Chaos integration unavailable: verified disposable baseline and exact owned PostgreSQL/Redis session identities are missing');
+}
+
+// Protect direct imports too, not only collection through the root config.
+assertPackage28IsolationPreflight(process.env);
+assertChaosSessionOwnershipAvailable();
+const { afterAll, describe, expect, it } = await import('vitest');
+const { resolveChainAddress } = await import('../../packages/shared/src/address.js');
+const { closePool, pool } = await import('../../packages/db/src/client.js');
+const {
   claimSourceSignalForCopyExecution,
-  closePool,
   insertSourceTradeSignal,
-  pool,
   recordSourceTradeEvent,
-  transitionCopyExecution,
-  withTransaction
-} from '../../packages/db/src/index.js';
-import { withLifecycleFixture, type LifecycleFixture } from './helpers/lifecycle-fixture.js';
+  transitionCopyExecution
+} = await import('../../packages/db/src/copy-trade-lifecycle.js');
+const { withTransaction } = await import('../../packages/db/src/transaction.js');
+const { withLifecycleFixture } = await import('./helpers/lifecycle-fixture.js');
 
 /**
- * E1 acceptance (`G7-T5`): infrastructure fault injection.
- *
- * Four faults, one invariant. Whatever dies — the executor mid-flight,
- * PostgreSQL, Redis, or the worker's connection — the system must come back
- * with **no duplicate execution and no fabricated fill**.
- *
- * The faults are injected at the layer where a real outage is actually
- * observable to this process, not by stopping containers: CI runs against
- * service containers it cannot restart, and a suite that only passes on a
- * developer's docker-compose is a suite nobody runs.
- *   - executor death  -> stop writing mid-lifecycle, then replay the job
- *   - PostgreSQL restart -> `pg_terminate_backend` on every one of our backends,
- *     which is precisely what a restart does to a pooled client
- *   - Redis restart   -> kill the clients, then drop the queue's keys, which is
- *     what a non-persistent Redis loses on the way back up
- *   - worker reconnection -> two workers racing the same signal, and a
- *     reconnecting worker resuming its own in-flight execution
- *
- * The point of the Redis case is inverted from the others: Redis is *not* the
- * safety mechanism. Losing it must lose at most the job, never the ledger.
+ * Historical E1 acceptance (`G7-T5`) scenarios, retained but NOT runnable.
+ * The assertions below describe intended recovery, not qualified fault evidence.
+ * Import refuses before infrastructure, and PostgreSQL/Redis fault helpers are
+ * explicitly unavailable until disposable baseline and session ownership exist.
+ * No caller-provided run name or endpoint establishes ownership of peer sessions.
  */
 
 const CLAIM_INPUT = {
@@ -42,27 +40,14 @@ const CLAIM_INPUT = {
   maxPositionEvidenceAgeMs: 10 * 60_000
 };
 
-const redisUrl = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
-
-/**
- * What a server restart does to every connection this process holds.
- *
- * `pid <> pg_backend_pid()` spares only the backend running the statement, so
- * this is issued from its own checked-out client: every other connection in the
- * pool — including any transaction in flight — is dropped.
- */
+/** Unavailable: neither a database-wide selector nor a pool name proves PID ownership. */
 async function terminateOurBackends(): Promise<void> {
-  const terminator = await pool.connect();
-  try {
-    await terminator.query(
-      `SELECT pg_terminate_backend(pid)
-         FROM pg_stat_activity
-        WHERE datname = current_database()
-          AND pid <> pg_backend_pid()`
-    );
-  } finally {
-    terminator.release();
-  }
+  assertChaosSessionOwnershipAvailable();
+}
+
+/** Unavailable: never disconnect Redis peers by type or invented client identity. */
+async function terminateOwnedRedisClients(_control: ChaosRedis): Promise<void> {
+  assertChaosSessionOwnershipAvailable();
 }
 
 afterAll(async () => {
@@ -127,7 +112,12 @@ async function executionRows(fixture: LifecycleFixture): Promise<Array<{
   confirmed_base_quantity: string;
   confirmed_quote_quantity: string;
 }>> {
-  const { rows } = await pool.query(
+  const { rows } = await pool.query<{
+    id: string;
+    state: string;
+    confirmed_base_quantity: string;
+    confirmed_quote_quantity: string;
+  }>(
     `SELECT execution.id,
             execution.state,
             execution.confirmed_base_quantity,
@@ -306,32 +296,14 @@ describe('chaos: PostgreSQL restart', () => {
 });
 
 describe('chaos: Redis restart', () => {
-  /**
-   * Each case gets its own queue name so a restart simulation never touches
-   * another suite's — or a developer's — keys. `FLUSHALL` is deliberately not
-   * used: `REDIS_URL` may point at a shared local instance.
+  /** Queue names alone do not qualify a disposable Redis or owned clients/keys.
+   * Refuse before creation, the callback or any destructive cleanup.
    */
-  function queueName(fixture: LifecycleFixture): string {
-    return `swat-chaos-${fixture.runId}`;
-  }
-
   async function withQueue(
-    fixture: LifecycleFixture,
-    operation: (queue: Queue, control: Redis) => Promise<void>
+    _fixture: LifecycleFixture,
+    _operation: (queue: ChaosQueue, control: ChaosRedis) => Promise<void>
   ): Promise<void> {
-    const queue = new Queue(queueName(fixture), { connection: { url: redisUrl } });
-    const control = new Redis(redisUrl, { maxRetriesPerRequest: null });
-    queue.on('error', () => {
-      // Expected while the connection is being killed underneath it.
-    });
-    control.on('error', () => {});
-    try {
-      await operation(queue, control);
-    } finally {
-      await queue.obliterate({ force: true }).catch(() => undefined);
-      await queue.close();
-      control.disconnect();
-    }
+    assertChaosSessionOwnershipAvailable();
   }
 
   it('reconnects after its clients are dropped and still holds the queued job', async () => {
@@ -340,9 +312,8 @@ describe('chaos: Redis restart', () => {
       await withQueue(fixture, async (queue, control) => {
         await queue.add('copyTrade', { signalId }, { jobId: signalId });
 
-        // SKIPME defaults to yes, so the control connection survives to observe
-        // the recovery.
-        await control.call('CLIENT', 'KILL', 'TYPE', 'normal');
+        // No owned client inventory is available; this is an explicit refusal.
+        await terminateOwnedRedisClients(control);
 
         const job = await queue.getJob(signalId);
         expect(job?.data).toEqual({ signalId });
@@ -410,16 +381,8 @@ describe('chaos: worker reconnection', () => {
         simulationId: `${fixture.sourceEventPrefix}sim`
       });
 
-      // The connection drop is invisible to the ledger: the worker's identity
-      // is the signal, not the socket.
-      const control = new Redis(redisUrl, { maxRetriesPerRequest: null });
-      control.on('error', () => {});
-      try {
-        await control.call('CLIENT', 'KILL', 'TYPE', 'normal');
-        await control.ping();
-      } finally {
-        control.disconnect();
-      }
+      // No connection may be acquired to pretend a worker reconnection occurred.
+      assertChaosSessionOwnershipAvailable();
 
       const resumed = await claim(signalId, fixture);
       expect(resumed.execution?.id).toBe(executionId);

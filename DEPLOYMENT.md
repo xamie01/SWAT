@@ -297,156 +297,71 @@ taskset -c 0,1 pnpm test
 
 ### Method A: Systemd Services (Recommended)
 
-Systemd provides native Linux process supervision, automatic restarts, resource cgroups, and journald logging.
+The canonical definitions are the source templates under `deploy/systemd/`:
 
-Create the service unit files under `/etc/systemd/system/`:
+| Service | Template | Scoped environment reference | Writable state |
+| --- | --- | --- | --- |
+| Backend API | `swat-api.service` | `/etc/swat/api.env` | `/var/lib/swat-api` |
+| Web console | `swat-web.service` | `/etc/swat/web.env` | `/var/lib/swat-web` |
+| LP intelligence | `swat-lp.service` | `/etc/swat/lp.env` | `/var/lib/swat-lp` |
+| Trade executor | `swat-trade-executor.service` | `/etc/swat/trade-executor.env` | `/var/lib/swat-trade-executor` |
+| Billing sweep | `swat-billing-sweep.service` + `swat-billing-sweep.timer` | `/etc/swat/billing-sweep.env` | `/var/lib/swat-billing-sweep` |
 
-#### 1. Backend REST API (`/etc/systemd/system/wake-api.service`)
-```ini
-[Unit]
-Description=Wake Protocol Backend REST API
-After=network.target docker.service
+Use the template names as service names, not the historical `wake-*` aliases.
+Do not copy an inline root unit or disable `ProtectHome` to make a home-directory
+checkout accessible. The templates run as the dedicated, non-login `swat:swat`
+principal and use `/opt/swat/current`, outside `/root` and `/home`.
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/SWAT
-ExecStart=/usr/bin/taskset -c 0,1 /usr/bin/node --env-file=.env apps/api/dist/index.js
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-LimitNOFILE=65536
+**Operator provisioning prerequisites (not performed or accepted by source checks):**
 
-[Install]
-WantedBy=multi-user.target
-```
-
-#### 2. Next.js Web Console (`/etc/systemd/system/wake-web.service`)
-```ini
-[Unit]
-Description=Wake Protocol Next.js Frontend Console
-After=network.target wake-api.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/SWAT/apps/web
-ExecStart=/usr/bin/taskset -c 0,1 /root/SWAT/node_modules/.bin/next start -H 0.0.0.0 -p 3000
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-```
-
-#### 3. LP Intelligence & Rebalancing (`/etc/systemd/system/wake-lp.service`)
-```ini
-[Unit]
-Description=Wake Protocol LP Scanner & Auto-Rebalancing Engine
-After=network.target docker.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/SWAT
-ExecStart=/usr/bin/taskset -c 0,1 /usr/bin/node --env-file=.env apps/lp/dist/index.js
-Restart=always
-RestartSec=10
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-```
-
-#### 4. Trade Execution Worker (`/etc/systemd/system/wake-executor.service`)
-```ini
-[Unit]
-Description=Wake Protocol Multi-Tenant Trade Executor
-After=network.target docker.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/SWAT
-ExecStart=/usr/bin/taskset -c 0,1 /usr/bin/node --env-file=.env apps/trade-executor/dist/index.js
-Restart=always
-RestartSec=5
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-```
-
-#### Enable and Start Services
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now wake-api wake-web wake-lp wake-executor
-sudo systemctl status wake-api wake-web
-```
-
----
+- Provision a reviewed immutable release under `/opt/swat/releases/<release-id>`;
+  `/opt/swat/current` points to that release. Every ancestor and code/dependency
+  file must be root-owned, readable/traversable by `swat`, and not writable by
+  `swat`. Include the compiled entrypoints and complete reviewed runtime dependencies;
+  do not install packages, build, or mutate source on service startup.
+- Provision `/etc/swat` as root-owned and traversable by `swat` (for example
+  `root:swat`, mode `0750`). Each service environment file is `root:swat`, mode
+  `0640`, contains only that service's approved settings/least-privilege credentials,
+  and stays outside the release. `EnvironmentFile` is parsed by systemd; never
+  source these files as executable shell. Do not reuse a developer `.env`.
+- `StateDirectory` and `RuntimeDirectory` create each service's state and runtime
+  directories with mode `0700`. `ProtectSystem=strict`, `ProtectHome=true`,
+  `NoNewPrivileges=true`, `PrivateTmp=true`, and `UMask=0077` remain enabled.
+  Application writes must use these locations, not the immutable release.
+  Logging uses journald. For Next.js only, provision `.next/cache` in the release
+  as a symlink to `/var/lib/swat-web/cache` and provision that cache for `swat`;
+  do not make `.next`, executable code, or the whole release writable.
+- An authorized operator must separately review/install the units and prove
+  code readability, scoped environment access, state/cache writes and restart
+  behavior under the actual service principal. Source assertions do not prove
+  installed permissions, service usability, host privilege, or operational safety.
+  Do not enable trading/LP execution until its separate authority/certification
+  gates are satisfied. Do not run both cron and the billing timer.
 
 ### Method B: PM2 Process Manager
 
-If PM2 is preferred, install PM2 globally and start using an ecosystem file:
-```bash
-npm install -g pm2
-```
+The unversioned global PM2 installation and root-based ecosystem recipe are
+removed. Use the canonical systemd templates above; PM2 is not an approved
+alternative here. A future operator tool requires its own complete reviewed
+immutable dependency/runtime inventory and credential-free acquisition. A
+pnpm pin does not make global npm or Python tooling reproducible.
 
-Create `ecosystem.config.cjs` in the repository root:
-```javascript
-module.exports = {
-  apps: [
-    {
-      name: 'wake-api',
-      cwd: '/root/SWAT',
-      script: 'node',
-      args: '--env-file=.env apps/api/dist/index.js',
-      instances: 1,
-      autorestart: true,
-      max_memory_restart: '1G',
-      env: { NODE_ENV: 'production' }
-    },
-    {
-      name: 'wake-web',
-      cwd: '/root/SWAT/apps/web',
-      script: '../../node_modules/.bin/next',
-      args: 'start -H 0.0.0.0 -p 3000',
-      instances: 1,
-      autorestart: true,
-      max_memory_restart: '1G',
-      env: { NODE_ENV: 'production' }
-    },
-    {
-      name: 'wake-lp',
-      cwd: '/root/SWAT',
-      script: 'node',
-      args: '--env-file=.env apps/lp/dist/index.js',
-      instances: 1,
-      autorestart: true,
-      max_memory_restart: '800M'
-    },
-    {
-      name: 'wake-executor',
-      cwd: '/root/SWAT',
-      script: 'node',
-      args: '--env-file=.env apps/trade-executor/dist/index.js',
-      instances: 1,
-      autorestart: true,
-      max_memory_restart: '800M'
-    }
-  ]
-};
-```
+For Vercel, both Woodpecker definitions separate credential-free **offline**
+acquisition from a minimal credential-bearing prebuilt publish step. The reviewed
+producer must supply `.package27-approved/{tool,artifact}` matching
+`deploy/tools/package27-deploy-artifacts.lock.json`: exact CLI `65.11.0`, complete
+Node/tool dependencies and prebuilt `.vercel/output` files, SHA256 per file, and a
+reviewed immutable OCI runtime digest. The checked-in lock is deliberately
+`pending`; publishing fails closed until those inputs and matching CI image
+pins are reviewed. No registry install, project pull or build runs with publish
+credentials. Token lifetime/scope, CI isolation, tool provenance and actual
+supply-chain runtime behavior remain external review gates.
 
-Launch with PM2:
-```bash
-pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup
-```
+Python operator installation likewise requires a complete reviewed wheel/hash
+inventory and exact preprovisioned Python/pip runtime; see
+`deploy/tools/package27-deploy-python-install.py`. The pending lock is not a
+resolved dependency set, and no installation or offline reproducibility has
+been accepted. Do not use an unversioned pip upgrade or editable server install.
 
 ---
 

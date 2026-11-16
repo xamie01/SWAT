@@ -1,0 +1,115 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
+import { assertPackage28IsolationPreflight } from '../integration/helpers/package28-isolation.js';
+
+const root = new URL('../../', import.meta.url);
+const text = readFileSync(new URL('tests/integration/chaos.integration.test.ts', root), 'utf8');
+const ast = ts.createSourceFile('chaos.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const boundary = ast.statements.find(statement => ts.isVariableStatement(statement)
+  && statement.declarationList.declarations.some(declaration => declaration.name.getText(ast) === 'CLAIM_INPUT'));
+if (!boundary) throw new Error('Missing historical chaos body boundary');
+const bootstrap = text.slice(0, boundary.getFullStart());
+
+const runId = '12345678-1234-4234-8234-123456789abc';
+const declared = {
+  INTEGRATION_DISPOSABLE: 'true', INTEGRATION_RUN_ID: runId, SWAT_DB_PROFILE: 'core',
+  INTEGRATION_DATABASE_URL: 'postgresql://127.0.0.1:55432/swat_integration_12345678123442348234123456789abc',
+  INTEGRATION_REDIS_URL: 'redis://127.0.0.1:56379/0',
+  INTEGRATION_REDIS_NAMESPACE: `swat:integration:${runId}`
+};
+
+/** Execute ONLY the AST-delimited bootstrap, never a chaos test module/body.
+ * Every import is an inert local port; unknown imports fail rather than loading
+ * application/native modules. The real pure guard is the sole application call.
+ */
+async function evaluateBootstrap(env: Record<string, string>, guard = assertPackage28IsolationPreflight) {
+  const imports: string[] = [];
+  const effects: string[] = [];
+  const inertEffect = () => { effects.push('infrastructure operation'); throw new Error('INERT_PORT_USED'); };
+  const requirePort = (name: string): unknown => {
+    if (name === './helpers/package28-isolation.js') return { assertPackage28IsolationPreflight: guard };
+    imports.push(name);
+    if (name === 'vitest') return { afterAll: inertEffect, describe: inertEffect, expect: inertEffect, it: inertEffect };
+    if (name === 'bullmq') return { Queue: inertEffect };
+    if (name === 'ioredis') return { Redis: inertEffect };
+    if (name === '@swat/shared' || name === '../../packages/shared/src/address.js') return { resolveChainAddress: inertEffect };
+    if (name === './helpers/lifecycle-fixture.js') return { withLifecycleFixture: inertEffect };
+    if (name === '../../packages/db/src/index.js') return {
+      pool: { connect: inertEffect, query: inertEffect }, closePool: inertEffect,
+      claimSourceSignalForCopyExecution: inertEffect, insertSourceTradeSignal: inertEffect,
+      recordSourceTradeEvent: inertEffect, transitionCopyExecution: inertEffect, withTransaction: inertEffect
+    };
+    throw new Error(`UNREVIEWED_BOOTSTRAP_IMPORT: ${name}`);
+  };
+  const compiled = ts.transpileModule(bootstrap, { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+    verbatimModuleSyntax: true, esModuleInterop: false
+  } }).outputText;
+  // No actual loader, process/environment, filesystem or network reaches this code.
+  const evaluate = new Function('require', 'process', 'exports', `return (async () => { ${compiled}\n })();`);
+  let reason: unknown;
+  try { await evaluate(requirePort, { env }, {}); } catch (error) { reason = error; }
+  return { reason, imports, effects };
+}
+
+describe('package28 chaos direct-import containment (source-only inert bootstrap)', () => {
+  it('refuses before any infrastructure import even when declarations look disposable or the outer guard returns', async () => {
+    const runtimeImports = ast.statements.filter(ts.isImportDeclaration)
+      .filter(statement => !statement.importClause?.isTypeOnly)
+      .map(statement => (statement.moduleSpecifier as ts.StringLiteral).text);
+    expect(runtimeImports).toEqual(['./helpers/package28-isolation.js']);
+
+    for (const env of [{}, declared]) {
+      const result = await evaluateBootstrap(env);
+      expect(result.reason).toBeInstanceOf(Error);
+      expect((result.reason as Error).message).toMatch(/Integration isolation/);
+      expect(result.imports).toEqual([]);
+      expect(result.effects).toEqual([]);
+    }
+    // A future declaration-only/returning preflight must not enable chaos either.
+    const future = await evaluateBootstrap(declared, () => {});
+    expect(future.reason).toBeInstanceOf(Error);
+    expect((future.reason as Error).message).toMatch(/Chaos integration unavailable.*exact owned.*session identities/);
+    expect(future.imports).toEqual([]);
+    expect(future.effects).toEqual([]);
+  });
+
+  it('has no executable all-peer kill or implicit Redis endpoint and unavailable helpers refuse without effects', async () => {
+    const literals: string[] = [];
+    const calls: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isStringLiteralLike(node)) literals.push(node.text);
+      if (ts.isCallExpression(node)) calls.push(node.expression.getText(ast));
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+    expect(literals.filter(value => /pg_terminate_backend|pg_stat_activity|redis:\/\/127\.0\.0\.1:6379/i.test(value))).toEqual([]);
+    expect(calls.filter(value => value === 'control.call')).toEqual([]);
+
+    for (const name of ['terminateOurBackends', 'terminateOwnedRedisClients', 'withQueue']) {
+      const functions: ts.FunctionDeclaration[] = [];
+      const find = (node: ts.Node) => {
+        if (ts.isFunctionDeclaration(node) && node.name?.text === name) functions.push(node);
+        ts.forEachChild(node, find);
+      };
+      find(ast);
+      expect(functions).toHaveLength(1);
+      const body = functions[0].body!;
+      // These helpers are explicit unavailable operations, not a silently scoped
+      // simulation. No queries, constructors, callback or cleanup can be reached.
+      expect(body.statements).toHaveLength(1);
+      expect(body.statements[0].getText(ast)).toBe('assertChaosSessionOwnershipAvailable();');
+      const compiled = ts.transpileModule(`async function refuse() ${body.getText(ast)}`, {
+        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
+      }).outputText;
+      let guards = 0;
+      const refuse = new Function('assertChaosSessionOwnershipAvailable', `${compiled}; return refuse;`)(() => {
+        guards++;
+        throw new Error('OWNED_SESSION_INVENTORY_UNAVAILABLE');
+      }) as () => Promise<void>;
+      await expect(refuse()).rejects.toThrow('OWNED_SESSION_INVENTORY_UNAVAILABLE');
+      expect(guards).toBe(1);
+    }
+  });
+});

@@ -27,12 +27,14 @@ type PositionTrade = {
 type OpenMasterLot = {
   lot_id: string;
   signal_id: string;
-  user_id: string;
+  user_id: string | null;
   master_wallet_address: string;
   token_mint: string;
   chain: string;
-  remaining_quantity: number | string;
+  remaining_quantity: string;
   remaining_cost_basis_usd: number | string | null;
+  target_account: string;
+  execution_mode: NonNullable<OpenPositionSnapshot['acquisitionExecutionMode']>;
 };
 
 /**
@@ -180,9 +182,10 @@ export async function markToMarketOpenPositions(
   const positions: OpenPositionSnapshot[] = [];
   let skipped = 0;
 
-  // Lot rows are the authoritative tenant/master identity once confirmed copy
-  // evidence has created them. The trade-ledger path remains the compatibility
-  // fallback for legacy rows and for tenants whose evidence predates migration 058.
+  // Lot exit scope requires its acquisition evidence to remain confirmed and
+  // actively applied to this exact position. A reversal can leave a positive
+  // historical lot; existence/provenance alone must not expose exact exit scope.
+  // The trade-ledger fallback remains diagnostic, without exact lot ownership.
   const hasTenantLedger = [...grouped.values()].some((group) => group.key.userId !== null);
   const openMasterLots = hasTenantLedger
     ? await query<OpenMasterLot>(
@@ -193,9 +196,34 @@ export async function markToMarketOpenPositions(
            lot.master_wallet_address,
            lot.token_mint,
            lot.chain,
-           lot.remaining_quantity,
-           lot.remaining_cost_basis_usd
+           lot.remaining_quantity::text,
+           lot.remaining_cost_basis_usd,
+           position.target_account,
+           acquisition.execution_mode
            FROM copy_position_master_lots lot
+           JOIN copy_positions position ON position.id = lot.position_id
+             AND position.user_id IS NOT DISTINCT FROM lot.user_id
+             AND position.chain = lot.chain AND position.token_mint = lot.token_mint
+           JOIN copy_executions acquisition ON acquisition.id = lot.acquisition_execution_id
+             AND acquisition.user_id IS NOT DISTINCT FROM lot.user_id
+             AND acquisition.target_account = position.target_account
+             AND acquisition.chain = lot.chain AND acquisition.token_mint = lot.token_mint
+             AND acquisition.direction = 'buy'
+             AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id
+             AND acquisition.source_trade_id = lot.source_trade_id
+           JOIN source_trades source ON source.id = lot.source_trade_id
+             AND source.chain = lot.chain AND source.token_mint = lot.token_mint
+             AND source.wallet_address = lot.master_wallet_address AND source.direction = 'buy'
+           JOIN copy_execution_evidence evidence ON evidence.id = lot.acquisition_evidence_id
+             AND evidence.execution_id = acquisition.id
+             AND evidence.confirmation_state IN ('confirmed', 'finalized')
+           JOIN copy_position_applications application ON application.evidence_id = evidence.id
+             AND application.execution_id = acquisition.id
+             AND application.active = TRUE
+             AND application.position_id = position.id
+             AND application.user_id IS NOT DISTINCT FROM lot.user_id
+             AND application.target_account = position.target_account
+             AND application.chain = lot.chain AND application.token_mint = lot.token_mint
           WHERE lot.remaining_quantity > 0
             AND ($1::uuid IS NULL OR lot.signal_id = $1)
           ORDER BY lot.signal_id, lot.user_id, lot.master_wallet_address, lot.acquired_at, lot.id`,
@@ -314,7 +342,15 @@ export async function markToMarketOpenPositions(
       positions.push({
         signalId: group.key.signalId,
         userId: group.key.userId,
-        ...(lot ? { positionKey: lot.lot_id } : {}),
+        // Only DB-attributed lots carry exact exit scope. Legacy diagnostic
+        // aggregates must never gain authority from Number-derived quantities.
+        ...(lot ? {
+          positionKey: lot.lot_id,
+          openQuantityExact: lot.remaining_quantity,
+          masterWalletAddress: lot.master_wallet_address,
+          targetAccount: lot.target_account,
+          acquisitionExecutionMode: lot.execution_mode
+        } : {}),
         tokenMint,
         chain,
         openQuantity: lotQuantity,

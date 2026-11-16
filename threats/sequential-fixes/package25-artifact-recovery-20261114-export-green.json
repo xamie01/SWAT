@@ -1,0 +1,14 @@
+{
+  "qualification": "actual source helpers with inert dependency mocks; pytest/full native ML runtime blocked",
+  "testResults": [
+    {
+      "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_ml_boundary_unittest.py",
+      "passed": 18,
+      "failed": 0,
+      "failureAssertions": 0,
+      "errorAssertions": 0,
+      "skipped": 0,
+      "total": 18
+    }
+  ]
+}

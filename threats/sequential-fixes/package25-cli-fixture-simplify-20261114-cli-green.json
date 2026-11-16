@@ -1,0 +1,35 @@
+{
+  "qualification": "actual CLI/config loaded with inert stdlib dependency fixtures; no real Typer/native/package initialization",
+  "executedMethods": [
+    "test_01_rank_config_escape_diagnostic_before_downstream",
+    "test_02_score_config_escape_diagnostic_before_downstream",
+    "test_03_both_config_symlink_and_writable_root_diagnostics",
+    "test_04_rank_artifact_symlink_diagnostic_before_read",
+    "test_05_rank_rechecks_path_before_native_read",
+    "test_06_rank_missing_artifact_keeps_existing_diagnostic",
+    "test_07_score_loader_rejection_keeps_existing_diagnostic",
+    "test_08_rank_allowed_path_reaches_inert_training_refusal",
+    "test_09_unexpected_settings_error_not_swallowed"
+  ],
+  "unittestAssertionCalls": {
+    "total": 35,
+    "byName": {
+      "assertRaises": 11,
+      "assertEqual": 11,
+      "assertTrue": 11,
+      "assertRaisesRegex": 2
+    },
+    "qualification": "unittest invocations only; Mock assertions additional, not counted"
+  },
+  "testResults": [
+    {
+      "name": "/home/xahmie/Documents/SWAT/pattern-ml/tests/package25_cli_diagnostics_unittest.py",
+      "passed": 9,
+      "failed": 0,
+      "failureAssertions": 0,
+      "errorAssertions": 0,
+      "skipped": 0,
+      "total": 9
+    }
+  ]
+}

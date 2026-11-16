@@ -4,14 +4,35 @@ After=network.target postgresql.service pgbouncer.service
 
 [Service]
 Type=oneshot
-User=swat
-WorkingDirectory=/root/SWAT
+User=swat-billing-sweep
+Group=swat-billing-sweep
+WorkingDirectory=/opt/swat/current/apps/api
 Environment=NODE_ENV=production
-EnvironmentFile=/root/SWAT/.env
-ExecStart=/usr/bin/node /root/SWAT/apps/api/dist/cron/billing-sweep.js
+Environment=HOME=/var/lib/swat-billing-sweep
+Environment=TRADING_MODE=paper
+Environment=AUTO_EXECUTE=false
+Environment=LIVE_ENABLED_CHAINS=
+EnvironmentFile=/etc/swat/billing-sweep.env
+ExecStartPre=/usr/bin/python3 -I -S /opt/swat/current/deploy/tools/ops-readiness.py --verify-only --service billing-sweep --release /opt/swat/current
+ExecStart=/usr/bin/node /opt/swat/current/apps/api/dist/cron/billing-sweep.js
+StateDirectory=swat-billing-sweep
+StateDirectoryMode=0700
+RuntimeDirectory=swat-billing-sweep
+RuntimeDirectoryMode=0700
+UMask=0077
 
-# Sandboxing
-ProtectSystem=full
+# Code/releases must be root-owned, readable by swat-billing-sweep, and not writable by any service principal.
+# Provision /etc/swat/billing-sweep.env root:swat-billing-sweep 0640 outside the release.
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectSystem=strict
 ProtectHome=true
 NoNewPrivileges=true
 PrivateTmp=true

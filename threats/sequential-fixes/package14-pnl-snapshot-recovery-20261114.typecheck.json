@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "incremental": false,
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@swat/shared": ["threats/sequential-fixes/package14-pnl-snapshot-recovery-20261114.shared-source.ts"],
+      "@solana/web3.js": ["packages/shared/node_modules/@solana/web3.js"]
+    }
+  },
+  "files": [
+    "../../packages/db/src/pnl-queries.ts",
+    "../../packages/db/src/pnl-queries.test.ts",
+    "../../packages/db/src/package14-exits.sequential.test.ts",
+    "./package14-pnl-snapshot-recovery-20261114-focused.config.ts",
+    "./package14-pnl-snapshot-recovery-20261114-neighbors.config.ts"
+  ]
+}

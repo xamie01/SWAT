@@ -1,5 +1,12 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { tradeQueueForChain, chainFromTokenMint } from '@swat/shared';
+import type { PoolClient } from 'pg';
+import {
+  ensureFanoutEnumeration, getFanoutBatch, claimFanoutEnumeration, failFanoutEnumeration,
+  completeFanoutEnumeration, listFanoutDeliveries, prepareFanoutDeliveryQueueWithClient,
+  markFanoutDeliveryQueued,
+  type FanoutRecipient, type FanoutExclusion, type FanoutDeliveryIdentity
+} from '@swat/db';
 import type { FanoutExclusionCode, FanoutPlan, MirrorEligibility } from '@swat/db';
 
 /**
@@ -92,9 +99,10 @@ export interface FanoutTradeJobData {
   readonly sourceTradeId?: string;
   readonly direction?: 'buy' | 'sell';
   /** Absent on the legacy operator job, which is what makes it the operator's. */
-  readonly userId?: string;
-  /** The already-clamped mode from the verdict. Absent on the operator job. */
-  readonly executionMode?: ExecutionMode;
+  readonly userId?: string | null;
+  readonly targetAccount?: string;
+  /** Immutable durable obligation scope, rechecked by the worker. */
+  readonly executionMode?: ExecutionMode | 'shadow';
   /** What this user's subscription state permits. Absent on the operator job. */
   readonly mirrors?: MirrorEligibility;
 }
@@ -176,10 +184,9 @@ export interface PlanFanoutTradeJobsInput {
   readonly sourceTrade: FanoutSourceTrade | null;
   /**
    * The fan-out verdict, or `null` when no enumeration ran or it failed.
-   *
-   * `null` yields the operator job alone, which is today's behaviour. That is
-   * the fallback an enumeration error lands in: nobody copies, the operator
-   * still trades, and nothing about the legacy path changed.
+   * A source trade requires a completed verdict, even for an empty cohort.
+   * Unknown enumeration must not become operator-only dispatched success.
+   * Pattern signals have no source cohort and may still pass `null`.
    */
   readonly plan: FanoutPlan | null;
 }
@@ -209,6 +216,9 @@ export interface FanoutJobPlan {
  * platform gate excluded everybody.
  */
 export function planFanoutTradeJobs(input: PlanFanoutTradeJobsInput): FanoutJobPlan {
+  if (input.sourceTrade && input.plan === null) {
+    throw new Error('Source fan-out enumeration is incomplete; retain the delivery obligation');
+  }
   const chain = chainFromTokenMint(input.tokenMint);
   const queue = tradeQueueForChain(chain);
 
@@ -346,14 +356,109 @@ export interface FanoutTradeQueue {
  * process dies mid-fan-out, the pre-existing behaviour has already happened and
  * the retry adds the remaining user jobs under their stable ids.
  */
+/** Caller wiring must persist the complete cohort and await COMMIT before resolving prepare. */
+export interface FanoutDeliveryCommit {
+  prepare(jobPlan: FanoutJobPlan): Promise<readonly FanoutJobDescriptor[]>;
+  /** Queue acceptance is not execution success; retain the obligation. */
+  queued(descriptor: FanoutJobDescriptor): Promise<void>;
+}
+
+export function fanoutDescriptorIdentity(descriptor: FanoutJobDescriptor): FanoutDeliveryIdentity {
+  const data = descriptor.data;
+  if (!Object.hasOwn(data, 'userId') || (data.userId !== null && typeof data.userId !== 'string')
+    || !['paper', 'live', 'shadow'].includes(data.executionMode ?? '') || !data.targetAccount) {
+    throw new Error('Durable fan-out descriptor requires explicit tenant/mode/account');
+  }
+  return { signalId: data.signalId, userId: data.userId as string | null,
+    executionMode: data.executionMode as FanoutDeliveryIdentity['executionMode'], targetAccount: data.targetAccount };
+}
+
+export interface DurableFanoutCaller {
+  /** Must resolve only after a successful caller-owned COMMIT. */
+  transaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T>;
+  readonly owner: string;
+  now(): Date;
+  enumerate(jobPlan: FanoutJobPlan): Promise<{ recipients: readonly FanoutRecipient[]; exclusions: readonly FanoutExclusion[] }>;
+  admission(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{ allowed: boolean; reason?: string }>;
+}
+
+/** Actual producer adapter: failed enumeration retains its separately committed
+ * seed; completed enumeration is never recalculated from current subscribers.
+ */
+export function createDurableFanoutDelivery(caller: DurableFanoutCaller): FanoutDeliveryCommit {
+  return {
+    async prepare(jobPlan) {
+      const signalId = jobPlan.operator.data.signalId;
+      const sourceTradeId = jobPlan.operator.data.sourceTradeId;
+      if (!sourceTradeId) throw new Error('Durable source fan-out requires source identity');
+      await caller.transaction(client => ensureFanoutEnumeration(client, { signalId, sourceTradeId }));
+      const batch = await caller.transaction(client => getFanoutBatch(client, signalId));
+      if (!batch || batch.source_trade_id !== sourceTradeId) throw new Error('Fanout batch/source identity missing');
+      if (batch.state !== 'complete') {
+        const claim = await caller.transaction(client => claimFanoutEnumeration(client, {
+          signalId, sourceTradeId, owner: caller.owner, now: caller.now(), leaseMs: 240_000
+        }));
+        if (!claim) throw new Error('Fanout enumeration busy; retain pending obligation');
+        try {
+          const snapshot = await caller.enumerate(jobPlan);
+          await caller.transaction(client => completeFanoutEnumeration(client, claim, {
+            ...snapshot, chain: jobPlan.chain, now: caller.now()
+          }));
+        } catch (error) {
+          await caller.transaction(client => failFanoutEnumeration(client, claim,
+            String(error instanceof Error ? error.message : error).slice(0, 2000) || 'enumeration failed'));
+          throw error;
+        }
+      }
+      return caller.transaction(async client => {
+        const rows = await listFanoutDeliveries(client, signalId);
+        const descriptors: FanoutJobDescriptor[] = [];
+        for (const row of rows) {
+          const descriptor = row.descriptor as unknown as FanoutJobDescriptor;
+          const identity = fanoutDescriptorIdentity(descriptor);
+          if (row.signal_id !== identity.signalId || row.user_id !== identity.userId
+            || row.execution_mode !== identity.executionMode || row.target_account !== identity.targetAccount
+            || row.job_id !== descriptor.options.jobId) throw new Error('Fanout stored descriptor identity mismatch');
+          const prepared = await prepareFanoutDeliveryQueueWithClient(client, identity, {
+            now: caller.now(), admission: locked => caller.admission(locked, descriptor)
+          });
+          if (prepared) descriptors.push(descriptor);
+        }
+        return descriptors;
+      });
+    },
+    queued(descriptor) {
+      return caller.transaction(client => markFanoutDeliveryQueued(client, fanoutDescriptorIdentity(descriptor)));
+    }
+  };
+}
+
 export async function enqueueFanoutTradeJobs(
   queueFor: (chain: Chain) => FanoutTradeQueue,
-  jobPlan: FanoutJobPlan
+  jobPlan: FanoutJobPlan,
+  durable?: FanoutDeliveryCommit
 ): Promise<number> {
+  const isSource = jobPlan.operator.data.sourceTradeId !== undefined;
+  if (isSource && !durable) {
+    throw new Error('Source fan-out requires durable delivery preparation before enqueue');
+  }
+  const descriptors = isSource
+    ? await durable!.prepare(jobPlan)
+    : [jobPlan.operator, ...jobPlan.users];
+  // Retried enumeration cannot replace a committed recipient snapshot. The
+  // durable adapter returns the still-outstanding original descriptors.
+  for (const descriptor of descriptors) {
+    if (descriptor.chain !== jobPlan.chain
+      || descriptor.data.signalId !== jobPlan.operator.data.signalId
+      || descriptor.data.sourceTradeId !== jobPlan.operator.data.sourceTradeId) {
+      throw new Error('Durable fan-out snapshot does not match the source job plan');
+    }
+  }
   const queue = queueFor(jobPlan.chain);
   let added = 0;
-  for (const descriptor of [jobPlan.operator, ...jobPlan.users]) {
+  for (const descriptor of descriptors) {
     await queue.add(descriptor.name, descriptor.data, descriptor.options);
+    if (isSource) await durable!.queued(descriptor);
     added += 1;
   }
   return added;

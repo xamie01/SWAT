@@ -1,5 +1,5 @@
 import type { Chain } from '@swat/shared';
-import { query } from '@swat/db';
+import { query, getSourceConfirmationReadiness } from '@swat/db';
 
 /**
  * S4-M8 - out-of-sample master metrics over 24h / 7d / 30d.
@@ -800,6 +800,8 @@ export async function listMasterCandidates(input: {
   asOf: Date;
   activityWindowMs?: number;
 }): Promise<MasterCandidate[]> {
+  // An asserted historical confirmation state is not verifier-backed evidence.
+  if (!getSourceConfirmationReadiness().ready) return [];
   const activityWindowMs = input.activityWindowMs ?? WINDOW_DURATION_MS['30d'];
   const rows = await query<{ wallet_address: string; chain: string; first_seen: Date | null }>(
     `SELECT w.address AS wallet_address,
@@ -839,6 +841,7 @@ export async function listMasterCandidates(input: {
  * introduced, and so closing it is a one-line change.
  */
 export async function fetchMasterTradeRows(input: MasterTradeFetchInput): Promise<MasterTradeRow[]> {
+  if (!getSourceConfirmationReadiness().ready) return [];
   const rows = await query<{
     wallet_address: string;
     chain: string;

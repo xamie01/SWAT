@@ -1,26 +1,9 @@
-import 'dotenv/config';
-import { defineConfig } from 'vitest/config';
+import { assertPackage28IsolationPreflight } from './tests/integration/helpers/package28-isolation.js';
 
-const databaseUrl = process.env.INTEGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error(
-    'INTEGRATION_DATABASE_URL is required (DATABASE_URL is accepted only for a dedicated test database)'
-  );
-}
-
-const databaseName = new URL(databaseUrl).pathname.replace(/^\//, '');
-if (!/(?:^|_)(?:integration|test)$/.test(databaseName)) {
-  throw new Error(
-    `Refusing to run integration tests against non-test database "${databaseName}"; `
-      + 'use a database whose name ends in _integration or _test'
-  );
-}
-
-process.env.DATABASE_URL = databaseUrl;
-process.env.NODE_ENV = 'test';
-process.env.TRADING_MODE = 'paper';
-process.env.AUTO_EXECUTE = 'false';
+// Fail before environment-file loading, config dependencies, worker collection or
+// globalSetup can import/construct a database or Redis client. No fallback URL.
+assertPackage28IsolationPreflight(process.env);
+const { defineConfig } = await import('vitest/config');
 
 export default defineConfig({
   test: {

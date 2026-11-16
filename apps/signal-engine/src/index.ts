@@ -1,7 +1,17 @@
+import type { PoolClient } from 'pg';
+import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import {
   crossTenantScope,
+  getSourceConfirmationReadiness,
+  readFanoutRecipientScopeWithClient,
+  listFanoutEnumerationRepairs,
+  listFanoutDeliveryRepairs,
+  getFanoutBatch,
+  withTransaction,
+  type FanoutRecipient,
+  type FanoutExclusion,
   getPolymarketOutcomeContext,
   insertSignalWithDedupe,
   insertSourceTradeSignal,
@@ -25,15 +35,14 @@ import {
   fetchTokenMetadata,
   initLogger,
   stripChainPrefix,
+  resolveChainAddress,
   tradeQueueForChain
 } from '@swat/shared';
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
 import {
   capacityAppliesToDirection,
-  planCapacityLedgerEntries,
   projectCohortNotionalUsd,
-  recordFanoutCapacityLedger,
   resolveFanoutCapacity
 } from './capacity-inputs.js';
 import { createPolymarketBookLiquidityReader } from './polymarket-book-reader.js';
@@ -41,9 +50,13 @@ import {
   isPlaceholderOrUnstableOutcome,
   requirePolymarketSignalContext
 } from './polymarket-context.js';
-import { mayPatternTrade } from './trade-eligibility.js';
+import { evaluateSignalTradeEligibility } from './trade-eligibility.js';
 import {
+  createDurableFanoutDelivery,
+  fanoutDescriptorIdentity,
   enqueueFanoutTradeJobs,
+  type FanoutJobPlan,
+  type FanoutJobDescriptor,
   planFanoutTradeJobs,
   summariseFanout
 } from './fanout-enqueue.js';
@@ -207,7 +220,7 @@ console.warn(
  */
 async function resolveFanoutChainMode(chain: Chain): Promise<ChainModeResolution | null> {
   try {
-    return await resolveChainMode(chain);
+    return await resolveChainMode(chain, { forceFresh: true });
   } catch (error) {
     console.error(
       `[signal-engine] fan-out could not resolve the ${chain} execution mode:`,
@@ -313,6 +326,105 @@ async function planSignalFanout(
   }
 }
 
+// Paper settlement identity must match the executor's existing synthetic account.
+// An override selects identity only; it cannot enable source readiness or live authority.
+function paperFanoutTarget(chain: Chain): string {
+  const fallback = chain === 'solana' ? '11111111111111111111111111111111'
+    : '0x0000000000000000000000000000000000000001';
+  const key = `PAPER_COPY_ACCOUNT_${chain.replace(/-/g, '_').toUpperCase()}`;
+  return resolveChainAddress(process.env[key]?.trim() || fallback, chain).prefixed;
+}
+
+const fanoutOwner = `signal-engine-${randomUUID()}`;
+
+async function currentFanoutAdmission(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{ allowed: boolean; reason?: string }> {
+  const readiness = getSourceConfirmationReadiness();
+  if (!readiness.ready) return { allowed: false, reason: readiness.reason };
+  const identity = fanoutDescriptorIdentity(descriptor);
+  const source = await client.query<{ wallet_address: string; direction: 'buy' | 'sell'; token_mint: string;
+    chain: Chain; event_at: Date; confirmation_state: string }>(
+    `SELECT source.wallet_address, source.direction, source.token_mint, source.chain, source.event_at, source.confirmation_state
+     FROM signals signal JOIN source_trades source ON source.id = signal.source_trade_id
+     WHERE signal.id = $1 AND source.id = $2 FOR SHARE OF source`,
+    [identity.signalId, descriptor.data.sourceTradeId]
+  );
+  const row = source.rows[0];
+  if (!row || row.chain !== descriptor.chain || row.token_mint !== descriptor.data.tokenMint
+    || row.direction !== descriptor.data.direction || !['confirmed', 'finalized'].includes(row.confirmation_state)
+    || !(row.event_at instanceof Date) || !Number.isFinite(row.event_at.getTime())
+    || row.event_at.getTime() > Date.now() || Date.now() - row.event_at.getTime() > SOURCE_COPY_MAX_EVENT_AGE_MS) {
+    return { allowed: false, reason: 'source-identity-confirmation-or-freshness-unavailable' };
+  }
+  // Explicit blacklist remains a stop for reducing candidates; unreadable state
+  // refuses instead of treating an outage as an empty blacklist.
+  const blacklist = await client.query<{ value: unknown }>(`SELECT value FROM config WHERE key = 'blacklist'`);
+  const value = blacklist.rows[0]?.value;
+  if (value !== undefined && (!Array.isArray(value) || value.some(entry => typeof entry !== 'string'))) {
+    return { allowed: false, reason: 'blacklist-unreadable' };
+  }
+  if (Array.isArray(value) && value.some(entry => stripChainPrefix(entry) === stripChainPrefix(row.token_mint))) {
+    return { allowed: false, reason: 'token-blacklisted' };
+  }
+  if (identity.userId === null && process.env.AUTO_EXECUTE !== 'true') return { allowed: false, reason: 'operator-auto-execute-off' };
+  const mode = await resolveFanoutChainMode(descriptor.chain);
+  const scope = await readFanoutRecipientScopeWithClient(client, {
+    userId: identity.userId, chain: descriptor.chain, tokenMint: row.token_mint,
+    masterWalletAddress: row.wallet_address, direction: row.direction,
+    platformMode: mode?.effectiveMode ?? 'off', paperTargetAccount: paperFanoutTarget(descriptor.chain), now: new Date()
+  });
+  if (scope.reason || scope.executionMode !== identity.executionMode || scope.targetAccount !== identity.targetAccount) {
+    return { allowed: false, reason: scope.reason ?? 'immutable-recipient-scope-changed' };
+  }
+  if (row.direction === 'buy') {
+    const safety = await checkTokenSafety(row.token_mint);
+    const verdict = evaluateSignalTradeEligibility('source_trade', { direction: 'buy', score: descriptor.data.score,
+      minimumScore: Math.max(80, MIN_SIGNAL_SCORE), safety, suppressTrade: false });
+    if (!verdict.allowed) return verdict;
+  }
+  return { allowed: true };
+}
+
+function durableSignalFanout(source: SourceTradeSignalCandidate, eligibility: ReturnType<typeof evaluateSignalTradeEligibility>,
+  poolTvlUsd: number | null) {
+  return createDurableFanoutDelivery({
+    transaction: withTransaction, owner: fanoutOwner, now: () => new Date(), admission: currentFanoutAdmission,
+    async enumerate(jobPlan) {
+      const fanout = await planSignalFanout(source, jobPlan.chain, jobPlan.operator.data.tokenMint,
+        jobPlan.operator.data.score, poolTvlUsd);
+      if (!fanout) throw new Error('Fanout recipient enumeration unavailable');
+      if (fanout.plan.eligible.length + fanout.plan.excluded.length > 1000) throw new Error('Fanout cohort exceeds bounded snapshot');
+      const summary = summariseFanout(fanout.plan);
+      console.log(`[signal-engine] fan-out ${jobPlan.operator.data.signalId}: ${summary.line}`);
+      if (summary.warning) console.warn(`[signal-engine] ${summary.warning}`);
+      const descriptors = planFanoutTradeJobs({
+        ...jobPlan.operator.data, tokenMint: source.tokenMint, sourceTrade: { sourceTradeId: source.sourceTradeId, direction: source.side },
+        plan: fanout.plan
+      });
+      const recipients: FanoutRecipient[] = [];
+      const exclusions: FanoutExclusion[] = [...fanout.plan.excluded.map(row => ({ userId: row.userId, code: row.code }))];
+      for (const descriptor of [descriptors.operator, ...descriptors.users]) {
+        const userId = descriptor.data.userId ?? null;
+        if (!eligibility.allowed) { exclusions.push({ userId, code: eligibility.reason }); continue; }
+        if (userId === null && process.env.AUTO_EXECUTE !== 'true') {
+          exclusions.push({ userId, code: 'operator-auto-execute-off' }); continue;
+        }
+        const scope = await withTransaction(client => readFanoutRecipientScopeWithClient(client, {
+          userId, chain: jobPlan.chain, tokenMint: source.tokenMint, masterWalletAddress: source.walletAddress,
+          direction: source.side, platformMode: fanout.effectiveMode, paperTargetAccount: paperFanoutTarget(jobPlan.chain), now: new Date()
+        }));
+        if (scope.reason || !scope.executionMode || !scope.targetAccount) {
+          exclusions.push({ userId, code: (scope.reason ?? 'recipient-scope-unavailable').slice(0, 128) }); continue;
+        }
+        const scoped: FanoutJobDescriptor = { ...descriptor, data: { ...descriptor.data,
+          userId, executionMode: scope.executionMode, targetAccount: scope.targetAccount } };
+        recipients.push({ ...fanoutDescriptorIdentity(scoped), jobId: scoped.options.jobId!,
+          descriptor: scoped as unknown as Record<string, unknown> });
+      }
+      return { recipients, exclusions };
+    }
+  });
+}
+
 // ─── Shared helper ─────────────────────────────────────────────────────────────
 
 async function enqueueSignal(opts: {
@@ -365,6 +477,8 @@ async function enqueueSignal(opts: {
     }
   } catch (e: any) {
     console.error(`[signal-engine] failed to read blacklist config:`, e.message);
+    // Explicit stop state must be readable on every retry, including sells.
+    throw e;
   }
 
   // 2. Fetch token metadata (Name & Symbol) from Helius / DexScreener
@@ -474,8 +588,7 @@ async function enqueueSignal(opts: {
       console.log(`[signal-engine] signal score ${opts.signalScore} below threshold ${MIN_SIGNAL_SCORE} — admitting reducing sell exit`);
     } else {
       console.log(`[signal-engine] signal score ${opts.signalScore} below threshold ${MIN_SIGNAL_SCORE} — logged only`);
-      if (opts.sourceTrade) await markSourceTradeSignalDispatched(signal.id);
-      return;
+      if (!opts.sourceTrade) return;
     }
   }
 
@@ -502,94 +615,27 @@ async function enqueueSignal(opts: {
     backoff: { type: 'exponential', delay: 2000 }
   });
 
-  // Two independent gates, deliberately. `mayPatternTrade` is the ADR-0005
-  // invariant and lives in one place; `suppressTrade` stays as a per-call-site
-  // statement of intent. Either one alone blocks the trade, so deleting a flag
-  // from a detector changes a log line rather than whether money moves.
-  const patternMayTrade = mayPatternTrade(opts.patternType);
-
-  if (patternMayTrade && !opts.suppressTrade && safety.isSafe && opts.signalScore >= 80) {
-    const clusterTier = opts.clusterId
-      ? await getClusterTier(opts.clusterId)
-      : scoreToTier(opts.signalScore);
-    console.log(`[signal-engine] ✅ TRADE QUEUED: ${opts.tokenMint} | score: ${opts.signalScore} | tier: ${clusterTier} | chain: ${chain}`);
-
-    // Fan-out (`S4-13`/`S4-14`). Only a source-trade signal has a master wallet
-    // to enumerate subscribers of; a pattern signal gets the operator job alone,
-    // exactly as before. `mayPatternTrade` already refuses every cluster pattern,
-    // so this branch is unreachable for them today — the guard keeps the
-    // dependency explicit rather than incidental.
-    // `safety.liquidity` is the DexScreener pool TVL `checkTokenSafety` already
-    // fetched above, reused rather than re-fetched: a second round trip would add
-    // latency to the money path for a number just read, and two reads could
-    // disagree. `usableLiquidityForFanout` discards it unread on polygon.
-    const fanout = opts.sourceTrade
-      ? await planSignalFanout(
-        opts.sourceTrade,
-        chain,
-        opts.tokenMint,
-        opts.signalScore,
-        safety.liquidity ?? null
-      )
-      : null;
-
-    if (fanout) {
-      const summary = summariseFanout(fanout.plan);
-      console.log(`[signal-engine] fan-out ${signal.id}: ${summary.line}`);
-      if (summary.warning) {
-        console.warn(`[signal-engine] fan-out ${signal.id}: ${summary.warning}`);
-      }
-    }
-
-    await enqueueFanoutTradeJobs(tradeQueueFor, planFanoutTradeJobs({
-      signalId: signal.id,
-      tokenMint: opts.tokenMint,
-      score: opts.signalScore,
-      clusterTier,
-      sourceTrade: opts.sourceTrade
-        ? {
-          sourceTradeId: opts.sourceTrade.sourceTradeId,
-          direction: opts.sourceTrade.side
-        }
-        : null,
-      plan: fanout?.plan ?? null
-    }));
-
-    // The capacity ledger writer (`S4-M6`), and it runs **after** the enqueue on
-    // purpose: the row asserts a cohort order was committed, and an enqueue
-    // failure means it was not. Idempotent on `(source_trade_id, execution_mode)`,
-    // which matters because `markSourceTradeSignalDispatched` runs only below —
-    // so a fan-out that dies mid-way really is re-run whole on the next tick.
-    //
-    // Without this write the ledger stays empty, an empty window sums to "no
-    // capacity used", and the cap above permits every cohort while looking like a
-    // control. The notional is recorded as `unpriced` rather than as the
-    // projection, so the window reports a LOWER BOUND instead of a fabricated
-    // numerator — see `planCapacityLedgerEntries`.
-    if (fanout && opts.sourceTrade) {
-      await recordFanoutCapacityLedger(planCapacityLedgerEntries({
-        masterWalletAddress: opts.sourceTrade.walletAddress,
-        chain,
-        tokenMint: opts.tokenMint,
-        sourceTradeId: opts.sourceTrade.sourceTradeId,
-        effectiveMode: fanout.effectiveMode,
-        cohortSize: fanout.plan.eligible.length,
-        committedAt: new Date()
-      }));
-    }
-  } else if (!patternMayTrade) {
-    console.log(`[signal-engine] ⏭️ ${opts.patternType} is discovery-only (ADR-0005) | token: ${opts.tokenMint}`);
-  } else if (!safety.isSafe) {
-    console.log(`[signal-engine] ❌ trade blocked — safety flags: ${safety.flags.join(', ')} | token: ${opts.tokenMint}`);
-  } else if (opts.suppressTrade) {
-    console.log(`[signal-engine] ⏭️ trade suppressed by call site | token: ${opts.tokenMint}`);
-  } else {
-    console.log(`[signal-engine] ⏭️ trade skipped — score ${opts.signalScore} < 80 | token: ${opts.tokenMint}`);
-  }
-
+  // This caller uses the reducing-aware gate. Sells reach scoped owned-lot
+  // enumeration even after entry score/safety deterioration; explicit stops stay.
+  const eligibility = evaluateSignalTradeEligibility(opts.patternType, {
+    direction: opts.sourceTrade?.side ?? 'buy', score: opts.signalScore,
+    minimumScore: Math.max(80, MIN_SIGNAL_SCORE), suppressTrade: opts.suppressTrade ?? false, safety
+  });
   if (opts.sourceTrade) {
+    const clusterTier = opts.clusterId ? await getClusterTier(opts.clusterId) : scoreToTier(opts.signalScore);
+    const jobPlan = planFanoutTradeJobs({ signalId: signal.id, tokenMint: opts.tokenMint,
+      score: opts.signalScore, clusterTier, sourceTrade: {
+        sourceTradeId: opts.sourceTrade.sourceTradeId, direction: opts.sourceTrade.side
+      }, plan: { eligible: [], excluded: [], exclusionCounts: {} } });
+    const added = await enqueueFanoutTradeJobs(tradeQueueFor, jobPlan,
+      durableSignalFanout(opts.sourceTrade, eligibility, safety.liquidity ?? null));
+    console.log(`[signal-engine] ${added} durable delivery queue acceptances for ${signal.id}; not financial completion`);
+    // Only detection/enumeration summary. Per-recipient repair ignores this marker.
     await markSourceTradeSignalDispatched(signal.id);
+  } else if (!eligibility.allowed) {
+    console.log(`[signal-engine] ${opts.patternType} trade not queued: ${eligibility.reason}`);
   }
+
 }
 
 export async function processSourceTradeSignals(sourceTradeId?: string): Promise<void> {

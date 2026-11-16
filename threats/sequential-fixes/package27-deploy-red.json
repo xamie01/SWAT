@@ -1,0 +1,73 @@
+{
+  "phase": "red",
+  "manifest": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package27-deploy-manifest.json",
+  "sourceFiles": [
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-api.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-trade-executor.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-billing-sweep.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-billing-sweep.timer",
+    "/home/xahmie/Documents/SWAT/deploy/crontab.example",
+    "/home/xahmie/Documents/SWAT/.woodpecker.yaml",
+    "/home/xahmie/Documents/SWAT/.woodpecker/ci.yaml"
+  ],
+  "sourceSha256": {
+    "deploy/systemd/swat-api.service": "6b4f201bf804456355d2030e0b1fd0ce2f4bf930fb872d994bd0a88803c7db1a",
+    "deploy/systemd/swat-trade-executor.service": "4fa197b14cf335ca203239f97898b522ecfb64d27d06afb714cf8268869cd796",
+    "deploy/systemd/swat-billing-sweep.service": "2e687b89e714ce6a15cb4d639083f5636d38654f1b9298bc2b73fa1ffe5e1444",
+    "deploy/systemd/swat-billing-sweep.timer": "48fb5a0361f2e43dbbbb8e44c04b9749f479ecdfa2c8cf2842a18a34ee3a8755",
+    "deploy/crontab.example": "e6438d69d71b03db6b99a5fc44519b0bc1d91fccdbe3c070cf4aa80e95110e4d",
+    ".woodpecker.yaml": "2b9b273a224062239d6d5e6efcb17c1f7bd3e21a09f5532ed3a2aa1dc3b11a21",
+    ".woodpecker/ci.yaml": "2b9b273a224062239d6d5e6efcb17c1f7bd3e21a09f5532ed3a2aa1dc3b11a21"
+  },
+  "nonDeployCiSha256": "f6a77c879b6d5d8101ef37a74c6f7d60f6e2bfc339347856872c93bb5aac762d",
+  "assertions": [
+    {
+      "name": "deploy/systemd/swat-api.service:unprivileged-path",
+      "passed": false
+    },
+    {
+      "name": "deploy/systemd/swat-api.service:read-only-code-explicit-state",
+      "passed": false
+    },
+    {
+      "name": "deploy/systemd/swat-trade-executor.service:unprivileged-path",
+      "passed": false
+    },
+    {
+      "name": "deploy/systemd/swat-trade-executor.service:read-only-code-explicit-state",
+      "passed": false
+    },
+    {
+      "name": "deploy/systemd/swat-billing-sweep.service:unprivileged-path",
+      "passed": false
+    },
+    {
+      "name": "deploy/systemd/swat-billing-sweep.service:read-only-code-explicit-state",
+      "passed": false
+    },
+    {
+      "name": "cron:no-protected-home-or-inline-database-password",
+      "passed": false
+    },
+    {
+      "name": "ci:mirrored-config",
+      "passed": true
+    },
+    {
+      "name": "ci:credential-free-local-acquisition-stage",
+      "passed": false
+    },
+    {
+      "name": "ci:publish-does-not-install-pull-or-build",
+      "passed": false
+    }
+  ],
+  "passed": 1,
+  "failed": 9,
+  "skipped": 0,
+  "neighborTests": null,
+  "executedDeploymentOrInstallerCode": false,
+  "runtimeAcceptance": false,
+  "safety": "Only explicit public source reads, SHA256, static assertions and stdlib unittest; no subprocess, network, credential reads or deployment imports.",
+  "exitCode": 1
+}

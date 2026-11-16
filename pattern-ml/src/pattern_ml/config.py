@@ -9,6 +9,8 @@ outside the project directory.
 from __future__ import annotations
 
 import os
+import re
+import stat
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
@@ -88,34 +90,80 @@ class Settings:
 
     @property
     def raw_dir(self) -> Path:
-        return self.data_dir / "raw"
+        return confined_path(self.data_dir / "raw")
 
     @property
     def checkpoint_dir(self) -> Path:
-        return self.data_dir / "checkpoints"
+        return confined_path(self.data_dir / "checkpoints")
 
     @property
     def artifacts_dir(self) -> Path:
-        return PROJECT_ROOT / "artifacts"
+        return confined_path(PROJECT_ROOT / "artifacts")
+
+    def artifact_path(self, name: str) -> Path:
+        if not name or Path(name).name != name or "\\" in name:
+            raise ValueError("Artifact name must be a single local filename")
+        return confined_path(self.artifacts_dir / name)
 
     @property
     def reports_dir(self) -> Path:
-        return PROJECT_ROOT / "reports"
+        return confined_path(PROJECT_ROOT / "reports")
 
     def ensure_dirs(self) -> None:
-        for path in (
-            self.data_dir,
-            self.raw_dir,
-            self.checkpoint_dir,
-            self.artifacts_dir,
-            self.reports_dir,
-        ):
-            path.mkdir(parents=True, exist_ok=True)
+        paths = tuple(confined_path(path) for path in (
+            self.data_dir, self.db_path.parent, self.raw_dir,
+            self.checkpoint_dir, self.artifacts_dir, self.reports_dir,
+        ))
+        for path in paths:
+            confined_path(path).mkdir(parents=True, exist_ok=True)
+
+
+def confined_path(path: Path, *, root: Path | None = None) -> Path:
+    """Package-local storage, with no parent components or symlinks.
+
+    Absolute paths inside the package are allowed; external storage is not an
+    operator override. Recheck at each I/O seam. The local package directory
+    must be operator-owned: path checks cannot fence a hostile concurrent
+    writer replacing ancestors of native Parquet/DuckDB calls.
+    """
+    package = PROJECT_ROOT.absolute()
+    approved = (root or package).absolute()
+    candidate = path if path.is_absolute() else approved / path
+    if any(".." in p.parts for p in (package, approved, candidate)):
+        raise ValueError("Parent traversal is not allowed in storage paths")
+    try:
+        approved.relative_to(package)
+        candidate.relative_to(approved)
+    except ValueError as exc:
+        raise ValueError("Storage path must stay beneath the approved package root") from exc
+    for component in (candidate, *candidate.parents):
+        if component.is_symlink():
+            raise ValueError("Symlinks are not allowed in storage paths")
+        # Only the package subtree is required to be same-user/non-writable.
+        # Shared ancestors such as /tmp may be sticky, but must not be symlinks.
+        if component.is_relative_to(package):
+            try:
+                info = component.lstat()
+            except FileNotFoundError:
+                continue
+            if (info.st_uid != os.getuid()
+                    or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                raise ValueError("Storage must be same-user and not group/world writable")
+            if component == candidate:
+                if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                    raise ValueError("Storage leaves must be regular files or directories")
+                if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+                    raise ValueError("Hardlinked storage files are not allowed")
+            elif not stat.S_ISDIR(info.st_mode):
+                raise ValueError("Storage ancestors must be directories")
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(approved.resolve()):
+        raise ValueError("Storage path escapes the approved root")
+    return resolved
 
 
 def _resolve(path_str: str) -> Path:
-    path = Path(path_str)
-    return path if path.is_absolute() else PROJECT_ROOT / path
+    return confined_path(Path(path_str))
 
 
 @lru_cache(maxsize=1)
@@ -159,15 +207,21 @@ def _coerce_since(value: object) -> datetime | None:
 def _normalize_address(address: object, chain: Chain) -> str:
     if not isinstance(address, str) or not address.strip():
         raise KolRosterError(f"A {chain} entry is missing a non-empty `address`")
+    if chain not in CHAINS:
+        raise KolRosterError(f"Unsupported chain: {chain!r}")
     addr = address.strip()
-    # Tolerate chain-prefixed addresses pasted over from the main SWAT DB.
-    for prefix in ("solana:", "polygon:", "polymarket:", "robinhood-chain:"):
+    # Tolerate imported prefixes only when their chain matches the roster.
+    prefixes = {"solana:": "solana", "polygon:": "polymarket",
+                "polymarket:": "polymarket", "robinhood-chain:": "polymarket"}
+    for prefix, prefix_chain in prefixes.items():
         if addr.lower().startswith(prefix):
+            if prefix_chain != chain:
+                raise KolRosterError("Address prefix does not match the declared chain")
             addr = addr[len(prefix) :]
             break
     if chain == "polymarket":
         # EVM addresses are case-insensitive; lowercase so joins can't miss.
-        if not addr.lower().startswith("0x") or len(addr) != 42:
+        if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr, flags=re.IGNORECASE):
             raise KolRosterError(
                 f"Polymarket address must be a 42-char 0x… EVM address, got {addr!r}"
             )
@@ -177,6 +231,17 @@ def _normalize_address(address: object, chain: Chain) -> str:
         raise KolRosterError(
             f"{addr!r} looks like an EVM address but is listed under `solana:`"
         )
+    if chain != "solana":
+        raise KolRosterError(f"Unsupported chain: {chain!r}")
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    if not 32 <= len(addr) <= 44 or any(c not in alphabet for c in addr):
+        raise KolRosterError("Solana address must be a canonical 32-byte base58 key")
+    number = 0
+    for char in addr:
+        number = number * 58 + alphabet.index(char)
+    leading_zeroes = len(addr) - len(addr.lstrip("1"))
+    if leading_zeroes + (number.bit_length() + 7) // 8 != 32:
+        raise KolRosterError("Solana address must decode to exactly 32 bytes")
     return addr
 
 

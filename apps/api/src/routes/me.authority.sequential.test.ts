@@ -108,6 +108,14 @@ describe('Synthetic security invariants against actual route handlers', () => {
     expect(response.body).not.toContain('SYNTHETIC_PRIVATE_MARKER');
     expect(response.json().polymarket.credentialsRecorded).toBe(true);
   });
+  it('reports eligibility and enrollment unavailable without fabricating geo approval', async () => {
+    const server = app();
+    await registerMeRoutes(server, { backfillQueue: {} as any, tokenDiscoveryQueue: {} as any });
+    const response = await server.inject({ method: 'GET', url: '/v1/me/vault' });
+    expect(response.json().polymarket).toMatchObject({ geoEligible: null, geoExpiresAt: null, eligibilityAssessment: 'unassessed', enrollmentSupported: false });
+    expect(response.json().polymarket.unavailableReasons).toContain('authorized-wrap-only-service-unavailable');
+    expect(response.json().solana.unavailableReasons).toContain('deployed-authority-verification-unavailable');
+  });
   it('never advertises a historical grant or spliced address as usable authority', async () => {
     fixture.query.mockResolvedValue([{ chain: 'robinhood-chain', grant_kind: 'eip7702', account_address: OWNER, status: 'active', scope_policy: { smartAccount: OTHER } }]);
     fixture.wallets.mockResolvedValue([{ address: OWNER, chainKind: 'evm', verifiedAt: new Date('2026-01-01') }]);

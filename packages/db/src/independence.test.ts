@@ -18,7 +18,7 @@ import type { FunderIndependenceInput, FunderLabel } from './independence.js';
 const FUNDER = 'solana:FundErAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 function input(overrides: Partial<FunderIndependenceInput> = {}): FunderIndependenceInput {
-  return { funder: FUNDER, observedFundedWalletCount: 3, label: null, ...overrides };
+  return { funder: FUNDER, observedFundedWalletCount: 3, label: 'individual', ...overrides };
 }
 
 describe('degree band', () => {
@@ -147,7 +147,7 @@ describe('hub exclusion is independent of observed degree', () => {
     ).toBe('labelled-hub');
     expect(
       assessFunderIndependence(input({ label: 'exchange' }), { hubLabels: [] }).verdict
-    ).toBe('independent');
+    ).toBe('unassessed');
   });
 });
 
@@ -170,7 +170,8 @@ describe('an unchecked label is not a clean label', () => {
       label: null
     });
     expect(checked.labelChecked).toBe(true);
-    expect(checked.verdict).toBe('independent');
+    expect(checked.verdict).toBe('unassessed');
+    expect(checked.code).toBe('control-unverified');
 
     const unchecked = assessFunderIndependence({
       funder: FUNDER,
@@ -247,7 +248,7 @@ describe('purity', () => {
 
 describe('partitionFundersByIndependence', () => {
   const funders: readonly FunderIndependenceInput[] = [
-    { funder: 'solana:small', observedFundedWalletCount: 3, label: null },
+    { funder: 'solana:small', observedFundedWalletCount: 3, label: 'individual' },
     { funder: 'solana:cex', observedFundedWalletCount: 900_000, label: null },
     { funder: 'solana:quietCex', observedFundedWalletCount: 2, label: 'exchange' },
     { funder: 'solana:lonely', observedFundedWalletCount: 1, label: null },

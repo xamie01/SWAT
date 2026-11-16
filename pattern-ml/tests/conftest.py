@@ -13,14 +13,19 @@ from pathlib import Path
 
 import pytest
 
+from pattern_ml import config
 from pattern_ml.config import get_settings
 
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Point every path-producing setting at a per-test temp directory."""
-    monkeypatch.setenv("PATTERN_ML_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("PATTERN_ML_DB", str(tmp_path / "data" / "test.duckdb"))
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(config, "PROJECT_ROOT", project)
+    monkeypatch.setattr(config, "_load_env", lambda: None)
+    monkeypatch.setenv("PATTERN_ML_DATA_DIR", str(project / "data"))
+    monkeypatch.setenv("PATTERN_ML_DB", str(project / "data" / "test.duckdb"))
     # Never let a real key leak into a test run and fire a live request.
     # `config` reads the repo-root .env as a fallback, so a key present there
     # would otherwise reach the provider tests.

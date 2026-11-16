@@ -1,0 +1,123 @@
+{
+  "phase": "green",
+  "manifest": "/home/xahmie/Documents/SWAT/threats/sequential-fixes/package27-deploy-manifest.json",
+  "sourceFiles": [
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-api.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-trade-executor.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-billing-sweep.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-billing-sweep.timer",
+    "/home/xahmie/Documents/SWAT/deploy/crontab.example",
+    "/home/xahmie/Documents/SWAT/.woodpecker.yaml",
+    "/home/xahmie/Documents/SWAT/.woodpecker/ci.yaml",
+    "/home/xahmie/Documents/SWAT/DEPLOYMENT.md",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-web.service",
+    "/home/xahmie/Documents/SWAT/deploy/systemd/swat-lp.service",
+    "/home/xahmie/Documents/SWAT/deploy/tools/package27-deploy-artifacts.py",
+    "/home/xahmie/Documents/SWAT/deploy/tools/package27-deploy-artifacts.lock.json",
+    "/home/xahmie/Documents/SWAT/deploy/tools/package27-deploy-python-install.py",
+    "/home/xahmie/Documents/SWAT/deploy/tools/package27-deploy-python.lock.json"
+  ],
+  "sourceSha256": {
+    "deploy/systemd/swat-api.service": "50d8edeed8405677ffb3ce5db819c39017d65a5a227c1e3748722c4ea215bf8a",
+    "deploy/systemd/swat-trade-executor.service": "28d2270b18383c0d04b743e1a9d09429b7545990da9fa5f52ee4ccaf6940ed67",
+    "deploy/systemd/swat-billing-sweep.service": "bff033f55e97a5269c8cbc4b3866ba89b020037dce04aae6ce046a7721ea1c47",
+    "deploy/systemd/swat-billing-sweep.timer": "48fb5a0361f2e43dbbbb8e44c04b9749f479ecdfa2c8cf2842a18a34ee3a8755",
+    "deploy/crontab.example": "84ff7c344cd8f4da3ddd02bf5dbcc093d34d05dddef5fe7eaeab98b036325056",
+    ".woodpecker.yaml": "d5b46b45af91e2ba0233c45eee256386985b810c1fde85c7054e69e81cc6a552",
+    ".woodpecker/ci.yaml": "d5b46b45af91e2ba0233c45eee256386985b810c1fde85c7054e69e81cc6a552",
+    "DEPLOYMENT.md": "e91ccbebbb18eacfb692ed51c637a7d02f59e922a9cb7896d951d536fd2bef3f",
+    "deploy/systemd/swat-web.service": "28c3a8e59c7bdc36c1c5fe03fbf3060092568f438f9fc596d0622cf56ac21a15",
+    "deploy/systemd/swat-lp.service": "2a08a33afa42303f48443e969240f58c2e1ca4446858f1868294fc803395a4c3",
+    "deploy/tools/package27-deploy-artifacts.py": "d27b06688701e020e8db3695733dad9a4c56feba5b8d92acdd7771b301cfff0f",
+    "deploy/tools/package27-deploy-artifacts.lock.json": "24683167363230fd709c2a5cb35124735aa03c120854769b84f5babd029ee5f6",
+    "deploy/tools/package27-deploy-python-install.py": "b7d8c0f55f33abb7c8af89af3ef148d3709ff262fdfa7f32174d4e30a581615a",
+    "deploy/tools/package27-deploy-python.lock.json": "5533f7eae80f2ebdbda2d4e9ee58ea56b1249c0dde272a8ac561edac8a9e761c"
+  },
+  "nonDeployCiSha256": "3d3fb1908e8bb38201cc1f4f8455652073f67059a02585db4f8849f68ddd1484",
+  "assertions": [
+    {
+      "name": "deploy/systemd/swat-api.service:unprivileged-path",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-api.service:read-only-code-explicit-state",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-trade-executor.service:unprivileged-path",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-trade-executor.service:read-only-code-explicit-state",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-billing-sweep.service:unprivileged-path",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-billing-sweep.service:read-only-code-explicit-state",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-web.service:unprivileged-path",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-web.service:read-only-code-explicit-state",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-lp.service:unprivileged-path",
+      "passed": true
+    },
+    {
+      "name": "deploy/systemd/swat-lp.service:read-only-code-explicit-state",
+      "passed": true
+    },
+    {
+      "name": "cron:no-protected-home-or-inline-database-password",
+      "passed": true
+    },
+    {
+      "name": "ci:mirrored-config",
+      "passed": true
+    },
+    {
+      "name": "ci:credential-free-local-acquisition-stage",
+      "passed": true
+    },
+    {
+      "name": "ci:publish-does-not-install-pull-or-build",
+      "passed": true
+    },
+    {
+      "name": "runbook:canonical-not-root-or-global-pm2",
+      "passed": true
+    },
+    {
+      "name": "artifacts:pending-lock-blocks-runtime",
+      "passed": true
+    },
+    {
+      "name": "artifacts:acquisition-does-not-run-child-process",
+      "passed": true
+    },
+    {
+      "name": "artifacts:complete-hash-inventory-and-no-symlinks",
+      "passed": true
+    },
+    {
+      "name": "python:offline-hash-locked-no-resolution",
+      "passed": true
+    }
+  ],
+  "passed": 19,
+  "failed": 0,
+  "skipped": 0,
+  "neighborTests": null,
+  "executedDeploymentOrInstallerCode": false,
+  "runtimeAcceptance": false,
+  "safety": "Only explicit public source reads, SHA256, static assertions and stdlib unittest; no subprocess, network, credential reads or deployment imports.",
+  "exitCode": 0
+}

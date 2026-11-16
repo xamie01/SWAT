@@ -30,7 +30,7 @@ const OWNER = '0x4444444444444444444444444444444444444444';
 const ACCOUNT = '0x5555555555555555555555555555555555555555';
 const PERMIT2 = '0x6666666666666666666666666666666666666666';
 
-const SWAP_SELECTOR = '0x12345678';
+const SWAP_SELECTOR = ERC20_TRANSFER.selector;
 const APPROVE_CAP = 1_000_000n;
 
 const DESCRIPTORS: readonly EvmFunctionDescriptor[] = [
@@ -92,11 +92,11 @@ const SWAP_RULE = {
     kind: 'contract-call',
     targets: [ROUTER],
     selector: SWAP_SELECTOR,
-    functionName: 'swapTokens'
+    functionName: 'transfer'
   },
   conditions: [
-    { field: 'swapTokens.recipient', op: 'address_is_owner' },
-    { field: 'swapTokens.amountIn', op: 'uint_lte', max: APPROVE_CAP.toString() }
+    { field: 'transfer.recipient', op: 'address_is_owner' },
+    { field: 'transfer.amountIn', op: 'uint_lte', max: APPROVE_CAP.toString() }
   ]
 };
 
@@ -110,7 +110,7 @@ function swapAction(overrides: Partial<AuthorityContractCall> = {}): AuthorityCo
     chainId: ROBINHOOD_CHAIN_ID,
     target: ROUTER,
     selector: SWAP_SELECTOR,
-    functionName: 'swapTokens',
+    functionName: 'transfer',
     value: 0n,
     args: { recipient: OWNER, amountIn: 500n },
     ...overrides
@@ -395,7 +395,7 @@ describe('S4-P10 — default-deny is structural', () => {
       kind: 'deny',
       code: 'authority-deny-condition-failed',
       ruleId: 'swap-on-router',
-      field: 'swapTokens.recipient'
+      field: 'transfer.recipient'
     });
   });
 
@@ -524,7 +524,7 @@ describe('S4-P10 — footgun 2: a mis-pathed condition fails closed (DG-3)', () 
     const typoPolicy = policy([
       {
         ...SWAP_RULE,
-        conditions: [{ field: 'swapTokens.recipent', op: 'address_is_owner' }]
+        conditions: [{ field: 'transfer.recipent', op: 'address_is_owner' }]
       }
     ]);
 
@@ -535,7 +535,7 @@ describe('S4-P10 — footgun 2: a mis-pathed condition fails closed (DG-3)', () 
       kind: 'unresolved',
       code: 'authority-field-path-unresolved',
       ruleId: 'swap-on-router',
-      field: 'swapTokens.recipent'
+      field: 'transfer.recipent'
     });
     // It must not present as a generic denial...
     expect(verdict.kind).not.toBe('deny');
@@ -573,13 +573,13 @@ describe('S4-P10 — footgun 2: a mis-pathed condition fails closed (DG-3)', () 
     const wrongTypePolicy = policy([
       {
         ...SWAP_RULE,
-        conditions: [{ field: 'swapTokens.amountIn', op: 'address_is_owner' }]
+        conditions: [{ field: 'transfer.amountIn', op: 'address_is_owner' }]
       }
     ]);
     expect(evaluateAuthorityAction(wrongTypePolicy, swapAction(), CONTEXT)).toMatchObject({
       kind: 'unresolved',
       code: 'authority-field-type-mismatch',
-      field: 'swapTokens.amountIn'
+      field: 'transfer.amountIn'
     });
   });
 
@@ -867,7 +867,7 @@ describe('S4-P10 — document validation', () => {
 
   it('rejects an unknown condition op', () => {
     expect(() =>
-      policy([{ ...SWAP_RULE, conditions: [{ field: 'swapTokens.recipient', op: 'regex' }] }])
+      policy([{ ...SWAP_RULE, conditions: [{ field: 'transfer.recipient', op: 'regex' }] }])
     ).toThrow(expect.objectContaining({ code: 'authority-policy-invalid-document' }));
   });
 

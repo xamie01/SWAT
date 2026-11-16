@@ -1,10 +1,13 @@
-import { randomUUID } from 'node:crypto';
-import { resolveChainAddress, resolveChainValue, type Chain } from '@swat/shared';
-import { pool } from '../../../packages/db/src/client.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { resolveChainAddress, resolveChainValue } from '../../../packages/shared/src/address.js';
+import type { Chain } from '../../../packages/shared/src/types.js';
+import { PublicKey } from '../../../packages/shared/src/validation.js';
+import { assertPackage28IsolationPreflight } from './package28-isolation.js';
 
-const SOLANA_SOURCE_WALLET = '11111111111111111111111111111111';
-const SOLANA_TARGET_ACCOUNT = 'So11111111111111111111111111111111111111112';
-const SOLANA_TOKEN_MINT = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+// UUID-scoped public bytes, not generated keypairs or spendable credentials.
+function solanaFixtureAddress(runId: string, field: string): string {
+  return new PublicKey(createHash('sha256').update(`swat:integration:${runId}:${field}`).digest()).toBase58();
+}
 
 export interface LifecycleFixture {
   runId: string;
@@ -19,13 +22,13 @@ export function createLifecycleFixture(chain: Chain = 'solana'): LifecycleFixtur
   const runId = randomUUID();
   const runHex = runId.replaceAll('-', '');
   const sourceWallet = chain === 'solana'
-    ? SOLANA_SOURCE_WALLET
+    ? solanaFixtureAddress(runId, 'sourceWallet')
     : `0x${runHex}00000001`;
   const targetAccount = chain === 'solana'
-    ? SOLANA_TARGET_ACCOUNT
+    ? solanaFixtureAddress(runId, 'targetAccount')
     : `0x${runHex}00000002`;
   const tokenMint = chain === 'solana'
-    ? SOLANA_TOKEN_MINT
+    ? solanaFixtureAddress(runId, 'tokenMint')
     : `0x${runHex}00000003`;
   return {
     runId,
@@ -42,6 +45,8 @@ function asError(reason: unknown): Error {
 }
 
 async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void> {
+  assertPackage28IsolationPreflight(process.env);
+  const { pool } = await import('../../../packages/db/src/client.js');
   const sourcePattern = `${fixture.sourceEventPrefix}%`;
   const sourceWallet = resolveChainAddress(fixture.sourceWallet, fixture.chain).prefixed;
   const targetAccount = resolveChainAddress(fixture.targetAccount, fixture.chain).prefixed;
@@ -55,10 +60,9 @@ async function cleanupLifecycleFixture(fixture: LifecycleFixture): Promise<void>
    * EVM builders set `sourceEventId` to the transaction hash, so a prefix-only
    * selector silently matches nothing and leaves the run's rows behind.
    *
-   * The wallet/token fallback is limited to the EVM chains because their
-   * fixture addresses are derived from `runId` and so cannot collide with
-   * another run. The Solana fixture reuses three constant addresses, where the
-   * same fallback would delete a concurrent run's rows.
+   * The wallet/token fallback remains limited to EVM ingestion builders; Solana
+   * uses the event prefix. All address-based position/token cleanup below now
+   * uses UUID-scoped identities, so a concurrent fixture is not selected.
    */
   const scopedByAddress = fixture.chain !== 'solana';
   const isFixtureSource = (alias: string): string =>
@@ -286,6 +290,7 @@ export async function withLifecycleFixture(
   operation: (fixture: LifecycleFixture) => Promise<void>,
   chain: Chain = 'solana'
 ): Promise<void> {
+  assertPackage28IsolationPreflight(process.env);
   const fixture = createLifecycleFixture(chain);
   const failures: Error[] = [];
   try {

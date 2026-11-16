@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "baseUrl": "../..",
+    "paths": {
+      "@solana/web3.js": ["packages/shared/node_modules/@solana/web3.js"],
+      "zod": ["packages/shared/node_modules/zod"],
+      "pg": ["packages/db/node_modules/@types/pg"],
+      "vitest/config": ["node_modules/vitest/dist/config.d.ts"]
+    }
+  },
+  "files": [
+    "../../tests/integration/helpers/package28-isolation.ts",
+    "../../tests/integration/helpers/schema-guard.ts",
+    "../../tests/integration/helpers/lifecycle-fixture.ts",
+    "../../tests/integration/global-setup.ts",
+    "../../tests/package28-isolation-preflight.ts",
+    "../../tests/unit/package28-preflight.test.ts",
+    "../../tests/unit/package28-existing-isolation.test.ts",
+    "../../vitest.integration.config.ts",
+    "../../packages/db/src/ci-setup.ts",
+    "../../packages/db/src/migration-discovery.ts",
+    "../../packages/db/src/migrations.test.ts",
+    "../../packages/db/src/database-policy.sequential.test.ts",
+    "../../packages/shared/src/address.test.ts",
+    "./package28-isolation-recovery-20261114-focused.config.ts",
+    "./package28-isolation-recovery-20261114-neighbor.config.ts"
+  ]
+}

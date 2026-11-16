@@ -5,16 +5,9 @@
 // WAKE Non-Custodial Delegated Execution Vault for Solana
 // (ADR-0003 §3, ADR-0004, AUDIT-FIX-CHECKLIST S4-P12 & S4-P19).
 //
-// Solves the three security vulnerabilities identified in the initial review:
-//   1. Balance Delta Post-Condition Checks & Rogue Account Scanning (Finding 1)
-//   2. Pinned WakeConfig PDA [b"config"] with Fixed Tip Accounts Allowlist (Finding 2)
-//   3. Centralized Live Executor Authority Check for Instant Rotation (Finding 3)
-//
-// Guarantees:
-//   - Mathematically keyless vault PDA bound strictly to the creator's wallet [b"vault", owner].
-//   - Only the creator/owner can withdraw funds or revoke execution authority.
-//   - Operator key can ONLY invoke Jupiter swaps where output tokens return to the vault.
-//   - Reverts on-chain if slippage or token spend exceeds pre-authorized bounds.
+// Source controls below require an audited new ABI/deployment and owner policy onboarding.
+// Helper/static tests are not instruction, CPI, rollback, or deployed governance proof.
+// An owner absolute output floor is not an oracle price or fair-value guarantee.
 
 use anchor_lang::prelude::*;
 use anchor_lang::Discriminator;
@@ -38,11 +31,14 @@ pub mod admin_authority {
     pub const INITIAL_ADMIN: Pubkey = pubkey!("2hNXKEQem7JKFkgG5wUTxuZyPdBDyTXDsLpXoFm6XNny");
 }
 
+// Fixed minimum delay; this is staged signer governance, not a multisig.
+pub const CONFIG_CHANGE_DELAY_SECONDS: i64 = 86_400;
+
 #[program]
 pub mod wake_vault {
     use super::*;
 
-    /// Initializes the global configuration PDA. Admin multisig only.
+    /// Initializes global configuration with the pinned deployment admin signer.
     pub fn initialize_config(
         ctx: Context<InitializeConfig>,
         executor: Pubkey,
@@ -58,24 +54,86 @@ pub mod wake_vault {
         Ok(())
     }
 
-    /// Rotates the global executor authority or updates tip allowlist. Admin only.
-    /// Immediately applies to all user vaults without per-vault updates.
+    /// Proposes a delayed global change. A pending proposal must be applied or cancelled
+    /// before another proposal can be created. No live config fields change here.
     pub fn update_config(
         ctx: Context<UpdateConfig>,
         new_executor: Option<Pubkey>,
         new_tip_accounts: Option<[Pubkey; 8]>,
         new_max_tip_lamports: Option<u64>,
+        new_admin: Option<Pubkey>,
     ) -> Result<()> {
+        let config = &ctx.accounts.config;
+        let change = &mut ctx.accounts.config_change;
+        change.config = config.key();
+        change.proposer = ctx.accounts.admin.key();
+        change.next_admin = new_admin.unwrap_or(config.admin);
+        require!(change.next_admin != Pubkey::default(), VaultError::InvalidConfigChange);
+        change.executor = new_executor.unwrap_or(config.executor);
+        require!(change.executor != Pubkey::default(), VaultError::InvalidConfigChange);
+        change.tip_accounts = new_tip_accounts.unwrap_or(config.tip_accounts);
+        change.max_tip_lamports = new_max_tip_lamports.unwrap_or(config.max_tip_lamports);
+        change.activate_after = Clock::get()?.unix_timestamp
+            .checked_add(CONFIG_CHANGE_DELAY_SECONDS)
+            .ok_or(VaultError::ArithmeticOverflow)?;
+        change.bump = ctx.bumps.config_change;
+        Ok(())
+    }
+
+    /// Current admin and proposed successor both sign; same admin may sign twice
+    /// when only executor/tip settings change. This does not enforce a threshold.
+    pub fn apply_config_change(ctx: Context<ApplyConfigChange>) -> Result<()> {
+        invariants::verify_config_change(
+            &ctx.accounts.config_change,
+            ctx.accounts.admin.key(),
+            ctx.accounts.next_admin.key(),
+            Clock::get()?.unix_timestamp,
+        )?;
+        let change = &ctx.accounts.config_change;
         let config = &mut ctx.accounts.config;
-        if let Some(executor) = new_executor {
-            config.executor = executor;
-        }
-        if let Some(tips) = new_tip_accounts {
-            config.tip_accounts = tips;
-        }
-        if let Some(max_tip) = new_max_tip_lamports {
-            config.max_tip_lamports = max_tip;
-        }
+        config.executor = change.executor;
+        config.tip_accounts = change.tip_accounts;
+        config.max_tip_lamports = change.max_tip_lamports;
+        config.admin = change.next_admin;
+        Ok(())
+    }
+
+    /// Current admin can cancel a pending proposal without waiting.
+    pub fn cancel_config_change(_ctx: Context<CancelConfigChange>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Owner authorizes one direction, executor, expiry and finite raw-input budget.
+    pub fn initialize_swap_policy(
+        ctx: Context<InitializeSwapPolicy>,
+        executor: Pubkey,
+        input_mint: Pubkey,
+        output_mint: Pubkey,
+        expires_at: i64,
+        max_input_per_swap: u64,
+        min_output_per_swap: u64,
+        remaining_input_budget: u64,
+    ) -> Result<()> {
+        let policy = &mut ctx.accounts.swap_policy;
+        policy.vault = ctx.accounts.vault.key();
+        policy.executor = executor;
+        policy.input_mint = input_mint;
+        policy.output_mint = output_mint;
+        policy.expires_at = expires_at;
+        policy.max_input_per_swap = max_input_per_swap;
+        policy.min_output_per_swap = min_output_per_swap;
+        policy.remaining_input_budget = remaining_input_budget;
+        policy.bump = ctx.bumps.swap_policy;
+        invariants::verify_swap_policy(
+            policy, executor, input_mint, output_mint, Clock::get()?.unix_timestamp,
+            max_input_per_swap, min_output_per_swap,
+        )?;
+        Ok(())
+    }
+
+    /// Closing the policy disables swaps; only its vault owner can replace it
+    /// through another signed initialize_swap_policy (including a budget reset).
+    pub fn close_swap_policy(_ctx: Context<ManageSwapPolicy>) -> Result<()> {
         Ok(())
     }
 

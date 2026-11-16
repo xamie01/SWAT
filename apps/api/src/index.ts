@@ -1,7 +1,7 @@
+import { loadPackage28LimiterConfig, package28TrustProxy, registerPackage28Limiters } from './package28-limiter.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
-import rateLimit from '@fastify/rate-limit';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -49,9 +49,11 @@ import { registerExecutionSettingsRoutes } from './routes/execution-settings.js'
 import { registerBillingRoutes } from './routes/billing.js';
 import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
 
+const limiterConfig = loadPackage28LimiterConfig(process.env);
+
 initLogger('api');
 
-const app = Fastify({ logger: {
+const app = Fastify({ trustProxy: package28TrustProxy(limiterConfig), logger: {
   redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]', 'req.headers["x-csrf-token"]'],
   serializers: {
     req: request => ({ id: request.id, method: request.method, url: request.url?.split('?')[0] }),
@@ -137,14 +139,9 @@ function isValidApiKey(provided: string | string[] | undefined): boolean {
 
 await app.register(cookie);
 
-// Blunts credential stuffing at the app layer. Cloudflare supplies the edge
-// limits (D10); this is the second layer, and the one that still applies when
-// traffic reaches the box directly.
-await app.register(rateLimit, {
-  max: Number(process.env.RATE_LIMIT_MAX ?? 300),
-  timeWindow: '1 minute',
-  allowList: () => false
-});
+// Independent global IP, credential IP and normalized-account buckets must
+// run before authentication hooks and every route scope.
+await registerPackage28Limiters(app, limiterConfig);
 
 // Order matters: the auth hook must be registered BEFORE any route scope it
 // needs to serve. Fastify applies a parent's hooks only to children registered
@@ -161,24 +158,8 @@ await registerAuth(app, {
 
 await registerAdminOnlyGlobals(app);
 
-// Stricter bucket for the credential endpoints specifically. Registered as a
-// scoped plugin so the tighter limit cannot leak onto ordinary read routes.
+// Keep the existing auth route scope; the parent limiter hooks cover it.
 await app.register(async (scope) => {
-  await scope.register(rateLimit, {
-    max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10),
-    timeWindow: '15 minutes',
-    // Exclude read-only session verification and wallet link nonce/verify
-    // from the credential-stuffing bucket. `/v1/auth/me` and wallet challenge routes
-    // are already governed by the global rate limit (300/min).
-    allowList: (request) => request.url === '/v1/auth/me' || request.url.startsWith('/v1/auth/wallet/'),
-    // Keyed on IP + email so one attacker cannot lock out an entire NAT, and a
-    // single account cannot be sprayed from one address.
-    keyGenerator: (request) => {
-      const body = request.body as { email?: unknown } | undefined;
-      const email = typeof body?.email === 'string' ? body.email.toLowerCase() : '';
-      return `${request.ip}:${email}`;
-    }
-  });
   await registerAuthRoutes(scope, {
     redis,
     isProduction: process.env.NODE_ENV === 'production',

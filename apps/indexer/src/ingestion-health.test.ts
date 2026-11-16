@@ -35,6 +35,21 @@ describe('tracked ingestion batches', () => {
     }));
   });
 
+  it.each(['unknown', 'complete'] as const)('records ordinary failed results as partial rather than %s', async completeness => {
+    const recorder = vi.fn().mockResolvedValue(undefined);
+    const result: IngestionBatchResult = { ...RESULT, evidence: {
+      observed: 3, quarantined: 3, accepted: 0, completeness,
+      confirmation: 'withheld', scope: 'provider-pagination'
+    } };
+    const expected = { ...result, evidence: { ...result.evidence, completeness: 'partial' } };
+    await expect(runTrackedIngestion({ chain: 'polygon', source: 'polymarket-data-api',
+      run: async () => result }, recorder)).resolves.toEqual(expected);
+    expect(recorder).toHaveBeenCalledWith(expect.objectContaining({
+      inserted: 8, skipped: 3, failed: 1, lastEventAt: RESULT.lastEventAt, evidence: expected.evidence
+    }));
+    expect(result.evidence?.completeness).toBe(completeness);
+  });
+
   it('records partial counters and rethrows a failed batch', async () => {
     const recorder = vi.fn().mockResolvedValue(undefined);
     const error = new IngestionBatchError('wallet refresh failed', RESULT);

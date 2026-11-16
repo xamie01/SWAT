@@ -1,10 +1,8 @@
 import {
   buildJupiterSwap,
-  fetchTokenPriceUsd,
   getJitoBundleStatus,
   getJitoTipAccounts,
   getJitoTipFloor,
-  lamportsToUsd,
   selectJitoTip,
   selectTipAccount,
   submitJitoBundle,
@@ -43,11 +41,43 @@ const DEFAULT_STORE_KEY = 'swat:trade-executor:pending:jupiter-jito:v1';
  */
 const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 
+export interface JupiterJitoExecutionIdentity {
+  readonly executionId: string;
+  readonly clientOrderId: string;
+  readonly userId: string | null;
+  readonly chain: 'solana';
+  readonly targetAccount: string;
+}
+
+export interface JupiterJitoIntent {
+  readonly inputMint: string;
+  readonly outputMint: string;
+  readonly inputAmountRaw: string;
+  readonly slippageBps: number;
+  readonly recipient: string;
+}
+
+export interface JupiterJitoReceipt {
+  readonly execution: JupiterJitoExecutionIdentity;
+  readonly signature: string;
+  readonly slot: number;
+  readonly inputMint: string;
+  readonly outputMint: string;
+  readonly inputAmountRaw: string;
+  readonly outputAmountRaw: string;
+  readonly feeLamports: string;
+  /** Canonical exact decimal fiat valuation supplied by the receipt accounting adapter. */
+  readonly feeUsd: string;
+}
+
 export interface JupiterJitoSubmitInput {
   /** Stable idempotency key. Must be `(signalId, target_account)`-derived. */
   readonly clientOrderId: string;
   readonly quote: JupiterQuote;
   readonly signerPublicKey: string;
+  /** Missing legacy identities cannot authorize a new submission. */
+  readonly execution?: JupiterJitoExecutionIdentity;
+  readonly intent?: JupiterJitoIntent;
 }
 
 export type JupiterJitoSubmission =
@@ -92,6 +122,8 @@ export type JupiterJitoResolution =
       readonly clientOrderId: string;
       readonly signature: string;
       readonly slot: number | null;
+      /** Quantified chain receipt, required before accounting acknowledgement. */
+      readonly receipt?: JupiterJitoReceipt;
       /** Tip actually paid by the landed bundle. Absent on records written before S4-P18. */
       readonly tipLamports?: number | null;
       /**
@@ -107,8 +139,12 @@ export type JupiterJitoResolution =
 
 export interface PendingJupiterJitoSubmission {
   readonly clientOrderId: string;
-  readonly bundleId: string;
-  /** Beyond this block height the transaction can never land — see below. */
+  readonly bundleId: string | null;
+  readonly execution?: JupiterJitoExecutionIdentity;
+  readonly intent?: JupiterJitoIntent;
+  readonly signedTransactions?: readonly string[];
+  readonly signatures?: readonly string[];
+  /** Expiry prevents future inclusion, not proof of an earlier non-fill. */
   readonly lastValidBlockHeight: number;
   readonly expiresAt: Date;
   /**
@@ -131,6 +167,10 @@ export interface JupiterJitoPendingStore {
   listPending(): Promise<PendingJupiterJitoSubmission[]>;
   save(pending: PendingJupiterJitoSubmission): Promise<void>;
   resolve(clientOrderId: string, resolution: JupiterJitoResolution): Promise<void>;
+  /** Atomic durable ownership, including the canonical execution reservation. */
+  claim?(execution: JupiterJitoExecutionIdentity): Promise<boolean>;
+  /** Commit exact signed identity and potentially-submitted canonical state before POST. */
+  prepare?(pending: PendingJupiterJitoSubmission): Promise<void>;
 }
 
 export function createRedisJupiterJitoStore(
@@ -204,7 +244,51 @@ export interface JupiterJitoRuntimeOptions {
    * `createSolanaSimulationGateFromEnvironment()`.
    */
   readonly simulation?: SolanaSimulationGate;
+  /** Extraction only, not authorization. Signing must already enforce exact final-byte semantics. */
+  readonly extractSignatures?: (transactions: readonly string[]) => Promise<readonly string[]>;
+  /** Must observe confirmed receipt quantities and fees, never quote estimates. */
+  readonly readReceipt?: (pending: PendingJupiterJitoSubmission) => Promise<JupiterJitoReceipt | null>;
   readonly now?: () => Date;
+}
+
+function validExecution(execution: JupiterJitoExecutionIdentity, clientOrderId: string): boolean {
+  return execution.chain === 'solana' && execution.clientOrderId === clientOrderId
+    && typeof execution.executionId === 'string' && execution.executionId.trim().length > 0
+    && typeof clientOrderId === 'string' && clientOrderId.trim().length > 0
+    && typeof execution.targetAccount === 'string' && execution.targetAccount.startsWith('solana:')
+    && (execution.userId === null || (typeof execution.userId === 'string' && execution.userId.trim().length > 0));
+}
+
+function positiveRaw(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9]+$/.test(value) && BigInt(value) > 0n;
+}
+
+function quoteMatchesIntent(quote: JupiterQuote, intent: JupiterJitoIntent): boolean {
+  if (!Number.isInteger(intent.slippageBps) || intent.slippageBps < 0 || intent.slippageBps >= 10000
+    || quote.swapMode !== 'ExactIn' || quote.inputMint !== intent.inputMint || quote.outputMint !== intent.outputMint
+    || quote.inAmount !== intent.inputAmountRaw || quote.slippageBps !== intent.slippageBps
+    || !positiveRaw(quote.inAmount) || !positiveRaw(quote.outAmount) || !positiveRaw(quote.otherAmountThreshold)) return false;
+  const output = BigInt(quote.outAmount);
+  const threshold = BigInt(quote.otherAmountThreshold);
+  // Jupiter may round down by one base unit; that cannot silently widen tolerance.
+  const minimum = output * BigInt(10000 - intent.slippageBps) / 10000n;
+  return threshold >= minimum && threshold <= output;
+}
+
+function receiptMatchesPending(receipt: JupiterJitoReceipt, pending: PendingJupiterJitoSubmission): boolean {
+  const execution = pending.execution;
+  const intent = pending.intent;
+  if (!execution || !intent || !receipt.execution || !validExecution(execution, pending.clientOrderId)
+    || !validExecution(receipt.execution, pending.clientOrderId)) return false;
+  return receipt.execution.executionId === execution.executionId
+    && receipt.execution.userId === execution.userId && receipt.execution.targetAccount === execution.targetAccount
+    && !!pending.signatures?.includes(receipt.signature)
+    && Number.isSafeInteger(receipt.slot) && receipt.slot >= 0
+    && receipt.inputMint === intent.inputMint && receipt.outputMint === intent.outputMint
+    && positiveRaw(receipt.inputAmountRaw) && positiveRaw(receipt.outputAmountRaw)
+    && BigInt(receipt.inputAmountRaw) <= BigInt(intent.inputAmountRaw)
+    && typeof receipt.feeLamports === 'string' && /^[0-9]+$/.test(receipt.feeLamports)
+    && typeof receipt.feeUsd === 'string' && /^(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/.test(receipt.feeUsd);
 }
 
 export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
@@ -227,12 +311,33 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
     }
     const pending = await options.pendingStore.findPending(input.clientOrderId);
     if (pending) {
+      if (!pending.bundleId || pending.bundleId === 'pending_unknown') {
+        return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'durable-submission-awaiting-reconciliation' };
+      }
       return {
         status: 'pending_confirmation',
         clientOrderId: input.clientOrderId,
         bundleId: pending.bundleId,
         lastValidBlockHeight: pending.lastValidBlockHeight
       };
+    }
+
+    const execution = input.execution;
+    const intent = input.intent;
+    if (!execution || !intent || !validExecution(execution, input.clientOrderId)
+      || execution.targetAccount !== `solana:${input.signerPublicKey}`
+      || intent.recipient !== input.signerPublicKey || !quoteMatchesIntent(input.quote, intent)) {
+      return { status: 'rejected', clientOrderId: input.clientOrderId, reason: 'jito-execution-intent-mismatch' };
+    }
+    if (!options.pendingStore.claim || !options.pendingStore.prepare || !options.extractSignatures) {
+      return { status: 'rejected', clientOrderId: input.clientOrderId, reason: 'jito-durable-submit-unavailable' };
+    }
+    try {
+      if (!await options.pendingStore.claim(execution)) {
+        return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'durable-submission-already-claimed' };
+      }
+    } catch {
+      return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'durable-claim-unavailable' };
     }
 
     const built = await buildJupiterSwap({
@@ -308,68 +413,45 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
       };
     }
 
-    const result = await submitJitoBundle([signedSwap, signedTip], options.jito);
-
-    if (!result.ok) {
-      if (result.retryable) {
-        // Genuinely ambiguous: the block engine may have received the bundle.
-        // EXE-06: Record as pending so the sweeper investigates and duplicate redeliveries are blocked.
-        await options.pendingStore.save({
-          clientOrderId: input.clientOrderId,
-          bundleId: 'pending_unknown',
-          lastValidBlockHeight: built.lastValidBlockHeight,
-          expiresAt: new Date(now().getTime() + options.pendingTtlMs),
-          tipLamports
-        });
-        return {
-          status: 'submission_unknown',
-          clientOrderId: input.clientOrderId,
-          reason: result.reason
-        };
+    const signedTransactions = [signedSwap, signedTip];
+    let prepared: PendingJupiterJitoSubmission;
+    try {
+      const signatures = await options.extractSignatures(signedTransactions);
+      if (signatures.length !== signedTransactions.length
+        || signatures.some(signature => !signature || signature === 'pending_unknown')
+        || new Set(signatures).size !== signatures.length
+        || !Number.isSafeInteger(built.lastValidBlockHeight) || built.lastValidBlockHeight <= 0) {
+        throw new Error('signed submission identity invalid');
       }
-      return { status: 'rejected', clientOrderId: input.clientOrderId, reason: result.reason };
+      prepared = {
+        clientOrderId: input.clientOrderId, execution, intent, bundleId: null,
+        signedTransactions, signatures, lastValidBlockHeight: built.lastValidBlockHeight,
+        expiresAt: new Date(now().getTime() + options.pendingTtlMs), tipLamports
+      };
+      await options.pendingStore.prepare(prepared);
+    } catch {
+      // No POST, but an uncertain durable write/claim must not release ownership.
+      return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'durable-preparation-unavailable' };
     }
 
-    await options.pendingStore.save({
-      clientOrderId: input.clientOrderId,
-      bundleId: result.bundleId,
-      lastValidBlockHeight: built.lastValidBlockHeight,
-      expiresAt: new Date(now().getTime() + options.pendingTtlMs),
-      // Carried on the pending record because reconciliation happens in a later
-      // process tick — often a later process — and the block engine's status
-      // response does not report what the bundle tipped. Recomputing it at
-      // reconcile time would re-read a tip floor that has since moved and book a
-      // number the chain never saw.
-      tipLamports
-    });
-
-    return {
-      status: 'submitted',
-      clientOrderId: input.clientOrderId,
-      bundleId: result.bundleId,
-      lastValidBlockHeight: built.lastValidBlockHeight
-    };
-  }
-
-  /**
-   * Prices a landed bundle's tip in USD, for `persistTrade`'s `feeUsd`.
-   *
-   * Only ever called once a bundle is known to have landed — see `reconcile`.
-   *
-   * Returns `null` on every path where the number would be a guess: a pending
-   * record from before S4-P18 that carries no tip, a nonsensical tip, or an
-   * unavailable SOL price. `fetchTokenPriceUsd` answers `null` when every one of
-   * its upstreams fails, and that must not collapse into a zero fee — zero is a
-   * claim that the trade cost nothing, which is a different and false statement.
-   */
-  async function priceLandedTip(
-    tipLamports: number | null | undefined
-  ): Promise<number | null> {
-    if (typeof tipLamports !== 'number' || !Number.isFinite(tipLamports) || tipLamports <= 0) {
-      return null;
+    try {
+      const result = await submitJitoBundle(signedTransactions, options.jito);
+      // Once transport was invoked, even malformed/4xx responses do not prove no effect.
+      if (!result.ok) {
+        return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: result.reason };
+      }
+      if (typeof result.bundleId !== 'string' || !result.bundleId.trim() || result.bundleId === 'pending_unknown') {
+        return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'bundle-identity-unavailable' };
+      }
+      await options.pendingStore.save({ ...prepared, bundleId: result.bundleId });
+      return {
+        status: 'submitted', clientOrderId: input.clientOrderId,
+        bundleId: result.bundleId, lastValidBlockHeight: built.lastValidBlockHeight
+      };
+    } catch {
+      // Exact bytes/signatures remain in the prewrite even if accepted response is lost.
+      return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'submission-response-or-store-unavailable' };
     }
-    const solPriceUsd = await fetchTokenPriceUsd(WRAPPED_SOL_MINT).catch(() => null);
-    return lamportsToUsd(tipLamports, solPriceUsd);
   }
 
   /**
@@ -384,64 +466,31 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
     pending: PendingJupiterJitoSubmission,
     currentBlockHeight?: number
   ): Promise<JupiterJitoResolution | null> {
+    const ambiguous = (reason: string): JupiterJitoResolution => ({ status: 'ambiguous', clientOrderId: pending.clientOrderId, reason });
+    // Locally persisted signatures can be reconciled without a bundle response.
+    try {
+      const receipt = await options.readReceipt?.(pending);
+      if (receipt) {
+        if (!receiptMatchesPending(receipt, pending)) return ambiguous('receipt-identity-or-quantity-mismatch');
+        return { status: 'filled', clientOrderId: pending.clientOrderId, signature: receipt.signature,
+          slot: receipt.slot, receipt };
+      }
+    } catch {
+      return ambiguous('confirmed-receipt-unavailable');
+    }
+    if (!pending.bundleId || pending.bundleId === 'pending_unknown') {
+      return ambiguous('bundle-response-unknown');
+    }
     const status = await getJitoBundleStatus(pending.bundleId, options.jito);
     if (!status) return null;
-
-    if (status.status === 'Landed') {
-      const signature = status.transactions[0];
-      if (!signature) {
-        // Landed without an observable signature is not a fill we can quantify.
-        // Never fabricate one — the position ledger would be permanently wrong.
-        return {
-          status: 'ambiguous',
-          clientOrderId: pending.clientOrderId,
-          reason: 'landed-without-signature'
-        };
-      }
-      // The one branch that books a cost. Everything below either never paid a
-      // tip (atomic bundle, never landed) or cannot be observed to have paid one.
-      const tipLamports = pending.tipLamports ?? null;
-      return {
-        status: 'filled',
-        clientOrderId: pending.clientOrderId,
-        signature,
-        slot: status.slot,
-        tipLamports,
-        feeUsd: await priceLandedTip(tipLamports)
-      };
+    if (status.bundleId !== pending.bundleId) return ambiguous('bundle-identity-mismatch');
+    if (status.status === 'Landed') return ambiguous('confirmed-receipt-unavailable');
+    // Bundle status/absence alone is not a chain receipt or proof all signatures never landed.
+    if (status.status === 'Failed') return ambiguous('bundle-failure-requires-chain-evidence');
+    if (typeof currentBlockHeight === 'number' && currentBlockHeight > pending.lastValidBlockHeight) {
+      return ambiguous('blockhash-expired-outcome-unknown');
     }
-
-    if (status.status === 'Failed') {
-      return { status: 'failed', clientOrderId: pending.clientOrderId, reason: 'bundle-failed' };
-    }
-
-    // `Invalid` means the block engine has never seen this id. Combined with an
-    // expired blockhash that is a definitive miss; on its own it may just be
-    // propagation lag, so it is not resolved here.
-    if (
-      typeof currentBlockHeight === 'number' &&
-      currentBlockHeight > pending.lastValidBlockHeight
-    ) {
-      // Past `lastValidBlockHeight` the transaction can never land. This is the
-      // only safe point to declare a miss, and it is why resubmission requires a
-      // FRESH quote and build — the expired blockhash makes the old transaction
-      // permanently unusable, so a blind retry would submit something that
-      // cannot execute.
-      return {
-        status: 'failed',
-        clientOrderId: pending.clientOrderId,
-        reason: 'blockhash-expired'
-      };
-    }
-
-    if (now() >= pending.expiresAt) {
-      return {
-        status: 'ambiguous',
-        clientOrderId: pending.clientOrderId,
-        reason: 'confirmation-timeout'
-      };
-    }
-
+    if (now() >= pending.expiresAt) return ambiguous('confirmation-timeout');
     return null;
   }
 
@@ -450,15 +499,31 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
     const resolutions: JupiterJitoResolution[] = [];
     for (const pending of pendings) {
       const resolution = await reconcile(pending, currentBlockHeight);
-      if (resolution) {
-        await options.pendingStore.resolve(pending.clientOrderId, resolution);
-        resolutions.push(resolution);
-      }
+      if (resolution) resolutions.push(resolution);
     }
     return resolutions;
   }
 
-  return { submit, reconcile, sweep };
+  /** Callback must return true only after idempotent receipt/evidence/accounting COMMIT. */
+  async function settle(
+    resolution: JupiterJitoResolution,
+    commit: (pending: PendingJupiterJitoSubmission, resolution: JupiterJitoResolution) => Promise<boolean>
+  ): Promise<boolean> {
+    if (resolution.status !== 'filled' || !resolution.receipt) return false;
+    try {
+      const pending = await options.pendingStore.findPending(resolution.clientOrderId);
+      if (!pending || !receiptMatchesPending(resolution.receipt, pending)
+        || resolution.signature !== resolution.receipt.signature || resolution.slot !== resolution.receipt.slot) return false;
+      if (!await commit(pending, resolution)) return false;
+      await options.pendingStore.resolve(resolution.clientOrderId, resolution);
+      return true;
+    } catch {
+      // DB rollback, unknown commit or acknowledgement failure stays replayable.
+      return false;
+    }
+  }
+
+  return { submit, reconcile, sweep, settle };
 }
 
 export type JupiterJitoRuntime = ReturnType<typeof createJupiterJitoRuntime>;

@@ -11,10 +11,12 @@ function createDependencies(
   return {
     findFundedUnknownWallets: vi.fn().mockResolvedValue([]),
     findFrequentCounterparties: vi.fn().mockResolvedValue([]),
-    upsertWallet: vi.fn(async (wallet) => {
+    persistBackfill: vi.fn(async (wallet) => {
       const resolved = resolveChainValue(wallet.address);
-      return { address: resolved.prefixed, chain: resolved.chain };
+      return { address: resolved.prefixed, chain: resolved.chain, intentId: 'intent-1' };
     }),
+    listPendingBackfills: vi.fn().mockResolvedValue([]),
+    acknowledgeBackfill: vi.fn().mockResolvedValue(undefined),
     enqueueBackfill: vi.fn().mockResolvedValue(undefined),
     logDiscoveryRun: vi.fn().mockResolvedValue(undefined),
     logger: {
@@ -35,7 +37,7 @@ describe('discovery runner', () => {
 
     await expect(runner.runFundingGraphExpansion()).resolves.toBe(1);
 
-    expect(dependencies.upsertWallet).toHaveBeenCalledWith({
+    expect(dependencies.persistBackfill).toHaveBeenCalledWith({
       address,
       source: 'discovered',
       discoveryMethod: 'funding'
@@ -59,10 +61,10 @@ describe('discovery runner', () => {
     const bad = 'solana:SysvarRent111111111111111111111111111111111';
     const dependencies = createDependencies({
       findFrequentCounterparties: vi.fn().mockResolvedValue([good, bad]),
-      upsertWallet: vi.fn(async (wallet) => {
+      persistBackfill: vi.fn(async (wallet) => {
         if (wallet.address === bad) throw new Error('database unavailable');
         const resolved = resolveChainValue(wallet.address);
-        return { address: resolved.prefixed, chain: resolved.chain };
+        return { address: resolved.prefixed, chain: resolved.chain, intentId: 'intent-1' };
       })
     });
     const runner = createDiscoveryRunner(dependencies);

@@ -31,7 +31,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import KolRosterError, get_settings, load_kols
+from .config import KolRosterError, confined_path, get_settings, load_kols
 from .storage import get_storage
 
 app = typer.Typer(
@@ -141,7 +141,7 @@ def venue_audit(
 
     frames = []
     for path in raw_files:
-        frame = pl.read_parquet(path)
+        frame = pl.read_parquet(confined_path(path))
         if "instructions_json" in frame.columns:
             frames.append(frame.select("instructions_json"))
     if not frames:
@@ -449,8 +449,8 @@ def choice_sets(
         )
 
     settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    candidates.write_parquet(settings.artifacts_dir / "choice_candidates.parquet")
-    groups.write_parquet(settings.artifacts_dir / "choice_sets.parquet")
+    candidates.write_parquet(settings.artifact_path("choice_candidates.parquet"))
+    groups.write_parquet(settings.artifact_path("choice_sets.parquet"))
 
     table = Table("Metric", "Value")
     table.add_row("Decisions", f"{groups.height:,}")
@@ -516,14 +516,18 @@ def rank(
     ),
 ) -> None:
     """Train the candidate ranker and check it against the naive baselines."""
-    import pickle
+    try:
+        settings = get_settings()
+        path = settings.artifact_path("choice_candidates.parquet")
+        if not path.exists():
+            _fail("No choice sets. Run `pattern-ml choice-sets` first.")
+        path = confined_path(path)
+    except ValueError as exc:
+        _fail(str(exc))
+        return
 
+    from .choice.package25_artifacts import save_ranker
     from .choice.rank import train_ranker
-
-    settings = get_settings()
-    path = settings.artifacts_dir / "choice_candidates.parquet"
-    if not path.exists():
-        _fail("No choice sets. Run `pattern-ml choice-sets` first.")
 
     candidates = pl.read_parquet(path)
     if drop_kol_features:
@@ -581,16 +585,15 @@ def rank(
             imp.add_row(row["feature"], f"{row['gain']:,.0f}")
         console.print(imp)
         result.importance.write_parquet(
-            settings.artifacts_dir / "rank_importance.parquet"
+            settings.artifact_path("rank_importance.parquet")
         )
 
-    with (settings.artifacts_dir / "ranker.pkl").open("wb") as handle:
-        pickle.dump(
-            {"model": result.model, "features": result.features_used},
-            handle,
-            protocol=pickle.HIGHEST_PROTOCOL,
-        )
-    console.print(f"[dim]Model → {settings.artifacts_dir / 'ranker.pkl'}[/dim]")
+    try:
+        model_path = save_ranker(settings, result)
+    except (ValueError, OSError) as exc:
+        _fail(str(exc))
+        return
+    console.print(f"[dim]Model → {model_path}[/dim]")
 
 
 @app.command()
@@ -607,21 +610,21 @@ def score(
     Scores are ordinal within one snapshot — only their order is meaningful,
     and comparing across snapshots is not valid.
     """
-    import pickle
     from datetime import datetime, timezone
-
-    from .choice.rank import RankerResult, score_candidates
-
-    settings = get_settings()
-    model_path = settings.artifacts_dir / "ranker.pkl"
-    if not model_path.exists():
-        _fail("No trained ranker. Run `pattern-ml rank` first.")
 
     if chain not in ("polymarket", "solana"):
         _fail(f"No snapshot provider for {chain!r}.")
 
-    with model_path.open("rb") as handle:
-        bundle = pickle.load(handle)
+    try:
+        settings = get_settings()
+        from .choice.package25_artifacts import load_ranker
+
+        bundle = load_ranker(settings)
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+
+    from .choice.rank import RankerResult, score_candidates
 
     now = datetime.now(timezone.utc)
 
@@ -778,7 +781,7 @@ def validate(
         )
 
     settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    result.equity_curve.write_parquet(settings.artifacts_dir / "equity_curve.parquet")
+    result.equity_curve.write_parquet(settings.artifact_path("equity_curve.parquet"))
 
 
 # ---------------------------------------------------------------------------
@@ -851,7 +854,7 @@ def runs() -> None:
         patterns = directory / "sequence_patterns.parquet"
         tested = survivors = "—"
         if patterns.exists():
-            frame = pl.read_parquet(patterns)
+            frame = pl.read_parquet(confined_path(patterns))
             tested = f"{frame.height:,}"
             survivors = f"{frame.filter(pl.col('survives_fdr')).height:,}"
         table.add_row(
