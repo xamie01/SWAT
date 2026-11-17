@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "scope": "Coordinator hash approval and import review required before any literal test config executes. Not a native/subprocess sandbox.",
+  "configs": {
+    "threats/project-completion-20261117/w2-source-allocation.config.ts": "0cba8754ea44019c3cad254dda8e1246efa971d9bf844974e47909bd1fd8dcb4",
+    "threats/project-completion-20261117/w2-runtime.config.ts": "9bc2c0adb22a72c6b6b9f1ab46a5d705e5a99010e4c0370e11de4c41360061b2",
+    "threats/project-completion-20261117/w2-financial.config.ts": "90a01bedb1144f94341cd7839cedf9a08771ec3384016dfe2a6ffb26488c651b",
+    "threats/project-completion-20261117/w1-api-basis.config.ts": "784e0e097009ecd4f4f9a4937e6635e4617a48eb2ab70c1fd736bf6f00c72903",
+    "threats/project-completion-20261117/w1-source.config.ts": "6a7e4dc6f1159f271af0b36e4b1c992cd4ad91784e5a6d315d58e02e52178296",
+    "threats/project-completion-20261117/w1-fanout.config.ts": "b361da06497d52e0735e1b30669878e88061390b2d1534af036dc1afd2fcc195"
+  }
+}

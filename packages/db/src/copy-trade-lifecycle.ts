@@ -22,12 +22,18 @@ import {
   type QuoteLegValuation
 } from './quote-valuation.js';
 import { withTransaction } from './transaction.js';
+import { captureWorkerPolicyWithClient } from './worker-policy.js';
+import { exactDecimal, addExactDecimal, subtractExactDecimal, minimumExactDecimal,
+  compareExactDecimal } from './runtime-exact-decimal.js';
+import { persistSourceSellLotAllocationWithClient, readSourceSellLotProofWithClient } from './source-sell-lot-allocation.js';
+import { bindSourceObservationWithClient, hasAcceptedSourceVerificationWithClient,
+  applyVerifiedSourceEvidenceWithClient, rebuildVerifiedSourcePositionWithClient,
+  ACCEPTED_SOURCE_VERIFICATION_JOINS_SQL, ACCEPTED_SOURCE_VERIFICATION_PREDICATE_SQL } from './source-verification-store.js';
+import { canonicalSourceBinding, sourceTokenQuantity, exactSourceDecimal,
+  type SourceVerificationBinding, type SourceVerificationEvidence, type TrustedSourceVerifier } from './source-verification.js';
 import {
-  allocateLotsForMasterSell,
-  assertLotAllocationComplete,
   assertExactExitQuantity,
-  getMasterSellAvailabilityWithClient,
-  type PositionLot
+  getMasterSellAvailabilityWithClient
 } from './lot-allocation.js';
 
 export type DecimalInput = string | number;
@@ -55,6 +61,8 @@ export interface SourceTradeEventInput {
   observedAt?: Date;
   confirmationState: SourceConfirmationState;
   confirmationEvidenceId: string;
+  /** Optional only for legacy observation quarantine; accepted evidence requires this exact new-source binding. */
+  verificationBinding?: SourceVerificationBinding;
 }
 
 export interface CanonicalSourceTrade {
@@ -463,7 +471,9 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
   if (input.sourceEventType === 'transaction' && transactionHash !== sourceEventId) {
     throw new Error('transaction sourceEventId must equal transactionHash');
   }
-  const quantity = decimal('quantity', input.quantity);
+  const quantity = input.verificationBinding
+    ? exactSourceDecimal(typeof input.quantity === 'string' ? input.quantity : (() => { throw new Error('Bound source quantity requires an exact string'); })())!
+    : decimal('quantity', input.quantity);
   const amountUsd = optionalDecimal('amountUsd', input.amountUsd);
   const priceUsd = optionalDecimal('priceUsd', input.priceUsd);
   const feeUsd = optionalDecimal('feeUsd', input.feeUsd);
@@ -473,6 +483,16 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
     'confirmationEvidenceId',
     input.confirmationEvidenceId
   );
+  const binding = input.verificationBinding ? canonicalSourceBinding(input.verificationBinding) : null;
+  if (binding && (binding.chain !== input.chain || binding.sourceEventType !== input.sourceEventType
+      || binding.sourceEventId !== sourceEventId || binding.sourceEventIndex !== sourceEventIndex
+      || binding.transactionHash !== transactionHash || binding.walletAddress !== wallet.prefixed
+      || binding.tokenMint !== token.prefixed || binding.side !== input.side
+      || sourceTokenQuantity(binding.rawQuantity, binding.quantityScale) !== quantity
+      || binding.eventAt !== eventAt.toISOString() || binding.amountUsd !== exactSourceDecimal(amountUsd)
+      || binding.priceUsd !== exactSourceDecimal(priceUsd) || binding.feeUsd !== exactSourceDecimal(feeUsd))) {
+    throw new Error('Source verification binding differs from immutable observation');
+  }
 
   return inTransaction(async (client) => {
     const inserted = await client.query<{ id: string }>(
@@ -546,6 +566,7 @@ export async function recordSourceTradeEvent(input: SourceTradeEventInput): Prom
     if (!source.payload_matches) {
       throw new Error('Source event identity collision with a different immutable payload');
     }
+    if (binding) await bindSourceObservationWithClient(client, source.id, binding, inserted.rowCount === 1);
 
     // Intake provenance is not confirmation authority. In particular, replaying
     // an observation must not re-activate or rebuild historical applications.
@@ -575,6 +596,29 @@ export async function advanceSourceTradeConfirmation(input: {
   // unavailable until authority-bound evidence, replay and reversal are reviewed.
   // Observation intake belongs to recordSourceTradeEvent, not this transition.
   throw new Error('Source confirmation verifier is unavailable');
+}
+
+/** Genuine evidence application seam used by scoped indexer adapters. Legacy
+ * labels remain unavailable; validation and all durable writes share one client. */
+export async function verifySourceTradeWithClient(client: PoolClient, input: {
+  sourceTradeId: string; evidence: SourceVerificationEvidence; verifier: TrustedSourceVerifier; now?: Date;
+}) {
+  return applyVerifiedSourceEvidenceWithClient(client, input);
+}
+export async function verifySourceTrade(input: {
+  sourceTradeId: string; evidence: SourceVerificationEvidence; verifier: TrustedSourceVerifier; now?: Date;
+}) {
+  return inTransaction(client => verifySourceTradeWithClient(client, input));
+}
+/** Recovery replays only persisted accepted applications. No new provider or
+ * finality assertion; revoked authority cannot make fresh claims eligible. */
+export async function recoverVerifiedSourcePositionWithClient(client: PoolClient, sourceTradeId: string, now = new Date()): Promise<void> {
+  const source = (await client.query<{ wallet_address: string; chain: string; token_mint: string }>(
+    'SELECT wallet_address, chain, token_mint FROM source_trades WHERE id = $1', [sourceTradeId])).rows[0];
+  if (!source) throw new Error('Source recovery scope is unavailable');
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    [JSON.stringify(['source-verification', source.wallet_address, source.chain, source.token_mint])]);
+  await rebuildVerifiedSourcePositionWithClient(client, sourceTradeId, null, now);
 }
 
 /**
@@ -653,10 +697,31 @@ export async function listSourceTradeSignalCandidates(input: {
   if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
     throw new Error('limit must be an integer between 1 and 1000');
   }
-  assertDate('now', input.now ?? new Date());
-  // Historical state labels are not certificates. There is no trusted verifier
-  // or promotion/republication worker; withhold candidates without touching rows.
-  return [];
+  const now = assertDate('now', input.now ?? new Date());
+  // Authority/application rejection happens before LIMIT. Revoked or expired
+  // early events cannot starve later valid candidates on repeated sweeps.
+  return inTransaction(async client => {
+    const rows = (await client.query<SourceTradeDbRow & { wallet_score: string; wallet_tier: string | null }>(
+      `SELECT ${SOURCE_TRADE_COLUMNS.split('\n').map(line => line.trim() ? `source.${line.trim()}` : '').join('\n')},
+          wallet.composite_score::text AS wallet_score, wallet.tier AS wallet_tier
+       FROM source_trades source ${ACCEPTED_SOURCE_VERIFICATION_JOINS_SQL}
+       JOIN wallets wallet ON wallet.address = source.wallet_address
+       WHERE ${ACCEPTED_SOURCE_VERIFICATION_PREDICATE_SQL} AND source.direction IN ('buy', 'sell')
+         AND source.event_at >= $2::timestamptz - ($1::bigint * INTERVAL '1 millisecond')
+         AND source.event_at <= $2::timestamptz + INTERVAL '30 seconds'
+         AND ($3::uuid IS NULL OR source.id = $3)
+         AND NOT EXISTS (SELECT 1 FROM signals WHERE source_trade_id = source.id)
+       ORDER BY source.event_at, source.id LIMIT $4 FOR SHARE OF source, binding, head, evidence, authority, application`,
+      [input.maxEventAgeMs, now, input.sourceTradeId ?? null, limit])).rows;
+    const accepted: SourceTradeSignalCandidate[] = [];
+    for (const row of rows) if (await hasAcceptedSourceVerificationWithClient(client, row.id, now)) accepted.push({
+      sourceTradeId: row.id, chain: row.chain, walletAddress: row.wallet_address, tokenMint: row.token_mint,
+      side: row.direction as 'buy' | 'sell', quantity: row.quantity, amountUsd: row.amount_usd,
+      priceUsd: row.price_usd, feeUsd: row.fee_usd ?? null, eventAt: row.event_at,
+      walletScore: Number(row.wallet_score), walletTier: row.wallet_tier, clusterId: null, clusterConfidence: 0
+    });
+    return accepted;
+  });
 }
 
 export async function markSourceTradeSignalDispatched(signalId: string, dispatchedAt = new Date()): Promise<boolean> {
@@ -805,7 +870,9 @@ export async function insertSourceTradeSignal(input: {
     );
     const source = sourceResult.rows[0];
     if (!source) throw new Error(`Source trade ${sourceTradeId} does not exist`);
-    assertSourceConfirmationReady();
+    if (!await hasAcceptedSourceVerificationWithClient(client, source.id, now)) {
+      throw new Error('Source confirmation verifier is unavailable');
+    }
     if (!isAppliedSourceConfirmation(source.confirmation_state)) {
       throw new Error(`Source trade ${sourceTradeId} is not confirmed`);
     }
@@ -1244,7 +1311,9 @@ export async function requestCopyExecution(input: CopyExecutionRequestInput): Pr
     );
     const source = sourceResult.rows[0];
     if (!source) throw new Error(`Source trade ${sourceTradeId} does not exist`);
-    assertSourceConfirmationReady();
+    if (!await hasAcceptedSourceVerificationWithClient(client, source.id)) {
+      throw new Error('Source confirmation verifier is unavailable');
+    }
     if (!isAppliedSourceConfirmation(source.confirmation_state)) {
       throw new Error(`Source trade ${sourceTradeId} is not confirmed`);
     }
@@ -1514,6 +1583,7 @@ export async function claimLotExitExecutionWithClient(
     [execution.id, `${input.trigger} lot exit accepted`]
   );
   await rebuildCopyPosition(client, execution);
+  await captureWorkerPolicyWithClient(client, mapCopyExecution(execution), owner.master_wallet_address);
   return { execution: mapCopyExecution(execution), created: true };
 }
 
@@ -1528,7 +1598,7 @@ type SourceSignalDbRow = QueryResultRow & {
   expires_at: Date | null;
 };
 
-export async function claimSourceSignalForCopyExecution(input: {
+export type SourceSignalCopyClaimInput = {
   signalId: string;
   targetAccount: string;
   /**
@@ -1545,12 +1615,18 @@ export async function claimSourceSignalForCopyExecution(input: {
   maxSubmissionAttempts?: number;
   maxReconciliationAttempts?: number;
   now?: Date;
-}): Promise<{
+};
+export type SourceSignalCopyClaimResult = {
   execution: CopyExecutionRecord | null;
   created: boolean;
   claimed: boolean;
   reason?: string;
-}> {
+};
+export async function claimSourceSignalForCopyExecution(input: SourceSignalCopyClaimInput): Promise<SourceSignalCopyClaimResult> {
+  return inTransaction(client => claimSourceSignalForCopyExecutionWithClient(client, input));
+}
+export async function claimSourceSignalForCopyExecutionWithClient(client: PoolClient,
+  input: SourceSignalCopyClaimInput): Promise<SourceSignalCopyClaimResult> {
   const signalId = assertIdentifier('signalId', input.signalId, 128);
   const userId = normalizeTenantId(input.userId);
   if (input.requestedBaseQuantity !== null && input.requestedBaseQuantity !== undefined) {
@@ -1578,7 +1654,21 @@ export async function claimSourceSignalForCopyExecution(input: {
   }
   const now = assertDate('now', input.now ?? new Date());
 
-  return inTransaction(async (client) => {
+  const operation = async (): Promise<SourceSignalCopyClaimResult> => {
+    // Discover immutable lock dimensions WITHOUT row locks. Workers take the
+    // position advisory key first, so claim must never hold signal/source rows
+    // while waiting for that same key.
+    const discoveredSignal = (await client.query<SourceSignalDbRow>(
+      'SELECT id, source_trade_id, source_side FROM signals WHERE id = $1', [signalId])).rows[0];
+    if (!discoveredSignal?.source_trade_id || !discoveredSignal.source_side) {
+      throw new Error(`Signal ${signalId} is not linked to a canonical source trade`);
+    }
+    const discoveredSource = (await client.query<SourceTradeDbRow>(
+      `SELECT ${SOURCE_TRADE_COLUMNS} FROM source_trades WHERE id = $1`, [discoveredSignal.source_trade_id])).rows[0];
+    if (!discoveredSource) throw new Error(`Source trade ${discoveredSignal.source_trade_id} does not exist`);
+    const target = resolveChainAddress(input.targetAccount, discoveredSource.chain);
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [JSON.stringify([target.prefixed, discoveredSource.chain, discoveredSource.token_mint, userId])]);
     const signalResult = await client.query<SourceSignalDbRow>(
       `SELECT
          id,
@@ -1595,8 +1685,9 @@ export async function claimSourceSignalForCopyExecution(input: {
       [signalId]
     );
     const signal = signalResult.rows[0];
-    if (!signal?.source_trade_id || !signal.source_side) {
-      throw new Error(`Signal ${signalId} is not linked to a canonical source trade`);
+    if (!signal || signal.source_trade_id !== discoveredSignal.source_trade_id
+        || signal.source_side !== discoveredSignal.source_side) {
+      throw new Error('Source signal immutable scope changed after lock discovery');
     }
     const sourceResult = await client.query<SourceTradeDbRow>(
       `SELECT ${SOURCE_TRADE_COLUMNS}
@@ -1607,12 +1698,17 @@ export async function claimSourceSignalForCopyExecution(input: {
     );
     const source = sourceResult.rows[0];
     if (!source) throw new Error(`Source trade ${signal.source_trade_id} does not exist`);
+    if (source.id !== discoveredSource.id || source.chain !== discoveredSource.chain
+        || source.token_mint !== discoveredSource.token_mint || source.wallet_address !== discoveredSource.wallet_address
+        || source.direction !== discoveredSource.direction) {
+      throw new Error('Source event immutable scope changed after lock discovery');
+    }
     if (source.direction !== signal.source_side) {
       throw new Error('Source signal direction no longer matches its immutable source event');
     }
-    // Retries cannot promote historical labels or return a submittable execution
-    // while the source verifier is unavailable.
-    if (!getSourceConfirmationReadiness().ready) {
+    // Historical labels and replay rows are not authority. Use the exact
+    // persisted accepted-evidence/application predicate before returning either.
+    if (!await hasAcceptedSourceVerificationWithClient(client, source.id, now)) {
       return {
         execution: null,
         created: false,
@@ -1620,11 +1716,8 @@ export async function claimSourceSignalForCopyExecution(input: {
         reason: 'Source confirmation verifier is unavailable'
       };
     }
-    const target = resolveChainAddress(input.targetAccount, source.chain);
-    // All source/explicit reservation and replay paths take the same position
-    // advisory key BEFORE execution-row locks; no new authorization is implied.
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-      [JSON.stringify([target.prefixed, source.chain, source.token_mint, userId])]);
+    // Position advisory key is already held before signal/source/execution
+    // row locks, matching worker context and explicit reservation order.
     // Tenant-scoped, mirroring `uq_copy_executions_source_target_mode_user`
     // (050_copy_tenancy.sql). Unscoped, tenant B's claim for a shared paper
     // `target_account` would find tenant A's row and return it as B's own
@@ -1643,8 +1736,22 @@ export async function claimSourceSignalForCopyExecution(input: {
     );
     const existing = existingResult.rows[0];
     if (existing) {
-      if (existing.signal_id !== signal.id) {
-        throw new Error('Copy execution source identity is linked to a different signal');
+      if (existing.signal_id !== signal.id || existing.chain !== source.chain || existing.token_mint !== source.token_mint
+          || existing.direction !== source.direction || existing.target_account !== target.prefixed
+          || existing.execution_mode !== input.executionMode || (existing.user_id ?? null) !== userId) {
+        throw new Error('Copy execution source identity collision or different signal');
+      }
+      if (['failed', 'cancelled', 'confirmed'].includes(existing.state)) return {
+        execution: null, created: false, claimed: false, reason: `Source execution is ${existing.state}`
+      };
+      const replay = (await client.query<{ matches: boolean }>(
+        `SELECT requested_base_quantity IS NOT DISTINCT FROM $2::numeric
+           AND requested_quote_quantity IS NOT DISTINCT FROM $3::numeric AS matches
+         FROM copy_executions WHERE id = $1`, [existing.id, requestedBase, requestedQuote])).rows[0];
+      // Sells are DB/master-inventory sized; compare explicit quantities only.
+      if (source.direction === 'buy' && replay?.matches !== true) throw new Error('Copy execution request quantity identity collision');
+      if (source.direction === 'sell' && !await readSourceSellLotProofWithClient(client, mapCopyExecution(existing), source.wallet_address)) {
+        throw new Error('Source sell replay requires its immutable reserved lot allocation');
       }
       return { execution: mapCopyExecution(existing), created: false, claimed: false };
     }
@@ -1822,11 +1929,16 @@ export async function claimSourceSignalForCopyExecution(input: {
     if (execution.direction === 'sell') {
       await rebuildCopyPosition(client, execution);
     }
+    await captureWorkerPolicyWithClient(client, mapCopyExecution(execution), source.wallet_address);
+    if (execution.direction === 'sell' && !await persistSourceSellLotAllocationWithClient(client, mapCopyExecution(execution), source.wallet_address)) {
+      throw new Error('Source sell claim could not persist exact reserved lot allocation');
+    }
     return { execution: mapCopyExecution(execution), created: true, claimed };
-  });
+  };
+  return operation();
 }
 
-export async function transitionCopyExecution(input: {
+export type TransitionCopyExecutionInput = {
   executionId: string;
   nextState: 'simulated' | 'submitted' | 'failed' | 'cancelled' | 'reconciliation_required';
   reason?: string | null;
@@ -1834,7 +1946,13 @@ export async function transitionCopyExecution(input: {
   submissionType?: 'transaction' | 'order' | null;
   submissionId?: string | null;
   nextReconciliationAt?: Date | null;
-}): Promise<CopyExecutionRecord> {
+};
+
+export async function transitionCopyExecution(input: TransitionCopyExecutionInput): Promise<CopyExecutionRecord> {
+  return inTransaction(client => transitionCopyExecutionWithClient(client, input));
+}
+
+export async function transitionCopyExecutionWithClient(client: PoolClient, input: TransitionCopyExecutionInput): Promise<CopyExecutionRecord> {
   const executionId = assertIdentifier('executionId', input.executionId, 128);
   const reason = input.reason === null || input.reason === undefined
     ? null
@@ -1851,7 +1969,7 @@ export async function transitionCopyExecution(input: {
     ? assertDate('nextReconciliationAt', input.nextReconciliationAt)
     : null;
 
-  return inTransaction(async (client) => {
+  const operation = async (): Promise<CopyExecutionRecord> => {
     const selected = await client.query<CopyExecutionDbRow>(
       `SELECT ${COPY_EXECUTION_COLUMNS}
          FROM copy_executions
@@ -1953,7 +2071,8 @@ export async function transitionCopyExecution(input: {
       );
     }
     return mapCopyExecution(execution);
-  });
+  };
+  return operation();
 }
 
 type ExecutionEvidenceDbRow = QueryResultRow & {
@@ -2011,6 +2130,7 @@ export interface RecordCopyExecutionEvidenceInput {
    */
   quoteLeg?: QuoteLegInput | null;
   priceUsd?: DecimalInput | null;
+  feeUsd?: DecimalInput | null;
   confirmationState: SourceConfirmationState;
   completesExecution: boolean;
   occurredAt: Date;
@@ -2026,6 +2146,132 @@ export interface RecordCopyExecutionEvidenceResult {
   confirmedQuoteTotal: ConfirmedQuoteTotal;
 }
 
+/** Consume the immutable ordered reservation, NOT current master FIFO. This is
+ * follower receipt settlement proof, not fresh source admission authority:
+ * current source/reorg labels cannot rewrite or strand already-owned fills.
+ * Acquisition receipt/application/tenant/mode remain required and locked. */
+export async function synchronizeSourceSellLotEvidenceWithClient(client: PoolClient, input: {
+  execution: CopyExecutionRecord; positionId: string; masterWalletAddress: string;
+  evidence: { id: string; baseQuantity: string; quoteQuantity: string | null; occurredAt: Date };
+}): Promise<void> {
+  const { execution, evidence } = input;
+  if (execution.direction !== 'sell' || !execution.sourceTradeId || execution.exitLotId
+      || !execution.requestedBaseQuantity) throw new Error('Source sell reserved allocation scope is unavailable');
+  const fillQuantity = exactDecimal(evidence.baseQuantity, true);
+  const requested = exactDecimal(execution.requestedBaseQuantity, true);
+  await client.query(
+    `SELECT lot.id FROM source_sell_lot_allocations reserved
+     JOIN copy_position_master_lots lot ON lot.id = reserved.lot_id
+     JOIN copy_executions acquisition ON acquisition.id = reserved.acquisition_execution_id
+     JOIN copy_execution_evidence receipt ON receipt.id = reserved.acquisition_evidence_id
+     JOIN copy_position_applications application ON application.evidence_id = receipt.id
+     WHERE reserved.execution_id = $1 ORDER BY reserved.ordinal
+     FOR UPDATE OF lot FOR SHARE OF reserved, acquisition, receipt, application`, [execution.id]);
+  const proof = (await client.query<{ valid: boolean; prior_quantity: string; allocations: Array<{
+    lot_id: string; ordinal: number; requested_quantity: string; remaining_quantity: string; consumed_quantity: string
+  }> }>(
+    `WITH allocation AS (
+       SELECT reserved.*, lot.remaining_quantity,
+         COALESCE((SELECT SUM(reduction.quantity) FROM copy_position_master_lot_reductions reduction
+           WHERE reduction.lot_id = reserved.lot_id AND reduction.sell_execution_id = $1
+             AND reduction.sell_evidence_id <> $9), 0) AS consumed_quantity,
+         (lot.position_id = $2 AND lot.user_id IS NOT DISTINCT FROM $3
+           AND lot.chain = $4 AND lot.token_mint = $5 AND lot.master_wallet_address = $6
+           AND lot.acquisition_execution_id = reserved.acquisition_execution_id
+           AND lot.acquisition_evidence_id = reserved.acquisition_evidence_id
+           AND lot.source_trade_id = reserved.acquisition_source_trade_id
+           AND acquisition.id IS NOT NULL AND acquisition.direction = 'buy'
+           AND acquisition.user_id IS NOT DISTINCT FROM $3 AND acquisition.target_account = $7
+           AND acquisition.chain = $4 AND acquisition.token_mint = $5 AND acquisition.execution_mode = $8
+           AND acquisition.source_trade_id = lot.source_trade_id
+           AND acquisition.signal_id IS NOT DISTINCT FROM lot.signal_id
+           AND acquisition_source.wallet_address = $6 AND acquisition_source.chain = $4
+           AND acquisition_source.token_mint = $5 AND acquisition_source.direction = 'buy'
+           AND receipt.execution_id = acquisition.id AND receipt.confirmation_state IN ('confirmed', 'finalized')
+           AND application.evidence_id = receipt.id AND application.active
+           AND application.execution_id = acquisition.id AND application.position_id = $2
+           AND application.user_id IS NOT DISTINCT FROM $3 AND application.target_account = $7
+           AND application.chain = $4 AND application.token_mint = $5) AS scope_valid
+       FROM source_sell_lot_allocations reserved
+       LEFT JOIN copy_position_master_lots lot ON lot.id = reserved.lot_id
+       LEFT JOIN copy_executions acquisition ON acquisition.id = reserved.acquisition_execution_id
+       LEFT JOIN source_trades acquisition_source ON acquisition_source.id = reserved.acquisition_source_trade_id
+       LEFT JOIN copy_execution_evidence receipt ON receipt.id = reserved.acquisition_evidence_id
+       LEFT JOIN copy_position_applications application ON application.evidence_id = receipt.id
+       WHERE reserved.execution_id = $1 AND reserved.user_id IS NOT DISTINCT FROM $3
+         AND reserved.chain = $4 AND reserved.token_mint = $5 AND reserved.master_wallet_address = $6
+         AND reserved.target_account = $7 AND reserved.execution_mode = $8
+     ) SELECT COALESCE(BOOL_AND(scope_valid IS TRUE), false)
+         AND COUNT(*) > 0 AND SUM(requested_quantity) = $10::numeric
+         AND MIN(ordinal) = 0 AND MAX(ordinal) = COUNT(*) - 1
+         AND COUNT(DISTINCT lot_id) = COUNT(*) AS valid,
+       (SELECT COALESCE(SUM(quantity),0)::text FROM copy_position_master_lot_reductions
+         WHERE sell_execution_id = $1 AND sell_evidence_id <> $9) AS prior_quantity,
+       COALESCE(jsonb_agg(jsonb_build_object('lot_id',lot_id,'ordinal',ordinal,
+         'requested_quantity',requested_quantity::text,'remaining_quantity',remaining_quantity::text,
+         'consumed_quantity',consumed_quantity::text) ORDER BY ordinal), '[]'::jsonb) AS allocations
+       FROM allocation`, [execution.id, input.positionId, execution.userId, execution.chain, execution.tokenMint,
+      input.masterWalletAddress, execution.targetAccount, execution.executionMode, evidence.id, requested])).rows[0];
+  if (!proof?.valid || !Array.isArray(proof.allocations)) throw new Error('Source sell immutable reserved lot proof mismatch');
+  const replay = (await client.query<{ lot_id: string; quantity: string }>(
+    `SELECT lot_id, quantity::text FROM copy_position_master_lot_reductions
+     WHERE sell_evidence_id = $1 AND sell_execution_id = $2 ORDER BY lot_id FOR SHARE`, [evidence.id, execution.id])).rows;
+  if (replay.length) {
+    // Original immutable rows are the replay authority. Later fills must not
+    // shift an earlier fill to a new allocation prefix or apply inventory twice.
+    let replayTotal = '0';
+    for (const row of replay) {
+      const allocated = proof.allocations.find(item => item.lot_id === row.lot_id);
+      if (!allocated || compareExactDecimal(exactDecimal(row.quantity, true), allocated.requested_quantity) > 0) {
+        throw new Error('Source sell evidence replay reduction identity mismatch');
+      }
+      replayTotal = addExactDecimal(replayTotal, row.quantity);
+    }
+    if (compareExactDecimal(replayTotal, fillQuantity) !== 0) throw new Error('Source sell evidence replay quantity mismatch');
+    return;
+  }
+  const prior = exactDecimal(proof.prior_quantity);
+  if (compareExactDecimal(addExactDecimal(prior, fillQuantity), requested) > 0) throw new Error('Source sell fill exceeds its exact reserved allocation');
+  let priorRemaining = prior;
+  let fillRemaining = fillQuantity;
+  let total = '0';
+  const planned: Array<{ lotId: string; quantity: string }> = [];
+  for (const [ordinal, allocation] of proof.allocations.entries()) {
+    if (allocation.ordinal !== ordinal) throw new Error('Source sell reservation ordinal mismatch');
+    const reserved = exactDecimal(allocation.requested_quantity, true);
+    const consumed = minimumExactDecimal(priorRemaining, reserved);
+    if (compareExactDecimal(exactDecimal(allocation.consumed_quantity), consumed) !== 0) {
+      throw new Error('Source sell prior fills did not consume immutable reservation prefix');
+    }
+    priorRemaining = subtractExactDecimal(priorRemaining, consumed);
+    total = addExactDecimal(total, reserved);
+    const quantity = minimumExactDecimal(fillRemaining, subtractExactDecimal(reserved, consumed));
+    fillRemaining = subtractExactDecimal(fillRemaining, quantity);
+    if (quantity !== '0') planned.push({ lotId: allocation.lot_id, quantity });
+  }
+  if (priorRemaining !== '0' || fillRemaining !== '0' || compareExactDecimal(total, requested) !== 0) {
+    throw new Error('Source sell reserved allocation exact sum/prefix mismatch');
+  }
+  for (const reduction of planned) {
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO copy_position_master_lot_reductions
+       (lot_id, sell_execution_id, sell_evidence_id, quantity, proceeds_usd, reduced_at)
+       SELECT lot.id, $2, $3, $4::numeric,
+         CASE WHEN $5::numeric IS NULL THEN NULL ELSE $5::numeric * $4::numeric / $9::numeric END, $6
+       FROM copy_position_master_lots lot JOIN source_sell_lot_allocations allocation
+         ON allocation.lot_id = lot.id AND allocation.execution_id = $2
+       WHERE lot.id = $1 AND lot.position_id = $7 AND lot.user_id IS NOT DISTINCT FROM $8
+         AND lot.remaining_quantity >= $4::numeric
+         AND allocation.requested_quantity - COALESCE((SELECT SUM(quantity)
+           FROM copy_position_master_lot_reductions WHERE sell_execution_id = $2 AND lot_id = lot.id),0) >= $4::numeric
+       ON CONFLICT (lot_id, sell_evidence_id) DO NOTHING RETURNING id`,
+      [reduction.lotId, execution.id, evidence.id, reduction.quantity, evidence.quoteQuantity,
+        evidence.occurredAt, input.positionId, execution.userId, fillQuantity]);
+    if (inserted.rows.length !== 1) throw new Error('Source sell physical reduction exceeds reserved lot inventory');
+    await applyLotReduction(client, reduction.lotId, evidence.id, execution.id);
+  }
+}
+
 async function synchronizePositionLots(
   client: PoolClient,
   input: {
@@ -2035,6 +2281,18 @@ async function synchronizePositionLots(
   }
 ): Promise<void> {
   if (!isAppliedSourceConfirmation(input.evidence.confirmation_state)) return;
+
+  if (input.execution.direction === 'sell' && input.execution.source_trade_id && !input.execution.exit_lot_id) {
+    const master = (await client.query<{ wallet_address: string }>(
+      'SELECT wallet_address FROM source_trades WHERE id = $1', [input.execution.source_trade_id])).rows[0];
+    if (!master) throw new Error('Source sell immutable master scope is unavailable');
+    await synchronizeSourceSellLotEvidenceWithClient(client, {
+      execution: mapCopyExecution(input.execution), positionId: input.positionId, masterWalletAddress: master.wallet_address,
+      evidence: { id: input.evidence.id, baseQuantity: input.evidence.base_quantity,
+        quoteQuantity: input.evidence.quote_quantity, occurredAt: input.evidence.occurred_at }
+    });
+    return;
+  }
 
   if (input.execution.direction === 'sell') {
     const applied = await client.query<{ id: string }>(
@@ -2056,7 +2314,7 @@ async function synchronizePositionLots(
           AND lot.remaining_quantity >= $4::numeric
           AND $4::numeric <= $9::numeric - (
             SELECT COALESCE(SUM(quantity), 0) FROM copy_position_master_lot_reductions
-             WHERE sell_execution_id = $2 AND sell_evidence_id = $3
+             WHERE sell_execution_id = $2
           )
        ON CONFLICT (lot_id, sell_evidence_id) DO NOTHING
        RETURNING id`,
@@ -2118,62 +2376,7 @@ async function synchronizePositionLots(
     return;
   }
 
-  const lotRows = await client.query<PositionLot & {
-    remaining_quantity: string;
-    remaining_cost_basis_usd: string | null;
-    acquired_at: Date;
-    master_wallet_address: string;
-  }>(
-    `SELECT id,
-            master_wallet_address AS "masterWalletAddress",
-            remaining_quantity::text,
-            remaining_cost_basis_usd::text,
-            acquired_at
-       FROM copy_position_master_lots
-      WHERE position_id = $1
-        AND master_wallet_address = $2
-        AND remaining_quantity > 0
-      ORDER BY acquired_at, id
-      FOR UPDATE`,
-    [input.positionId, source.wallet_address]
-  );
-  const lots = lotRows.rows.map((row) => ({
-    id: row.id,
-    masterWalletAddress: row.masterWalletAddress,
-    remainingQuantity: Number(row.remaining_quantity),
-    remainingCostBasisUsd: row.remaining_cost_basis_usd === null
-      ? null
-      : Number(row.remaining_cost_basis_usd),
-    acquiredAt: row.acquired_at
-  }));
-  const allocation = allocateLotsForMasterSell({
-    masterWalletAddress: source.wallet_address,
-    quantity: Number(input.evidence.base_quantity),
-    lots
-  });
-  assertLotAllocationComplete(allocation);
-
-  for (const reduction of allocation.reductions) {
-    const insertedReduction = await client.query<{ id: string }>(
-      `INSERT INTO copy_position_master_lot_reductions (
-         lot_id, sell_execution_id, sell_evidence_id, quantity, proceeds_usd, reduced_at
-       ) VALUES ($1, $2, $3, $4::numeric, $5::numeric, $6)
-       ON CONFLICT (lot_id, sell_evidence_id) DO NOTHING
-       RETURNING id`,
-      [
-        reduction.lotId,
-        input.execution.id,
-        input.evidence.id,
-        reduction.quantity,
-        input.evidence.quote_quantity === null
-          ? null
-          : Number(input.evidence.quote_quantity) * reduction.quantity / Number(input.evidence.base_quantity),
-        input.evidence.occurred_at
-      ]
-    );
-    if (insertedReduction.rows.length === 0) continue;
-    await applyLotReduction(client, reduction.lotId, input.evidence.id, input.execution.id);
-  }
+  throw new Error('Source sell evidence requires immutable reserved lot allocation');
 }
 
 async function applyLotReduction(
@@ -2227,6 +2430,7 @@ export async function recordCopyExecutionEvidenceWithClient(
     fillValuation.nativeUsdPrice
   );
   const priceUsd = optionalDecimal('priceUsd', input.priceUsd);
+  const feeUsd = optionalDecimal('feeUsd', input.feeUsd);
   const occurredAt = assertDate('occurredAt', input.occurredAt);
   const observedAt = assertDate('observedAt', input.observedAt ?? new Date());
 
@@ -2249,11 +2453,11 @@ export async function recordCopyExecutionEvidenceWithClient(
          execution_id, evidence_type, evidence_id, base_quantity, quote_quantity,
          quote_native_quantity, quote_currency, quote_native_usd_price,
          price_usd, confirmation_state, completes_execution, occurred_at, observed_at,
-         confirmation_updated_at
+         confirmation_updated_at, fee_usd
        ) VALUES (
          $1, $2, $3, $4::numeric, $5::numeric,
          $6::numeric, $7, $8::numeric,
-         $9::numeric, $10, $11, $12, $13, $13
+         $9::numeric, $10, $11, $12, $13, $13, $14::numeric
        )
        ON CONFLICT (execution_id, evidence_type, evidence_id) DO NOTHING`,
       [
@@ -2269,7 +2473,8 @@ export async function recordCopyExecutionEvidenceWithClient(
         input.confirmationState,
         input.completesExecution,
         occurredAt,
-        observedAt
+        observedAt,
+        feeUsd
       ]
     );
 
@@ -2293,6 +2498,7 @@ export async function recordCopyExecutionEvidenceWithClient(
            AND price_usd IS NOT DISTINCT FROM $9::numeric
            AND completes_execution = $10
            AND occurred_at = $11
+           AND fee_usd IS NOT DISTINCT FROM $12::numeric
          ) AS payload_matches
        FROM copy_execution_evidence
        WHERE execution_id = $1 AND evidence_type = $2 AND evidence_id = $3
@@ -2308,7 +2514,8 @@ export async function recordCopyExecutionEvidenceWithClient(
         quoteNativeUsdPrice,
         priceUsd,
         input.completesExecution,
-        occurredAt
+        occurredAt,
+        feeUsd
       ]
     );
     let evidence = evidenceResult.rows[0];
@@ -2507,6 +2714,14 @@ export async function recordCopyExecutionEvidenceWithClient(
     };
   };
   return operation();
+}
+
+export async function getCopyExecutionByIdWithClient(client: PoolClient, id: string): Promise<CopyExecutionRecord | null> {
+  const rows = await client.query<CopyExecutionDbRow>(
+    `SELECT ${COPY_EXECUTION_COLUMNS} FROM copy_executions WHERE id = $1 FOR UPDATE`,
+    [assertIdentifier('id', id, 128)]
+  );
+  return rows.rows[0] ? mapCopyExecution(rows.rows[0]) : null;
 }
 
 export async function getCopyExecutionById(id: string): Promise<CopyExecutionRecord | null> {

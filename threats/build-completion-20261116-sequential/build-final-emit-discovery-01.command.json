@@ -1,0 +1,56 @@
+{
+  "label": "build-final-emit-discovery-01",
+  "kind": "emit",
+  "target": "discovery",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc",
+    "-p",
+    "/root/SWAT/apps/discovery/tsconfig.json",
+    "--incremental",
+    "false"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T21:00:28.414406+00:00",
+  "elapsedSeconds": 7.118,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 640,
+  "inputSha256": {
+    "apps/discovery/tsconfig.json": "1a9f0873fec04475a675b9b11b9402a9eca94c930c65a199019538b9f521b861",
+    "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+    "scripts/build-completion-runner.py": "30f27ea48b52231000350815b8a21ba422a1983a449b4c0081aaacc43923e8de",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "workspaceInputManifest": "threats/build-completion-20261116-sequential/build-final-emit-discovery-01.inputs.json",
+  "workspaceInputManifestSha256": "2978a7601bf33e4ceab81f2291269b9c71026be6e965040cd71e57fdcb5dcb31",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": null,
+  "emittedArtifactsSha256": {
+    "apps/discovery/dist/index.d.ts": "f667f6b1d66ba55f0dcd27f5ff050063fecfe289bad00e8c5d48344a775c1439",
+    "apps/discovery/dist/index.d.ts.map": "ed0c415f672448fd3d813cc929c78d1e24412d4a0e1e47e42e17cb67a67f08da",
+    "apps/discovery/dist/index.js": "273ec6e5947afd2d2a0900297e2fc5fc7d15b083e753725897e3d40839ac11df",
+    "apps/discovery/dist/index.js.map": "e57603ed6b2854c451e8331ef1f33b5ab5c24e52eef9f6db02ccaa88a7e74f5b",
+    "apps/discovery/dist/package24-delivery.test.d.ts": "e08eee7856bb02f34f2ac0ede17685108749298305e02cf5299f08b9e30ef1eb",
+    "apps/discovery/dist/package24-delivery.test.d.ts.map": "9c4a9dd0015f77d98ffc45e1ea94ddf86a494d064b2164cabba1e97a7c7f2c34",
+    "apps/discovery/dist/package24-delivery.test.js": "9953e5d4edf282d6049f1cd833f262002614430bf64536deac4126202413f6d6",
+    "apps/discovery/dist/package24-delivery.test.js.map": "8f1cca6dafed0662f0064cdc65a5cb19da96d7069d6866788621221ebc95eadb",
+    "apps/discovery/dist/runner.d.ts": "870459e6563152883c948fb0920375a65799ff9f5fe5a8de3640882240be4988",
+    "apps/discovery/dist/runner.d.ts.map": "523e48d834b817ab87b36f43310bf17469dc138f9754de63716ede010b9bc05a",
+    "apps/discovery/dist/runner.js": "3c1c50b53eeb92130be1cf460bf1a4a0230ec84201bcb6fff847e6a613528d0a",
+    "apps/discovery/dist/runner.js.map": "e05fbd2a747a92608f30b5b58fd68a330625ea75dde485c730a1805829526379",
+    "apps/discovery/dist/runner.test.d.ts": "97e0632bc56ec8f291b700d9f24818a315f946215cc24fa56d10527fc0aae789",
+    "apps/discovery/dist/runner.test.d.ts.map": "a126d7e99a83d51b0af0a2763d908fdc2f66b675a10a7cae1a80359b1180a42b",
+    "apps/discovery/dist/runner.test.js": "39d2b531ff9a78d0376788afe2c75b65566d84ac224c7faacab806b3bff89a92",
+    "apps/discovery/dist/runner.test.js.map": "dcf3bbd14cd66600974943a9060be6253e2d5216da9f9318ded2c36f7b47209c"
+  },
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

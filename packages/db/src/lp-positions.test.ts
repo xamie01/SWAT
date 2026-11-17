@@ -1,272 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const mocks = vi.hoisted(() => {
-  const clientQuery = vi.fn();
-  return {
-    clientQuery,
-    query: vi.fn(),
-    connect: vi.fn(async () => ({
-      query: clientQuery,
-      release: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn()
-    }))
-  };
-});
-
-vi.mock('./client.js', () => ({
-  query: mocks.query,
-  pool: { connect: mocks.connect }
-}));
-
-import { createLpPosition, getLpPositionAnyOwner, listPositionsForMonitor, setLpPositionAutoRebalance, sumOpenLpDeposits, sumOpenLpPoolExposure, transitionLpPosition } from './lp-positions.js';
-import { crossTenantScope, forUser } from './tenancy.js';
-
-const scope = forUser('11111111-1111-1111-1111-111111111111');
-
-const positionRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 'pos-1',
-  user_id: scope.userId,
-  chain: 'solana',
-  protocol: 'meteora-dlmm',
-  pool_address: 'solana:3ucNos4Nbum3ZNF6ndRiMKK4sjKbLRPmv4V7WtH2sApY',
-  strategy_type: 'spot',
-  range_lower: 150,
-  range_upper: 190,
-  rung_allocations: [
-    { priceLower: 150, priceUpper: 165, weight: 0.5, binId: 100 },
-    { priceLower: 165, priceUpper: 190, weight: 0.5, binId: 110 }
-  ],
-  deposit_amount: 1000,
-  deposit_asset: 'solana:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-  state: 'active',
-  on_chain_position_address: null,
-  auto_rebalance: false,
-  opened_at: new Date('2026-10-04T00:00:00Z'),
-  closed_at: null,
-  updated_at: new Date('2026-10-04T00:00:00Z'),
-  ...overrides
-});
-
-/**
- * The PoolClient routes by statement content: a test names the needle and the
- * rows each statement returns, and everything else (BEGIN, COMMIT, journal
- * inserts) resolves empty. `withTransaction` is real, so BEGIN/COMMIT are in
- * the statement log and a helper that forgets its transaction is visible.
- */
-type ClientRoute = readonly [needle: string, rows: unknown[]];
-let clientRoutes: ClientRoute[] = [];
-
-beforeEach(() => {
-  clientRoutes = [];
-  mocks.query.mockReset();
-  mocks.query.mockImplementation(async () => []);
-  mocks.clientQuery.mockReset();
-  mocks.clientQuery.mockImplementation(async (text: unknown) => {
-    const sql = String(text);
-    for (const [needle, rows] of clientRoutes) {
-      if (sql.includes(needle)) return { rows };
-    }
-    return { rows: [] };
+const mocks = vi.hoisted(() => ({ scopedQuery: vi.fn(), transaction: vi.fn(), clientQuery: vi.fn() }));
+vi.mock('./tenancy.js', () => ({ scopedQuery: mocks.scopedQuery, isCrossTenant: (scope: any) => scope.userId === '*',
+  withTenantTransaction: mocks.transaction }));
+import { createLpPosition, getLpPosition, listLpPositions, listPositionsForMonitor, setLpPositionAutoRebalance, transitionLpPosition } from './lp-positions.js';
+const scope = { userId: 'alice' } as any;
+const row = { id: 'p', user_id: 'alice', chain: 'solana', protocol: 'meteora-dlmm', pool_address: 'solana:pool', strategy_type: 'spot',
+  range_lower: 90, range_upper: 110, rung_allocations: [], deposit_amount: 1, deposit_asset: 'solana:mint', state: 'active',
+  on_chain_position_address: null, auto_rebalance: false, opened_at: new Date(), closed_at: null, updated_at: new Date() };
+beforeEach(() => { vi.clearAllMocks(); mocks.scopedQuery.mockResolvedValue([row]); mocks.transaction.mockImplementation(async (_scope, action) => action({ query: mocks.clientQuery }));
+  mocks.clientQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes('SELECT') ? sql.includes('FROM users') ? [{ id: 'alice' }] : [row] : [{ ...row, state: 'near_edge' }] })); });
+describe('LP position reads and nonfinancial preferences remain tenant scoped', () => {
+  it('unvalued legacy acquisition cannot write a building position', async () => {
+    await expect(createLpPosition(scope, {} as any)).rejects.toThrow('legacy unvalued'); expect(mocks.transaction).not.toHaveBeenCalled();
   });
-});
-
-function statementLog(): string[] {
-  return mocks.clientQuery.mock.calls.map((call) => String(call[0]));
-}
-
-describe('lp-positions state machine', () => {
-  it('creates a building position and journals the initial state in one transaction', async () => {
-    clientRoutes.push(
-      ['INSERT INTO lp_positions', [positionRow({ state: 'building' })]],
-      ['lp_position_state_history', []]
-    );
-
-    const created = await createLpPosition(scope, {
-      chain: 'solana',
-      protocol: 'meteora-dlmm',
-      poolAddress: 'solana:3ucNos4Nbum3ZNF6ndRiMKK4sjKbLRPmv4V7WtH2sApY',
-      strategyType: 'spot',
-      rangeLower: 150,
-      rangeUpper: 190,
-      rungAllocations: [
-        { priceLower: 150, priceUpper: 165, weight: 0.5, binId: 100 },
-        { priceLower: 165, priceUpper: 190, weight: 0.5, binId: 110 }
-      ],
-      depositAmount: 1000,
-      depositAsset: 'solana:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-    });
-
-    expect(created.state).toBe('building');
-    expect(created.rungAllocations).toHaveLength(2);
-    const log = statementLog();
-    expect(log[0]).toBe('BEGIN');
-    expect(log.some((statement) => statement.includes('INSERT INTO lp_positions'))).toBe(true);
-    expect(log.some((statement) => statement.includes('INSERT INTO lp_position_state_history'))).toBe(true);
-    expect(log.at(-1)).toBe('COMMIT');
+  it('position and list read scopes are principal derived', async () => {
+    await getLpPosition(scope, 'p'); await listLpPositions(scope);
+    expect(mocks.scopedQuery.mock.calls.every(call => call[0] === scope)).toBe(true);
+    expect(mocks.scopedQuery.mock.calls[0]![2]).toEqual(['p', 'alice']);
   });
-
-  it('rejects rungs whose weights sum above 1 before touching the database', async () => {
-    await expect(
-      createLpPosition(scope, {
-        chain: 'solana',
-        protocol: 'meteora-dlmm',
-        poolAddress: 'solana:pool',
-        strategyType: 'spot',
-        rangeLower: 150,
-        rangeUpper: 190,
-        rungAllocations: [
-          { priceLower: 150, priceUpper: 165, weight: 0.7 },
-          { priceLower: 165, priceUpper: 190, weight: 0.7 }
-        ],
-        depositAmount: 1000,
-        depositAsset: 'solana:usdc'
-      })
-    ).rejects.toThrow('at most 1');
-    expect(mocks.clientQuery).not.toHaveBeenCalled();
+  it('close and rebalance transition refuse financial state mutation', async () => {
+    await expect(transitionLpPosition(scope, 'p', { toState: 'closed', reason: 'close' })).rejects.toThrow('durable paper');
+    await expect(transitionLpPosition(scope, 'p', { toState: 'rebalancing', reason: 'rebalance' })).rejects.toThrow('durable paper');
+    expect(mocks.clientQuery.mock.calls.some(call => call[0].includes('UPDATE'))).toBe(false);
   });
-
-  it('refuses an unprefixed pool address', async () => {
-    await expect(
-      createLpPosition(scope, {
-        chain: 'solana',
-        protocol: 'meteora-dlmm',
-        poolAddress: '3ucNos4Nbum3ZNF6ndRiMKK4sjKbLRPmv4V7WtH2sApY',
-        strategyType: 'spot',
-        rangeLower: 150,
-        rangeUpper: 190,
-        rungAllocations: [],
-        depositAmount: 1000,
-        depositAsset: 'solana:usdc'
-      })
-    ).rejects.toThrow('chain-prefixed');
+  it('automatic preference takes same owner lock, returns actual affected owned row and never financial state', async () => {
+    await setLpPositionAutoRebalance(scope, 'p', true);
+    expect(mocks.clientQuery.mock.calls[0]![0]).toContain('FROM users');
+    const update = mocks.clientQuery.mock.calls.find(call => call[0].includes('UPDATE'))!;
+    expect(update[0]).not.toContain('SET state'); expect(update[1]).toEqual(['p', 'alice', true]);
   });
-
-  it('transitions active -> closed, sets closed_at, and journals the reason', async () => {
-    clientRoutes.push(
-      ['FOR UPDATE', [positionRow({ state: 'active' })]],
-      ['UPDATE lp_positions', [positionRow({ state: 'closed', closed_at: new Date() })]],
-      ['lp_position_state_history', []]
-    );
-
-    const closed = await transitionLpPosition(scope, 'pos-1', {
-      toState: 'closed',
-      reason: 'user close'
-    });
-
-    expect(closed.state).toBe('closed');
-    const log = statementLog();
-    expect(log.some((statement) => statement.includes('FOR UPDATE'))).toBe(true);
-    const update = log.find((statement) => statement.includes('UPDATE lp_positions'));
-    expect(update).toContain("CASE WHEN $2 = 'closed' THEN NOW()");
-    const historyCall = mocks.clientQuery.mock.calls.find(
-      (call) => String(call[0]).includes('lp_position_state_history')
-    );
-    expect(historyCall?.[1]).toEqual(['pos-1', 'active', 'closed', 'user close']);
-  });
-
-  it('refuses a transition the machine forbids and writes nothing', async () => {
-    clientRoutes.push(['FOR UPDATE', [positionRow({ state: 'closed' })]]);
-
-    await expect(
-      transitionLpPosition(scope, 'pos-1', { toState: 'active', reason: 'reopen' })
-    ).rejects.toThrow('invalid lp position transition: closed -> active');
-
-    const log = statementLog();
-    expect(log.some((statement) => statement.includes('UPDATE lp_positions'))).toBe(false);
-    expect(log.some((statement) => statement.includes('lp_position_state_history'))).toBe(false);
-    expect(log.at(-1)).toBe('ROLLBACK');
-  });
-
-  it('requires a reason for every transition', async () => {
-    await expect(
-      transitionLpPosition(scope, 'pos-1', { toState: 'closed', reason: '   ' })
-    ).rejects.toThrow('requires a reason');
-    expect(mocks.clientQuery).not.toHaveBeenCalled();
-  });
-
-  it('the monitor sweep is a platform sweep and refuses a user scope', async () => {
-    await expect(listPositionsForMonitor(scope, 'solana')).rejects.toThrow('crossTenantScope');
-    expect(mocks.query).not.toHaveBeenCalled();
-  });
-
-  it('the monitor sweep reads only open, monitorable states on one chain', async () => {
-    mocks.query.mockImplementation(async () => [positionRow()]);
-    await listPositionsForMonitor(crossTenantScope('lp position monitor sweep'), 'solana', 100);
-
-    const [sql, params] = mocks.query.mock.calls[0];
-    expect(String(sql)).toContain("state IN ('active', 'near_edge', 'out_of_range')");
-    expect(params[0]).toBe('solana');
-    expect(params[1]).toBe(100);
-  });
-
-  it('creates a position with auto_rebalance persisted (default false)', async () => {
-    clientRoutes.push(
-      ['INSERT INTO lp_positions', [positionRow({ state: 'building', auto_rebalance: true })]],
-      ['lp_position_state_history', []]
-    );
-
-    const created = await createLpPosition(scope, {
-      chain: 'solana',
-      protocol: 'meteora-dlmm',
-      poolAddress: 'solana:pool',
-      strategyType: 'spot',
-      rangeLower: 150,
-      rangeUpper: 190,
-      rungAllocations: [],
-      depositAmount: 1000,
-      depositAsset: 'solana:usdc',
-      autoRebalance: true
-    });
-
-    expect(created.autoRebalance).toBe(true);
-    const insertCall = mocks.clientQuery.mock.calls.find(
-      (call) => String(call[0]).includes('INSERT INTO lp_positions')
-    );
-    expect(insertCall?.[1]?.[10]).toBe(true);
-  });
-
-  it('flips the auto-rebalance opt-in without touching state or the journal', async () => {
-    mocks.query.mockImplementation(async () => []);
-
-    await setLpPositionAutoRebalance(scope, 'pos-1', true);
-
-    const [sql, params] = mocks.query.mock.calls[0];
-    expect(String(sql)).toContain('SET auto_rebalance = $3');
-    expect(String(sql)).not.toContain('state');
-    expect(params).toEqual(['pos-1', scope.userId, true]);
-    expect(mocks.clientQuery).not.toHaveBeenCalled(); // no transaction, no journal row
-  });
-
-  it('exposure sums read open positions only, scoped by user and pool', async () => {
-    mocks.query.mockImplementation(async () => [{ total: '2500' }]);
-
-    await expect(sumOpenLpDeposits(scope)).resolves.toBe(2500);
-    const [totalSql] = mocks.query.mock.calls[0];
-    expect(String(totalSql)).toContain("state <> 'closed'");
-    expect(String(totalSql)).toContain('user_id = $1');
-
-    await expect(sumOpenLpPoolExposure(scope, 'solana', 'solana:pool')).resolves.toBe(2500);
-    const [poolSql, poolParams] = mocks.query.mock.calls[1];
-    expect(String(poolSql)).toContain('pool_address = $3');
-    expect(poolParams).toEqual([scope.userId, 'solana', 'solana:pool']);
-  });
-
-  it('an empty exposure sum reads as 0, not null', async () => {
-    mocks.query.mockImplementation(async () => [{ total: null }]);
-    await expect(sumOpenLpDeposits(scope)).resolves.toBe(0);
-  });
-
-  it('the worker read refuses a user scope and queries by id alone', async () => {
-    await expect(getLpPositionAnyOwner(scope, 'pos-1')).rejects.toThrow('crossTenantScope');
-    expect(mocks.query).not.toHaveBeenCalled();
-
-    mocks.query.mockImplementation(async () => [positionRow({ user_id: 'someone-else' })]);
-    const position = await getLpPositionAnyOwner(crossTenantScope('lp execution worker'), 'pos-1');
-    expect(position?.userId).toBe('someone-else');
-    const [sql, params] = mocks.query.mock.calls[0];
-    expect(String(sql)).toContain('WHERE id = $1');
-    expect(String(sql)).not.toContain('AND user_id');
-    expect(params).toEqual(['pos-1']);
+  it('platform sweep marker is not an accepted cross-tenant RLS bypass', async () => {
+    await expect(listPositionsForMonitor(scope, 'solana')).rejects.toThrow('platform sweep');
   });
 });

@@ -1,7 +1,8 @@
 import type { LpPosition } from '@swat/db';
 import type { LpChain } from '@swat/shared';
 import { classifyRangeState, type RangeState } from './classifier.js';
-import { evaluateRebalanceEconomics, type RebalanceEconomicsInput } from './economic-check.js';
+import type { RebalanceEconomicsInput } from './economic-check.js';
+import { lpEconomics, type LpEconomicEvidence } from '@swat/db/dist/lp-exact.js';
 
 /**
  * The monitor pass (Tracks F1/F2/F6) — polls current prices against every open
@@ -40,12 +41,9 @@ export interface PricePollerPort {
 }
 
 export interface RebalanceEconomicsPort {
-  /** The live service's fee model projects these; mock data in tests. */
-  estimate(input: {
-    readonly position: MonitorPosition;
-    readonly currentPrice: number;
-    readonly state: RangeState;
-  }): Promise<RebalanceEconomicsInput>;
+  /** Legacy numeric observations cannot authorize financial rebalance; exact domain rechecks at admission. */
+  estimate(input: { readonly position: MonitorPosition; readonly currentPrice: number; readonly state: RangeState }): Promise<RebalanceEconomicsInput | null>;
+  readonly exactEstimate?: (input: { readonly position: MonitorPosition; readonly currentPrice: number; readonly state: RangeState }) => Promise<LpEconomicEvidence | null>;
 }
 
 export interface MonitorJobPorts {
@@ -60,6 +58,7 @@ export interface MonitorJobPorts {
     readonly poolAddress: string;
     readonly netBenefitUsd: number;
   }): Promise<void>;
+  readonly queueExactRebalance?: (input: { readonly positionId: string; readonly chain: LpChain; readonly poolAddress: string; readonly netBenefitMicroUsd: string }) => Promise<void>;
   readonly edgeThreshold?: number;
 }
 
@@ -84,7 +83,7 @@ export async function runMonitorPass(ports: MonitorJobPorts, chain: LpChain): Pr
   for (const position of positions) {
     summary.positionsChecked += 1;
     const currentPrice = await ports.pricePoller.currentPrice(position.poolAddress);
-    if (currentPrice === null) {
+    if (currentPrice === null || !Number.isFinite(currentPrice) || currentPrice <= 0) {
       summary.unreadablePrices += 1;
       continue;
     }
@@ -129,23 +128,19 @@ export async function runMonitorPass(ports: MonitorJobPorts, chain: LpChain): Pr
       continue;
     }
 
-    // Economic gate: only a strictly positive projection earns a rebalance.
-    const economicsInput = await ports.economics.estimate({ position, currentPrice, state: observed });
-    const economics = evaluateRebalanceEconomics(economicsInput);
-    if (!economics.shouldRebalance) {
-      summary.rebalancesDeclined.push({
-        positionId: position.id,
-        reason: economics.reasons.join(',') || 'not-positive'
-      });
-      continue;
+    // This is a scheduling hint only; exact service reads a fresh bound quote and rechecks economics and consent.
+    const economicsInput = await ports.economics.exactEstimate?.({ position, currentPrice, state: observed });
+    let economics;
+    try { economics = lpEconomics(economicsInput ?? null); } catch {
+      summary.rebalancesDeclined.push({ positionId: position.id, reason: 'economics-unassessed' }); continue;
     }
-
-    await ports.queueRebalance({
-      positionId: position.id,
-      chain,
-      poolAddress: position.poolAddress,
-      netBenefitUsd: economics.netBenefitUsd
-    });
+    if (!economics.assessed || !economics.shouldRebalance) {
+      summary.rebalancesDeclined.push({ positionId: position.id, reason: economics.reason }); continue;
+    }
+    if (!ports.queueExactRebalance) {
+      summary.rebalancesDeclined.push({ positionId: position.id, reason: 'exact-rebalance-capability-unavailable' }); continue;
+    }
+    await ports.queueExactRebalance({ positionId: position.id, chain, poolAddress: position.poolAddress, netBenefitMicroUsd: economics.netMicroUsd });
     summary.rebalancesQueued += 1;
   }
 

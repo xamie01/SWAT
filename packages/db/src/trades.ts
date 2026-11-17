@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { query } from './client.js';
 import { withTransaction } from './transaction.js';
 import { normalizeTenantId } from './copy-trade-lifecycle.js';
@@ -8,6 +9,7 @@ export type TradeInsert = {
   signalId?: string | null;
   sourceTradeId?: string | null;
   copyExecutionId?: string | null;
+  exitLotId?: string | null;
   /**
    * Owning tenant. Omit or pass `null` for the pre-multi-tenant operator
    * account — `null` is a real, meaningful value here, not a missing one
@@ -20,17 +22,17 @@ export type TradeInsert = {
   chain?: Chain | null;
   direction: 'buy' | 'sell';
   /** Size of the position in SOL. */
-  amountSol?: number | null;
+  amountSol?: number | string | null;
   /** USD value of the position at execution time (the cost basis for a buy). */
-  amountUsd?: number | null;
+  amountUsd?: number | string | null;
   /** Requested USD notional, retained separately when a venue fill is pending or partial. */
-  targetAmountUsd?: number | null;
+  targetAmountUsd?: number | string | null;
   /** Token amount acquired/sold, in human units (used for mark-to-market). */
-  tokenAmount?: number | null;
+  tokenAmount?: number | string | null;
   /** Token price in USD at execution time. */
-  priceUsd?: number | null;
+  priceUsd?: number | string | null;
   /** Receipt- or venue-derived execution fees in USD. */
-  feeUsd?: number | null;
+  feeUsd?: number | string | null;
   slippageBps?: number | null;
   signature?: string | null;
   /** 'paper' | 'live' */
@@ -55,7 +57,7 @@ export type TradeInsert = {
   /** Solana slot at which the Jupiter quote was computed. */
   quoteSlot?: number | null;
   /** Minimum output after slippage, in human token units. */
-  minTokenAmount?: number | null;
+  minTokenAmount?: number | string | null;
   
   submittedAt?: Date | null;
   confirmedAt?: Date | null;
@@ -98,9 +100,10 @@ const INSERT_TRADE_SQL = `INSERT INTO trades (
    source_trade_id,
    copy_execution_id,
    target_amount_usd,
-   user_id
+   user_id,
+   exit_lot_id
  )
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
  ON CONFLICT (copy_execution_id) WHERE copy_execution_id IS NOT NULL
  DO UPDATE SET
    signature = COALESCE(EXCLUDED.signature, trades.signature),
@@ -127,11 +130,19 @@ const INSERT_TRADE_SQL = `INSERT INTO trades (
    user_id = COALESCE(trades.user_id, EXCLUDED.user_id),
    submitted_at = COALESCE(trades.submitted_at, EXCLUDED.submitted_at),
    confirmed_at = COALESCE(EXCLUDED.confirmed_at, trades.confirmed_at)
+ WHERE trades.user_id IS NOT DISTINCT FROM EXCLUDED.user_id
+   AND trades.signal_id IS NOT DISTINCT FROM EXCLUDED.signal_id
+   AND trades.source_trade_id IS NOT DISTINCT FROM EXCLUDED.source_trade_id
+   AND trades.exit_lot_id IS NOT DISTINCT FROM EXCLUDED.exit_lot_id
+   AND trades.token_mint = EXCLUDED.token_mint AND trades.chain = EXCLUDED.chain
+   AND trades.direction = EXCLUDED.direction AND trades.execution_mode IS NOT DISTINCT FROM EXCLUDED.execution_mode
  RETURNING id`;
 
-function validatedFeeUsd(input: TradeInsert): number | null {
+function validatedFeeUsd(input: TradeInsert): number | string | null {
   const feeUsd = input.feeUsd ?? null;
-  if (feeUsd !== null && (!Number.isFinite(feeUsd) || feeUsd < 0)) {
+  if (feeUsd !== null && (typeof feeUsd === 'string'
+    ? feeUsd.length > 256 || !/^\d+(?:\.\d+)?$/.test(feeUsd)
+    : !Number.isFinite(feeUsd) || feeUsd < 0)) {
     throw new Error('feeUsd must be a finite non-negative number');
   }
   return feeUsd;
@@ -176,8 +187,14 @@ function getTradeValues(input: TradeInsert) {
     input.sourceTradeId ?? null,
     input.copyExecutionId ?? null,
     input.targetAmountUsd ?? null,
-    normalizeTenantId(input.userId)
+    normalizeTenantId(input.userId),
+    input.exitLotId ?? null
   ];
+}
+
+export async function insertTradeWithClient(client: PoolClient, input: TradeInsert) {
+  const rows = await client.query<{ id: string }>(INSERT_TRADE_SQL, getTradeValues(input));
+  return rows.rows[0] ?? null;
 }
 
 export async function insertTrade(input: TradeInsert) {

@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock('@swat/db', () => ({
+  scopedQuery: (_scope: { userId: string }, sql: string, values: unknown[]) => fixture.query(sql, values),
   query: fixture.query,
   listAuthWallets: fixture.wallets,
   forUser: (userId: string) => ({ userId }),
@@ -115,6 +116,18 @@ describe('Synthetic security invariants against actual route handlers', () => {
     expect(response.json().polymarket).toMatchObject({ geoEligible: null, geoExpiresAt: null, eligibilityAssessment: 'unassessed', enrollmentSupported: false });
     expect(response.json().polymarket.unavailableReasons).toContain('authorized-wrap-only-service-unavailable');
     expect(response.json().solana.unavailableReasons).toContain('deployed-authority-verification-unavailable');
+  });
+  it('providerless CLOB challenge/credentials refuse without signing data, acquisition or sealing', async () => {
+    const server = app();
+    await registerMeRoutes(server, { backfillQueue: {} as any, tokenDiscoveryQueue: {} as any });
+    for (const method of ['GET', 'POST'] as const) {
+      const response = await server.inject({ method, url: method === 'GET' ? '/v1/me/vault/polymarket/challenge?address=' + OWNER : '/v1/me/vault/polymarket/credentials',
+        ...(method === 'POST' ? { payload: { address: OWNER, signature: '0x00' } } : {}) });
+      expect(response.statusCode).toBe(503); expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).not.toHaveProperty('typedData'); expect(response.json()).not.toHaveProperty('signature');
+      expect(response.json()).toMatchObject({ credentialsRecorded: false, executionSupported: false });
+    }
+    expect(fixture.query).not.toHaveBeenCalled(); expect(fixture.recover).not.toHaveBeenCalled(); expect(fixture.seal).not.toHaveBeenCalled();
   });
   it('never advertises a historical grant or spliced address as usable authority', async () => {
     fixture.query.mockResolvedValue([{ chain: 'robinhood-chain', grant_kind: 'eip7702', account_address: OWNER, status: 'active', scope_policy: { smartAccount: OTHER } }]);

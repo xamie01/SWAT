@@ -15,8 +15,10 @@ FILES = [
     ROOT / "src/pattern_ml/storage.py",
     ROOT / "src/pattern_ml/cli.py",
     ROOT / "src/pattern_ml/choice/package25_artifacts.py",
+    ROOT / "src/pattern_ml/choice/rank.py",
     ROOT / "tests/conftest.py",
     ROOT / "tests/test_package25_ml_security.py",
+    ROOT / "tests/native/test_package25_native_parity.py",
 ]
 
 
@@ -88,9 +90,41 @@ def check_fixture_seams():
     assert not any(n in calls(text) for n in ("pickle.loads", "pickle.load", "subprocess.run"))
 
 
+def check_stable_ties():
+    funcs = functions(source("choice/rank.py"))
+    for name in ("_reciprocal_rank", "_ndcg"):
+        sorts = [n for n in ast.walk(ast.parse(funcs[name]))
+                 if isinstance(n, ast.Call) and ast.unparse(n.func) == "np.argsort"]
+        assert sorts and all(any(k.arg == "kind" and ast.literal_eval(k.value) == "stable"
+                                 for k in n.keywords) for n in sorts)
+    sorts = [n for n in ast.walk(ast.parse(funcs["score_candidates"]))
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "sort"]
+    assert len(sorts) == 1 and any(k.arg == "maintain_order" and ast.literal_eval(k.value) is True
+                                 for k in sorts[0].keywords)
+
+
+def check_native_parity_gate_is_real_and_isolated():
+    text = (ROOT / "tests/native/test_package25_native_parity.py").read_text()
+    funcs = functions(text)
+    assert funcs["native"].index("PATTERN_ML_NATIVE_PARITY") < funcs["native"].index("importorskip(")
+    assert "--confcutdir" in text and '"pattern_ml" in sys.modules' in funcs["native"]
+    assert all(f'"{name}"' in funcs["native"] for name in ("lightgbm", "numpy", "polars"))
+    assert "train_ranker" in funcs["test_native_train_ranker_public_export_and_group_seam"]
+    assert "_group_sizes" in calls(text) or "native.rank._group_sizes" in calls(text)
+    for call in ("artifacts.save_ranker", "artifacts.load_ranker", "np.testing.assert_array_equal",
+                 "native.rank.score_candidates", "model.fit"):
+        assert call in calls(text)
+    assert "np.nextafter" in calls(text) and "per_tree" in text and "with_none" in text
+    assert not any(n in calls(text) for n in ("Mock", "patch", "pickle.load", "joblib.load", "subprocess.run"))
+    imports = [n for n in ast.walk(ast.parse(text)) if isinstance(n, (ast.Import, ast.ImportFrom))]
+    assert not any(isinstance(n, ast.ImportFrom) and n.module and n.module.startswith("pattern_ml") for n in imports)
+    assert "storage.py" not in funcs["native"] and "providers" not in funcs["native"]
+
+
 checks = [check_no_executable_deserialization, check_public_rank_score_wiring,
           check_config_boundary, check_public_raw_boundary, check_address_parsing,
-          check_inert_bounded_schema, check_test_isolation, check_fixture_seams]
+          check_inert_bounded_schema, check_test_isolation, check_fixture_seams,
+          check_stable_ties, check_native_parity_gate_is_real_and_isolated]
 if MODE == "neighbors":
     FILES = [ROOT / "tests" / f for f in ("test_config.py", "test_rank.py", "test_normalize.py", "test_positions.py")]
     checks = []

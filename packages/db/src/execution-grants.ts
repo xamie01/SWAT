@@ -1,9 +1,9 @@
 import type { Chain } from '@swat/shared';
 import { resolveChainAddress } from '@swat/shared';
-import { query } from './client.js';
-import { withTransaction } from './transaction.js';
 import { recordAuditEventStrict } from './audit-log.js';
-import { isCrossTenant, type UserScope } from './tenancy.js';
+import { isCrossTenant, scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
+import { assertCustodyBindingMatches, assertCustodyEnvelope, assertCustodyLifecycle, custodyGrantId, custodyIdentifier, custodyPolicySnapshot,
+  type CustodySecretBinding } from './custody-contract.js';
 
 /**
  * Scoped delegated authority to trade on a user's behalf (`S4-7`, migration
@@ -139,6 +139,10 @@ export class ExecutionGrantConflictError extends Error {
 }
 
 export interface RecordExecutionGrantInput {
+  /** Trusted preallocated row ID required for a resource-bound keyed enrollment. */
+  readonly id?: string;
+  /** Persisted AAD metadata. Not delegated execution authority. */
+  readonly secretBinding?: CustodySecretBinding | null;
   readonly chain: Chain;
   readonly grantKind: GrantKind;
   /**
@@ -148,7 +152,7 @@ export interface RecordExecutionGrantInput {
    * form the column holds.
    */
   readonly accountAddress: string;
-  /** The `v1.<wrapperId>.…` envelope. Omit or pass null for a keyless kind. */
+  /** The authenticated resource-bound v2 envelope. Omit or pass null for a keyless kind. */
   readonly sealedSecret?: string | null;
   readonly keyVersion?: number | null;
   readonly scopePolicy?: unknown;
@@ -185,9 +189,11 @@ export function assertGrantSecretMatchesKind(input: {
       `${input.grantKind} requires a sealed secret and a key version`
     );
   }
-  // Mirrors the `sealed_secret LIKE 'v%'` tripwire: reject anything that is not a
-  // versioned envelope before it reaches the database, so the failure names the
-  // format rather than the constraint.
+  if (!Number.isSafeInteger(input.keyVersion) || input.keyVersion! <= 0) {
+    throw new InvalidExecutionGrantError('key version must be a positive safe integer');
+  }
+  // This shape guard remains compatible with historical rows. New writes below
+  // additionally require the fully bound v2 envelope and immutable admission.
   if (!/^v\d+\./.test(input.sealedSecret as string)) {
     throw new InvalidExecutionGrantError(
       'sealed secret must be a versioned envelope, e.g. v1.<wrapperId>.…'
@@ -234,6 +240,11 @@ export async function recordExecutionGrant(
   input: RecordExecutionGrantInput,
   options: { replace?: boolean } = {}
 ): Promise<ExecutionGrant> {
+  scope = { userId: scope.userId } as UserScope;
+  custodyIdentifier(scope.userId);
+  input = { ...input, scopePolicy: custodyPolicySnapshot(input.scopePolicy),
+    expiresAt: input.expiresAt == null ? null : new Date(input.expiresAt.getTime()),
+    secretBinding: input.secretBinding ? structuredClone(input.secretBinding) : null };
   const validPair = input.grantKind === 'solana_vault' ? input.chain === 'solana'
     : input.grantKind === 'polymarket_signer' ? input.chain === 'polygon'
     : input.chain === 'robinhood-chain';
@@ -245,28 +256,59 @@ export async function recordExecutionGrant(
       `${input.grantKind} requires expires_at — a scoped grant with no expiry is not scoped`
     );
   }
+  // New keyed writes never accept legacy/unbound envelopes. A string shaped like
+  // ciphertext is not authentication; only an approved wrap identity can attest it.
+  if (input.id !== undefined) custodyGrantId(input.id);
+  if (isKeylessGrantKind(input.grantKind)) {
+    if (input.secretBinding != null) throw new InvalidExecutionGrantError('Keyless grant must have no secret binding');
+  } else {
+    if (!input.id || !input.secretBinding) throw new InvalidExecutionGrantError('Resource-bound v2 enrollment required');
+    assertCustodyEnvelope(input.sealedSecret!, input.keyVersion!);
+    assertCustodyBindingMatches(input.secretBinding, { id: input.id, userId: scope.userId,
+      chain: input.chain, grantKind: input.grantKind, accountAddress: input.accountAddress,
+      keyVersion: input.keyVersion!, scopePolicy: input.scopePolicy, expiresAt: input.expiresAt ?? null });
+  }
   const accountAddress = normalizeGrantAccountAddress(input.chain, input.accountAddress);
 
   try {
-    if (options.replace) return await withTransaction(async (client) => {
+    if (options.replace) return await withTenantTransaction(scope, async (client) => {
       const owner = await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [scope.userId]);
       if (owner.rows.length !== 1) throw new ExecutionGrantConflictError();
-      const existing = await client.query<{ user_id: string; status: string }>(`SELECT user_id, status FROM user_execution_grants
-        WHERE chain = $1 AND (CASE WHEN chain = 'solana' THEN account_address ELSE lower(account_address) END) = $2 FOR UPDATE`,
-        [input.chain, accountAddress]);
-      if (existing.rows.length > 1 || existing.rows.some(g => g.user_id !== scope.userId || g.status === 'compromised')) throw new ExecutionGrantConflictError();
+      const existing = await client.query<GrantRow & { sealed_secret: string | null; secret_binding: unknown;
+        lifecycle_revision: string; revocation_tombstone: Date | null; activated_key_version: number | null }>(`SELECT ${GRANT_COLUMNS}, sealed_secret, secret_binding,
+          lifecycle_revision::text AS lifecycle_revision, revocation_tombstone, activated_key_version FROM user_execution_grants
+        WHERE chain = $1 AND (CASE WHEN chain = 'solana' THEN account_address ELSE lower(account_address) END) = $2
+          AND user_id = $3 FOR UPDATE`,
+        [input.chain, accountAddress, scope.userId]);
+      if (existing.rows.length > 1 || existing.rows.some(g => g.user_id !== scope.userId || g.status === 'compromised'
+        || (input.id !== undefined && g.id !== input.id))) throw new ExecutionGrantConflictError();
+      const previous = existing.rows[0];
+      if (previous) {
+        assertCustodyLifecycle({ lifecycleRevision: previous.lifecycle_revision, revocationTombstone: previous.revocation_tombstone,
+          revokedAt: previous.revoked_at }, new Date());
+        const same = previous.status === 'active' && previous.revoked_at === null && previous.grant_kind === input.grantKind &&
+          previous.key_version === (input.keyVersion ?? null) && previous.sealed_secret === (input.sealedSecret ?? null) &&
+          JSON.stringify(custodyPolicySnapshot(previous.secret_binding)) === JSON.stringify(custodyPolicySnapshot(input.secretBinding)) &&
+          JSON.stringify(custodyPolicySnapshot(previous.scope_policy)) === JSON.stringify(input.scopePolicy) &&
+          (previous.expires_at?.getTime() ?? null) === (input.expiresAt?.getTime() ?? null);
+        if (same) return toGrant(previous); // retries do not stage/clear revocation or change lifecycle
+        if (isKeylessGrantKind(input.grantKind) ? previous.revocation_tombstone !== null || previous.grant_kind !== input.grantKind
+          : previous.key_version !== null && input.keyVersion! <= previous.key_version) throw new ExecutionGrantConflictError();
+      }
       // Reserve/update the owned replacement in a non-active state BEFORE
       // revoking anything. An empty guarded upsert is an error, not success.
       const staged = await client.query<GrantRow>(`INSERT INTO user_execution_grants
-        (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, expires_at, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'retired')
+        (user_id, chain, grant_kind, account_address, sealed_secret, key_version, scope_policy, expires_at, status, id, secret_binding)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'retired', COALESCE($9::uuid, gen_random_uuid()), $10::jsonb)
         ON CONFLICT (chain, account_address) DO UPDATE SET
           grant_kind = EXCLUDED.grant_kind, sealed_secret = EXCLUDED.sealed_secret,
-          key_version = EXCLUDED.key_version, scope_policy = EXCLUDED.scope_policy,
+          key_version = EXCLUDED.key_version, scope_policy = EXCLUDED.scope_policy, secret_binding = EXCLUDED.secret_binding,
           expires_at = EXCLUDED.expires_at, status = 'retired'
         WHERE user_execution_grants.user_id = EXCLUDED.user_id AND user_execution_grants.status <> 'compromised'
+          AND ($9::uuid IS NULL OR user_execution_grants.id = $9::uuid)
         RETURNING ${GRANT_COLUMNS}`, [scope.userId, input.chain, input.grantKind, accountAddress,
-          input.sealedSecret ?? null, input.keyVersion ?? null, input.scopePolicy === undefined ? null : JSON.stringify(input.scopePolicy), input.expiresAt ?? null]);
+          input.sealedSecret ?? null, input.keyVersion ?? null, input.scopePolicy === undefined ? null : JSON.stringify(input.scopePolicy), input.expiresAt ?? null,
+          input.id ?? null, input.secretBinding ? JSON.stringify(input.secretBinding) : null]);
       if (staged.rows.length !== 1) throw new ExecutionGrantConflictError();
       const id = staged.rows[0]!.id;
       await client.query(`UPDATE user_execution_grants SET status = 'revoked', revoked_at = NOW()
@@ -279,11 +321,11 @@ export async function recordExecutionGrant(
         targetType: 'execution_grant', targetId: id, metadata: { chain: input.chain, grantKind: input.grantKind, localOnly: true } }, client);
       return toGrant(active.rows[0]!);
     });
-    const rows = await query<GrantRow>(
+    const rows = await scopedQuery<GrantRow>(scope,
       `INSERT INTO user_execution_grants
          (user_id, chain, grant_kind, account_address, sealed_secret, key_version,
-          scope_policy, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          scope_policy, expires_at, id, secret_binding)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::uuid, gen_random_uuid()), $10::jsonb)
        RETURNING ${GRANT_COLUMNS}`,
       [
         scope.userId,
@@ -293,7 +335,9 @@ export async function recordExecutionGrant(
         input.sealedSecret ?? null,
         input.keyVersion ?? null,
         input.scopePolicy === undefined ? null : JSON.stringify(input.scopePolicy),
-        input.expiresAt ?? null
+        input.expiresAt ?? null,
+        input.id ?? null,
+        input.secretBinding ? JSON.stringify(input.secretBinding) : null
       ]
     );
     if (rows.length !== 1) throw new ExecutionGrantConflictError();
@@ -308,7 +352,7 @@ export async function recordExecutionGrant(
 }
 
 export async function listExecutionGrants(scope: UserScope): Promise<ExecutionGrant[]> {
-  const rows = await query<GrantRow>(
+  const rows = await scopedQuery<GrantRow>(scope,
     `SELECT ${GRANT_COLUMNS}
        FROM user_execution_grants
       WHERE user_id = $1
@@ -329,7 +373,7 @@ export async function findActiveExecutionGrant(
   chain: Chain,
   grantKind: GrantKind
 ): Promise<ExecutionGrant | null> {
-  const rows = await query<GrantRow>(
+  const rows = await scopedQuery<GrantRow>(scope,
     `SELECT ${GRANT_COLUMNS}
        FROM user_execution_grants
       WHERE user_id = $1 AND chain = $2 AND grant_kind = $3 AND status = 'active'
@@ -341,7 +385,10 @@ export async function findActiveExecutionGrant(
 }
 
 /**
- * Reads the sealed envelope for one grant.
+ * Reads historical ciphertext for explicit migration/incident tooling only.
+ * This compatibility read is NOT execution authority: it has no authenticated
+ * resource context or lifecycle proof. New execution uses custody-execution.ts
+ * and its role-specific store, never this return value.
  *
  * **Only useful inside a process that holds a wrapper key**, which is
  * `trade-executor` and nothing else. Named separately from every other read so
@@ -349,16 +396,15 @@ export async function findActiveExecutionGrant(
  * ciphertext is fetched, and any new occurrence is a security review item — the
  * same convention as `crossTenantScope`.
  *
- * Still scoped by `user_id`. The envelope's AAD binds the ciphertext to
- * `(userId, chainKind, keyVersion)`, so opening it under the wrong user fails on
- * the auth tag — but a query that could fetch another tenant's ciphertext at all
- * should not exist, whether or not the next step would fail.
+ * Ciphertext is fetched separately only by migration/incident tooling. Full
+ * scope/version binding is mandatory for new enrollment, while this historical
+ * loader cannot establish active execution authority.
  */
 export async function loadSealedGrantSecret(
   scope: UserScope,
   grantId: string
 ): Promise<{ sealedSecret: string; keyVersion: number } | null> {
-  const rows = await query<{ sealed_secret: string | null; key_version: number | null }>(
+  const rows = await scopedQuery<{ sealed_secret: string | null; key_version: number | null }>(scope,
     `SELECT sealed_secret, key_version
        FROM user_execution_grants
       WHERE id = $1 AND user_id = $2`,
@@ -380,7 +426,7 @@ export async function revokeExecutionGrant(
   scope: UserScope,
   grantId: string
 ): Promise<boolean> {
-  const rows = await query<{ id: string }>(
+  const rows = await scopedQuery<{ id: string }>(scope,
     `UPDATE user_execution_grants
         SET status = 'revoked', revoked_at = NOW()
       WHERE id = $1 AND user_id = $2 AND status = 'active'
@@ -399,7 +445,7 @@ export async function markExecutionGrantCompromised(
   scope: UserScope,
   grantId: string
 ): Promise<boolean> {
-  const rows = await query<{ id: string }>(
+  const rows = await scopedQuery<{ id: string }>(scope,
     `UPDATE user_execution_grants
         SET status = 'compromised', revoked_at = COALESCE(revoked_at, NOW())
       WHERE id = $1 AND user_id = $2 AND status <> 'compromised'
@@ -425,15 +471,8 @@ export async function listExpiringExecutionGrants(
       'listExpiringExecutionGrants is a platform sweep; pass crossTenantScope(reason)'
     );
   }
-  const rows = await query<GrantRow>(
-    `SELECT ${GRANT_COLUMNS}
-       FROM user_execution_grants
-      WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= $1
-      ORDER BY expires_at
-      LIMIT $2`,
-    [before, limit]
-  );
-  return rows.map(toGrant);
+  void before; void limit;
+  throw new Error('Cross-tenant grant sweeps require a separately reviewed privileged capability');
 }
 
 /**
@@ -449,11 +488,5 @@ export async function retireLapsedExecutionGrants(scope: UserScope): Promise<num
       'retireLapsedExecutionGrants is a platform sweep; pass crossTenantScope(reason)'
     );
   }
-  const rows = await query<{ id: string }>(
-    `UPDATE user_execution_grants
-        SET status = 'retired'
-      WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= NOW()
-      RETURNING id`
-  );
-  return rows.length;
+  throw new Error('Cross-tenant grant sweeps require a separately reviewed privileged capability');
 }

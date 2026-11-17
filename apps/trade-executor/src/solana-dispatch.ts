@@ -1,4 +1,7 @@
 import { getJupiterQuote, type JupiterQuote } from '@swat/shared';
+import { settleJitoReceiptWithClient, type DurableJitoPending, type QuantifiedJitoReceipt } from '@swat/db';
+import type { CanonicalWorkerPorts, CanonicalWorkerIntent } from './worker-policy.js';
+import { requireDurableJitoPending } from './jupiter-jito-runtime.js';
 import type {
   JupiterJitoRuntime,
   JupiterJitoSubmission
@@ -31,6 +34,9 @@ export interface SolanaDispatchInput {
   /** SELL: exact base units to sell. Required for a sell. */
   readonly sellBaseUnits?: string;
   readonly slippageBps: number;
+  readonly execution?: import('./jupiter-jito-runtime.js').JupiterJitoExecutionIdentity;
+  readonly intent?: import('./jupiter-jito-runtime.js').JupiterJitoIntent;
+  readonly attempt?: CanonicalWorkerIntent['attempt'];
 }
 
 export type SolanaDispatchOutcome =
@@ -152,7 +158,8 @@ export function mapSubmissionToOutcome(
     case 'already_resolved': {
       const resolution = submission.resolution;
       if (resolution.status === 'filled') {
-        return { kind: 'filled', signature: resolution.signature, slot: resolution.slot };
+        // A legacy status/signature is not quantified accounting evidence.
+        return { kind: 'ambiguous', reason: 'canonical-jito-receipt-settlement-required' };
       }
       if (resolution.status === 'failed') {
         return { kind: 'rejected', reason: resolution.reason };
@@ -172,6 +179,9 @@ export async function dispatchSolanaTrade(
   input: SolanaDispatchInput,
   dependencies: SolanaDispatchDependencies
 ): Promise<SolanaDispatchOutcome> {
+  if (!input.execution || !input.intent || !input.attempt) {
+    return { kind: 'rejected', reason: 'canonical-jito-intent-unavailable' };
+  }
   const quote = await buildSolanaQuote(input, dependencies);
   if (!quote) {
     return { kind: 'rejected', reason: 'jupiter-quote-unavailable' };
@@ -180,8 +190,66 @@ export async function dispatchSolanaTrade(
   const submission = await dependencies.runtime.submit({
     clientOrderId: input.clientOrderId,
     quote,
-    signerPublicKey: dependencies.signerPublicKey
+    signerPublicKey: dependencies.signerPublicKey,
+    execution: input.execution, intent: input.intent, attempt: input.attempt
   });
 
   return mapSubmissionToOutcome(submission);
+}
+
+export interface CanonicalJitoQuoteDependencies {
+  readonly runtime: JupiterJitoRuntime;
+  readonly signerPublicKey: string;
+  /** Reviewed independent sizing/valuation provider. Null means unavailable.
+   * Must derive intent from canonical requested economic quantities, not quote. */
+  readonly observe: (execution: Parameters<CanonicalWorkerPorts['quote']>[0], maxSlippageBps: number) => Promise<{
+    readonly intent: DurableJitoPending['intent']; readonly quote: JupiterQuote; readonly requestedDebitUsd: string | null;
+  } | null>;
+}
+/** Canonical executor seam: submits only the immutable worker identity/fence and
+ * independently sized intent. Always retains pending liability; receipt sweep
+ * owns accounting, not optimistic submit/quote output or queue acknowledgement. */
+export function createCanonicalJitoQuote(dependencies: CanonicalJitoQuoteDependencies): CanonicalWorkerPorts['quote'] {
+  return async (execution, maxSlippageBps) => {
+    if (execution.chain !== 'solana' || execution.executionMode !== 'live'
+      || execution.targetAccount !== `solana:${dependencies.signerPublicKey}`) return null;
+    const observation = await dependencies.observe(execution, maxSlippageBps);
+    if (!observation || observation.intent.slippageBps !== maxSlippageBps
+      || observation.intent.recipient !== dependencies.signerPublicKey
+      || (execution.direction === 'buy' ? observation.intent.outputMint : observation.intent.inputMint) !== execution.tokenMint.slice(7)
+      || (execution.direction === 'buy' ? observation.intent.inputMint : observation.intent.outputMint) !== SOL_MINT) return null;
+    // The observed intent is independent of the venue quote; exact sell lot
+    // quantity must match canonical decimal units, including >2^53 raw values.
+    if (execution.direction === 'sell') {
+      const raw = observation.intent.inputAmountRaw;
+      const scale = observation.intent.tokenDecimals;
+      if (!/^[1-9][0-9]*$/.test(raw) || !Number.isInteger(scale) || scale < 0 || scale > 18) return null;
+      const padded = raw.padStart(scale + 1, '0');
+      const decimal = scale ? `${padded.slice(0, -scale)}.${padded.slice(-scale)}`.replace(/0+$/, '').replace(/\.$/, '') : raw;
+      if (decimal !== execution.requestedBaseQuantity) return null;
+    }
+    return { requestedDebitUsd: observation.requestedDebitUsd,
+      async execute(intent) {
+        if (intent.execution.id !== execution.id || intent.execution.clientOrderId !== execution.clientOrderId
+          || intent.execution.userId !== execution.userId || intent.execution.targetAccount !== execution.targetAccount
+          || intent.maxSlippageBps !== maxSlippageBps) return { kind: 'unknown', reason: 'canonical-jito-execution-changed' };
+        const submission = await dependencies.runtime.submit({ clientOrderId: execution.clientOrderId,
+          execution: { executionId: execution.id, clientOrderId: execution.clientOrderId, userId: execution.userId,
+            chain: 'solana', targetAccount: execution.targetAccount }, intent: observation.intent, attempt: intent.attempt,
+          quote: observation.quote, signerPublicKey: dependencies.signerPublicKey });
+        return { kind: 'unknown', reason: submission.status === 'rejected' || submission.status === 'submission_unknown'
+          ? submission.reason : `jito-${submission.status}-receipt-reconciliation-required` };
+      }
+    };
+  };
+}
+
+/** Financial transaction resolves before runtime cache/outbox acknowledgement. */
+export function createJitoReceiptCommit(transaction: CanonicalWorkerPorts['transaction'],
+  settle: typeof settleJitoReceiptWithClient = settleJitoReceiptWithClient) {
+  return async (pending: import('./jupiter-jito-runtime.js').PendingJupiterJitoSubmission,
+    resolution: import('./jupiter-jito-runtime.js').JupiterJitoResolution): Promise<boolean> => {
+    if (resolution.status !== 'filled' || !resolution.receipt) return false;
+    return transaction(client => settle(client, requireDurableJitoPending(pending), resolution.receipt as QuantifiedJitoReceipt));
+  };
 }

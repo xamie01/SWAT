@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+vi.mock('@swat/db', async () => import('@swat/db/dist/withdrawal-contract.js'));
 import {
   CHAIN_EXIT_TRIGGERS,
   assertExitObservationHonest,
@@ -6,8 +7,11 @@ import {
   exitTriggerSupport,
   exitTriggersForChain,
   type ExitTriggerObservation,
-  type ManualExitInput
+  type ManualExitInput,
+  requestDurableManualExit
 } from './manual-exit.js';
+import { createReducingService } from '@swat/db/dist/reducing-service.js';
+import { withdrawalSqlFixture, financialFundingFixture } from '@swat/db/dist/withdrawal-test-fixture.js';
 import type { PolymarketOutcomePosition } from './polymarket-representation.js';
 
 /**
@@ -329,5 +333,23 @@ describe('stable outcome codes', () => {
       'manual-exit-claim-ledger-absent'
     ]);
     expect(new Set(codes).size).toBe(codes.length);
+  });
+});
+
+describe('durable manual exit injected domain admission', () => {
+  it('drives actual reducing service and durable SQL outbox but never falsely closes on admission', async () => {
+    const db = withdrawalSqlFixture();
+    const request = { requestKey: 'manual-1', chain: 'solana' as const, network: 'solana-genesis', venue: 'spot' as const,
+      positionId: 'position-1', accountId: 'account-1', assetId: 'mint-1', assetScale: 9, mode: 'paper' as const,
+      positionSide: 'LONG' as const, quantityRaw: '100', maxFeeRaw: '0', feeAssetId: 'SOL', feeAssetScale: 9,
+      feeFundingAccountId: 'fee-account', limitPriceExact: '1', expectedRevision: 'r1' };
+    const service = createReducingService({ transaction: db.transaction, lockFunding: async(_c,u,b)=>financialFundingFixture(u,b,db.now), lockExposure: async () => ({
+      ...request, userId: 'user-1', heldRaw: '100', revision: 'r1', observedAt: db.now,
+      validUntil: '2026-11-17T12:01:00.000Z', proof: 'fixture-inventory-proof'
+    }) });
+    const record = await requestDurableManualExit('user-1', request, service);
+    expect(record.status).toBe('queued'); expect(record.completedRaw).toBe('0'); expect(record.terminal).toBe(false);
+    expect(db.state().outbox).toHaveLength(1);
+    await expect(requestDurableManualExit('user-1', request)).rejects.toThrow('manual-exit-durable-ports-unavailable');
   });
 });

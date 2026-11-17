@@ -173,7 +173,7 @@ export function createPackageConfig(explicitFiles: string[]) {
   return defineConfig({
     root: workspace,
     envDir: resolve(evidenceDirectory, 'empty-env'),
-    cacheDir: resolve(evidenceDirectory, 'cache'),
+    cacheDir: process.env.REVIEW_CACHE || resolve(evidenceDirectory, 'cache'),
     resolve: {
       alias: {
         '@swat/shared': fileURLToPath(new URL('../../packages/shared/src/index.ts', import.meta.url)),

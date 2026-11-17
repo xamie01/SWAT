@@ -1,35 +1,29 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { lpApi } from '../../../lib/api.js';
 import { describeApiError } from '../../../lib/api-error-message.js';
+import { lpActionAllowed, lpMode, lpOperationNotice, submitLpAction, usd, type LpPositionView } from '../../../lib/portfolio-model.js';
 
-interface PositionItem {
-  id: string;
-  chain: string;
-  protocol: string;
-  poolAddress: string;
-  strategyType: string;
-  rangeLower: number;
-  rangeUpper: number;
-  depositAmount: number;
-  state: 'building' | 'active' | 'near_edge' | 'out_of_range' | 'rebalancing' | 'closed';
-  autoRebalance: boolean;
-  rebalanceRecommended?: boolean;
-}
+type PositionItem = LpPositionView;
 
 export default function LpPositionsPage() {
   const [positions, setPositions] = useState<PositionItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const operationKeys = useRef(new Map<string, string>());
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setPositions([]);
     try {
       const res = await lpApi.get<{ positions: PositionItem[] }>('/v1/lp/positions?includeClosed=true');
-      setPositions(res.positions ?? []);
+      if (!Array.isArray(res.positions)) throw new Error('Malformed position observation');
+      setPositions(res.positions);
     } catch (err) {
       setError(describeApiError(err, 'Failed to fetch LP positions'));
     } finally {
@@ -41,34 +35,30 @@ export default function LpPositionsPage() {
     void fetchPositions();
   }, [fetchPositions]);
 
-  const handleToggleAutoRebalance = async (pos: PositionItem) => {
+  const runAction = async (pos: PositionItem, kind: 'close' | 'rebalance' | 'auto-rebalance') => {
+    if (pendingId || loading || error) return;
+    setPendingId(pos.id);
+    setNotice(null);
     try {
-      await lpApi.patch(`/v1/lp/positions/${pos.id}/auto-rebalance`, { enabled: !pos.autoRebalance });
-      void fetchPositions();
+      const result = await submitLpAction(pos, kind, async () => {
+        if (kind === 'close' && !confirm('Close this paper LP record locally? No live liquidity will be removed.')) return null;
+        if (kind === 'auto-rebalance') return lpApi.patch(`/v1/lp/positions/${pos.id}/auto-rebalance`, { enabled: !pos.autoRebalance });
+        const identity = JSON.stringify([pos.id, kind, pos.rangeLower, pos.rangeUpper, pos.state]);
+        if (!operationKeys.current.has(identity)) operationKeys.current.set(identity, crypto.randomUUID());
+        return lpApi.post(`/v1/lp/positions/${pos.id}/${kind}`, { operationKey: operationKeys.current.get(identity) });
+      });
+      if (result === null) return;
+      setNotice(kind === 'auto-rebalance' ? 'Local paper auto-rebalance setting updated. No live execution was enabled.' : lpOperationNotice(result, kind, pos.id));
+      await fetchPositions();
     } catch (err) {
-      alert(describeApiError(err, 'Failed to toggle auto-rebalance'));
+      setNotice(describeApiError(err, 'LP action unavailable; no completion is confirmed'));
+    } finally {
+      setPendingId(null);
     }
   };
-
-  const handleTriggerRebalance = async (posId: string) => {
-    try {
-      await lpApi.post(`/v1/lp/positions/${posId}/rebalance`);
-      alert('Rebalance job queued on execution queue.');
-      void fetchPositions();
-    } catch (err) {
-      alert(describeApiError(err, 'Failed to trigger rebalance'));
-    }
-  };
-
-  const handleClosePosition = async (posId: string) => {
-    if (!confirm('Are you sure you want to close this LP position? Liquidity will be removed.')) return;
-    try {
-      await lpApi.post(`/v1/lp/positions/${posId}/close`);
-      void fetchPositions();
-    } catch (err) {
-      alert(describeApiError(err, 'Failed to close position'));
-    }
-  };
+  const handleToggleAutoRebalance = (pos: PositionItem) => runAction(pos, 'auto-rebalance');
+  const handleTriggerRebalance = (pos: PositionItem) => runAction(pos, 'rebalance');
+  const handleClosePosition = (pos: PositionItem) => runAction(pos, 'close');
 
   const stateBadge = (state: PositionItem['state']) => {
     switch (state) {
@@ -125,7 +115,7 @@ export default function LpPositionsPage() {
             </span>
           </div>
           <p className="text-xs text-on-surface-variant max-w-2xl leading-relaxed">
-            Real-time concentrated liquidity monitor with automated boundary alerts, economic rebalancing, and one-click exits.
+            Recorded LP acquisitions and paper lifecycle operations. Live or unknown acquisitions cannot be reduced here.
           </p>
         </div>
 
@@ -153,19 +143,22 @@ export default function LpPositionsPage() {
         </div>
       )}
 
+      {notice && <div role="status" className="p-3 border border-border-subtle rounded-lg text-xs font-mono">{notice}</div>}
       {loading ? (
         <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center text-xs text-on-surface-variant font-mono">
           Loading active concentrated LP positions...
         </div>
+      ) : error ? (
+        <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center text-xs">LP holdings unavailable. A failed observation is not an empty portfolio.</div>
       ) : positions.length === 0 ? (
         <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center space-y-3">
           <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
             <span className="material-symbols-outlined text-[20px]">water_drop</span>
           </div>
           <div>
-            <p className="text-xs font-bold text-on-surface">No LP Positions Deployed</p>
+            <p className="text-xs font-bold text-on-surface">No recorded LP positions</p>
             <p className="text-[11px] text-on-surface-variant mt-0.5">
-              Deploy your first custom liquidity ladder or copy a verified master to begin earning fees.
+              The successful API observation returned no LP positions. Paper planning does not deploy live liquidity or earn live fees.
             </p>
           </div>
           <div className="flex items-center justify-center gap-2.5 pt-1">
@@ -173,7 +166,7 @@ export default function LpPositionsPage() {
               href="/lp/builder"
               className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity"
             >
-              Deploy Custom Ladder
+              Plan Paper Ladder
             </Link>
             <Link
               href="/lp/copy"
@@ -218,22 +211,24 @@ export default function LpPositionsPage() {
                       </span>
                     </div>
                     <div>
-                      <span className="text-[9px] text-on-surface-variant uppercase block">Capital Deposited</span>
-                      <span className="text-emerald-400 font-bold">${pos.depositAmount} USD</span>
+                      <span className="text-[9px] text-on-surface-variant uppercase block">Quantity / Acquisition USD</span>
+                      <span className="text-emerald-400 font-bold">{pos.depositAmount} {pos.depositAsset ?? 'asset unknown'} · {usd(pos.depositValueUsd)}</span>
                     </div>
                   </div>
 
+                  <p className="text-[10px] text-on-surface-variant">{lpMode(pos)}</p>
                   {!isClosed && (
                     <div className="flex items-center justify-between p-2.5 bg-surface-container rounded-lg text-xs">
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-[16px] text-primary">auto_mode</span>
                         <div>
                           <span className="font-bold text-on-surface block text-[11px]">Auto Rebalance</span>
-                          <span className="text-[9px] text-on-surface-variant">Fee uplift &gt; IL + cost</span>
+                          <span className="text-[9px] text-on-surface-variant">Local paper preference; economics unassessed</span>
                         </div>
                       </div>
                       <input
                         type="checkbox"
+                        disabled={!!pendingId || !lpActionAllowed(pos, 'auto-rebalance')}
                         checked={pos.autoRebalance}
                         onChange={() => void handleToggleAutoRebalance(pos)}
                         className="h-4 w-4 accent-primary"
@@ -244,16 +239,18 @@ export default function LpPositionsPage() {
                   {!isClosed && (
                     <div className="flex items-center gap-2 pt-1">
                       <button
-                        onClick={() => void handleTriggerRebalance(pos.id)}
+                        disabled={!!pendingId || !lpActionAllowed(pos, 'rebalance')}
+                        onClick={() => void handleTriggerRebalance(pos)}
                         className="flex-1 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high border border-border-subtle text-xs font-bold text-on-surface transition-colors"
                       >
-                        Rebalance Now
+                        Paper Rebalance
                       </button>
                       <button
-                        onClick={() => void handleClosePosition(pos.id)}
+                        disabled={!!pendingId || !lpActionAllowed(pos, 'close')}
+                        onClick={() => void handleClosePosition(pos)}
                         className="py-1.5 px-3 rounded-lg text-xs font-bold text-red-400 hover:bg-red-500/10 transition-colors"
                       >
-                        Close
+                        Close Paper Record
                       </button>
                     </div>
                   )}
@@ -271,7 +268,7 @@ export default function LpPositionsPage() {
                     <th className="px-4 py-3">Position & Pool</th>
                     <th className="px-4 py-3">Venue</th>
                     <th className="px-4 py-3 text-right">Range Bounds</th>
-                    <th className="px-4 py-3 text-right">Capital Deposited</th>
+                    <th className="px-4 py-3 text-right">Quantity / Acquisition USD</th>
                     <th className="px-4 py-3 text-center">Status</th>
                     <th className="px-4 py-3 text-center">Auto-Rebalance</th>
                     <th className="px-4 py-3 text-right">Actions</th>
@@ -287,7 +284,7 @@ export default function LpPositionsPage() {
                             {pos.poolAddress}
                           </span>
                           <span className="text-[10px] text-on-surface-variant capitalize">
-                            Strategy: {pos.strategyType}
+                            Strategy: {pos.strategyType} · {lpMode(pos)}
                           </span>
                         </td>
                         <td className="px-4 py-3 font-mono">
@@ -298,13 +295,14 @@ export default function LpPositionsPage() {
                           {pos.rangeLower} → {pos.rangeUpper}
                         </td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400">
-                          ${pos.depositAmount}
+                          {pos.depositAmount} {pos.depositAsset ?? 'asset unknown'} · {usd(pos.depositValueUsd)}
                         </td>
                         <td className="px-4 py-3 text-center">{stateBadge(pos.state)}</td>
                         <td className="px-4 py-3 text-center">
                           {!isClosed ? (
                             <input
                               type="checkbox"
+                              disabled={!!pendingId || !lpActionAllowed(pos, 'auto-rebalance')}
                               checked={pos.autoRebalance}
                               onChange={() => void handleToggleAutoRebalance(pos)}
                               className="h-4 w-4 accent-primary"
@@ -317,16 +315,18 @@ export default function LpPositionsPage() {
                           {!isClosed ? (
                             <div className="flex items-center justify-end gap-1.5">
                               <button
-                                onClick={() => void handleTriggerRebalance(pos.id)}
+                                disabled={!!pendingId || !lpActionAllowed(pos, 'rebalance')}
+                                onClick={() => void handleTriggerRebalance(pos)}
                                 className="px-2.5 py-1 text-xs font-bold rounded bg-surface-container hover:bg-surface-container-high border border-border-subtle text-on-surface transition-colors"
                               >
-                                Rebalance
+                                Paper Rebalance
                               </button>
                               <button
-                                onClick={() => void handleClosePosition(pos.id)}
+                                disabled={!!pendingId || !lpActionAllowed(pos, 'close')}
+                                onClick={() => void handleClosePosition(pos)}
                                 className="px-2.5 py-1 text-xs font-bold rounded text-red-400 hover:bg-red-500/10 transition-colors"
                               >
-                                Close
+                                Close Paper Record
                               </button>
                             </div>
                           ) : (

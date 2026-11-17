@@ -338,84 +338,28 @@ describe('per-user adapters fail closed when mechanism is unavailable', () => {
   });
 });
 
-describe('live per-user Solana WAKE Vault adapter', () => {
-  it('grants execution authority bound to the audited WAKE Vault program ID', async () => {
+describe('legacy per-user Solana options never verify deployed authority', () => {
+  it('does not infer an audited deployment from a signer or vault address label', async () => {
     const signer = fakeSolanaSigner();
-    const authority = createUserSolanaAuthority({
-      signer,
-      loadUserVaultAddress: async (userId) => `UserVaultPDA:${userId}`
-    });
-
-    const verdict = await authority.authorize(request('solana', ALICE));
-    expect(verdict.kind).toBe('granted');
-    if (verdict.kind === 'granted') {
-      expect(verdict.authority.adapterId).toBe('user-solana');
-      expect(verdict.authority.chain).toBe('solana');
-      expect(verdict.authority.settlementAddress).toBe('UserVaultPDA:alice');
-      expect(verdict.authority.signingAddress).toBe(signer.publicKey);
-      expect(verdict.authority.capabilities).toEqual(['sign-chain-transaction']);
-    }
+    const loadUserVaultAddress = vi.fn(async () => 'UserVaultPDA:alice');
+    const authority = createUserSolanaAuthority({ enabled: true, programId: WAKE_VAULT_PROGRAM_ID, signer, loadUserVaultAddress });
+    expect(await authority.authorize(request('solana', ALICE))).toMatchObject({ kind: 'denied', code: 'authority-solana-delegate-unavailable' });
+    expect(loadUserVaultAddress).not.toHaveBeenCalled(); expect(signer.signed).toEqual([]);
   });
-
-  it('defaults settlement address to program-scoped vault format with WAKE_VAULT_PROGRAM_ID', async () => {
-    const signer = fakeSolanaSigner();
-    const authority = createUserSolanaAuthority({ signer });
-    const verdict = await authority.authorize(request('solana', ALICE));
-    expect(verdict.kind).toBe('granted');
-    if (verdict.kind === 'granted') {
-      expect(verdict.authority.settlementAddress).toBe(`solana:vault:${WAKE_VAULT_PROGRAM_ID}:alice`);
-      expect(verdict.authority.signingAddress).toBe(signer.publicKey);
-      expect(verdict.authority.capabilities).toEqual(['sign-chain-transaction']);
-    }
+  it('never invents a program-scoped settlement address from the caller label', async () => {
+    expect(await createUserSolanaAuthority({ signer: fakeSolanaSigner() }).authorize(request('solana', ALICE)))
+      .toMatchObject({ kind: 'denied', code: 'authority-solana-delegate-unavailable' });
   });
-
-  it('denies venue-trade when no signer is configured for live wake-vault', async () => {
-    const authority = createUserSolanaAuthority();
-    const verdict = await authority.authorize(request('solana', ALICE));
-    expect(verdict.kind).toBe('denied');
-    if (verdict.kind === 'denied') {
-      expect(verdict.code).toBe('authority-operator-not-configured');
-      expect(verdict.reason).toContain('No Solana transaction signer configured');
-    }
+  it.each(['venue-trade', 'token-spend-permission', 'position-redemption'] as const)('denies %s without a verified deployed port', async action => {
+    expect(await createUserSolanaAuthority().authorize(request('solana', ALICE, action)))
+      .toMatchObject({ kind: 'denied', code: 'authority-solana-delegate-unavailable' });
   });
-
-  it('grants token-spend-permission even without signer for address discovery', async () => {
-    const authority = createUserSolanaAuthority();
-    const verdict = await authority.authorize(request('solana', ALICE, 'token-spend-permission'));
-    expect(verdict.kind).toBe('granted');
-    if (verdict.kind === 'granted') {
-      expect(verdict.authority.settlementAddress).toBe(`solana:vault:${WAKE_VAULT_PROGRAM_ID}:alice`);
-      expect(verdict.authority.signingAddress).toBeNull();
-      expect(verdict.authority.capabilities).toEqual([]);
-    }
-  });
-
-  it('signs transaction through delegated signer capability', async () => {
-    const signer = fakeSolanaSigner();
-    const authority = createUserSolanaAuthority({ signer });
-    const grant = granted(await authority.authorize(request('solana', ALICE)));
-
-    const result = await grant.sign({ kind: 'solana-transaction', transactionBase64: 'UserSwapTxBase64' });
-    expect(result).toEqual({ kind: 'signed', encoding: 'base64', value: 'signed:UserSwapTxBase64' });
-    expect(signer.signed).toContain('UserSwapTxBase64');
-  });
-
-  it('rejects unsupported actions on Solana vault', async () => {
-    const authority = createUserSolanaAuthority();
-    const verdict = await authority.authorize(request('solana', ALICE, 'position-redemption'));
-    expect(verdict.kind).toBe('denied');
-    if (verdict.kind === 'denied') {
-      expect(verdict.code).toBe('authority-capability-unsupported');
-    }
-  });
-
-  it('denies when explicitly disabled via options', async () => {
-    const authority = createUserSolanaAuthority({ enabled: false });
-    const verdict = await authority.authorize(request('solana', ALICE));
-    expect(verdict.kind).toBe('denied');
-    if (verdict.kind === 'denied') {
-      expect(verdict.code).toBe('authority-solana-delegate-unavailable');
-    }
+  it('does not even read the legacy signer/accessor options', async () => {
+    let read = false;
+    const options = { get signer() { read = true; throw new Error('must not read'); }, get enabled() { read = true; return true; } };
+    expect(await createUserSolanaAuthority(options as any).authorize(request('solana', ALICE)))
+      .toMatchObject({ kind: 'denied', code: 'authority-solana-delegate-unavailable' });
+    expect(read).toBe(false);
   });
 });
 
@@ -446,17 +390,9 @@ describe('the full adapter set', () => {
       expect(await resolve(request(chain, OPERATOR))).toMatchObject({ kind: 'granted' });
       const forUser = await resolve(request(chain, ALICE));
 
-      if (chain === 'solana') {
-        // Solana per-user authority is routed to the live audited WAKE Vault program
-        expect(forUser.kind).toBe('granted');
-        if (forUser.kind === 'granted') {
-          expect(forUser.authority.adapterId).toBe('user-solana');
-        }
-      } else {
-        // Robinhood and Polymarket per-user requests fail closed until respective mechanisms are live
-        expect(forUser.kind).toBe('denied');
-        expect(forUser.kind === 'denied' && forUser.code).not.toBe('authority-adapter-missing');
-      }
+      // All legacy user configurations remain denials; a signer is not deployment evidence.
+      expect(forUser.kind).toBe('denied');
+      expect(forUser.kind === 'denied' && forUser.code).not.toBe('authority-adapter-missing');
     }
   });
 
@@ -465,7 +401,7 @@ describe('the full adapter set', () => {
     const forUser = await resolve(request('solana', ALICE));
     expect(forUser.kind).toBe('denied');
     if (forUser.kind === 'denied') {
-      expect(forUser.code).toBe('authority-operator-not-configured');
+      expect(forUser.code).toBe('authority-solana-delegate-unavailable');
     }
   });
 

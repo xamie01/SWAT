@@ -21,6 +21,8 @@ function ports(overrides: Partial<MonitorJobPorts> = {}): MonitorJobPorts {
   return {
     pricePoller: { currentPrice: vi.fn(async () => 100) },
     economics: {
+      exactEstimate: vi.fn(async () => ({ basis: 'incremental-rebalance' as const, windowStart: '2026-11-17T12:00:00.000Z', windowEnd: '2026-11-18T12:00:00.000Z',
+        extraFeesMicroUsd: '60000000', inventoryChangeMicroUsd: '0', impermanentLossMicroUsd: '15000000', gasMicroUsd: '5000000', repositionMicroUsd: '10000000' })),
       estimate: vi.fn(async () => ({
         expectedExtraFeesUsd: 60,
         impermanentLossUsd: 15,
@@ -31,6 +33,7 @@ function ports(overrides: Partial<MonitorJobPorts> = {}): MonitorJobPorts {
     },
     listPositions: vi.fn(async () => [position()]),
     transition: vi.fn(async () => ({})),
+    queueExactRebalance: vi.fn(async () => undefined),
     queueRebalance: vi.fn(async () => undefined),
     ...overrides
   };
@@ -60,8 +63,8 @@ describe('runMonitorPass (F1/F6)', () => {
       { positionId: 'pos-1', from: 'active', to: 'near_edge' }
     ]);
     expect(summary.rebalancesQueued).toBe(1);
-    expect(ports_.queueRebalance).toHaveBeenCalledWith(
-      expect.objectContaining({ positionId: 'pos-1', chain: 'solana', netBenefitUsd: 30 })
+    expect(ports_.queueExactRebalance).toHaveBeenCalledWith(
+      expect.objectContaining({ positionId: 'pos-1', chain: 'solana', netBenefitMicroUsd: '30000000' })
     );
   });
 
@@ -105,8 +108,8 @@ describe('runMonitorPass (F1/F6)', () => {
 
     expect(summary.rebalancesQueued).toBe(1);
     expect(summary.rebalancesDeclined).toEqual([]);
-    expect(ports_.queueRebalance).toHaveBeenCalledWith(
-      expect.objectContaining({ positionId: 'pos-1', netBenefitUsd: 30 })
+    expect(ports_.queueExactRebalance).toHaveBeenCalledWith(
+      expect.objectContaining({ positionId: 'pos-1', netBenefitMicroUsd: '30000000' })
     );
   });
 
@@ -115,6 +118,8 @@ describe('runMonitorPass (F1/F6)', () => {
       pricePoller: { currentPrice: vi.fn(async () => 91) },
       listPositions: vi.fn(async () => [position({ autoRebalance: true })]),
       economics: {
+        exactEstimate: vi.fn(async () => ({ basis: 'incremental-rebalance' as const, windowStart: '2026-11-17T12:00:00.000Z', windowEnd: '2026-11-18T12:00:00.000Z',
+          extraFeesMicroUsd: '5000000', inventoryChangeMicroUsd: '0', impermanentLossMicroUsd: '15000000', gasMicroUsd: '5000000', repositionMicroUsd: '10000000' })),
         estimate: vi.fn(async () => ({
           expectedExtraFeesUsd: 5,
           impermanentLossUsd: 15,
@@ -129,7 +134,7 @@ describe('runMonitorPass (F1/F6)', () => {
 
     expect(summary.rebalancesQueued).toBe(0);
     expect(summary.rebalancesDeclined[0]?.positionId).toBe('pos-1');
-    expect(summary.rebalancesDeclined[0]?.reason).toContain('net-benefit-not-positive');
+    expect(summary.rebalancesDeclined[0]?.reason).toContain('not-positive');
   });
 
   it('an unreadable price is counted and skipped, never treated as in-range', async () => {

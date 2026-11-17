@@ -1,0 +1,38 @@
+{
+  "label": "build-w2-runtime-tests-01",
+  "kind": "test",
+  "target": "threats/project-completion-20261117/w2-runtime.config.ts",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/root/SWAT/threats/project-completion-20261117/w2-runtime.config.ts"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-17T08:34:10.055297+00:00",
+  "elapsedSeconds": 20.83,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "threats/project-completion-20261117/w2-runtime.config.ts": "9bc2c0adb22a72c6b6b9f1ab46a5d705e5a99010e4c0370e11de4c41360061b2",
+    "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "scripts/build-completion-runner.py": "fc9757dc991ce098e698882e72db023f16866aa88f8d32b8e8d7a20a43f131d1",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "15d933324fa789451ef60877a900fc61af5a408428ab8427b6a7a7d3f97e9f2b",
+  "workspaceInputManifest": "threats/project-completion-20261117/build-w2-runtime-tests-01.inputs.json",
+  "workspaceInputManifestSha256": "6667cff3dae292f02e186417c568edaa77585941f2db6037600bde27fd2da048",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": "56ceaaa48fe2cfc38b425e34a332b4d7155d08ab23129c735cbd425da35c2f3e",
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

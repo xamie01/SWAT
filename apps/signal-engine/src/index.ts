@@ -1,10 +1,14 @@
-import type { PoolClient } from 'pg';
+import type { PoolClient } from '@swat/db';
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import {
+  createExactFollowerEntryRequest,
   crossTenantScope,
-  getSourceConfirmationReadiness,
+  hasAcceptedSourceVerificationWithClient,
+  claimSourceSignalForCopyExecutionWithClient,
+  readWorkerExecutionContextWithClient,
+  readCapturedWorkerPolicyWithClient,
   readFanoutRecipientScopeWithClient,
   listFanoutEnumerationRepairs,
   listFanoutDeliveryRepairs,
@@ -60,6 +64,8 @@ import {
   planFanoutTradeJobs,
   summariseFanout
 } from './fanout-enqueue.js';
+import { createCanonicalFanoutPreparation, unavailableExactFanoutEntryRequest,
+  createVerifiedFanoutAdmission, requireStableFanoutExclusions } from './fanout-canonical.js';
 import {
   evaluateMirrorableActivity,
   resolveMinimumMirrorableNotionalUsd
@@ -337,9 +343,7 @@ function paperFanoutTarget(chain: Chain): string {
 
 const fanoutOwner = `signal-engine-${randomUUID()}`;
 
-async function currentFanoutAdmission(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{ allowed: boolean; reason?: string }> {
-  const readiness = getSourceConfirmationReadiness();
-  if (!readiness.ready) return { allowed: false, reason: readiness.reason };
+async function currentFanoutPolicyAdmission(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{ allowed: boolean; reason?: string }> {
   const identity = fanoutDescriptorIdentity(descriptor);
   const source = await client.query<{ wallet_address: string; direction: 'buy' | 'sell'; token_mint: string;
     chain: Chain; event_at: Date; confirmation_state: string }>(
@@ -367,6 +371,7 @@ async function currentFanoutAdmission(client: PoolClient, descriptor: FanoutJobD
   }
   if (identity.userId === null && process.env.AUTO_EXECUTE !== 'true') return { allowed: false, reason: 'operator-auto-execute-off' };
   const mode = await resolveFanoutChainMode(descriptor.chain);
+  if (!mode) return { allowed: false, reason: 'chain-mode-unknown' };
   const scope = await readFanoutRecipientScopeWithClient(client, {
     userId: identity.userId, chain: descriptor.chain, tokenMint: row.token_mint,
     masterWalletAddress: row.wallet_address, direction: row.direction,
@@ -384,11 +389,27 @@ async function currentFanoutAdmission(client: PoolClient, descriptor: FanoutJobD
   return { allowed: true };
 }
 
+const currentFanoutAdmission = createVerifiedFanoutAdmission({
+  accepted: hasAcceptedSourceVerificationWithClient, current: currentFanoutPolicyAdmission, now: () => new Date()
+});
+
 function durableSignalFanout(source: SourceTradeSignalCandidate, eligibility: ReturnType<typeof evaluateSignalTradeEligibility>,
   poolTvlUsd: number | null) {
   return createDurableFanoutDelivery({
     transaction: withTransaction, owner: fanoutOwner, now: () => new Date(), admission: currentFanoutAdmission,
+    canonicalPrepare: createCanonicalFanoutPreparation({
+      claim: claimSourceSignalForCopyExecutionWithClient,
+      context: readWorkerExecutionContextWithClient,
+      capturedPolicy: readCapturedWorkerPolicyWithClient,
+      exactEntryRequest: createExactFollowerEntryRequest({ provider: null, now: () => new Date(),
+        maximumAgeMs: SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS }),
+      maxPositionEvidenceAgeMs: SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS,
+      now: () => new Date()
+    }),
     async enumerate(jobPlan) {
+      const accepted = await withTransaction(client => hasAcceptedSourceVerificationWithClient(client,
+        source.sourceTradeId, new Date()));
+      if (!accepted) throw new Error('accepted-source-verification-unavailable');
       const fanout = await planSignalFanout(source, jobPlan.chain, jobPlan.operator.data.tokenMint,
         jobPlan.operator.data.score, poolTvlUsd);
       if (!fanout) throw new Error('Fanout recipient enumeration unavailable');
@@ -402,6 +423,7 @@ function durableSignalFanout(source: SourceTradeSignalCandidate, eligibility: Re
       });
       const recipients: FanoutRecipient[] = [];
       const exclusions: FanoutExclusion[] = [...fanout.plan.excluded.map(row => ({ userId: row.userId, code: row.code }))];
+      requireStableFanoutExclusions(exclusions);
       for (const descriptor of [descriptors.operator, ...descriptors.users]) {
         const userId = descriptor.data.userId ?? null;
         if (!eligibility.allowed) { exclusions.push({ userId, code: eligibility.reason }); continue; }
@@ -420,6 +442,7 @@ function durableSignalFanout(source: SourceTradeSignalCandidate, eligibility: Re
         recipients.push({ ...fanoutDescriptorIdentity(scoped), jobId: scoped.options.jobId!,
           descriptor: scoped as unknown as Record<string, unknown> });
       }
+      requireStableFanoutExclusions(exclusions);
       return { recipients, exclusions };
     }
   });

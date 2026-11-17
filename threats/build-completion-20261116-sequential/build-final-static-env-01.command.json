@@ -1,0 +1,38 @@
+{
+  "label": "build-final-static-env-01",
+  "kind": "static",
+  "target": "env",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/scripts/check-env-coverage.mjs",
+    "--names-file",
+    "/root/SWAT/threats/build-completion-20261116-sequential/env-assignment-names.json"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T21:06:27.565436+00:00",
+  "elapsedSeconds": 0.855,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "scripts/check-env-coverage.mjs": "07b58d65a11e3ca94ed6a72394e841810563c42fe76cde768024ae2f7d649d19",
+    "threats/build-completion-20261116-sequential/env-assignment-names.json": "110976a69438a2cc3c980731c9872e2b4dc88475321143db5ce1ddbcb3cfb713",
+    ".env.example": "dc8cd5435d371f59803d7c08e5c4d703921b2f26067eaff6d3da9026dc8fdcdb",
+    "scripts/build-completion-runner.py": "30f27ea48b52231000350815b8a21ba422a1983a449b4c0081aaacc43923e8de",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "76dc0a8c0b474c8f4c3cb16fa72a71e861900062aae8844dceb40e82b33701cf",
+  "workspaceInputManifest": "threats/build-completion-20261116-sequential/build-final-static-env-01.inputs.json",
+  "workspaceInputManifestSha256": "79794a8eca8c78530d8ec50f1b6eedfa41285377133e2a7ef54f451094ed6ef7",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": null,
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

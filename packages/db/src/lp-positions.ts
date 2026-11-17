@@ -3,10 +3,9 @@ import {
   type LpChain,
   type LpPositionState
 } from '@swat/shared';
-import { query } from './client.js';
+import { scopedQuery as queryForScope } from './tenancy.js';
 import type { LpProtocol } from './lp-pools.js';
-import { isCrossTenant, type UserScope } from './tenancy.js';
-import { withTransaction } from './transaction.js';
+import { isCrossTenant, withTenantTransaction, type UserScope } from './tenancy.js';
 
 /**
  * User LP positions and their state machine (`059`).
@@ -58,12 +57,19 @@ export interface LpPosition {
    * bypass this flag (the user IS the consent).
    */
   readonly autoRebalance: boolean;
+  readonly acquisitionMode?: 'unknown' | 'paper' | 'live';
+  readonly acquisitionProvenance?: string | null;
+  readonly depositValueUsd?: number | null;
+  readonly valuationEvidence?: unknown;
+  readonly paperPlan?: unknown;
+  readonly acquisitionKey?: string | null;
+  readonly acquisitionFingerprint?: string | null;
   readonly openedAt: Date;
   readonly closedAt: Date | null;
   readonly updatedAt: Date;
 }
 
-interface PositionRow {
+export interface PositionRow {
   id: string;
   user_id: string;
   chain: LpChain;
@@ -78,15 +84,23 @@ interface PositionRow {
   state: LpPositionState;
   on_chain_position_address: string | null;
   auto_rebalance: boolean;
+  acquisition_mode?: 'unknown' | 'paper' | 'live';
+  acquisition_provenance?: string | null;
+  deposit_value_usd?: number | string | null;
+  valuation_evidence?: unknown;
+  paper_plan?: unknown;
+  acquisition_key?: string | null;
+  acquisition_fingerprint?: string | null;
   opened_at: Date;
   closed_at: Date | null;
   updated_at: Date;
 }
 
-const POSITION_COLUMNS =
+export const POSITION_COLUMNS =
   'id, user_id, chain, protocol, pool_address, strategy_type, range_lower, range_upper, ' +
   'rung_allocations, deposit_amount, deposit_asset, state, on_chain_position_address, ' +
-  'auto_rebalance, opened_at, closed_at, updated_at';
+  'auto_rebalance, acquisition_mode, acquisition_provenance, deposit_value_usd, valuation_evidence, ' +
+  'paper_plan, acquisition_key, acquisition_fingerprint, opened_at, closed_at, updated_at';
 
 function toSafeNumber(value: number | string): number {
   if (typeof value === 'number') return value;
@@ -112,7 +126,7 @@ function toRungAllocations(value: unknown): LpRungAllocation[] {
   });
 }
 
-function toPosition(row: PositionRow): LpPosition {
+export function toPosition(row: PositionRow): LpPosition {
   return {
     id: row.id,
     userId: row.user_id,
@@ -128,6 +142,13 @@ function toPosition(row: PositionRow): LpPosition {
     state: row.state,
     onChainPositionAddress: row.on_chain_position_address,
     autoRebalance: row.auto_rebalance,
+    acquisitionMode: row.acquisition_mode ?? 'unknown',
+    acquisitionProvenance: row.acquisition_provenance ?? null,
+    depositValueUsd: row.deposit_value_usd == null ? null : toSafeNumber(row.deposit_value_usd),
+    valuationEvidence: row.valuation_evidence ?? null,
+    paperPlan: row.paper_plan ?? null,
+    acquisitionKey: row.acquisition_key ?? null,
+    acquisitionFingerprint: row.acquisition_fingerprint ?? null,
     openedAt: row.opened_at,
     closedAt: row.closed_at,
     updatedAt: row.updated_at
@@ -170,54 +191,14 @@ export interface CreateLpPositionInput {
 }
 
 export async function createLpPosition(
-  scope: UserScope,
-  input: CreateLpPositionInput
+  _scope: UserScope,
+  _input: CreateLpPositionInput
 ): Promise<LpPosition> {
-  if (!Number.isFinite(input.depositAmount) || input.depositAmount <= 0) {
-    throw new Error(`lp_positions.deposit_amount must be a positive finite number, got ${input.depositAmount}`);
-  }
-  if (!Number.isFinite(input.rangeLower) || input.rangeLower <= 0
-    || !Number.isFinite(input.rangeUpper) || input.rangeUpper <= input.rangeLower) {
-    throw new Error(`lp_positions range must satisfy 0 < rangeLower < rangeUpper, got ${input.rangeLower}..${input.rangeUpper}`);
-  }
-  assertRungs(input.rungAllocations);
-  if (input.poolAddress.indexOf(':') < 0 || input.depositAsset.indexOf(':') < 0) {
-    throw new Error('lp_positions pool and deposit addresses must be chain-prefixed');
-  }
-
-  return withTransaction(async (client) => {
-    const rows = await client.query<PositionRow>(
-      `INSERT INTO lp_positions
-         (user_id, chain, protocol, pool_address, strategy_type, range_lower, range_upper,
-          rung_allocations, deposit_amount, deposit_asset, state, auto_rebalance)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, 'building', $11)
-       RETURNING ${POSITION_COLUMNS}`,
-      [
-        scope.userId,
-        input.chain,
-        input.protocol,
-        input.poolAddress,
-        input.strategyType,
-        input.rangeLower,
-        input.rangeUpper,
-        JSON.stringify(input.rungAllocations),
-        input.depositAmount,
-        input.depositAsset,
-        input.autoRebalance ?? false
-      ]
-    );
-    const position = rows.rows[0]!;
-    await client.query(
-      `INSERT INTO lp_position_state_history (position_id, from_state, to_state, reason)
-       VALUES ($1, NULL, 'building', 'position created')`,
-      [position.id]
-    );
-    return toPosition(position);
-  });
+  throw new Error('LP legacy unvalued acquisition unavailable; exact injected rawscale domain required');
 }
 
 export async function getLpPosition(scope: UserScope, positionId: string): Promise<LpPosition | null> {
-  const rows = await query<PositionRow>(
+  const rows = await queryForScope<PositionRow>(scope,
     `SELECT ${POSITION_COLUMNS} FROM lp_positions WHERE id = $1 AND user_id = $2`,
     [positionId, scope.userId]
   );
@@ -234,7 +215,7 @@ export async function getLpPositionAnyOwner(scope: UserScope, positionId: string
   if (!isCrossTenant(scope)) {
     throw new Error('getLpPositionAnyOwner is a platform read; pass crossTenantScope(reason)');
   }
-  const rows = await query<PositionRow>(
+  const rows = await queryForScope<PositionRow>(scope,
     `SELECT ${POSITION_COLUMNS} FROM lp_positions WHERE id = $1`,
     [positionId]
   );
@@ -250,14 +231,14 @@ export async function listLpPositions(
     throw new Error(`listLpPositions limit must be an integer in 1..500, got ${limit}`);
   }
   const rows = options.includeClosed
-    ? await query<PositionRow>(
+    ? await queryForScope<PositionRow>(scope,
         `SELECT ${POSITION_COLUMNS} FROM lp_positions
           WHERE user_id = $1
           ORDER BY opened_at DESC
           LIMIT $2`,
         [scope.userId, limit]
       )
-    : await query<PositionRow>(
+    : await queryForScope<PositionRow>(scope,
         `SELECT ${POSITION_COLUMNS} FROM lp_positions
           WHERE user_id = $1 AND state <> 'closed'
           ORDER BY opened_at DESC
@@ -283,7 +264,7 @@ export async function listPositionsForMonitor(
   if (!Number.isInteger(limit) || limit < 1 || limit > 2000) {
     throw new Error(`listPositionsForMonitor limit must be an integer in 1..2000, got ${limit}`);
   }
-  const rows = await query<PositionRow>(
+  const rows = await queryForScope<PositionRow>(scope,
     `SELECT ${POSITION_COLUMNS} FROM lp_positions
       WHERE chain = $1 AND state IN ('active', 'near_edge', 'out_of_range')
       ORDER BY updated_at
@@ -302,12 +283,13 @@ export async function setLpPositionAutoRebalance(
   positionId: string,
   enabled: boolean
 ): Promise<void> {
-  await query(
-    `UPDATE lp_positions
-       SET auto_rebalance = $3, updated_at = NOW()
-       WHERE id = $1 AND user_id = $2`,
-    [positionId, scope.userId, enabled]
-  );
+  return withTenantTransaction(scope, async client => {
+    const owner = await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [scope.userId]);
+    if (!owner.rows[0]) throw new Error('LP owner unavailable');
+    const result = await client.query(`UPDATE lp_positions SET auto_rebalance=$3,updated_at=statement_timestamp()
+      WHERE id=$1 AND user_id=$2 RETURNING id`, [positionId, scope.userId, enabled]);
+    if (!result.rows[0]) throw new Error('LP owned position unavailable');
+  });
 }
 
 export interface LpPositionStateTransition {
@@ -333,9 +315,11 @@ export async function transitionLpPosition(
   if (!transition.reason || transition.reason.trim().length === 0) {
     throw new Error('transitionLpPosition requires a reason');
   }
-  const filterByUser = !isCrossTenant(scope);
+  if (isCrossTenant(scope)) throw new Error('LP transition requires the resolved owner tenant scope; privileged monitor enumeration unavailable');
+  const filterByUser = true;
 
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
+    await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [scope.userId]);
     // Ownership rides in the locked SELECT rather than a pre-check outside the
     // transaction: one round trip, and no window where a row passes the check
     // and is gone before the lock.
@@ -351,6 +335,9 @@ export async function transitionLpPosition(
       );
     }
     const current = toPosition(locked.rows[0]!);
+    if (transition.toState === 'closed' || transition.toState === 'rebalancing') {
+      throw new Error('LP financial lifecycle requires the durable paper operation path; live/unknown unsupported');
+    }
     if (!canTransitionLpPosition(current.state, transition.toState)) {
       throw new Error(
         `invalid lp position transition: ${current.state} -> ${transition.toState}`
@@ -384,7 +371,8 @@ export async function attachOnChainPositionAddress(
   if (onChainPositionAddress.indexOf(':') < 0) {
     throw new Error('on-chain position address must be chain-prefixed');
   }
-  await query(
+  throw new Error('live LP attachment unsupported; certified receipt settlement required');
+  await queryForScope(scope,
     `UPDATE lp_positions
        SET on_chain_position_address = $3, updated_at = NOW()
        WHERE id = $1 AND user_id = $2`,
@@ -399,11 +387,12 @@ export async function attachOnChainPositionAddress(
  * rather than a cached total.
  */
 export async function sumOpenLpDeposits(scope: UserScope): Promise<number> {
-  const rows = await query<{ total: number | string | null }>(
-    `SELECT SUM(deposit_amount) AS total FROM lp_positions
+  const rows = await queryForScope<{ total: number | string | null; unvalued: number | string }>(scope,
+    `SELECT SUM(deposit_value_usd) AS total, COUNT(*) FILTER (WHERE deposit_value_usd IS NULL OR acquisition_mode = 'unknown') AS unvalued FROM lp_positions
       WHERE user_id = $1 AND state <> 'closed'`,
     [scope.userId]
   );
+  if (Number(rows[0]?.unvalued ?? 0) > 0) throw new Error('LP exposure unassessed: missing acquisition valuation');
   const total = rows[0]?.total;
   return total === null || total === undefined ? 0 : toSafeNumber(total);
 }
@@ -417,11 +406,12 @@ export async function sumOpenLpPoolExposure(
   chain: LpChain,
   poolAddress: string
 ): Promise<number> {
-  const rows = await query<{ total: number | string | null }>(
-    `SELECT SUM(deposit_amount) AS total FROM lp_positions
+  const rows = await queryForScope<{ total: number | string | null; unvalued: number | string }>(scope,
+    `SELECT SUM(deposit_value_usd) AS total, COUNT(*) FILTER (WHERE deposit_value_usd IS NULL OR acquisition_mode = 'unknown') AS unvalued FROM lp_positions
       WHERE user_id = $1 AND chain = $2 AND pool_address = $3 AND state <> 'closed'`,
     [scope.userId, chain, poolAddress]
   );
+  if (Number(rows[0]?.unvalued ?? 0) > 0) throw new Error('LP exposure unassessed: missing acquisition valuation');
   const total = rows[0]?.total;
   return total === null || total === undefined ? 0 : toSafeNumber(total);
 }

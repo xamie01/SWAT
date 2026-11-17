@@ -2,14 +2,18 @@ import { readFileSync } from 'node:fs';
 import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ query: vi.fn(), transaction: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), transaction: vi.fn(), capture: vi.fn() }));
+vi.mock('./worker-policy.js', () => ({ captureWorkerPolicyWithClient: mocks.capture }));
 vi.mock('./client.js', () => ({ query: mocks.query }));
 vi.mock('./transaction.js', () => ({ withTransaction: mocks.transaction }));
 // Complete inert shared facade: do not import the shared service/crypto barrel.
 vi.mock('@swat/shared', () => ({
   canTransitionCopyExecution: vi.fn(), canTransitionSourceConfirmation: vi.fn(),
   isAppliedSourceConfirmation: (state: string) => ['confirmed', 'finalized'].includes(state),
-  resolveChainAddress: vi.fn(), resolveChainValue: vi.fn()
+  resolveChainAddress: (value: string, chain: string) => ({
+    raw: value.startsWith(`${chain}:`) ? value.slice(chain.length + 1) : value,
+    prefixed: value.startsWith(`${chain}:`) ? value : `${chain}:${value}`
+  }), resolveChainValue: vi.fn()
 }));
 import { claimLotExitExecution, claimLotExitExecutionWithClient,
   claimSourceSignalForCopyExecution, requestCopyExecution } from './copy-trade-lifecycle.js';

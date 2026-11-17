@@ -19,10 +19,12 @@ import { isLpChain, type LpChain, type LpProtocol } from '@swat/shared';
 import { rankPoolsByVolumeToActiveLiquidity } from './scanner/ranking.js';
 import { rankHotNewLaunches } from './scanner/new-launches.js';
 import { requireUser, registerLpAuth, type LpAuthOptions } from './auth.js';
-import { buildPosition, type BuildPositionDeps, type BuildPositionResult } from './builder/build-position.js';
-import { listStrategyTemplates, STRATEGY_TEMPLATE_NAMES, type StrategyTemplateName } from './builder/templates.js';
+import { buildExactPosition, buildPosition, type BuildPositionDeps, type BuildPositionResult } from './builder/build-position.js';
+import { lpRaw, lpSnapshot, type LpExactAcquisitionRequest } from '@swat/db/dist/lp-exact.js';
+import { listStrategyTemplates } from './builder/templates.js';
 import type { LpStrategyType } from '@swat/db';
 
+import { requestLpOperation, type LpOperationDeps } from './operations.js';
 const STRATEGY_DISTRIBUTIONS: readonly LpStrategyType[] = ['spot', 'curve', 'bidask'];
 
 /**
@@ -60,6 +62,7 @@ function clampOffset(raw: unknown): number {
 }
 
 export type LpRoutesDeps = BuildPositionDeps & {
+  readonly operations?: LpOperationDeps;
   /** Test seam: override the entrypoint itself. */
   readonly build?: typeof buildPosition;
   /**
@@ -150,6 +153,9 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     return {
       positions: positions.map((position) => ({
         ...position,
+        quantityCapability: 'legacy-numeric-observation-only',
+        exactQuantity: null,
+        legacyNumericDtoFractionalCapability: false,
         rebalanceRecommended: position.state === 'near_edge' || position.state === 'out_of_range'
       }))
     };
@@ -214,101 +220,73 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     }
   });
 
-  // H5: Deploy-ladder action (E6 behind G1) — user-scoped, state-changing.
-  app.post('/v1/lp/positions/deploy', async (request, reply) => {
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-
-    const body = request.body as {
-      chain?: string;
-      poolAddress?: string;
-      template?: string;
-      custom?: {
-        rangeLower?: number;
-        rangeUpper?: number;
-        rungCount?: number;
-        distribution?: string;
-      };
-      depositAmount?: number;
-      depositAsset?: string;
-      /** Track I: opt this position into monitor-driven auto-rebalancing. */
-      autoRebalance?: boolean;
-    };
-
-    if (!body.chain || !body.poolAddress || !body.depositAsset || !Number.isFinite(Number(body.depositAmount))) {
-      return reply.code(400).send({ error: 'chain, poolAddress, depositAsset and depositAmount are required' });
-    }
-    if (!isLpChain(body.chain)) {
-      return reply.code(400).send({ error: 'chain must be a supported LpChain' });
-    }
-    if (!body.poolAddress.startsWith(`${body.chain}:`)) {
-      return reply.code(400).send({ error: 'poolAddress and depositAsset must be chain-prefixed' });
-    }
-    if (!body.depositAsset.startsWith(`${body.chain}:`)) {
-      return reply.code(400).send({ error: 'poolAddress and depositAsset must be chain-prefixed' });
-    }
-    if (!body.template && !body.custom) {
-      return reply.code(400).send({ error: 'a strategy template or custom ladder params is required' });
-    }
-
-    if (body.template !== undefined && !(STRATEGY_TEMPLATE_NAMES as readonly string[]).includes(body.template)) {
-      return reply.code(400).send({
-        error: `unknown strategy template: ${body.template}`,
-        known: STRATEGY_TEMPLATE_NAMES
-      });
-    }
-    if (body.custom !== undefined) {
-      const custom = body.custom;
-      if (
-        !Number.isFinite(Number(custom.rangeLower)) || Number(custom.rangeLower) <= 0
-        || !Number.isFinite(Number(custom.rangeUpper)) || Number(custom.rangeUpper) <= Number(custom.rangeLower)
-        || !Number.isInteger(Number(custom.rungCount)) || Number(custom.rungCount) < 1 || Number(custom.rungCount) > 64
-        || !(STRATEGY_DISTRIBUTIONS as readonly string[]).includes(String(custom.distribution))
-      ) {
-        return reply.code(400).send({
-          error: 'custom ladder needs rangeLower > 0, rangeUpper > rangeLower, integer rungCount in 1..64, and distribution spot|curve|bidask'
-        });
-      }
-    }
-
+  const keysOnly = (value: unknown, allowed: readonly string[]): value is Record<string, unknown> =>
+    !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => allowed.includes(key));
+  const exactBody = (value: unknown): value is LpExactAcquisitionRequest => {
+    if (!keysOnly(value, ['operationKey', 'chain', 'poolAddress', 'depositAsset', 'deposit', 'strategy', 'autoRebalance'])) return false;
+    if (typeof value.operationKey !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.operationKey)
+        || typeof value.chain !== 'string' || !isLpChain(value.chain) || typeof value.poolAddress !== 'string'
+        || !value.poolAddress.startsWith(`${value.chain}:`) || typeof value.depositAsset !== 'string'
+        || !value.depositAsset.startsWith(`${value.chain}:`) || !keysOnly(value.deposit, ['raw', 'scale'])
+        || typeof value.deposit.raw !== 'string' || !/^[1-9][0-9]{0,77}$/.test(value.deposit.raw)
+        || !Number.isInteger(value.deposit.scale) || Number(value.deposit.scale) < 0 || Number(value.deposit.scale) > 30
+        || !keysOnly(value.strategy, ['rangeLower', 'rangeUpper', 'rungCount', 'distribution'])
+        || typeof value.strategy.rangeLower !== 'number' || !Number.isFinite(value.strategy.rangeLower) || value.strategy.rangeLower <= 0
+        || typeof value.strategy.rangeUpper !== 'number' || !Number.isFinite(value.strategy.rangeUpper) || value.strategy.rangeUpper <= value.strategy.rangeLower
+        || !Number.isInteger(value.strategy.rungCount) || Number(value.strategy.rungCount) < 1 || Number(value.strategy.rungCount) > 64
+        || !STRATEGY_DISTRIBUTIONS.includes(value.strategy.distribution as LpStrategyType)
+        || value.autoRebalance !== undefined && typeof value.autoRebalance !== 'boolean') return false;
+    try { lpRaw({ raw: value.deposit.raw, scale: Number(value.deposit.scale) }, true); } catch { return false; }
+    return true;
+  };
+  app.get('/v1/lp/capabilities', async (request, reply) => {
+    if (!request.principal) return reply.code(401).send({ error: 'Unauthorized' });
+    return deps.exactPaper?.capabilities() ?? { sourceImplemented: true, injectedPortsConfigured: false, runtimeAccepted: false,
+      liveCapabilityAccepted: false, fractionalRawscaleDto: true, legacyNumericDtoFractionalCapability: false,
+      reason: 'trusted exact quote/receipt protocol provider unavailable' };
+  });
+  app.post('/v1/lp/positions/deploy-exact', async (request, reply) => {
+    const scope = requireUser(request, reply); if (!scope) return;
+    if (!exactBody(request.body)) return reply.code(400).send({ error: 'exact rawscale acquisition DTO required' });
+    if (!deps.exactPaper) return reply.code(503).send({ error: 'LP exact quote/receipt capability unavailable' });
     try {
-      const result = await (deps.build ?? buildPosition)(deps, scope, {
-        chain: body.chain as LpChain,
-        poolAddress: body.poolAddress,
-        template: body.template as StrategyTemplateName | undefined,
-        custom:
-          body.custom
-            ? {
-                rangeLower: Number(body.custom.rangeLower),
-                rangeUpper: Number(body.custom.rangeUpper),
-                rungCount: Number(body.custom.rungCount),
-                distribution: String(body.custom.distribution) as LpStrategyType
-              }
-            : undefined,
-        depositAmount: Number(body.depositAmount),
-        depositAsset: body.depositAsset,
-        autoRebalance: body.autoRebalance === true
-      });
+      const position = await buildExactPosition(deps, scope, lpSnapshot(request.body));
+      return { positionId: position.id, position, mode: 'paper', broadcast: false, capabilities: deps.exactPaper.capabilities() };
+    } catch { return reply.code(409).send({ error: 'LP exact acquisition refused', requestId: request.id }); }
+  });
+  app.get('/v1/lp/positions/:positionId/exact', async (request, reply) => {
+    const scope = requireUser(request, reply); if (!scope) return;
+    if (!deps.exactPaper) return reply.code(503).send({ error: 'LP exact read capability unavailable' });
+    const { positionId } = request.params as { positionId: string };
+    const position = await deps.exactPaper.position(scope, positionId);
+    if (!position) return reply.code(404).send({ error: 'position not found' });
+    return { position, capabilities: deps.exactPaper.capabilities() };
+  });
+  app.get('/v1/lp/operations/:operationId', async (request, reply) => {
+    const scope = requireUser(request, reply); if (!scope) return;
+    if (!deps.operations?.exactPaper) return reply.code(503).send({ error: 'LP exact operation read capability unavailable' });
+    const { operationId } = request.params as { operationId: string };
+    const operation = await deps.operations.exactPaper.operation(scope, operationId);
+    if (!operation) return reply.code(404).send({ error: 'operation not found' });
+    return { operation, broadcast: false };
+  });
+  app.post('/v1/lp/copy/mint-exact', async (request, reply) => {
+    const scope = requireUser(request, reply); if (!scope) return;
+    const body = request.body;
+    if (!keysOnly(body, ['subscriptionId', 'eventId', 'assetScale']) || typeof body.subscriptionId !== 'string'
+        || typeof body.eventId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.eventId)
+        || !Number.isInteger(body.assetScale) || Number(body.assetScale) < 0 || Number(body.assetScale) > 30) return reply.code(400).send({ error: 'exact canonical copy identity required' });
+    if (!deps.exactPaper) return reply.code(503).send({ error: 'LP canonical copy capability unavailable' });
+    try {
+      const position = await deps.exactPaper.copyMint(scope, { subscriptionId: body.subscriptionId, eventId: body.eventId, assetScale: Number(body.assetScale) });
+      return { position, mode: 'paper', broadcast: false, capabilities: deps.exactPaper.capabilities() };
+    } catch { return reply.code(409).send({ error: 'LP canonical copy refused', requestId: request.id }); }
+  });
 
-      if (result.rejectionReasons.length > 0) {
-        // A guard refusal is 403 with reasons — the client shows the caps, not
-        // a generic error.
-        return reply.code(403).send({ error: 'Deploy blocked by guardrails', reasons: result.rejectionReasons });
-      }
-      return result;
-    } catch (error) {
-      // Known validation failures map to 400; anything else bubbles to the
-      // global handler so an internal error never leaks its message.
-      if (error instanceof Error && (
-        error.message.includes('must be') || error.message.includes('required')
-        || error.message.includes('not in the scan cache') || error.message.includes('is off')
-        || error.message.includes('not both') || error.message.includes('no current price')
-        || error.message.includes('chain-prefixed')
-      )) {
-        return reply.code(400).send({ error: 'Invalid LP request', requestId: request.id });
-      }
-      throw error;
-    }
+  // Legacy numeric admission is explicitly unavailable; it cannot preserve fractional raw quantities.
+  app.post('/v1/lp/positions/deploy', async (request, reply) => {
+    const scope = requireUser(request, reply); if (!scope) return;
+    return reply.code(503).send({ error: 'LP legacy numeric acquisition unavailable; use exact rawscale DTO' });
   });
 
   // Track I: manual rebalance trigger — the user IS the consent, so the
@@ -318,36 +296,15 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     if (!scope) return;
     const { positionId } = request.params as { positionId: string };
 
-    const position = await getLpPosition(scope, positionId);
-    if (!position) {
-      return reply.code(404).send({ error: 'position not found' });
-    }
-    if (position.state === 'building') {
-      return reply.code(409).send({ error: 'position is still building; nothing to rebalance yet' });
-    }
-    if (position.state === 'closed') {
-      return reply.code(409).send({ error: 'position is closed' });
-    }
-
-    await deps.queueManualRebalance({
-      positionId: position.id,
-      chain: position.chain,
-      poolAddress: position.poolAddress
-    });
-    // Transition after the job is queued: a refusal here (racing a close)
-    // leaves a queued job that no-ops on a closed position, never a position
-    // stuck in `rebalancing` with no work behind it.
+    if (!deps.operations?.exactPaper) return reply.code(503).send({ error: 'LP exact durable receipt operations unavailable' });
+    const body = request.body;
+    if (!keysOnly(body, ['operationKey']) || typeof body.operationKey !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.operationKey)) return reply.code(400).send({ error: 'operationKey required' });
+    const key = body.operationKey;
     try {
-      await transitionLpPosition(scope, positionId, {
-        toState: 'rebalancing',
-        reason: 'manual rebalance trigger (Track I)'
-      });
-    } catch (error) {
-      return reply.code(409).send({
-        error: 'transition refused', requestId: request.id
-      });
+      return await requestLpOperation(deps.operations, scope, { positionId, operationKey: key, kind: 'rebalance' });
+    } catch {
+      return reply.code(409).send({ error: 'LP operation refused', requestId: request.id });
     }
-    return { queued: true, positionId, state: 'rebalancing' };
   });
 
   // Track I: auto-rebalance opt-in toggle.
@@ -355,8 +312,8 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     const scope = requireUser(request, reply);
     if (!scope) return;
     const { positionId } = request.params as { positionId: string };
-    const body = request.body as { enabled?: boolean };
-    if (typeof body.enabled !== 'boolean') {
+    const body = request.body;
+    if (!keysOnly(body, ['enabled']) || typeof body.enabled !== 'boolean') {
       return reply.code(400).send({ error: 'enabled (boolean) is required' });
     }
 
@@ -368,36 +325,22 @@ export async function registerLpRoutes(app: FastifyInstance, deps: LpRoutesDeps)
     return { positionId, autoRebalance: body.enabled };
   });
 
-  // Close a position. The state machine allows every open state -> closed
-  // (including `building`, so a stuck or unwanted build has an exit). The
-  // profit-bank sweep (G2) is deliberately NOT invoked here: it needs a
-  // realized-gain valuation from live position reads, which paper mode does
-  // not have — wiring it to a client-supplied gain would trust the caller to
-  // price its own sweep.
+  // Close admission never closes financial state. Only a durable bound paper receipt can settle zero inventory.
+  // No reserve sweep is inferred from a client gain or a projection.
   app.post('/v1/lp/positions/:positionId/close', async (request, reply) => {
     const scope = requireUser(request, reply);
     if (!scope) return;
     const { positionId } = request.params as { positionId: string };
 
-    const position = await getLpPosition(scope, positionId);
-    if (!position) {
-      return reply.code(404).send({ error: 'position not found' });
-    }
-    if (position.state === 'closed') {
-      return reply.code(409).send({ error: 'position is already closed' });
-    }
-
+    if (!deps.operations?.exactPaper) return reply.code(503).send({ error: 'LP exact durable receipt operations unavailable' });
+    const body = request.body;
+    if (!keysOnly(body, ['operationKey']) || typeof body.operationKey !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.operationKey)) return reply.code(400).send({ error: 'operationKey required' });
+    const key = body.operationKey;
     try {
-      await transitionLpPosition(scope, positionId, {
-        toState: 'closed',
-        reason: 'user close (dashboard)'
-      });
-    } catch (error) {
-      return reply.code(409).send({
-        error: 'transition refused', requestId: request.id
-      });
+      return await requestLpOperation(deps.operations, scope, { positionId, operationKey: key, kind: 'close' });
+    } catch {
+      return reply.code(409).send({ error: 'LP operation refused', requestId: request.id });
     }
-    return { positionId, state: 'closed' };
   });
 
   // Tracked-wallet on-ramp (Track D). Tracked wallets are external addresses,

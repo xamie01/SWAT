@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock('@swat/db', () => ({
+  scopedQuery: (scope: { userId: string }, sql: string, values: unknown[]) => { if (scope.userId !== '11111111-1111-4111-8111-111111111111') throw new Error('tenant mismatch'); return fixture.query(sql, values); },
   query: fixture.query,
   listAuthWallets: fixture.wallets,
   forUser: (userId: string) => ({ userId }),

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJupiterJitoRuntime, type JupiterJitoRuntimeOptions, type JupiterJitoSubmitInput } from './jupiter-jito-runtime.js';
 
-// Entire transport barrel is mocked: no source barrel, RPC, credentials or keys.
+// Transport effects are mocked; source shared exports remain for DB receipt validation.
 const transport = vi.hoisted(() => ({
   buildJupiterSwap: vi.fn(), submitJitoBundle: vi.fn(), getJitoBundleStatus: vi.fn(),
   getJitoTipFloor: vi.fn(), getJitoTipAccounts: vi.fn()
 }));
-vi.mock('@swat/shared', () => ({ ...transport,
+vi.mock('@swat/shared', async original => ({ ...await original<typeof import('@swat/shared')>(), ...transport,
   selectJitoTip: () => 100, selectTipAccount: () => 'opaque-tip-recipient',
   fetchTokenPriceUsd: vi.fn(async () => null), lamportsToUsd: vi.fn(() => null)
 }));
@@ -15,7 +15,9 @@ const execution = { executionId: 'execution-one', clientOrderId: 'swat-one', use
 const input = {
   clientOrderId: execution.clientOrderId, execution,
   signerPublicKey: 'opaque-account',
-  intent: { inputMint: 'mint-in', outputMint: 'mint-out', inputAmountRaw: '1000', slippageBps: 50, recipient: 'opaque-account' },
+  intent: { inputMint: 'mint-in', outputMint: 'mint-out', inputAmountRaw: '1000', slippageBps: 50, recipient: 'opaque-account',
+    minimumOutputAmountRaw: '896', tokenDecimals: 3, maxFeeLamports: '200', maxFeeUsd: '1' },
+  attempt: { executionId: execution.executionId, userId: execution.userId, fence: '1', policyRevision: 'fixture-revision', riskEpoch: null },
   quote: { inputMint: 'mint-in', outputMint: 'mint-out', inAmount: '1000', outAmount: '900', otherAmountThreshold: '896', swapMode: 'ExactIn', slippageBps: 50, priceImpactPct: '0', routePlan: [], contextSlot: 1 }
 } satisfies JupiterJitoSubmitInput;
 
@@ -33,7 +35,8 @@ function fixture() {
   };
   const options = {
     pendingStore: store, jito: { baseUrl: 'https://transport.invalid' },
-    signTransaction: vi.fn(async (bytes: string) => bytes === 'opaque-swap' ? 'opaque-signed-swap' : 'opaque-signed-tip'),
+    signTransaction: vi.fn(async (bytes: string) => bytes === 'opaque-swap' ? 'c3dhcA==' : 'dGlw'),
+    authorizeSignedBundle: vi.fn(async () => true),
     buildTipTransaction: vi.fn(async () => 'opaque-tip'),
     extractSignatures: vi.fn(async () => ['opaque-swap-signature', 'opaque-tip-signature']),
     simulation: { evaluate: vi.fn(async () => ({ kind: 'submit' as const, outcome: { kind: 'proceed' as const, unitsConsumed: 1, slot: 1 } })) },
@@ -96,7 +99,7 @@ describe('package17 durable Jito public submit seam', () => {
     const { runtime, store } = fixture();
     store.save.mockRejectedValue(new Error('metadata store unavailable'));
     expect((await runtime.submit(input)).status).toBe('submission_unknown');
-    expect(await store.findPending()).toMatchObject({ bundleId: null, signedTransactions: ['opaque-signed-swap', 'opaque-signed-tip'] });
+    expect(await store.findPending()).toMatchObject({ bundleId: null, signedTransactions: ['c3dhcA==', 'dGlw'] });
   });
 
   it('does not query a placeholder or conclude non-fill from blockhash expiry', async () => {
@@ -119,7 +122,9 @@ describe('package17 durable Jito public submit seam', () => {
   it('acknowledges only after a quantified identity-bound accounting commit, replaying DB failure', async () => {
     const { options, store } = fixture();
     const readReceipt = vi.fn(async () => ({ execution, signature: 'opaque-swap-signature', slot: 10,
-      inputMint: 'mint-in', outputMint: 'mint-out', inputAmountRaw: '1000', outputAmountRaw: '899', feeLamports: '105', feeUsd: '0.000021' }));
+      inputMint: 'mint-in', outputMint: 'mint-out', inputAmountRaw: '1000', outputAmountRaw: '899', feeLamports: '105', feeUsd: '0.000021',
+      recipient: 'opaque-account', confirmationState: 'finalized' as const, occurredAt: new Date('2026-11-13T00:00:01Z'),
+      quoteUsd: '1', baseQuantity: '1' }));
     const runtime = createJupiterJitoRuntime({ ...options, readReceipt });
     await runtime.submit(input);
     const observation = (await runtime.sweep(101))[0]!;

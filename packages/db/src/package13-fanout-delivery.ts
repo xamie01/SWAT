@@ -2,6 +2,7 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import type { Chain } from '@swat/shared';
 import { resolveChainAddress } from '@swat/shared';
 import { getMasterSellAvailabilityWithClient } from './lot-allocation.js';
+import { assertCanonicalFanoutDescriptor } from './fanout-worker-descriptor.js';
 
 /** Requires the UNAPPLIED package13-fanout-schema.sql proposal. No fallback.
  * Every operation belongs to the caller's transaction. Never BEGIN/COMMIT,
@@ -138,15 +139,8 @@ export async function completeFanoutEnumeration(client: PoolClient, claim: Fanou
     seen.add(key); jobs.add(recipient.jobId);
     if (recipient.userId === null) operators += 1;
     if (!recipient.descriptor || Array.isArray(recipient.descriptor) || typeof recipient.descriptor !== 'object') throw new Error('Invalid fanout descriptor');
-    const descriptor = recipient.descriptor;
-    const data = descriptor.data as Record<string, unknown> | undefined;
-    const options = descriptor.options as Record<string, unknown> | undefined;
-    if (descriptor.chain !== input.chain || data?.signalId !== claim.signalId
-      || data?.sourceTradeId !== claim.sourceTradeId || (data?.userId ?? null) !== recipient.userId
-      || data?.executionMode !== recipient.executionMode || data?.targetAccount !== recipient.targetAccount
-      || options?.jobId !== recipient.jobId) {
-      throw new Error('Fanout descriptor does not match recipient identity');
-    }
+    assertCanonicalFanoutDescriptor(recipient.descriptor, { ...recipient,
+      sourceTradeId: claim.sourceTradeId, chain: input.chain });
   }
   const excluded = new Set<string | null>();
   const included = new Set(input.recipients.map(recipient => recipient.userId));
@@ -169,9 +163,10 @@ export async function completeFanoutEnumeration(client: PoolClient, claim: Fanou
   if (fenced.rows.length !== 1) throw new Error('Fanout enumeration lease lost');
   for (const recipient of input.recipients) {
     await client.query(
-      `INSERT INTO source_fanout_deliveries (signal_id, user_id, execution_mode, target_account, job_id, descriptor)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-      [...identityValues(recipient), recipient.jobId, JSON.stringify(recipient.descriptor)]
+      `INSERT INTO source_fanout_deliveries (signal_id, user_id, execution_mode, target_account, job_id, descriptor, execution_id)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
+      [...identityValues(recipient), recipient.jobId, JSON.stringify(recipient.descriptor),
+        (recipient.descriptor.data as Record<string, unknown>).copyExecutionId]
     );
   }
 }
@@ -257,6 +252,7 @@ export async function readFanoutRecipientScopeWithClient(client: PoolClient, inp
   for (const value of [input.tokenMint, input.masterWalletAddress, input.paperTargetAccount]) {
     if (resolveChainAddress(value).chain !== input.chain) throw new Error('Fanout scope chain mismatch');
   }
+  if (input.platformMode === 'off') return refused('chain-execution-off');
   if (!['paper', 'live', 'live+shadow'].includes(input.platformMode)) return refused('chain-execution-unavailable');
   let requestedMode = input.platformMode;
   if (userId !== null) {
@@ -268,13 +264,19 @@ export async function readFanoutRecipientScopeWithClient(client: PoolClient, inp
        WHERE account.id = $1 FOR SHARE OF account`, [userId, input.chain, input.masterWalletAddress]
     );
     const row = policy.rows[0];
-    if (!row || row.status !== 'active') return refused('account-not-active');
+    if (!row) return refused('account-unavailable');
+    if (!['active', 'suspended', 'deleted'].includes(row.status)) return refused('account-status-unreadable');
+    if (row.status !== 'active') return refused('account-not-active');
+    if (row.killed === true) return refused('user-killed');
     if (row.killed !== false) return refused('user-killed-or-unreadable');
-    if (row.auto_execute !== true) return refused('auto-execute-off');
+    if (row.auto_execute === false) return refused('auto-execute-off');
+    if (row.auto_execute !== true) return refused('execution-settings-unreadable');
+    if (!['active', 'winding_down', 'ended'].includes(row.state)) return refused('subscription-unreadable');
     if (row.state !== 'active' && !(row.state === 'winding_down' && input.direction === 'sell')) {
       return refused('subscription-not-mirroring');
     }
-    if (!['paper', 'live'].includes(row.mode)) return refused('user-chain-execution-off');
+    if (row.mode === 'off') return refused('user-chain-execution-off');
+    if (!['paper', 'live'].includes(row.mode)) return refused('user-chain-execution-unreadable');
     requestedMode = row.mode === 'paper' || input.platformMode === 'paper' ? 'paper' : 'live';
   }
   if (input.direction === 'sell') {
@@ -342,11 +344,77 @@ export async function claimFanoutDelivery(client: PoolClient, identity: FanoutDe
   const now = time(input.now);
   const owner = text('delivery owner', input.owner, 128);
   const leaseUntil = new Date(now.getTime() + duration(input.leaseMs));
+  // Unlocked discovery only. Every repair follows the worker's position ->
+  // execution -> delivery order, including legacy quarantine. No queue terms
+  // supply canonical source scope and no historical binding is backfilled.
+  const discovered = (await client.query<FanoutDeliveryRow & { scope_chain: Chain; scope_token_mint: string }>(
+    `SELECT delivery.*, source.chain AS scope_chain, source.token_mint AS scope_token_mint
+     FROM source_fanout_deliveries delivery
+     JOIN source_fanout_batches batch ON batch.signal_id = delivery.signal_id
+     JOIN source_trades source ON source.id = batch.source_trade_id
+     WHERE delivery.signal_id = $1 AND delivery.user_id IS NOT DISTINCT FROM $2::uuid
+       AND delivery.execution_mode = $3 AND delivery.target_account = $4`, values)).rows[0];
+  if (!discovered) throw new Error('Missing durable fanout obligation');
+  if (discovered.state === 'completed' || discovered.state === 'reconciliation_required') return null;
+  if (resolveChainAddress(identity.targetAccount).chain !== discovered.scope_chain) {
+    throw new Error('Fanout discovered source chain mismatch');
+  }
+  const executionScope = (await client.query<{ id: string; target_account: string; chain: Chain; token_mint: string; user_id: string | null }>(
+    `SELECT id, target_account, chain, token_mint, user_id FROM copy_executions
+     WHERE ${IDENTITY} OR id = $5::uuid ORDER BY id`, [...values, discovered.execution_id])).rows;
+  const positionKeys = new Set<string>();
+  for (const scope of [{ target_account: identity.targetAccount, chain: discovered.scope_chain,
+    token_mint: discovered.scope_token_mint, user_id: identity.userId }, ...executionScope]) {
+    if (resolveChainAddress(scope.target_account).chain !== scope.chain
+      || resolveChainAddress(scope.target_account).prefixed !== scope.target_account
+      || resolveChainAddress(scope.token_mint).chain !== scope.chain
+      || resolveChainAddress(scope.token_mint).prefixed !== scope.token_mint
+      || (scope.user_id !== null && uuid('position userId', scope.user_id) !== scope.user_id)) {
+      throw new Error('Fanout discovered canonical position scope mismatch');
+    }
+    positionKeys.add(JSON.stringify([scope.target_account, scope.chain, scope.token_mint, scope.user_id]));
+  }
+  for (const key of [...positionKeys].sort()) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
+  }
+  const executions = await client.query<{ id: string; target_account: string; chain: Chain; token_mint: string;
+    user_id: string | null; proven_non_submitted: boolean }>(
+    `SELECT id, target_account, chain, token_mint, user_id,
+      (submission_id IS NULL AND submission_attempts = 0 AND confirmed_base_quantity = 0
+       AND state IN ('requested','simulated','failed','cancelled')
+       AND NOT EXISTS (SELECT 1 FROM copy_execution_evidence evidence WHERE evidence.execution_id = copy_executions.id)
+       AND NOT EXISTS (SELECT 1 FROM copy_execution_worker_attempts attempt WHERE attempt.execution_id = copy_executions.id)
+      ) AS proven_non_submitted FROM copy_executions WHERE ${IDENTITY} OR id = $5::uuid ORDER BY id FOR UPDATE`,
+    [...values, discovered.execution_id]);
+  if (executions.rows.some(scope => !positionKeys.has(JSON.stringify([
+    scope.target_account, scope.chain, scope.token_mint, scope.user_id])))) {
+    throw new Error('Fanout execution position scope changed after discovery');
+  }
   const result = await client.query<FanoutDeliveryRow>(
     `SELECT *, fence::text AS fence FROM source_fanout_deliveries WHERE ${IDENTITY} FOR UPDATE`, values
   );
   const row = result.rows[0];
   if (!row) throw new Error('Missing durable fanout obligation');
+  if (row.execution_id !== discovered.execution_id || row.job_id !== discovered.job_id
+    || JSON.stringify(row.descriptor) !== JSON.stringify(discovered.descriptor)) {
+    throw new Error('Fanout immutable delivery changed after discovery');
+  }
+  if (row.state === 'completed' || row.state === 'reconciliation_required') return null;
+  let validDescriptor = false;
+  try {
+    const data = row.descriptor?.data as Record<string, unknown> | undefined;
+    const executionId = assertCanonicalFanoutDescriptor(row.descriptor, { ...identity,
+      sourceTradeId: String(data?.sourceTradeId ?? ''), chain: resolveChainAddress(identity.targetAccount).chain,
+      jobId: row.job_id });
+    validDescriptor = row.execution_id === executionId;
+  } catch { /* Immutable legacy comparison terms are quarantined, never rebuilt. */ }
+  if (!validDescriptor) {
+    const clean = row.state !== 'claimed' && executions.rows.every(execution => execution.proven_non_submitted === true);
+    await client.query(`UPDATE source_fanout_deliveries SET state = $5, lease_owner = NULL, lease_until = NULL,
+      last_reason = 'legacy canonical descriptor unavailable; immutable terms quarantined', updated_at = $6
+      WHERE ${IDENTITY}`, [...values, clean ? 'blocked' : 'reconciliation_required', now]);
+    return null;
+  }
   if (row.state === 'claimed') {
     if (!row.lease_until || row.lease_until <= now) {
       await client.query(`UPDATE source_fanout_deliveries SET state = 'reconciliation_required',
@@ -355,18 +423,11 @@ export async function claimFanoutDelivery(client: PoolClient, identity: FanoutDe
     }
     return null;
   }
-  if (row.state === 'completed' || row.state === 'reconciliation_required') return null;
   if (row.state !== 'pending' && row.state !== 'queued' && row.state !== 'blocked') {
     throw new Error('Unknown fanout delivery state');
   }
-  // A previous worker can leave effects behind even in a blocked/queued row.
-  // Denial cannot erase submitted, partial or economically settled work.
-  const executions = await client.query<{ id: string; proven_non_submitted: boolean }>(
-    `SELECT id, (submission_id IS NULL AND submission_attempts = 0 AND confirmed_base_quantity = 0
-       AND state IN ('requested', 'simulated', 'failed', 'cancelled')
-       AND NOT EXISTS (SELECT 1 FROM copy_execution_evidence evidence WHERE evidence.execution_id = copy_executions.id)
-     ) AS proven_non_submitted FROM copy_executions WHERE ${IDENTITY} FOR SHARE`, values
-  );
+  // Execution proof was read under its lock BEFORE the delivery lock. No
+  // execution-row lock may be acquired while retaining only a delivery lock.
   if (executions.rows.some(execution => execution.proven_non_submitted !== true)) {
     await client.query(`UPDATE source_fanout_deliveries SET state = 'reconciliation_required',
       lease_owner = NULL, lease_until = NULL, last_reason = 'existing execution requires economic reconciliation',
@@ -442,9 +503,10 @@ export async function settleFanoutDelivery(client: PoolClient, claim: FanoutDeli
     if (executions.rows.length !== 0) throw new Error('Existing execution must be classified before blocking delivery');
   }
   const result = await client.query(
-    `UPDATE source_fanout_deliveries SET state = $7, last_reason = $8, execution_id = $9,
+    `UPDATE source_fanout_deliveries SET state = $7, last_reason = $8, execution_id = COALESCE(execution_id, $9),
        lease_owner = NULL, lease_until = NULL, updated_at = $10
      WHERE ${IDENTITY} AND lease_owner = $5 AND fence = $6::bigint AND state = 'claimed'
+       AND ($9::uuid IS NULL OR execution_id = $9)
        AND lease_until > $10 RETURNING signal_id`,
     [...values, text('delivery owner', claim.owner, 128), claim.fence, input.outcome, text('delivery outcome reason', input.reason), executionId, now]
   );

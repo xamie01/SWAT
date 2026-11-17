@@ -15,7 +15,7 @@ import {
   persistDiscoveredWalletBackfill,
   listPendingDiscoveryBackfills,
   acknowledgeDiscoveryBackfill
-} from '../../../packages/db/src/discovery-queries.js';
+} from '@swat/db';
 import { createDiscoveryRunner } from './runner.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';

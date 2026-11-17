@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "scope": "Manually reviewed literal-file configs; import review remains required. Not a sandbox.",
+  "configs": {
+    "threats/build-completion-20261116-sequential/final-regressions.config.ts": "f1fc18c5d823b254afe404145d39d8accd28a22c61445f0d9a41db4e84abc65f",
+    "threats/build-completion-20261116-sequential/program.config.ts": "3d09c48cd08f990e94f041818178f8e4f28cb5c35784308ad0e3e677e0f711fe",
+    "threats/build-completion-20261116-sequential/web-api.config.ts": "55c7b8f4fc0de7b6df1460ddf72e55c957fbf73e98e78bd323cc190003dc8d3c",
+    "threats/build-completion-20261116-sequential/lp-neighbors.config.ts": "c37eb81bc943d6212c21e45a0f9e16a589b90226128e7bcd66c87d47d77bd639",
+    "threats/build-completion-20261116-sequential/lp.config.ts": "e8455664db2590d1c43d23e3e14584f831d52558f5e89623c88050a3cdc81761",
+    "threats/build-completion-20261116-sequential/jito-neighbors.config.ts": "a77379611bd3022f9149d9723fe78f118eb950db4e81fae8a937155a3534efa5",
+    "threats/build-completion-20261116-sequential/core-review-repairs.config.ts": "ac632433686209b06d18e413150d1a9e26f05a3a75446cdfe14e7ce948a64c31",
+    "threats/build-completion-20261116-sequential/jito.config.ts": "d13dc1be3a3faf6136a83d677bf77bde2ba56858a9171392c654d348902a3f8a",
+    "threats/build-completion-20261116-sequential/core-neighbors.config.ts": "93d7983bb3c56510b77bb604569b18eaea76037532cebdfad865f18c888ad468",
+    "threats/build-completion-20261116-sequential/core.config.ts": "4853f8d1d061bac67c056289f015a8845e851222c5617f7fde900019b483a776",
+    "threats/build-completion-20261116-sequential/api-baseline.config.ts": "6037dc5dff31d1219e3c0052836caefb78bcabf271df30a57b3ccce868782942",
+    "threats/build-completion-20261116-sequential/build-neighbors.config.ts": "7afb61e8fc654d1845a75702ac856a497904ccfa9ac0198d02635bcd794e06f2"
+  }
+}

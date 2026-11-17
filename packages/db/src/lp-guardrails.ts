@@ -1,6 +1,5 @@
 import type { LpChain } from '@swat/shared';
-import { query } from './client.js';
-import type { UserScope } from './tenancy.js';
+import { scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
 
 /**
  * Per-user LP risk guardrails (`059`, Track A3 / Track G).
@@ -52,7 +51,7 @@ function toConfig(row: GuardrailRow): LpGuardrailConfig {
 }
 
 export async function getLpGuardrailConfig(scope: UserScope): Promise<LpGuardrailConfig | null> {
-  const rows = await query<GuardrailRow>(
+  const rows = await scopedQuery<GuardrailRow>(scope,
     `SELECT ${GUARDRAIL_COLUMNS} FROM lp_guardrail_configs WHERE user_id = $1`,
     [scope.userId]
   );
@@ -98,7 +97,10 @@ export async function upsertLpGuardrailConfig(
   scope: UserScope,
   input: UpsertLpGuardrailInput
 ): Promise<LpGuardrailConfig> {
-  const existing = await getLpGuardrailConfig(scope);
+  return withTenantTransaction(scope, async client => {
+  await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [scope.userId]);
+  const stored = await client.query<GuardrailRow>(`SELECT ${GUARDRAIL_COLUMNS} FROM lp_guardrail_configs WHERE user_id = $1 FOR UPDATE`, [scope.userId]);
+  const existing = stored.rows[0] ? toConfig(stored.rows[0]) : null;
   const maxPoolAllocationPct =
     input.maxPoolAllocationPct ??
     existing?.maxPoolAllocationPct ??
@@ -111,7 +113,7 @@ export async function upsertLpGuardrailConfig(
   assertPercent('max_pool_allocation_pct', maxPoolAllocationPct, true);
   assertPercent('profit_bank_pct', profitBankPct, false);
 
-  const rows = await query<GuardrailRow>(
+  const rows = await client.query<GuardrailRow>(
     `INSERT INTO lp_guardrail_configs
        (user_id, max_pool_allocation_pct, profit_bank_pct,
         reserve_sub_vault_chain, reserve_sub_vault_address, updated_at)
@@ -131,5 +133,6 @@ export async function upsertLpGuardrailConfig(
       reserveSubVault?.address ?? null
     ]
   );
-  return toConfig(rows[0]!);
+  return toConfig(rows.rows[0]!);
+  });
 }

@@ -205,6 +205,7 @@ interface RiskSpendRow {
   liability_usd: string;
   policy_epoch: string;
   state: RiskSpendState;
+  valuation_correction_id?: string | null;
 }
 export interface RiskSpendReservation {
   executionId: string;
@@ -241,7 +242,7 @@ function assertRiskSpendScope(scope: RiskSpendScope): void {
   }
 }
 const RISK_SPEND_ROWS_SQL = `SELECT execution_id::text, requested_usd::text,
-       confirmed_usd::text, liability_usd::text, policy_epoch::text, state
+       confirmed_usd::text, liability_usd::text, policy_epoch::text, state, valuation_correction_id
   FROM risk_spend_reservations
  WHERE account = $1 AND chain = $2 AND execution_mode = $3
    AND (state NOT IN ('confirmed', 'released') OR settled_at >= NOW() - INTERVAL '24 hours'
@@ -301,6 +302,8 @@ export async function updateRiskSpendReservation(client: PoolClient, input: Risk
   state: RiskSpendState;
   confirmedUsd: string | null;
   provenNotSubmitted?: boolean;
+  /** Persisted correction ledger identity; cannot be a caller-authorized amount. */
+  valuationCorrectionId?: string;
 }): Promise<RiskSpendReservation> {
   assertRiskSpendScope(input);
   if (!['reserved', 'submitted', 'unknown', 'partial', 'confirmed', 'released'].includes(input.state)) {
@@ -317,10 +320,10 @@ export async function updateRiskSpendReservation(client: PoolClient, input: Risk
     state: string; submission_id: string | null; confirmed_usd: string | null;
     unvalued_count: string; completes_execution: boolean;
   }>(`SELECT execution.state, execution.submission_id,
-      (SELECT SUM(evidence.quote_quantity)::text FROM copy_execution_evidence evidence
+      (SELECT SUM(COALESCE(evidence.effective_quote_usd,0) + COALESCE(evidence.effective_fee_usd,0))::text FROM worker_effective_execution_evidence evidence
        WHERE evidence.execution_id = execution.id AND evidence.confirmation_state IN ('confirmed','finalized')) AS confirmed_usd,
-      (SELECT COUNT(*)::text FROM copy_execution_evidence evidence WHERE evidence.execution_id = execution.id
-       AND evidence.confirmation_state IN ('confirmed','finalized') AND evidence.quote_quantity IS NULL) AS unvalued_count,
+      (SELECT COUNT(*)::text FROM worker_effective_execution_evidence evidence WHERE evidence.execution_id = execution.id
+       AND evidence.confirmation_state IN ('confirmed','finalized') AND (evidence.effective_quote_usd IS NULL OR evidence.effective_fee_usd IS NULL)) AS unvalued_count,
       EXISTS (SELECT 1 FROM copy_execution_evidence evidence WHERE evidence.execution_id = execution.id
        AND evidence.confirmation_state IN ('confirmed','finalized') AND evidence.completes_execution) AS completes_execution
      FROM copy_executions execution WHERE execution.id = $4::uuid AND execution.chain = $2
@@ -331,6 +334,19 @@ export async function updateRiskSpendReservation(client: PoolClient, input: Risk
   if (!evidence) throw new Error('Canonical risk execution ownership/evidence unavailable');
   const previous = riskUsd(row.confirmed_usd);
   const confirmed = input.confirmedUsd === null ? previous : riskUsd(input.confirmedUsd);
+  let correctionAuthorized = false;
+  if (input.valuationCorrectionId) {
+    const authorization = await client.query<{ authorized: boolean }>(`SELECT worker_correction_authorized(correction.correction_id) AS authorized
+      FROM copy_execution_valuation_corrections correction
+      JOIN copy_executions execution ON execution.id = correction.execution_id
+      WHERE correction.correction_id = $5 AND execution.id = $4::uuid
+        AND COALESCE(execution.user_id::text,'operator') = $1 AND execution.chain = $2 AND execution.execution_mode = $3
+        AND correction.user_id IS NOT DISTINCT FROM execution.user_id FOR SHARE OF correction`,
+    [input.account,input.chain,input.executionMode,input.executionId,input.valuationCorrectionId]);
+    correctionAuthorized = authorization.rows[0]?.authorized === true;
+    if (!correctionAuthorized) throw new Error('Risk correction authorization unavailable');
+  }
+  if (confirmed < previous && !correctionAuthorized) throw new Error('Risk cumulative evidence reversal refused');
   if (input.confirmedUsd !== null && (evidence.confirmed_usd === null
       ? confirmed !== 0n : riskUsd(evidence.confirmed_usd) !== confirmed)) {
     throw new Error('Risk USD does not match canonical cumulative evidence');
@@ -339,10 +355,14 @@ export async function updateRiskSpendReservation(client: PoolClient, input: Risk
       || evidence.completes_execution !== true || evidence.unvalued_count !== '0')) {
     throw new Error('Canonical terminal risk evidence is incomplete/unvalued');
   }
-  if (confirmed < previous) throw new Error('Risk cumulative evidence reversal refused');
-  if (row.state === 'confirmed' || row.state === 'released') {
+  if (correctionAuthorized && row.valuation_correction_id === input.valuationCorrectionId
+      && row.state === input.state && confirmed === previous) return riskSpendResult(row);
+  if ((row.state === 'confirmed' || row.state === 'released') && !correctionAuthorized) {
     if (row.state !== input.state || confirmed !== previous) throw new Error('Risk terminal evidence is immutable');
     return riskSpendResult(row);
+  }
+  if (correctionAuthorized && (row.state === 'released' || !['unknown','partial','confirmed'].includes(input.state))) {
+    throw new Error('Correction cannot release or recreate an execution liability');
   }
   if (input.state === 'reserved' && row.state !== 'reserved') throw new Error('Submitted liability cannot return to reserved');
   if (input.state === 'released' && (input.provenNotSubmitted !== true || row.state !== 'reserved'
@@ -355,10 +375,11 @@ export async function updateRiskSpendReservation(client: PoolClient, input: Risk
     ? confirmed : [requested, riskUsd(row.liability_usd), confirmed].reduce((max, n) => n > max ? n : max);
   const updated = await client.query<RiskSpendRow>(
     `UPDATE risk_spend_reservations SET state = $5, confirmed_usd = $6::numeric,
-       liability_usd = $7::numeric, settled_at = CASE WHEN $5 IN ('confirmed','released') THEN NOW() ELSE NULL END
+       liability_usd = $7::numeric, settled_at = CASE WHEN $5 IN ('confirmed','released') THEN NOW() ELSE NULL END,
+       valuation_correction_id = COALESCE($8,valuation_correction_id)
      WHERE account = $1 AND chain = $2 AND execution_mode = $3 AND execution_id = $4::uuid
      RETURNING execution_id::text, state, liability_usd::text, confirmed_usd::text`,
-    [input.account, input.chain, input.executionMode, input.executionId, input.state, riskUsdText(confirmed), riskUsdText(liability)]
+    [input.account, input.chain, input.executionMode, input.executionId, input.state, riskUsdText(confirmed), riskUsdText(liability), input.valuationCorrectionId ?? null]
   );
   if (!updated.rows[0]) throw new Error('Risk reservation update was not persisted');
   return riskSpendResult(updated.rows[0]);

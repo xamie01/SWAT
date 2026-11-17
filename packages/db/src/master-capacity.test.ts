@@ -254,7 +254,8 @@ describe('assessMasterCapacity — crude follower soft-cap', () => {
 
   it('treats an unknown follower count as unassessed, never as zero', () => {
     const decision = assessMasterCapacity(input({ activeFollowerCount: null }));
-    expect(decision.outcome).toBe('admit');
+    expect(decision.outcome).toBe('skip');
+    expect(decision.reasonCode).toBe('capacity-not-assessable');
     expect(decision.internal.followerSoftCap).toBeNull();
     expect(decision.unassessed.map((entry) => entry.reason)).toEqual(['follower-count-unknown']);
   });
@@ -279,16 +280,16 @@ describe('assessMasterCapacity — unassessable primary', () => {
     expect(decision.internal.priceImpact).toBeNull();
   });
 
-  it('fails open with a distinct code when the caller declared admit', () => {
+  it('refuses unknown liquidity even when a legacy caller requested admit', () => {
     const decision = assessMasterCapacity(
       input({
         liquidity: unknownLiquidity('polygon', 'polygon:0xtoken', 'no pre-fan-out book read'),
         policy: { unassessablePolicy: 'admit' }
       })
     );
-    expect(decision.outcome).toBe('admit');
-    expect(decision.reasonCode).toBe('capacity-admitted-unassessed');
-    // An admit under partial information is never reportable as a clean pass.
+    expect(decision.outcome).toBe('skip');
+    expect(decision.reasonCode).toBe('capacity-not-assessable');
+    // Unknown obligations never create free headroom or a clean pass.
     expect(decision.reasonCode).not.toBe('capacity-within-limits');
     expect(decision.unassessed.length).toBeGreaterThan(0);
   });
@@ -326,7 +327,7 @@ describe('assessMasterCapacity — unassessable primary', () => {
     );
   });
 
-  it('records a partial notional sum as a lower bound even when it admits', () => {
+  it('records a partial notional sum as a lower bound and refuses new admission', () => {
     const decision = assessMasterCapacity(
       input({
         observation: {
@@ -337,7 +338,8 @@ describe('assessMasterCapacity — unassessable primary', () => {
         }
       })
     );
-    expect(decision.outcome).toBe('admit');
+    expect(decision.outcome).toBe('skip');
+    expect(decision.reasonCode).toBe('capacity-not-assessable');
     expect(decision.unassessed.map((entry) => entry.reason)).toContain('copy-notional-partial');
     expect(decision.internal.priceImpact?.lowerBound).toBe(true);
   });

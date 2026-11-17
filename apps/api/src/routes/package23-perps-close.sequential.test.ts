@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 vi.mock('@swat/db', () => ({
+  scopedQuery: (_scope: { userId: string }, sql: string, values: unknown[]) => mocks.query(sql, values),
   query: mocks.query, forUser: (userId: string) => ({ userId }),
   findUserById: vi.fn(), resolveSession: vi.fn(), listAuthWallets: vi.fn(),
   isSubscribed: vi.fn(), listTokenWatches: vi.fn(), listWalletSubscriptions: vi.fn(),

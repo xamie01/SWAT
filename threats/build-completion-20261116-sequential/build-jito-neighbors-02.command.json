@@ -1,0 +1,38 @@
+{
+  "label": "build-jito-neighbors-02",
+  "kind": "test",
+  "target": "threats/build-completion-20261116-sequential/jito-neighbors.config.ts",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/root/SWAT/threats/build-completion-20261116-sequential/jito-neighbors.config.ts"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T11:06:45.592011+00:00",
+  "elapsedSeconds": 7.014,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "threats/build-completion-20261116-sequential/jito-neighbors.config.ts": "a77379611bd3022f9149d9723fe78f118eb950db4e81fae8a937155a3534efa5",
+    "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "scripts/build-completion-runner.py": "ad19a4817fbaa42c86b68a6c7dc7bf542ff87fefe6c03a07318adabb48e580d6",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "c9bf289bcea1154b662865a959c3b3111357fad925bc6bbbc0c63435ecdd32b9",
+  "workspaceInputManifest": "threats/build-completion-20261116-sequential/build-jito-neighbors-02.inputs.json",
+  "workspaceInputManifestSha256": "3ab77fd19364eda8580389d02dcac1d10616487dec3430b1cd8251fdc787ae5a",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": "cda1ceb3de16ef5c8fdb4c70f829910b98f2ff2074dc08c629dde285be16bf1c",
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

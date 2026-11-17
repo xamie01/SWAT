@@ -16,9 +16,7 @@ export function deriveSolanaAnchorPda(
   if (cluster !== 'mainnet-beta') throw new Error('Devnet vault deployment is unsupported.');
   try {
     const userPubkey = new PublicKey(userAddress.trim());
-    const progId = new PublicKey(
-      cluster === 'devnet' ? WAKE_SOLANA_DEVNET_PROGRAM_ID : WAKE_SOLANA_MAINNET_PROGRAM_ID
-    );
+    const progId = new PublicKey(WAKE_SOLANA_MAINNET_PROGRAM_ID);
     const [pda, bump] = PublicKey.findProgramAddressSync(
       [new TextEncoder().encode('vault'), userPubkey.toBytes()],
       progId

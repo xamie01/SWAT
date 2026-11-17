@@ -46,6 +46,10 @@ describe('runCloseAllSweep', () => {
         tokenMint: 'solana:token-1',
         chain: 'solana',
         sellTokenAmount: 10,
+        requestedBaseQuantity: '10',
+        masterWalletAddress: 'solana:master-1',
+        targetAccount: 'solana:target-1',
+        acquisitionExecutionMode: 'paper',
         jobId: 'close-all-user-1-lot-1'
       },
       {
@@ -56,13 +60,19 @@ describe('runCloseAllSweep', () => {
         tokenMint: 'polygon:token-2',
         chain: 'polygon',
         sellTokenAmount: 25,
+        requestedBaseQuantity: '25',
+        masterWalletAddress: 'polygon:master-2',
+        targetAccount: 'polygon:target-2',
+        acquisitionExecutionMode: 'paper',
         jobId: 'close-all-user-2-lot-2'
       }
     ];
 
     const claimExit = vi.fn()
       .mockResolvedValueOnce({ execution: dummyExecution('exec-1', 'requested'), created: true })
-      .mockResolvedValueOnce({ execution: dummyExecution('exec-2', 'submitted'), created: false });
+      .mockResolvedValueOnce({ execution: { ...dummyExecution('exec-2', 'submitted'), userId: 'user-2',
+        exitLotId: 'lot-2', signalId: 'sig-2', chain: 'polygon', tokenMint: 'polygon:token-2',
+        targetAccount: 'polygon:target-2', requestedBaseQuantity: '25', reservedBaseQuantity: '25' }, created: false });
 
     const enqueueSell = vi.fn().mockResolvedValue(true);
     const endCompleted = vi.fn().mockResolvedValue(1);
@@ -77,7 +87,7 @@ describe('runCloseAllSweep', () => {
     expect(result).toEqual({
       scanned: 2,
       claimed: 2,
-      queued: 2,
+      queued: 1,
       ended: 1,
       failed: 0
     });
@@ -91,7 +101,7 @@ describe('runCloseAllSweep', () => {
       requestedBaseQuantity: '10'
     });
 
-    expect(enqueueSell).toHaveBeenCalledTimes(2);
+    expect(enqueueSell).toHaveBeenCalledTimes(1);
     expect(enqueueSell).toHaveBeenNthCalledWith(1, {
       signalId: 'sig-1',
       tokenMint: 'solana:token-1',
@@ -101,6 +111,10 @@ describe('runCloseAllSweep', () => {
       closeAll: true,
       exitLotId: 'lot-1',
       copyExecutionId: 'exec-1',
+      requestedBaseQuantity: '10',
+      masterWalletAddress: 'solana:master-1',
+      targetAccount: 'solana:target-1',
+      acquisitionExecutionMode: 'paper',
       score: 100
     }, 'close-all-user-1-lot-1', 'solana');
 
@@ -117,6 +131,10 @@ describe('runCloseAllSweep', () => {
         tokenMint: 'solana:token-1',
         chain: 'solana',
         sellTokenAmount: 10,
+        requestedBaseQuantity: '10',
+        masterWalletAddress: 'solana:master-1',
+        targetAccount: 'solana:target-1',
+        acquisitionExecutionMode: 'paper',
         jobId: 'close-all-user-1-lot-1'
       }
     ];
@@ -152,6 +170,10 @@ describe('runCloseAllSweep', () => {
         tokenMint: 'solana:token-1',
         chain: 'solana',
         sellTokenAmount: 10,
+        requestedBaseQuantity: '10',
+        masterWalletAddress: 'solana:master-1',
+        targetAccount: 'solana:target-1',
+        acquisitionExecutionMode: 'paper',
         jobId: 'close-all-user-1-lot-1'
       },
       {
@@ -162,13 +184,19 @@ describe('runCloseAllSweep', () => {
         tokenMint: 'solana:token-2',
         chain: 'solana',
         sellTokenAmount: 5,
+        requestedBaseQuantity: '5',
+        masterWalletAddress: 'solana:master-2',
+        targetAccount: 'solana:target-2',
+        acquisitionExecutionMode: 'paper',
         jobId: 'close-all-user-2-lot-2'
       }
     ];
 
     const claimExit = vi.fn()
       .mockRejectedValueOnce(new Error('Lock contention'))
-      .mockResolvedValueOnce({ execution: dummyExecution('exec-2', 'requested'), created: true });
+      .mockResolvedValueOnce({ execution: { ...dummyExecution('exec-2', 'requested'), userId: 'user-2',
+        exitLotId: 'lot-2', signalId: 'sig-2', tokenMint: 'solana:token-2',
+        targetAccount: 'solana:target-2', requestedBaseQuantity: '5', reservedBaseQuantity: '5' }, created: true });
 
     const enqueueSell = vi.fn().mockResolvedValue(true);
     const endCompleted = vi.fn().mockResolvedValue(0);

@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { lpApi } from '../../../lib/api.js';
-import { describeApiError } from '../../../lib/api-error-message.js';
+import { loadingObservation, observe, type Observation } from '../../../lib/portfolio-model.js';
+import { lpBuilderHref, lpListState, recordedRiskNotice } from '../../../lib/lp-observation.js';
 
 type Chain = 'All' | 'solana' | 'robinhood-chain' | 'base' | 'ethereum' | 'bsc';
 
@@ -31,28 +32,23 @@ interface PoolItem {
 export default function LpDiscoverPage() {
   const [selectedChain, setSelectedChain] = useState<Chain>('All');
   const [showHotOnly, setShowHotOnly] = useState(false);
-  const [pools, setPools] = useState<PoolItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [observation, setObservation] = useState<Observation<PoolItem[]>>(loadingObservation);
+  const readVersion = useRef(0);
+  const pools = observation.state === 'observed' ? observation.data : [];
+  const state = lpListState(observation);
 
   const fetchPools = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (showHotOnly) {
-        const queryChain = selectedChain === 'All' ? '' : `?chain=${selectedChain}`;
-        const res = await lpApi.get<{ newLaunches: PoolItem[] }>(`/v1/lp/new-launches${queryChain}`);
-        setPools(res.newLaunches ?? []);
-      } else {
-        const queryChain = selectedChain === 'All' ? '' : `?chain=${selectedChain}`;
-        const res = await lpApi.get<{ pools: PoolItem[] }>(`/v1/lp/discover${queryChain}`);
-        setPools(res.pools ?? []);
-      }
-    } catch (err) {
-      setError(describeApiError(err, 'Failed to fetch LP pools'));
-    } finally {
-      setLoading(false);
-    }
+    const version = ++readVersion.current;
+    setObservation(loadingObservation());
+    const result = await observe(async () => {
+      const queryChain = selectedChain === 'All' ? '' : `?chain=${selectedChain}`;
+      const res = showHotOnly
+        ? (await lpApi.get<{ newLaunches: PoolItem[] }>(`/v1/lp/new-launches${queryChain}`)).newLaunches
+        : (await lpApi.get<{ pools: PoolItem[] }>(`/v1/lp/discover${queryChain}`)).pools;
+      if (!Array.isArray(res)) throw new Error('Malformed pool observation');
+      return res;
+    }, 'Pool observation unavailable');
+    if (readVersion.current === version) setObservation(result);
   }, [selectedChain, showHotOnly]);
 
   useEffect(() => {
@@ -66,14 +62,14 @@ export default function LpDiscoverPage() {
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <h1 className="text-lg sm:text-xl font-bold text-primary tracking-tight">
-              Concentrated Pool Scanner
+              Concentrated Pool Observations
             </h1>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/20 text-primary border border-primary/30 uppercase">
-              Live Feed
+              Recorded Feed
             </span>
           </div>
           <p className="text-xs text-on-surface-variant max-w-2xl leading-relaxed">
-            Real-time scanner across Meteora DLMM, Raydium, Uniswap v3 & PancakeSwap v3 with volume-to-liquidity velocity and Rug Shield protection.
+            Stored pool observations across LP networks. Freshness, risk protection, runtime valuation and live provider acceptance are not established by this feed.
           </p>
         </div>
 
@@ -94,7 +90,7 @@ export default function LpDiscoverPage() {
             className="px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-container border border-border-subtle text-on-surface-variant hover:text-primary flex items-center gap-1.5 transition-colors"
           >
             <span className="material-symbols-outlined text-[16px]">refresh</span>
-            <span>Scan</span>
+            <span>Refresh observations</span>
           </button>
         </div>
       </div>
@@ -119,24 +115,13 @@ export default function LpDiscoverPage() {
         ))}
       </div>
 
-      {error && (
-        <div className="p-3 bg-red-950/40 border border-red-500/30 text-red-300 rounded-lg text-xs font-mono">
-          {error}
-        </div>
-      )}
-
-      {/* Pools Container */}
-      {loading ? (
-        <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center text-xs text-on-surface-variant font-mono">
-          Scanning on-chain liquidity pools and computing active TVL...
-        </div>
-      ) : pools.length === 0 ? (
-        <div className="bg-surface-container-lowest border border-border-subtle rounded-xl p-10 text-center space-y-2">
-          <p className="text-xs font-bold text-on-surface">No Pools Found</p>
-          <p className="text-[11px] text-on-surface-variant">
-            Try switching chains or toggling Hot Launches off to see all available liquidity pools.
-          </p>
-        </div>
+      {/* Mutually exclusive observation states; failed reads are never empty records. */}
+      {state === 'loading' ? (
+        <div role="status" className="border rounded-xl p-10 text-center text-xs">Loading recorded pool observations…</div>
+      ) : state === 'unavailable' ? (
+        <div role="alert" className="border rounded-xl p-10 text-center text-xs">{observation.error ?? 'Pool observation unavailable'}. This is not an empty pool list.</div>
+      ) : state === 'empty' ? (
+        <div className="border rounded-xl p-10 text-center text-xs">No recorded pools in the successful observation for this filter.</div>
       ) : (
         <>
           {/* Mobile View: Cards */}
@@ -164,15 +149,7 @@ export default function LpDiscoverPage() {
                     </div>
 
                     <div className="flex flex-col items-end gap-1">
-                      {p.riskScore !== null && p.riskScore <= 30 ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          PASSED ({p.riskScore})
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                          AUDIT {p.riskScore ?? 'N/A'}
-                        </span>
-                      )}
+                      <span className="px-2 py-0.5 rounded text-[10px] border text-on-surface-variant">{recordedRiskNotice(p.riskScore)}</span>
                       {p.isNewLaunch && (
                         <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                           {p.ageHours}h new
@@ -186,19 +163,19 @@ export default function LpDiscoverPage() {
                     <div>
                       <span className="text-[9px] text-on-surface-variant uppercase block">Fee APR</span>
                       <span className="text-xs font-bold text-emerald-400">
-                        {p.feeApr24h !== null ? `${p.feeApr24h.toFixed(1)}%` : '0.0%'}
+                        {p.feeApr24h !== null ? `${p.feeApr24h.toFixed(1)}%` : 'Unassessed'}
                       </span>
                     </div>
                     <div>
                       <span className="text-[9px] text-on-surface-variant uppercase block">Active TVL</span>
                       <span className="text-xs font-bold text-on-surface">
-                        {p.activeTvl !== null ? `$${Math.round(p.activeTvl).toLocaleString()}` : '$0'}
+                        {p.activeTvl !== null ? `$${Math.round(p.activeTvl).toLocaleString()}` : 'Unassessed'}
                       </span>
                     </div>
                     <div>
                       <span className="text-[9px] text-on-surface-variant uppercase block">24h Vol</span>
                       <span className="text-xs font-bold text-on-surface">
-                        {p.volume24h !== null ? `$${Math.round(p.volume24h).toLocaleString()}` : '$0'}
+                        {p.volume24h !== null ? `$${Math.round(p.volume24h).toLocaleString()}` : 'Unassessed'}
                       </span>
                     </div>
                   </div>
@@ -212,10 +189,10 @@ export default function LpDiscoverPage() {
 
                   <div className="flex items-center gap-2 pt-1">
                     <Link
-                      href={`/lp/builder?pool=${encodeURIComponent(p.poolAddress)}&chain=${p.chain}&price=${p.currentPrice ?? 1}`}
+                      href={lpBuilderHref(p)}
                       className="flex-1 py-2 rounded-lg bg-primary text-on-primary font-bold text-xs hover:opacity-90 transition-opacity text-center"
                     >
-                      Deploy Ladder
+                      Plan Paper Ladder
                     </Link>
                     <Link
                       href="/lp/copy"
@@ -242,8 +219,8 @@ export default function LpDiscoverPage() {
                     <th className="px-4 py-3 text-right">Active TVL</th>
                     <th className="px-4 py-3 text-right">24h Volume</th>
                     <th className="px-4 py-3 text-right">Dynamic Fee APR</th>
-                    <th className="px-4 py-3 text-center">Rug Shield</th>
-                    <th className="px-4 py-3 text-right">Deploy</th>
+                    <th className="px-4 py-3 text-center">Recorded Risk (unverified)</th>
+                    <th className="px-4 py-3 text-right">Paper Plan</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle">
@@ -269,13 +246,13 @@ export default function LpDiscoverPage() {
                           {p.currentPrice !== null ? `$${p.currentPrice.toFixed(4)}` : 'N/A'}
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
-                          {p.activeTvl !== null ? `$${Math.round(p.activeTvl).toLocaleString()}` : '$0'}
+                          {p.activeTvl !== null ? `$${Math.round(p.activeTvl).toLocaleString()}` : 'Unassessed'}
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
-                          {p.volume24h !== null ? `$${Math.round(p.volume24h).toLocaleString()}` : '$0'}
+                          {p.volume24h !== null ? `$${Math.round(p.volume24h).toLocaleString()}` : 'Unassessed'}
                         </td>
                         <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400">
-                          {p.feeApr24h !== null ? `${p.feeApr24h.toFixed(1)}%` : '0.0%'}
+                          {p.feeApr24h !== null ? `${p.feeApr24h.toFixed(1)}%` : 'Unassessed'}
                           {isMeteora && p.volatilitySurgeIndex && p.volatilitySurgeIndex > 1 && (
                             <span className="text-[10px] text-amber-400 block font-normal">
                               +{p.volatilitySurgeIndex}x dynamic surge
@@ -283,22 +260,14 @@ export default function LpDiscoverPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {p.riskScore !== null && p.riskScore <= 30 ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                              PASSED ({p.riskScore})
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                              AUDIT {p.riskScore ?? 'N/A'}
-                            </span>
-                          )}
+                          <span className="px-2 py-0.5 rounded text-[10px] border text-on-surface-variant">{recordedRiskNotice(p.riskScore)}</span>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <Link
-                            href={`/lp/builder?pool=${encodeURIComponent(p.poolAddress)}&chain=${p.chain}&price=${p.currentPrice ?? 1}`}
+                            href={lpBuilderHref(p)}
                             className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity inline-block"
                           >
-                            Deploy
+                            Plan Paper
                           </Link>
                         </td>
                       </tr>

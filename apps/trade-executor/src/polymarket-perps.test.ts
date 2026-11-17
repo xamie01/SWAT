@@ -4,12 +4,18 @@ import {
   calculateApproxLiquidationPrice,
   executePerpsOrder,
   openAttributedPerpsSession,
+  requestDurablePerpsReduction,
   POLYMARKET_PERPS_MAX_BUILDER_FEE_RATE
 } from './polymarket-perps.js';
+import { createReducingService } from '@swat/db/dist/reducing-service.js';
+import { withdrawalSqlFixture, financialFundingFixture, reducingMappingFixture } from '@swat/db/dist/withdrawal-test-fixture.js';
 import { OrderSide, PerpsTimeInForce } from '@polymarket/client';
+// Never load provider SDK transitive signing/network modules in guarded offline verification.
+vi.mock('@polymarket/client', () => ({ OrderSide: { BUY: 'BUY', SELL: 'SELL' }, PerpsTimeInForce: { IOC: 'IOC', GTC: 'GTC', FOK: 'FOK' } }));
 
 // Mock DB queries
-vi.mock('@swat/db', () => ({
+vi.mock('@swat/db', async () => ({
+  ...await import('@swat/db/dist/withdrawal-contract.js'),
   upsertPerpsInstrument: vi.fn(),
   upsertPerpsAccount: vi.fn(),
   upsertPerpsPosition: vi.fn(),
@@ -17,6 +23,26 @@ vi.mock('@swat/db', () => ({
   getPerpsInstrumentBySymbol: vi.fn(),
   getPerpsInstruments: vi.fn()
 }));
+
+describe('durable reducing perps admission is separate from opening margin/leverage path', () => {
+  it('uses actual injected durable service without calling SDK/session or marking position closed', async () => {
+    const db = withdrawalSqlFixture();
+    const request = { requestKey: 'reduce-1', chain: 'polygon' as const, network: 'polygon137', venue: 'polymarket-perps' as const,
+      positionId: 'position-1', accountId: 'account-1', assetId: '1', assetScale: 8, mode: 'paper' as const,
+      positionSide: 'SHORT' as const, quantityRaw: '100', maxFeeRaw: '0', feeAssetId: 'USDC', feeAssetScale: 6,
+      feeFundingAccountId: 'fee-account', limitPriceExact: '65000', expectedRevision: 'r1' };
+    const service = createReducingService({ transaction: db.transaction,
+      lockVenueMapping: async(_c,r)=>{const mapping=reducingMappingFixture(r,db.now);db.admitMapping(r,mapping);return mapping;},
+      lockFunding: async(_c,u,b)=>financialFundingFixture(u,b,db.now), lockExposure: async () => ({
+      ...request, userId: 'user-1', heldRaw: '100', revision: 'r1', observedAt: db.now,
+      validUntil: '2026-11-17T12:01:00.000Z', proof: 'fixture-provider-exposure'
+    }) });
+    const record = await requestDurablePerpsReduction('user-1', request, service);
+    expect(record.intent.side).toBe('BUY'); expect(record.status).toBe('queued'); expect(record.completedRaw).toBe('0');
+    expect(db.state().outbox).toHaveLength(1);
+    await expect(requestDurablePerpsReduction('user-1', request)).rejects.toThrow('perps-reducing-durable-ports-unavailable');
+  });
+});
 
 describe('Polymarket Perps Infrastructure', () => {
   describe('evaluatePerpsMarginHealth', () => {

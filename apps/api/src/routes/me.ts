@@ -11,7 +11,7 @@ import {
   subscribeToWallet,
   beginWindDown,
   requestCloseAll,
-  query,
+  scopedQuery,
   getWalletScoringReadiness,
   checkWalletClusterIndependence,
   checkWalletHubStatus,
@@ -24,7 +24,6 @@ import {
   type UserScope
 } from '@swat/db';
 import {
-  buildClobAuthTypedData,
   deriveWakeVaultAddress,
   capabilitiesFor,
   chainSchema,
@@ -35,6 +34,17 @@ import {
   type Chain
 } from '@swat/shared';
 import { requireUser } from '../auth/plugin.js';
+import { registerMeFinancialRoutes, requestMeReduction, financialCapability, type MeFinancialPorts } from './me-financial.js';
+import { registerMeCustodyRoutes, enrollmentCapability, type MeCustodyPorts } from './me-custody.js';
+const spotReducingCapability = () => ({
+  state: 'blocked-on-external-capability', supported: false,
+  unavailableReasons: ['authorized-reducing-handoff-unavailable', 'provider-receipt-reconciliation-unavailable']
+});
+const observedFiniteNumber = (value: string | null): number | null => {
+  if (value === null || value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
 const perpsReducingCapability = () => ({
   state: 'blocked-on-external-capability', supported: false,
   unavailableReasons: ['authorized-reducing-execution-unavailable', 'provider-receipt-reconciliation-unavailable']
@@ -62,6 +72,9 @@ export interface MeRouteOptions {
   readonly tokenDiscoveryQueue: Queue;
   readonly now?: () => Date;
   readonly coolingOffMs?: number;
+  readonly financial?: MeFinancialPorts;
+  readonly custody?: MeCustodyPorts;
+  /** Compatibility only; never durable authority. */
   readonly otpStore?: Map<string, StoredWithdrawalOtp>;
   readonly sendWithdrawalOtpEmail?: (email: string, code: string) => Promise<boolean>;
 }
@@ -108,6 +121,8 @@ export async function registerMeRoutes(
   app: FastifyInstance,
   options: MeRouteOptions
 ): Promise<void> {
+  await registerMeFinancialRoutes(app, options.financial);
+  await registerMeCustodyRoutes(app, options.custody);
   // ─── User Profile & Dashboard State ──────────────────────────────────────────
   app.get('/v1/me/account', async (request, reply) => {
     const scope = requireUser(request, reply);
@@ -125,13 +140,13 @@ export async function registerMeRoutes(
       tierExpiresAt: principal.user.tierExpiresAt
     };
 
-    const balanceRows = await query<{
+    const balanceRows = await scopedQuery<{
       chain: string;
       asset: string;
       amount: string;
       usd: string | null;
       fetched_at: Date;
-    }>(
+    }>(scope,
       `SELECT chain, asset, amount, usd, fetched_at
          FROM user_balances
         WHERE user_id = $1
@@ -144,11 +159,12 @@ export async function registerMeRoutes(
       asset: b.asset,
       balanceUsd: b.usd != null ? Number(b.usd) : null,
       valuationAssessment: b.usd != null ? 'observed-runtime-unverified' : 'unassessed',
+      balanceNativeExact: b.amount,
       balanceNative: Number(b.amount),
       updatedAt: b.fetched_at ? new Date(b.fetched_at).toISOString() : null
     }));
 
-    const subscriptions = await query<{
+    const subscriptions = await scopedQuery<{
       wallet_address: string;
       chain: string | null;
       label: string | null;
@@ -159,7 +175,7 @@ export async function registerMeRoutes(
       win_rate: number | null;
       realized_roi: number | null;
       total_trades: number | null;
-    }>(
+    }>(scope,
       `SELECT uws.wallet_address, COALESCE(w.chain, 'solana') AS chain,
               uws.label, uws.state, uws.membership_slot,
               w.composite_score, w.tier, w.win_rate, w.realized_roi, w.total_trades
@@ -170,11 +186,11 @@ export async function registerMeRoutes(
       [scope.userId]
     );
 
-    const [settingsRow] = await query<{
+    const [settingsRow] = await scopedQuery<{
       killed: boolean;
       max_slippage_bps: number;
       max_position_pct: number;
-    }>(
+    }>(scope,
       `SELECT ues.killed, ues.max_position_pct,
               COALESCE((SELECT uces.max_slippage_bps FROM user_chain_execution_settings uces WHERE uces.user_id = ues.user_id LIMIT 1), 100) AS max_slippage_bps
          FROM user_execution_settings ues
@@ -210,7 +226,7 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
 
-    const positions = await query<{
+    const positions = await scopedQuery<{
       id: string;
       chain: string;
       token_mint: string;
@@ -219,7 +235,7 @@ export async function registerMeRoutes(
       token_symbol: string | null;
       master_wallet_address: string | null;
       latest_price_usd: string | null;
-    }>(
+    }>(scope,
       `SELECT cp.id, cp.chain, cp.token_mint, cp.confirmed_quantity, cp.cost_basis_usd,
               tm.symbol AS token_symbol,
               cpm.master_wallet_address,
@@ -245,26 +261,35 @@ export async function registerMeRoutes(
     );
 
     return reply.send({
+      positionsAssessment: 'observed-runtime-unverified',
+      reducingExecution: { ...spotReducingCapability(), ...financialCapability(!!options.financial?.reducing) },
+      closeAllExecution: spotReducingCapability(),
       positions: positions.map((p) => {
-        const confirmedQuantity = Number(p.confirmed_quantity || 0);
-        const costBasisUsd = Number(p.cost_basis_usd || 0);
-        const entryPriceUsd = confirmedQuantity > 0 ? costBasisUsd / confirmedQuantity : 0;
-        const currentPriceUsd = p.latest_price_usd != null ? Number(p.latest_price_usd) : null;
-        const currentValueUsd = currentPriceUsd != null ? confirmedQuantity * currentPriceUsd : costBasisUsd;
-        const unrealizedPnlUsd = currentPriceUsd != null ? currentValueUsd - costBasisUsd : null;
-        const unrealizedPnlPct = (currentPriceUsd != null && costBasisUsd > 0)
-          ? ((unrealizedPnlUsd! / costBasisUsd) * 100)
-          : null;
+        const confirmedQuantity = observedFiniteNumber(p.confirmed_quantity);
+        const costBasisUsd = observedFiniteNumber(p.cost_basis_usd);
+        const entryPriceUsd = confirmedQuantity !== null && confirmedQuantity > 0 && costBasisUsd !== null ? costBasisUsd / confirmedQuantity : null;
+        const observedPrice = observedFiniteNumber(p.latest_price_usd);
+        const currentPriceUsd = observedPrice !== null && observedPrice >= 0 ? observedPrice : null;
+        const value = currentPriceUsd !== null && confirmedQuantity !== null ? confirmedQuantity * currentPriceUsd : null;
+        const currentValueUsd = value !== null && Number.isFinite(value) ? value : null;
+        const gain = currentValueUsd !== null && costBasisUsd !== null ? currentValueUsd - costBasisUsd : null;
+        const unrealizedPnlUsd = gain !== null && Number.isFinite(gain) ? gain : null;
+        const unrealizedPnlPct = unrealizedPnlUsd !== null && costBasisUsd !== null && costBasisUsd > 0
+          ? unrealizedPnlUsd / costBasisUsd * 100 : null;
 
         return {
           id: p.id,
           chain: p.chain,
           tokenMint: p.token_mint,
           tokenSymbol: p.token_symbol || p.token_mint.slice(0, 8),
+          confirmedQuantityExact: p.confirmed_quantity,
           confirmedQuantity,
+          costBasisUsdExact: p.cost_basis_usd,
           costBasisUsd,
           entryPriceUsd,
           currentPriceUsd,
+          currentValueUsd,
+          valuationAssessment: currentValueUsd !== null ? 'observed-runtime-unverified' : 'unassessed',
           unrealizedPnlUsd,
           unrealizedPnlPct,
           masterWalletAddress: p.master_wallet_address || undefined
@@ -280,11 +305,13 @@ export async function registerMeRoutes(
     if (!requireUser(request, reply)) return;
     return reply.code(503).send({
       code: 'POSITION_EXIT_UNAVAILABLE', supported: false,
-      unavailableReasons: ['authorized-reducing-handoff-unavailable', 'provider-receipt-reconciliation-unavailable'],
+      reducingExecution: spotReducingCapability(),
+      unavailableReasons: spotReducingCapability().unavailableReasons,
       message: 'Financial exit is unavailable here. Exposure was not changed and no order was queued.'
     });
   };
-  app.post('/v1/me/positions/:id/exit', unavailablePositionExit);
+  app.post('/v1/me/positions/:id/exit', (request, reply) => options.financial?.reducing
+    ? requestMeReduction(request, reply, options.financial.reducing, 'spot') : unavailablePositionExit(request, reply));
   app.post('/v1/me/positions/close-all', unavailablePositionExit);
 
   // ─── Non-Custodial Vault & Custody Status ────────────────────────────────────
@@ -297,14 +324,14 @@ export async function registerMeRoutes(
     const authWallets = await listAuthWallets(scope);
     const now = new Date();
 
-    const grants = await query<{
+    const grants = await scopedQuery<{
       chain: string;
       grant_kind: string;
       account_address: string;
       status: string;
       expires_at: Date | null;
       scope_policy: any;
-    }>(
+    }>(scope,
       `SELECT chain, grant_kind, account_address, status, expires_at, scope_policy
          FROM user_execution_grants
         WHERE user_id = $1 AND status = 'active'
@@ -335,9 +362,15 @@ export async function registerMeRoutes(
         status: polyGrant ? 'credentials_recorded' : 'uninitialized',
         executionSupported: false,
         credentialsRecorded: !!polyGrant,
-        geoEligible: true,
-        geoExpiresAt: new Date(now.getTime() + 7 * 86400000).toISOString()
+        geoEligible: null,
+        geoExpiresAt: null,
+        eligibilityAssessment: 'unassessed',
+        enrollmentSupported: false,
+        capabilityState: 'blocked-on-external-capability',
+        unavailableReasons: ['jurisdiction-assessment-unavailable', 'authorized-wrap-only-service-unavailable',
+          'authorized-live-executor-unavailable']
       },
+      localEnrollment: enrollmentCapability(options.custody),
       linkedWallets: authWallets.map((w) => {
         const cooling = isWalletCoolingOff(w.verifiedAt, now);
         return {
@@ -366,7 +399,7 @@ export async function registerMeRoutes(
     const { chain } = parsed.data;
     let updated;
     if (chain === 'all') {
-      updated = await query<{ id: string }>(
+      updated = await scopedQuery<{ id: string }>(scope,
         `UPDATE user_execution_grants
             SET status = 'revoked', revoked_at = NOW()
           WHERE user_id = $1 AND status = 'active'
@@ -374,7 +407,7 @@ export async function registerMeRoutes(
         [scope.userId]
       );
     } else {
-      updated = await query<{ id: string }>(
+      updated = await scopedQuery<{ id: string }>(scope,
         `UPDATE user_execution_grants SET status = 'revoked', revoked_at = NOW()
           WHERE user_id = $1 AND chain = $2 AND status = 'active' RETURNING id`,
         [scope.userId, chain]
@@ -386,7 +419,8 @@ export async function registerMeRoutes(
       revokedCount: updated.length, affectedGrantIds: updated.map(g => g.id),
       localOnly: true, onChainRevoked: false,
       chain,
-      message: `${chain} local grants disabled. No on-chain authority was revoked, vault closed, or rent refunded.`
+      message: updated.length > 0 ? `${updated.length} ${chain} local grant records disabled. No on-chain authority was revoked, vault closed, or rent refunded.`
+        : `No active ${chain} local grant records changed. No on-chain authority was revoked, vault closed, or rent refunded.`
     });
   });
 
@@ -437,89 +471,22 @@ export async function registerMeRoutes(
     } });
   }
 
-  // ─── Polymarket CLOB L2 Authentication ──────────────────────────────────────
-  app.get('/v1/me/vault/polymarket/challenge', async (request, reply) => {
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-
-    const q = request.query as { address?: string };
-    const address = q.address?.trim();
-    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
-      return reply.code(400).send({
-        error: 'Bad Request',
-        message: 'Valid EVM address query param required (0x followed by 40 hex characters)'
-      });
-    }
-
-    const timestampSeconds = Math.floor(Date.now() / 1000);
-    const nonce = 0;
-    const typedData = buildClobAuthTypedData({
-      signerAddress: address,
-      timestampSeconds,
-      nonce
-    });
-
-    return reply.send({
-      address,
-      timestampSeconds,
-      nonce,
-      typedData
-    });
-  });
-
-  const polymarketCredentialsSchema = z.object({
-    address: z.string().trim().regex(/^0x[0-9a-fA-F]{40}$/),
-    signature: z.string().trim().regex(/^0x[0-9a-fA-F]+$/),
-    timestampSeconds: z.number().int().positive(),
-    nonce: z.number().int().nonnegative().default(0)
-  });
-
-  app.post('/v1/me/vault/polymarket/credentials', async (request, reply) => {
+  // E enrollment creates local records, not CLOB credentials or signing challenges.
+  for (const [method, url] of [
+    ['GET', '/v1/me/vault/polymarket/challenge'], ['POST', '/v1/me/vault/polymarket/credentials']
+  ] as const) app.route({ method, url, handler: async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-
-    const parsed = polymarketCredentialsSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Bad Request', issues: parsed.error.issues });
-    }
-
-    const { address, signature, timestampSeconds, nonce } = parsed.data;
-
-    const linked = await listAuthWallets(scope);
-    if (!linked.some(w => w.chainKind === 'evm' && w.address.toLowerCase() === address.toLowerCase())) return reply.code(403).send({ error: 'signer-not-linked' });
-    const age = Math.floor(Date.now() / 1000) - timestampSeconds;
-    if (age < 0 || age > 300) return reply.code(400).send({ error: 'expired-signature-challenge' });
-    try {
-      const { recoverTypedDataAddress } = await import('viem');
-      const typedData = buildClobAuthTypedData({ signerAddress: address, timestampSeconds, nonce });
-      const recovered = await recoverTypedDataAddress({
-        ...typedData,
-        types: { ClobAuth: typedData.types.ClobAuth },
-        message: { ...typedData.message, nonce: BigInt(nonce) },
-        signature: signature as `0x${string}`
-      });
-      if (recovered.toLowerCase() !== address.toLowerCase()) return reply.code(403).send({ error: 'invalid-signer-proof' });
-    } catch { return reply.code(403).send({ error: 'invalid-signer-proof' }); }
-
-    // No separately authorized wrap-only service or durable resource-context
-    // writer exists. Do not acquire external credentials that cannot be safely
-    // recorded, or reconstruct a symmetric wrapper in this API process.
-    return reply.code(503).send({
-      error: 'credential-sealing-unavailable',
-      code: 'CREDENTIAL_SEALING_UNAVAILABLE',
-      credentialsRecorded: false,
-      executionSupported: false,
-      message: 'Credential enrollment is unavailable: separately authorized wrapping and durable resource binding are not configured.'
-    });
-  });
+    if (!requireUser(request, reply)) return;
+    return reply.code(503).send({ code: 'CREDENTIAL_SEALING_UNAVAILABLE', credentialsRecorded: false,
+      executionSupported: false, message: 'CLOB challenge and credential acquisition are unavailable. Local enrollment does not authorize signing.' });
+  } });
 
   // ─── Suggested Alpha Masters Discovery ───────────────────────────────────────
   app.get('/v1/me/masters', async (request, reply) => {
     const scope = requireUser(request, reply);
     if (!scope) return;
 
-    const rows = await query<{
+    const rows = await scopedQuery<{
       address: string;
       chain: string;
       label: string | null;
@@ -528,7 +495,7 @@ export async function registerMeRoutes(
       win_rate: number | null;
       realized_roi: number | null;
       follower_count: string;
-    }>(
+    }>(scope,
       `SELECT w.address, COALESCE(w.chain, 'solana') AS chain,
               COALESCE((SELECT uws.label FROM user_wallet_subscriptions uws WHERE uws.wallet_address = w.address AND uws.user_id = $1 LIMIT 1), w.nickname) AS label,
               w.composite_score, w.tier, w.win_rate, w.realized_roi,
@@ -566,7 +533,7 @@ export async function registerMeRoutes(
     // Subscriptions are per-user; the wallet's stats are global. Joined here
     // rather than duplicated per user — that is the whole point of the
     // global-dedup model (D9).
-    const rows = await query<{
+    const rows = await scopedQuery<{
       address: string;
       chain: Chain;
       status: string;
@@ -576,7 +543,7 @@ export async function registerMeRoutes(
       realized_roi: number | null;
       total_trades: number | null;
       last_active: Date | null;
-    }>(
+    }>(scope,
       `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
          FROM wallets WHERE address = ANY($1)`,
       [subscriptions.map((s) => s.walletAddress)]
@@ -612,7 +579,7 @@ export async function registerMeRoutes(
       return reply.code(400).send({ error: 'Missing address parameter' });
     }
     const resolved = resolveChainAddress(q.address, (q.chain as Chain) || 'solana');
-    const rows = await query<{
+    const rows = await scopedQuery<{
       address: string;
       chain: Chain;
       status: string;
@@ -622,7 +589,7 @@ export async function registerMeRoutes(
       realized_roi: number | null;
       total_trades: number | null;
       last_active: Date | null;
-    }>(
+    }>(scope,
       `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
          FROM wallets WHERE address = $1`,
       [resolved.prefixed]
@@ -821,7 +788,7 @@ export async function registerMeRoutes(
     const gate = await requireSubscription(request, reply);
     if (!gate) return;
     // `transactions` carries in/out amounts, not a single `amount_usd`.
-    const rows = await query(
+    const rows = await scopedQuery(gate.scope,
       `SELECT signature, chain, direction, target_token, token_in, token_out,
               amount_in_usd, amount_out_usd, timestamp
          FROM transactions
@@ -836,12 +803,21 @@ export async function registerMeRoutes(
   app.get('/v1/me/wallets/:address/holdings', async (request, reply) => {
     const gate = await requireSubscription(request, reply);
     if (!gate) return;
-    // `wallet_positions` uses balance/cost_basis_usd, not quantity/avg_cost_usd.
-    const rows = await query(
-      `SELECT token_mint, chain, balance, cost_basis_usd, last_event_at, updated_at
-         FROM wallet_positions
-        WHERE wallet_address = $1 AND balance > 0
-        ORDER BY updated_at DESC
+    // A numeric stored subtotal is not a complete acquisition basis. Missing
+    // verified provenance or any unvalued acquisition must remain unassessed.
+    const rows = await scopedQuery(gate.scope,
+      `SELECT position.token_mint, position.chain, position.balance,
+              CASE WHEN scope.unvalued_acquisition_count = 0 THEN position.cost_basis_usd ELSE NULL END AS cost_basis_usd,
+              CASE WHEN scope.wallet_address IS NOT NULL THEN position.cost_basis_usd ELSE NULL END AS known_cost_basis_subtotal_usd,
+              CASE WHEN scope.wallet_address IS NULL THEN 'unassessed'
+                   WHEN scope.unvalued_acquisition_count > 0 THEN 'partial' ELSE 'verified' END AS basis_assessment,
+              scope.unvalued_acquisition_count, position.last_event_at, position.updated_at
+         FROM wallet_positions position
+         LEFT JOIN source_verified_position_scopes scope
+           ON scope.wallet_address = position.wallet_address AND scope.chain = position.chain
+          AND scope.token_mint = position.token_mint
+        WHERE position.wallet_address = $1 AND position.balance > 0
+        ORDER BY position.updated_at DESC
         LIMIT 200`,
       [gate.address]
     );
@@ -927,7 +903,7 @@ export async function registerMeRoutes(
     // is never sent to the client in the first place.
     // Column names verified against the live schema — `signals` uses
     // `pattern_type`/`signal_score`, not `pattern`/`score`.
-    const rows = await query(
+    const rows = await scopedQuery(scope,
       `SELECT DISTINCT s.id, s.pattern_type, s.chain, s.token_mint, s.token_symbol,
               s.signal_score, s.confidence, s.status, s.detected_at
          FROM signals s
@@ -954,7 +930,7 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
     // `source_trades` uses `direction`/`token_amount`, not `side`/`quantity`.
-    const rows = await query(
+    const rows = await scopedQuery(scope,
       `SELECT st.id, st.chain, st.wallet_address, st.token_mint, st.direction,
               st.token_amount, st.amount_usd, st.price_usd, st.event_at
          FROM source_trades st
@@ -971,21 +947,6 @@ export async function registerMeRoutes(
     return reply.send({ events: rows });
   });
 
-  // No durable exact-intent store or authorized withdrawal executor is wired.
-  // Refuse both entry points rather than issue an unusable approval or burn a code.
-  const unsupportedWithdrawal = async (request: FastifyRequest, reply: FastifyReply) => {
-    reply.header('Cache-Control', 'no-store');
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-    if (request.principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
-    return reply.code(501).send({
-      error: 'withdrawal-unsupported',
-      supported: false,
-      message: 'Withdrawals are unavailable: durable exact intents and an authorized execution handoff are not implemented. No code was sent, authorization recorded, or transfer queued.'
-    });
-  };
-  app.post('/v1/me/trading/withdraw/request-otp', unsupportedWithdrawal);
-  app.post('/v1/me/trading/withdraw', unsupportedWithdrawal);
 
   // --- Polymarket Perpetual Futures (Perps) Endpoints ---
 
@@ -1006,12 +967,14 @@ export async function registerMeRoutes(
     return reply.send({
       account,
       accountAssessment: account ? 'observed-runtime-unverified' : 'unassessed',
-      reducingExecution: perpsReducingCapability(),
+      reducingExecution: { ...perpsReducingCapability(), ...financialCapability(!!options.financial?.reducing) },
       positions
     });
   });
 
   app.post('/v1/me/perps/positions/:id/close', async (request, reply) => {
+    if (options.financial?.reducing) return requestMeReduction(request, reply, options.financial.reducing, 'polymarket-perps');
+    reply.header('Cache-Control', 'no-store');
     const scope = requireUser(request, reply);
     if (!scope) return;
     const { id } = request.params as { id: string };

@@ -6,25 +6,28 @@ import { AdminNav } from '../../components/AdminNav.js';
 import { ChainBadge, LoadingSkeleton, ErrorBanner } from '../../components/UIPrimitives.js';
 import { WalletConnectModalButton } from '../../components/WalletConnectModalButton.js';
 import { api } from '../../lib/api.js';
+import { describeApiError } from '../../lib/api-error-message.js';
+import { FinancialRequestPanel, LocalEnrollmentPanel } from '../../components/FinancialRequestPanel.js';
+import { domainTransport, type DomainCapability } from '../../lib/domain-transport.js';
+import { enrollmentAllowed, geoNotice, submitPolymarketEnrollment, type PolymarketEnrollmentView } from '../../lib/portfolio-model.js';
 import {
   connectSolanaWallet,
   connectEvmWallet,
   linkWalletWithSignature,
-  signPolymarketClobAuth,
   getSolanaProvider,
   getEvmProvider,
-  deriveSolanaAnchorPda,
   detectSolanaCluster,
   copyToClipboard,
 } from '../../lib/wallets.js';
 
 interface VaultData {
+  localEnrollment?: DomainCapability;
   solana: {
     pdaAddress: string | null;
-    rentLamports: number;
-    solGasReserve: number;
-    solGasUsd: number;
-    solMinGasUsd: number;
+    rentLamports: number | null;
+    solGasReserve: number | null;
+    solGasUsd: number | null;
+    solMinGasUsd: number | null;
     hasMinimumGas: boolean;
     status: string;
   };
@@ -36,12 +39,12 @@ interface VaultData {
     sponsoredOpsUsedToday: number;
     dailyCap: number;
   };
-  polymarket: {
-    depositAddress: string;
+  polymarket: PolymarketEnrollmentView & {
+    depositAddress: string | null;
     signerAddress?: string | null;
     status?: string | null;
     credentialsRecorded?: boolean;
-    geoEligible: boolean;
+    geoEligible: boolean | null;
     geoExpiresAt: string | null;
   };
   linkedWallets: Array<{
@@ -57,6 +60,7 @@ interface VaultData {
 export default function VaultPage() {
   const [role, setRole] = useState<'admin' | 'user'>('user');
   const [data, setData] = useState<VaultData | null>(null);
+  const [withdrawalCapability, setWithdrawalCapability] = useState<DomainCapability | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,7 +85,6 @@ export default function VaultPage() {
   // Solana Cluster, Copy Feedback & Modals
   const [solanaCluster, setSolanaCluster] = useState<'mainnet-beta' | 'devnet'>('mainnet-beta');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [showWalletConnectModal, setShowWalletConnectModal] = useState<boolean>(false);
   const [actionSuccessNotice, setActionSuccessNotice] = useState<string | null>(null);
 
   const triggerCopy = (text: string, key: string) => {
@@ -102,57 +105,18 @@ export default function VaultPage() {
 
   const fetchVault = async () => {
     setLoading(true);
+    setError(null);
+    setData(null);
+    setWithdrawalCapability(undefined);
     try {
-      const [vaultRes, meRes, authWalletsRes] = await Promise.all([
-        api.get<VaultData>('/v1/me/vault').catch(() => null),
-        api.get<{ user?: { role?: string } }>('/v1/auth/me').catch(() => null),
-        api.get<{ wallets?: Array<{ chainKind: string; address: string; verifiedAt: string }> }>('/v1/auth/me').catch(() => null),
-      ]);
-
-      if (meRes?.user?.role === 'admin') {
-        setRole('admin');
-      }
-
-      const initialLinkedWallets = (authWalletsRes?.wallets || []).map((w) => ({
-        address: w.address,
-        chain: w.chainKind === 'solana' ? 'solana' : 'robinhood-chain',
-        verified: true,
-        linkedAt: w.verifiedAt || new Date().toISOString(),
-        spendableAt: new Date(Date.now() - 3600000).toISOString(),
-        isCoolingOff: false,
-      }));
-
-      const resolvedData: VaultData = vaultRes || {
-        solana: {
-          pdaAddress: '',
-          rentLamports: 2039280,
-          solGasReserve: 0.12,
-          solGasUsd: 19.8,
-          solMinGasUsd: 10.0,
-          hasMinimumGas: true,
-          status: 'uninitialized',
-        },
-        robinhood: {
-          smartAccountAddress: '',
-          sessionKeyStatus: 'unsupported',
-          expiresAt: null as any,
-          sponsoredOpsUsedToday: 0,
-          dailyCap: 50,
-        },
-        polymarket: {
-          depositAddress: '',
-          geoEligible: true,
-          geoExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
-        },
-        linkedWallets: initialLinkedWallets,
-      };
-
-      setData(resolvedData);
-      if (resolvedData.linkedWallets.length > 0) {
-        setWithdrawDest(resolvedData.linkedWallets[0].address);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load vault status');
+      const vaultRes = await api.get<VaultData>('/v1/me/vault');
+      setData(vaultRes);
+      const capabilities = await domainTransport.capabilities().catch(() => null);
+      setWithdrawalCapability(capabilities?.withdrawal);
+      const meRes = await api.get<{ user?: { role?: string } }>('/v1/auth/me').catch(() => null);
+      setRole(meRes?.user?.role === 'admin' ? 'admin' : 'user');
+    } catch (err) {
+      setError(describeApiError(err, 'Vault capability status unavailable; funding authority is unverified'));
     } finally {
       setLoading(false);
     }
@@ -192,32 +156,8 @@ export default function VaultPage() {
           provider,
         });
 
-        const accountAddress = address;
-
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                robinhood: {
-                  ...prev.robinhood,
-                  smartAccountAddress: null, accountAddress, sessionKeyStatus: 'unsupported',
-                },
-                linkedWallets: [
-                  ...prev.linkedWallets.filter((w) => w.address.toLowerCase() !== address.toLowerCase()),
-                  {
-                    address,
-                    chain: 'robinhood-chain',
-                    verified: true,
-                    linkedAt: new Date().toISOString(),
-                    spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-                    isCoolingOff: false,
-                  },
-                ],
-              }
-            : prev
-        );
-
-        setWalletConnectSuccess(`Connected to ${walletName}! Address ${address.slice(0, 6)}...${address.slice(-4)} linked. Click "Authorize 7702" below to sign the 30-day session delegation.`);
+        await fetchVault();
+        setWalletConnectSuccess(`Connected to ${walletName}. Wallet link recorded; delegation, smart account funding and live execution remain unavailable.`);
       } else {
         // Polymarket (Polygon)
         const { address, provider, walletName } = await connectEvmWallet('0x89');
@@ -230,72 +170,9 @@ export default function VaultPage() {
           provider,
         });
 
-        // 2. Derive Polymarket CLOB L2 credentials via EIP-712 ClobAuth
-        let credentialsRecorded = false;
-        try {
-          const challenge = await api.get<{
-            address: string;
-            timestampSeconds: number;
-            nonce: number;
-            typedData: any;
-          }>(`/v1/me/vault/polymarket/challenge?address=${address}`);
-
-          const signature = await signPolymarketClobAuth(provider, address, challenge.typedData);
-
-          const credsRes = await api.post<{
-            success: boolean;
-            credentialsRecorded: boolean;
-            address: string;
-          }>('/v1/me/vault/polymarket/credentials', {
-            address,
-            signature,
-            timestampSeconds: challenge.timestampSeconds,
-            nonce: challenge.nonce,
-          });
-
-          credentialsRecorded = credsRes.credentialsRecorded;
-        } catch (authErr: any) {
-          console.warn('Polymarket L2 credential derivation deferred:', authErr);
-        }
-
-        const derivedPolyDeposit = address;
-
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                polymarket: {
-                  ...prev.polymarket,
-                  depositAddress: '',
-                  signerAddress: address,
-                  status: credentialsRecorded ? 'credentials_recorded' : prev.polymarket?.status ?? 'uninitialized',
-                  credentialsRecorded: credentialsRecorded || prev.polymarket?.credentialsRecorded || false,
-                  geoEligible: true,
-                },
-                linkedWallets: [
-                  ...prev.linkedWallets.filter((w) => w.address.toLowerCase() !== address.toLowerCase()),
-                  {
-                    address,
-                    chain: 'polygon',
-                    verified: true,
-                    linkedAt: new Date().toISOString(),
-                    spendableAt: new Date(Date.now() + 24 * 3600000).toISOString(),
-                    isCoolingOff: false,
-                  },
-                ],
-              }
-            : prev
-        );
-
-        if (credentialsRecorded) {
-          setWalletConnectSuccess(
-            `Connected to ${walletName} on Polygon. Credentials recorded locally; live execution remains unavailable.`
-          );
-        } else {
-          setWalletConnectSuccess(
-            `Connected to ${walletName} on Polygon! Address ${address.slice(0, 6)}...${address.slice(-4)} verified. You can authorize Polymarket L2 signing below.`
-          );
-        }
+        // Wallet ownership linking is independent from unavailable enrollment.
+        await fetchVault();
+        setWalletConnectSuccess(`Connected to ${walletName} on Polygon. Wallet ownership link recorded only; Polymarket enrollment, funding and live execution remain unavailable.`);
       }
     } catch (err: any) {
       setWalletConnectError(err.message || 'Failed to connect wallet.');
@@ -305,48 +182,16 @@ export default function VaultPage() {
   };
 
   const handleAuthorizePolymarketL2 = async () => {
-    setAuthorizingPoly(true);
-    setError(null);
     setWalletConnectError(null);
     setWalletConnectSuccess(null);
     try {
-      const { address, provider, walletName } = await connectEvmWallet('0x89');
-      setDetectedEvm(walletName);
-
-      // 1. Fetch challenge from API
-      const challenge = await api.get<{
-        address: string;
-        timestampSeconds: number;
-        nonce: number;
-        typedData: any;
-      }>(`/v1/me/vault/polymarket/challenge?address=${address}`);
-
-      // 2. Sign EIP-712 ClobAuth typed data with MetaMask
-      const signature = await signPolymarketClobAuth(provider, address, challenge.typedData);
-
-      // 3. Post to backend to call Polymarket CLOB and seal credentials
-      const res = await api.post<{
-        success: boolean;
-        credentialsRecorded: boolean;
-        address: string;
-        message: string;
-      }>('/v1/me/vault/polymarket/credentials', {
-        address,
-        signature,
-        timestampSeconds: challenge.timestampSeconds,
-        nonce: challenge.nonce,
+      // Refuse before opening a wallet, fetching a challenge or requesting any
+      // signature. There is no enrollment implementation to execute locally.
+      await submitPolymarketEnrollment(data?.polymarket, async () => {
+        throw new Error('Authorized enrollment implementation unavailable');
       });
-
-      setWalletConnectSuccess(
-        res.message
-      );
-
-      // Refresh vault data
-      await fetchVault();
-    } catch (err: any) {
-      setWalletConnectError(err.message || 'Failed to authenticate with Polymarket CLOB.');
-    } finally {
-      setAuthorizingPoly(false);
+    } catch (err) {
+      setWalletConnectError(describeApiError(err, 'Enrollment unavailable'));
     }
   };
 
@@ -395,7 +240,7 @@ export default function VaultPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="font-headline-lg text-2xl font-bold tracking-tight text-primary">
-              Custody Vault &amp; Liquidity Funding
+              Wallet Links &amp; Custody Capability
             </h1>
             <p className="text-body-sm text-on-surface-variant">
               Connect trading wallets, derive non-custodial Solana Anchor PDAs, view local credential records. User-live execution is unavailable.
@@ -419,7 +264,7 @@ export default function VaultPage() {
               </div>
               <div>
                 <h2 className="font-headline-md text-xl font-bold text-primary">
-                  Connect Wallet &amp; Authorize Execution
+                  Connect Wallet &amp; Verify Ownership
                 </h2>
                 <p className="text-xs sm:text-sm text-on-surface-variant">
                   One-click Web3 extension connection with zero-cost cryptographic SIWE/SIWS proof. No manual copy-pasting required.
@@ -498,7 +343,7 @@ export default function VaultPage() {
               }`}
             >
               <span className="w-2.5 h-2.5 rounded-full bg-[#8B5CF6]" />
-              <span>Polymarket Safe Proxy</span>
+              <span>Polymarket credential records</span>
               {data?.linkedWallets.some((w) => w.chain === 'polygon') && (
                 <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]" />
               )}
@@ -555,31 +400,34 @@ export default function VaultPage() {
                       {linkChain === 'solana' && (
                         <button
                           type="button"
-                          onClick={() => setActiveModal('solana-gas')}
+                          disabled
+                          onClick={() => setError('Solana funding unavailable; no deployed vault is verified.')}
                           className="px-4 py-2 bg-[#14F195] hover:bg-[#00D685] text-black text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
                         >
                           <span className="material-symbols-outlined text-sm">local_gas_station</span>
-                          <span>Fund SOL Float</span>
+                          <span>Funding unavailable</span>
                         </button>
                       )}
                       {linkChain === 'robinhood-chain' && (
                         <button
                           type="button"
-                          onClick={() => setActiveModal('robinhood-delegate')}
+                          disabled
+                          onClick={() => setError('Robinhood delegation unavailable; no spend authority was created.')}
                           className="px-4 py-2 bg-[#FFB800] hover:bg-[#E5A700] text-black text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
                         >
                           <span className="material-symbols-outlined text-sm">key</span>
-                          <span>Authorize 7702</span>
+                          <span>Delegation unavailable</span>
                         </button>
                       )}
                       {linkChain === 'polygon' && (
                         <button
                           type="button"
-                          onClick={() => setActiveModal('polymarket-deposit')}
+                          disabled
+                          onClick={() => setError('Deposit funding unavailable; no proxy address is verified.')}
                           className="px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"
                         >
                           <span className="material-symbols-outlined text-sm">qr_code</span>
-                          <span>Deposit USDC</span>
+                          <span>Deposit unavailable</span>
                         </button>
                       )}
                     </div>
@@ -593,9 +441,9 @@ export default function VaultPage() {
                         {linkChain === 'polygon' && 'Connect Polygon Wallet (Polymarket)'}
                       </h3>
                       <p className="text-xs text-on-surface-variant">
-                        {linkChain === 'solana' && 'Opens your Solana browser wallet to sign a zero-cost cryptographic SIWS challenge. Generates your non-custodial Anchor Execution PDA.'}
+                        {linkChain === 'solana' && 'Opens your Solana browser wallet to sign a zero-cost cryptographic SIWS challenge. Linking does not generate a verified vault or funding address.'}
                         {linkChain === 'robinhood-chain' && 'Opens your EVM browser wallet to sign an EIP-4361 SIWE challenge. Links your EOA for authentication only; delegation is unavailable.'}
-                        {linkChain === 'polygon' && 'Connects your wallet on Polygon Mainnet to verify your signer and activate your dedicated Safe Deposit Proxy address.'}
+                        {linkChain === 'polygon' && 'Links wallet ownership on Polygon. Credentials do not establish a deposit proxy, eligibility or live execution authority.'}
                       </p>
                     </div>
 
@@ -605,7 +453,7 @@ export default function VaultPage() {
                         chainKind={linkChain}
                         onLinked={() => {
                           fetchVault();
-                          setActionSuccessNotice(`Wallet connected & linked via WalletConnect for ${linkChain.toUpperCase()}!`);
+                          setActionSuccessNotice(`Wallet ownership linked via WalletConnect for ${linkChain.toUpperCase()}. No vault, enrollment or execution authority was created.`);
                           setTimeout(() => setActionSuccessNotice(null), 4000);
                         }}
                       />
@@ -705,15 +553,7 @@ export default function VaultPage() {
                         )
                       )}
 
-                      {/* Universal WalletConnect Option */}
-                      <button
-                        type="button"
-                        onClick={() => setShowWalletConnectModal(true)}
-                        className="px-4 py-3 bg-surface-container hover:bg-surface-container-high border border-border-subtle text-on-surface-variant hover:text-primary text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0"
-                      >
-                        <span className="material-symbols-outlined text-sm">qr_code_scanner</span>
-                        <span>WalletConnect / Mobile</span>
-                      </button>
+
                     </div>
                   </div>
                 )}
@@ -793,6 +633,8 @@ export default function VaultPage() {
 
         {loading ? (
           <LoadingSkeleton rows={5} />
+        ) : !data ? (
+          <p role="status" className="p-6 text-on-surface-variant">Vault observations unavailable. No custody, wallet status or funding authority is inferred.</p>
         ) : (
           <>
             {actionSuccessNotice && (
@@ -843,13 +685,14 @@ export default function VaultPage() {
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] text-on-surface-variant uppercase font-semibold">Deposit Proxy Address (Polygon)</span>
                         <button
-                          onClick={() => triggerCopy(data?.polymarket.depositAddress || '', 'poly-deposit')}
+                          disabled={!data?.polymarket.depositAddress}
+                          onClick={() => { if (data?.polymarket.depositAddress) triggerCopy(data.polymarket.depositAddress, 'poly-deposit'); }}
                           className="text-[10px] text-primary underline font-bold flex items-center gap-1 cursor-pointer"
                         >
                           {copiedKey === 'poly-deposit' ? <span className="text-status-success font-bold">✓ Copied!</span> : 'Copy Address'}
                         </button>
                       </div>
-                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress || 'Not linked yet'}</div>
+                      <div className="font-bold text-primary truncate mt-0.5 select-all">{data?.polymarket.depositAddress || 'Unverified — funding unavailable'}</div>
                     </div>
                     <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
                       <span className="text-on-surface-variant">L2 CLOB Signer:</span>
@@ -876,7 +719,7 @@ export default function VaultPage() {
                   <button
                     type="button"
                     onClick={handleAuthorizePolymarketL2}
-                    disabled={authorizingPoly}
+                    disabled={authorizingPoly || !enrollmentAllowed(data?.polymarket)}
                     className="w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-sm"
                   >
                     {authorizingPoly ? (
@@ -888,34 +731,31 @@ export default function VaultPage() {
                       <>
                         <span className="material-symbols-outlined text-sm">verified_user</span>
                         <span>
-                          {data?.polymarket.status === 'credentials_recorded'
-                            ? 'Re-authorize Polymarket L2 Signer'
-                            : 'Authorize Polymarket L2 Signer (1-Click)'}
+                          {enrollmentAllowed(data?.polymarket) ? 'Polymarket enrollment' : 'Polymarket enrollment unavailable'}
                         </span>
                       </>
                     )}
                   </button>
                   <button
-                    onClick={() => setActiveModal('polymarket-deposit')}
+                    disabled
+                          onClick={() => setError('Deposit funding unavailable; no proxy address is verified.')}
                     className="w-full py-2 bg-surface-container hover:bg-surface-container-high border border-border-subtle text-primary font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
                   >
                     <span className="material-symbols-outlined text-sm">qr_code</span>
-                    <span>Deposit Polygon USDC Float</span>
+                    <span>Deposit unavailable</span>
                   </button>
                   <div className="flex items-center justify-between text-xs font-mono text-on-surface-variant px-1 pt-1">
                     <span>Geo-Eligibility:</span>
-                    <span className="text-status-success font-bold">ACTIVE (PASSED)</span>
+                    <span className="text-on-surface-variant font-bold">{geoNotice(data?.polymarket.geoEligible)}</span>
                   </div>
                 </div>
               </div>
             </section>
 
             <section className="bg-surface-container-lowest border border-border-subtle rounded-2xl p-6 sm:p-8 max-w-2xl mx-auto shadow-sm mb-8">
-              <h2 className="font-headline-md text-xl font-bold text-primary">Withdrawals unavailable</h2>
-              <p role="status" className="text-sm text-on-surface-variant mt-2">
-                Withdrawals are unsupported. Durable exact withdrawal intents and an authorized execution handoff are not implemented.
-                No email code, approval, or transfer can be requested here. A linked wallet does not establish custody or withdrawal capability.
-              </p>
+              <h2 className="font-headline-md text-xl font-bold text-primary">Withdrawal admission</h2>
+              <LocalEnrollmentPanel capability={data?.localEnrollment} />
+              <FinancialRequestPanel kind="withdrawal" capability={withdrawalCapability} />
             </section>
           </>
         )}
@@ -961,7 +801,7 @@ export default function VaultPage() {
               </div>
 
               <div className="p-3 bg-[#8B5CF6]/10 border border-[#8B5CF6]/30 rounded-xl text-xs text-[#8B5CF6] mb-4">
-                Deposits credit automatically after 32 block confirmations on Polygon.
+                Deposit processing and confirmation requirements are unverified here. No deposit completion is promised.
               </div>
 
               <button
@@ -974,44 +814,6 @@ export default function VaultPage() {
           </div>
         )}
 
-        {/* Modal: Universal WalletConnect QR */}
-        {showWalletConnectModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-surface-container-lowest border border-border-subtle rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in text-center">
-              <div className="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#0284C7]" />
-                  <h3 className="font-headline-md font-bold text-primary text-base">WalletConnect Mobile QR</h3>
-                </div>
-                <button onClick={() => setShowWalletConnectModal(false)} className="text-on-surface-variant hover:text-primary">
-                  <span className="material-symbols-outlined">close</span>
-                </button>
-              </div>
-              <p className="text-xs text-on-surface-variant mb-4">
-                Scan with Phantom, Solflare, MetaMask, or any WalletConnect v2 compatible mobile wallet on iOS or Android.
-              </p>
-              <div className="p-4 bg-white rounded-xl mx-auto w-44 h-44 flex items-center justify-center border border-border-subtle mb-4 shadow-inner">
-                {/* Visual QR Pattern */}
-                <svg className="w-36 h-36" viewBox="0 0 100 100" fill="none">
-                  <rect width="100" height="100" fill="white"/>
-                  <path fill="#0F172A" d="M10 10h30v30H10zm6 6v18h18V16zm44-6h30v30H60zm6 6v18h18V16zM10 60h30v30H10zm6 6v18h18V66zm44 4h10v10H60zm10 10h10v10H70zm10-10h10v10H80zm0 10h10v10H80zM45 45h10v10H45zm-15 0h10v10H30zm30 0h10v10H60z"/>
-                </svg>
-              </div>
-              <div className="text-[11px] font-mono text-on-surface-variant bg-surface-container p-2.5 rounded-lg break-all mb-4 text-left">
-                wc:7f83a1b4-29a@2?relay-protocol=irn&amp;symKey=9e48...
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  triggerCopy('wc:7f83a1b4-29a@2?relay-protocol=irn', 'wc-uri');
-                }}
-                className="w-full py-2.5 bg-surface-container hover:bg-surface-container-high border border-border-subtle rounded-xl text-xs font-bold text-primary mb-2 flex items-center justify-center gap-1.5 transition-colors"
-              >
-                {copiedKey === 'wc-uri' ? <span className="text-status-success font-bold">✓ Copied Connection URI!</span> : 'Copy Connection URI'}
-              </button>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

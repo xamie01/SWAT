@@ -116,6 +116,8 @@ import {
 import {
   createJupiterJitoRuntimeFromEnvironment,
   getConfiguredJupiterJitoRuntime,
+  getConfiguredCanonicalJitoQuote,
+  settleConfiguredJitoResolution,
   getJupiterJitoLiveReadiness,
   getJupiterJitoSigner
 } from './jupiter-jito-config.js';
@@ -156,6 +158,9 @@ import {
 } from './execution-authority.js';
 import { createExecutionAuthorityAdapters } from './execution-authority-adapters.js';
 import { riskPolicyAccountForUser } from './per-user-sizing.js';
+import { runCanonicalWorkerJob, type CanonicalWorkerPorts } from './worker-policy.js';
+import { createExecutorRuntimePorts, type ReviewedExecutorRuntimeAdapters } from './worker-runtime-adapters.js';
+import type { JupiterJitoResolution } from './jupiter-jito-runtime.js';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
@@ -366,7 +371,8 @@ export async function persistTrade(opts: {
     // written 0 into `trades.amount_usd`, and revisiting that is a separate call
     // from S4-M35, whose subject is `copy_execution_evidence`. The unknown is not
     // lost -- it is `valuation.code`, and the evidence path stores it as NULL.
-    amountUsd = valuation.usdAmount === null ? 0 : Number(valuation.usdAmount);
+    if (valuation.usdAmount === null) throw new Error('Trade USD valuation unavailable; refusing fabricated zero');
+    amountUsd = Number(valuation.usdAmount);
   }
 
   const jup = opts.jupiterFill;
@@ -1111,6 +1117,15 @@ function resolveExecutionPrincipal(payload: { userId?: unknown }): ExecutionPrin
  */
 export type ExecutorJobPorts = {
   readonly authorize: ExecutionAuthorityResolver;
+  /** Production and tests invoke the same canonical orchestration. Only the
+   * external quote/effect boundary may be substituted; no alternate policy flag. */
+  readonly canonicalQuote?: CanonicalWorkerPorts['quote'];
+  /** Supplied by an approved durable job/tenant capability, NEVER constructed
+   * from the untrusted queue userId. Default unavailable under forced RLS. */
+  readonly canonicalTransaction?: (job: unknown) => CanonicalWorkerPorts['transaction'] | null;
+  readonly deliveryOwner?: string;
+  readonly now?: () => Date;
+  readonly deliveryLeaseMs?: number;
 };
 
 /**
@@ -1124,8 +1139,11 @@ export type ExecutorJobPorts = {
  * This function is the only place in the executor that names a chain-specific
  * authority type. That is the point of it: `handleJob` names none.
  */
-export function createExecutorJobPorts(): ExecutorJobPorts {
+export function createExecutorJobPorts(runtime: ReviewedExecutorRuntimeAdapters = {
+  paperValuation: null, now: () => new Date(), maximumAgeMs: 60_000
+}): ExecutorJobPorts {
   return {
+    ...createExecutorRuntimePorts(runtime, (execution, slippage) => getConfiguredCanonicalJitoQuote()(execution, slippage)),
     authorize: createExecutionAuthorityRegistry(createExecutionAuthorityAdapters({
       solana: {
         trojanWalletAddress: () => TROJAN_WALLET_ADDRESS ?? null,
@@ -1404,7 +1422,32 @@ export async function runTrojanReconciliation(
 export async function handleJob(
   job: { data: unknown },
   ports: ExecutorJobPorts = getDefaultJobPorts()
-) {
+): Promise<ExecutorJobResult> {
+  const raw = job.data as Record<string, unknown> | null;
+  if (raw?.copyExecutionId) {
+    const transaction = ports.canonicalTransaction?.(job.data);
+    if (!transaction) return { status: 'skipped', reason: 'approved-worker-tenant-scope-unavailable' };
+    return runCanonicalWorkerJob(job.data, {
+      transaction,
+      authorize: ports.authorize,
+      platformMode: async chain => {
+        const current = await resolveChainMode(chain, { forceFresh: true });
+        return clampExecutionModeForStartup(chain, current.effectiveMode, current.reason).effectiveMode;
+      },
+      quote: ports.canonicalQuote ?? getConfiguredCanonicalJitoQuote(),
+      deliveryOwner: ports.deliveryOwner,
+      now: ports.now,
+      deliveryLeaseMs: ports.deliveryLeaseMs
+    });
+  }
+  // A reducing claim is mandatory. Queue booleans, numbers and manual flags
+  // cannot authorize an exit or revive an unsupported financial entrypoint.
+  if (raw?.stopLoss || raw?.closeAll || raw?.exitLotId) {
+    return { status: 'skipped', reason: 'canonical-lot-exit-required' };
+  }
+  if (raw?.userId !== undefined && raw.userId !== null) {
+    return { status: 'skipped', reason: 'canonical-tenant-obligation-required' };
+  }
   const payload = job.data as {
     signalId: string;
     sourceTradeId?: string;
@@ -1468,6 +1511,12 @@ export async function handleJob(
   if (execMode === 'off') {
     console.log(`[trade-executor] SKIPPED: Execution is OFF for ${chain}`);
     return { status: 'skipped', reason: 'Execution disabled (off)' };
+  }
+  if (payload.sourceTradeId) {
+    return { status: 'skipped', reason: 'canonical-source-obligation-required; source-confirmation-verifier-unavailable' };
+  }
+  if (new Set<string>(['live', 'live+shadow']).has(execMode)) {
+    return { status: 'skipped', reason: 'canonical-live-receipt-adapter-unavailable' };
   }
 
   if (clampReason) {
@@ -1553,10 +1602,12 @@ export async function handleJob(
   let thisTradeUsd = size;
   if (chain === 'solana') {
     const solPrice = await fetchTokenPriceUsd(SOL_MINT);
-    thisTradeUsd = size * (solPrice && Number.isFinite(solPrice) && solPrice > 0 ? solPrice : 150);
+    if (solPrice === null || !Number.isFinite(solPrice) || solPrice <= 0) return { status: 'skipped', reason: 'trusted-USD-valuation-unavailable' };
+    thisTradeUsd = size * solPrice;
   } else if (chain === 'robinhood-chain') {
     const ethPrice = await fetchTokenPriceUsd(WETH_ROBINHOOD);
-    thisTradeUsd = size * (ethPrice && Number.isFinite(ethPrice) && ethPrice > 0 ? ethPrice : 3000);
+    if (ethPrice === null || !Number.isFinite(ethPrice) || ethPrice <= 0) return { status: 'skipped', reason: 'trusted-USD-valuation-unavailable' };
+    thisTradeUsd = size * ethPrice;
   }
 
   if (direction === 'buy' && dailyExposureUsd + thisTradeUsd > dailyCapUsd) {
@@ -2686,6 +2737,18 @@ export async function handleJob(
   }
 }
 
+/** Shared by actual startup/periodic Jito sweeps and the keyless join test.
+ * Resolution clientOrderId is opaque, never used as a signals UUID. A false
+ * receipt commit leaves the durable obligation unresolved for reconciliation. */
+export async function settleJitoSweepResolutions(resolutions: readonly JupiterJitoResolution[],
+  settle: (resolution: JupiterJitoResolution) => Promise<boolean> = settleConfiguredJitoResolution): Promise<void> {
+  for (const resolution of resolutions) {
+    if (!await settle(resolution)) {
+      console.warn(`[trade-executor] Jito receipt remains unresolved for ${resolution.clientOrderId}`);
+    }
+  }
+}
+
 export async function main() {
   initLogger('trade-executor');
   console.log('[trade-executor] Starting executor worker...');
@@ -2784,25 +2847,7 @@ export async function main() {
                 `[trade-executor] jito sweep resolved ${resolutions.length}: `
                 + resolutions.map((r) => `${r.clientOrderId}=${r.status}`).join(', ')
               );
-              // EXE-07: Transition pending trade rows in DB upon Jito resolution
-              for (const resolution of resolutions) {
-                if (resolution.status === 'filled') {
-                  await transitionPendingTrade({
-                    executor: 'jupiter-jito',
-                    signalId: resolution.clientOrderId,
-                    signature: resolution.signature,
-                    status: 'filled',
-                    confirmedAt: new Date()
-                  });
-                } else if (resolution.status === 'failed') {
-                  await transitionPendingTrade({
-                    executor: 'jupiter-jito',
-                    signalId: resolution.clientOrderId,
-                    status: 'failed',
-                    errorMessage: resolution.reason
-                  });
-                }
-              }
+              await settleJitoSweepResolutions(resolutions);
             }
           }
         });

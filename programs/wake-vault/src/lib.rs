@@ -309,6 +309,18 @@ pub mod wake_vault {
         // Enforce non-zero minimum output to prevent drain via arbitrary min_out == 0 (C-01)
         require!(min_out > 0, VaultError::ZeroMinOutNotAllowed);
 
+        // Owner policy is mandatory in addition to the live global executor signer.
+        // Raw amount bounds are owner authorization, not an oracle/fair-price check.
+        invariants::verify_swap_policy(
+            &ctx.accounts.swap_policy,
+            ctx.accounts.executor.key(),
+            ctx.accounts.vault_token_in.mint,
+            ctx.accounts.vault_token_out.mint,
+            Clock::get()?.unix_timestamp,
+            max_in,
+            min_out,
+        )?;
+
         let in_key = ctx.accounts.vault_token_in.key();
         let out_key = ctx.accounts.vault_token_out.key();
         require_keys_neq!(in_key, out_key, VaultError::IdenticalSwapTokens);
@@ -321,28 +333,56 @@ pub mod wake_vault {
             VaultError::MissingOutputTokenAccount
         );
 
-        // Record baseline token balances and native lamports before swap
+        require!(
+            ctx.remaining_accounts
+                .iter()
+                .any(|acc| acc.key() == in_key && acc.is_writable),
+            VaultError::MissingInputTokenAccount
+        );
+
+        // Record baseline token balances and native lamports before swap.
         ctx.accounts.vault_token_in.reload()?;
         ctx.accounts.vault_token_out.reload()?;
+        let vault_key = vault.key();
+        let input_mint = ctx.accounts.vault_token_in.mint;
+        let output_mint = ctx.accounts.vault_token_out.mint;
+        invariants::verify_token_account_scope(&ctx.accounts.vault_token_in, vault_key, input_mint)?;
+        invariants::verify_token_account_scope(&ctx.accounts.vault_token_out, vault_key, output_mint)?;
         let in_before = ctx.accounts.vault_token_in.amount;
         let out_before = ctx.accounts.vault_token_out.amount;
         let vault_lamports_before = ctx.accounts.vault.to_account_info().lamports();
 
-        // Scan remaining_accounts to reject any other writable vault-owned token accounts
-        let vault_key = vault.key();
+        // Never forward writable program-owned policy/governance/control accounts.
+        // Pool state owned by other programs remains available to Jupiter routes.
         let token_prog_key = ctx.accounts.token_program.key();
-
+        let config_key = ctx.accounts.config.key();
+        let policy_key = ctx.accounts.swap_policy.key();
+        let executor_key = ctx.accounts.executor.key();
+        let swap_program_key = ctx.accounts.swap_program.key();
         for acc in ctx.remaining_accounts.iter() {
+            require!(
+                !acc.is_writable || (
+                    acc.owner != ctx.program_id
+                    && acc.owner != &solana_program::system_program::ID
+                    && acc.key() != vault_key
+                    && acc.key() != config_key
+                    && acc.key() != policy_key
+                    && acc.key() != executor_key
+                    && acc.key() != token_prog_key
+                    && acc.key() != swap_program_key
+                ),
+                VaultError::UnsupportedWritableResource
+            );
             if acc.is_writable
                 && acc.owner == &token_prog_key
                 && acc.key() != in_key
                 && acc.key() != out_key
             {
                 let ata_data = TokenAccount::try_deserialize(&mut &acc.data.borrow()[..])?;
-                require!(
-                    ata_data.owner != vault_key,
-                    VaultError::UnauthorizedVaultAccount
-                );
+                invariants::verify_remaining_account_safety(
+                    acc.key(), acc.is_writable, *acc.owner, token_prog_key,
+                    Some(ata_data.owner), vault_key, in_key, out_key,
+                )?;
             }
         }
 
@@ -355,6 +395,8 @@ pub mod wake_vault {
         let signer = &[&seeds[..]];
 
         let cpi_accounts = ctx.remaining_accounts.to_vec();
+        let mut cpi_infos = ctx.remaining_accounts.to_vec();
+        cpi_infos.push(ctx.accounts.swap_program.to_account_info());
         invoke_signed(
             &Instruction {
                 program_id: ctx.accounts.swap_program.key(),
@@ -363,12 +405,12 @@ pub mod wake_vault {
                     .map(|a| AccountMeta {
                         pubkey: *a.key,
                         is_signer: a.key == &vault_key,
-                        is_writable: a.is_writable,
+                        is_writable: a.is_writable && a.key != &vault_key,
                     })
                     .collect(),
                 data: cpi_data,
             },
-            ctx.remaining_accounts,
+            &cpi_infos,
             signer,
         )?;
 
@@ -382,9 +424,16 @@ pub mod wake_vault {
         // Ensure native SOL in vault PDA was not drained by CPI instruction
         invariants::verify_native_sol_preservation(vault_lamports_before, vault_lamports_after)?;
 
-        // Ensure token deltas strictly observe maximum spend and minimum return bounds
-        invariants::verify_token_in_delta(in_before, in_after, max_in)?;
+        // Recheck authority, mint and delegate/close scope after the untrusted route.
+        invariants::verify_token_account_scope(&ctx.accounts.vault_token_in, vault_key, input_mint)?;
+        invariants::verify_token_account_scope(&ctx.accounts.vault_token_out, vault_key, output_mint)?;
+
+        // Ensure token deltas observe requested bounds; charge the actual debit only.
+        let spent = invariants::verify_token_in_delta(in_before, in_after, max_in)?;
         invariants::verify_token_out_delta(out_before, out_after, min_out)?;
+        invariants::consume_swap_budget(&mut ctx.accounts.swap_policy, spent)?;
+        // Any error returns before Anchor persistence; Solana transaction atomicity
+        // is relied on for CPI rollback, not demonstrated by the source/helper tests.
 
         Ok(())
     }
@@ -415,13 +464,108 @@ pub struct InitializeConfig<'info> {
 #[derive(Accounts)]
 pub struct UpdateConfig<'info> {
     #[account(
+        seeds = [b"config"],
+        bump = config.bump,
+        has_one = admin @ VaultError::UnauthorizedAdmin
+    )]
+    pub config: Account<'info, WakeConfig>,
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + WakeConfigChange::LEN,
+        seeds = [b"config_change", config.key().as_ref()],
+        bump
+    )]
+    pub config_change: Account<'info, WakeConfigChange>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ApplyConfigChange<'info> {
+    #[account(
         mut,
         seeds = [b"config"],
         bump = config.bump,
         has_one = admin @ VaultError::UnauthorizedAdmin
     )]
     pub config: Account<'info, WakeConfig>,
+    #[account(
+        mut,
+        close = admin,
+        seeds = [b"config_change", config.key().as_ref()],
+        bump = config_change.bump,
+        has_one = config @ VaultError::InvalidConfigChange,
+        constraint = config_change.proposer == admin.key() @ VaultError::UnauthorizedAdmin
+    )]
+    pub config_change: Account<'info, WakeConfigChange>,
+    #[account(mut)]
     pub admin: Signer<'info>,
+    #[account(constraint = next_admin.key() == config_change.next_admin @ VaultError::UnauthorizedSuccessor)]
+    pub next_admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CancelConfigChange<'info> {
+    #[account(
+        seeds = [b"config"],
+        bump = config.bump,
+        has_one = admin @ VaultError::UnauthorizedAdmin
+    )]
+    pub config: Account<'info, WakeConfig>,
+    #[account(
+        mut,
+        close = admin,
+        seeds = [b"config_change", config.key().as_ref()],
+        bump = config_change.bump,
+        has_one = config @ VaultError::InvalidConfigChange,
+        constraint = config_change.proposer == admin.key() @ VaultError::UnauthorizedAdmin
+    )]
+    pub config_change: Account<'info, WakeConfigChange>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeSwapPolicy<'info> {
+    #[account(
+        seeds = [b"vault", owner.key().as_ref()],
+        bump = vault.bump,
+        has_one = owner @ VaultError::UnauthorizedOwner
+    )]
+    pub vault: Account<'info, WakeVault>,
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + WakeSwapPolicy::LEN,
+        seeds = [b"swap_policy", vault.key().as_ref()],
+        bump
+    )]
+    pub swap_policy: Account<'info, WakeSwapPolicy>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ManageSwapPolicy<'info> {
+    #[account(
+        seeds = [b"vault", owner.key().as_ref()],
+        bump = vault.bump,
+        has_one = owner @ VaultError::UnauthorizedOwner
+    )]
+    pub vault: Account<'info, WakeVault>,
+    #[account(
+        mut,
+        close = owner,
+        seeds = [b"swap_policy", vault.key().as_ref()],
+        bump = swap_policy.bump,
+        has_one = vault @ VaultError::InvalidSwapPolicy
+    )]
+    pub swap_policy: Account<'info, WakeSwapPolicy>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -508,7 +652,6 @@ pub struct WithdrawSol<'info> {
 #[derive(Accounts)]
 pub struct ExecuteSwap<'info> {
     #[account(
-        mut,
         seeds = [b"vault", vault.owner.as_ref()],
         bump = vault.bump,
     )]
@@ -522,6 +665,14 @@ pub struct ExecuteSwap<'info> {
 
     #[account(
         mut,
+        seeds = [b"swap_policy", vault.key().as_ref()],
+        bump = swap_policy.bump,
+        has_one = vault @ VaultError::InvalidSwapPolicy,
+        has_one = executor @ VaultError::UnauthorizedExecutor
+    )]
+    pub swap_policy: Account<'info, WakeSwapPolicy>,
+
+    #[account(
         constraint = executor.key() == config.executor @ VaultError::UnauthorizedExecutor
     )]
     pub executor: Signer<'info>,
@@ -539,7 +690,10 @@ pub struct ExecuteSwap<'info> {
     pub vault_token_out: Account<'info, TokenAccount>,
 
     /// CHECK: Target DEX routing program verified against allowlist (Jupiter v6)
-    #[account(address = jupiter::ID @ VaultError::UnknownCpiTarget)]
+    #[account(
+        address = jupiter::ID @ VaultError::UnknownCpiTarget,
+        constraint = swap_program.executable @ VaultError::UnknownCpiTarget
+    )]
     pub swap_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
 }
@@ -547,6 +701,40 @@ pub struct ExecuteSwap<'info> {
 // ─────────────────────────────────────────────────────────────────────────────
 // State Data
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Separate PDAs keep the existing WakeConfig and WakeVault serialized layouts intact.
+#[account]
+pub struct WakeConfigChange {
+    pub config: Pubkey,
+    pub proposer: Pubkey,
+    pub next_admin: Pubkey,
+    pub executor: Pubkey,
+    pub tip_accounts: [Pubkey; 8],
+    pub max_tip_lamports: u64,
+    pub activate_after: i64,
+    pub bump: u8,
+}
+
+impl WakeConfigChange {
+    pub const LEN: usize = (32 * 4) + (32 * 8) + 8 + 8 + 1;
+}
+
+#[account]
+pub struct WakeSwapPolicy {
+    pub vault: Pubkey,
+    pub executor: Pubkey,
+    pub input_mint: Pubkey,
+    pub output_mint: Pubkey,
+    pub expires_at: i64,
+    pub max_input_per_swap: u64,
+    pub min_output_per_swap: u64,
+    pub remaining_input_budget: u64,
+    pub bump: u8,
+}
+
+impl WakeSwapPolicy {
+    pub const LEN: usize = (32 * 4) + 8 + 8 + 8 + 8 + 1;
+}
 
 #[account]
 pub struct WakeConfig {
@@ -614,6 +802,27 @@ pub enum VaultError {
     ZeroMinOutNotAllowed,
     #[msg("Swap output token account must be included in CPI remaining accounts as writable")]
     MissingOutputTokenAccount,
+    // Append errors so existing error-number assignments remain stable.
+    #[msg("Swap input token account must be included in CPI remaining accounts as writable")]
+    MissingInputTokenAccount,
+    #[msg("Owner swap policy contains invalid keys or zero amount bounds")]
+    InvalidSwapPolicy,
+    #[msg("Owner swap policy has expired")]
+    SwapPolicyExpired,
+    #[msg("Requested swap exceeds owner policy amount bounds")]
+    SwapPolicyBoundsExceeded,
+    #[msg("Swap exceeds the remaining owner-authorized input budget")]
+    SwapBudgetExceeded,
+    #[msg("Pending configuration change has invalid bindings or settings")]
+    InvalidConfigChange,
+    #[msg("Configuration change minimum activation delay has not elapsed")]
+    ConfigChangeNotReady,
+    #[msg("Proposed successor admin must sign acceptance")]
+    UnauthorizedSuccessor,
+    #[msg("CPI cannot receive writable policy, governance, or control resources")]
+    UnsupportedWritableResource,
+    #[msg("Swap token account authority, mint, delegate, or close scope is unsafe")]
+    InvalidTokenAccountScope,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -622,6 +831,71 @@ pub enum VaultError {
 
 pub mod invariants {
     use super::*;
+
+    /// Owner authorization in raw token units; this does not validate route price.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_swap_policy(
+        policy: &WakeSwapPolicy,
+        executor: Pubkey,
+        input_mint: Pubkey,
+        output_mint: Pubkey,
+        now: i64,
+        max_in: u64,
+        min_out: u64,
+    ) -> Result<()> {
+        require!(policy.executor != Pubkey::default(), VaultError::InvalidSwapPolicy);
+        require!(policy.input_mint != Pubkey::default(), VaultError::InvalidSwapPolicy);
+        require!(policy.output_mint != Pubkey::default(), VaultError::InvalidSwapPolicy);
+        require_keys_eq!(policy.executor, executor, VaultError::UnauthorizedExecutor);
+        require_keys_eq!(policy.input_mint, input_mint, VaultError::MintMismatch);
+        require_keys_eq!(policy.output_mint, output_mint, VaultError::MintMismatch);
+        require_keys_neq!(input_mint, output_mint, VaultError::InvalidSwapPolicy);
+        require!(now < policy.expires_at, VaultError::SwapPolicyExpired);
+        require!(policy.max_input_per_swap > 0, VaultError::InvalidSwapPolicy);
+        require!(policy.min_output_per_swap > 0, VaultError::InvalidSwapPolicy);
+        require!(max_in > 0, VaultError::SwapPolicyBoundsExceeded);
+        require!(max_in <= policy.max_input_per_swap, VaultError::SwapPolicyBoundsExceeded);
+        require!(max_in <= policy.remaining_input_budget, VaultError::SwapBudgetExceeded);
+        require!(min_out >= policy.min_output_per_swap, VaultError::SwapPolicyBoundsExceeded);
+        Ok(())
+    }
+
+    /// Called only after all post-CPI invariants pass. Checked subtraction precedes
+    /// mutation so an error never stores a wrapped or partially updated budget.
+    pub fn consume_swap_budget(policy: &mut WakeSwapPolicy, spent: u64) -> Result<()> {
+        let remaining = policy.remaining_input_budget.checked_sub(spent)
+            .ok_or(VaultError::SwapBudgetExceeded)?;
+        policy.remaining_input_budget = remaining;
+        Ok(())
+    }
+
+    /// Signer handoff plus fixed delay; not multisig or an external governance system.
+    pub fn verify_config_change(
+        change: &WakeConfigChange,
+        admin: Pubkey,
+        next_admin: Pubkey,
+        now: i64,
+    ) -> Result<()> {
+        require_keys_eq!(change.proposer, admin, VaultError::UnauthorizedAdmin);
+        require_keys_eq!(change.next_admin, next_admin, VaultError::UnauthorizedSuccessor);
+        require!(change.next_admin != Pubkey::default(), VaultError::InvalidConfigChange);
+        require!(change.executor != Pubkey::default(), VaultError::InvalidConfigChange);
+        require!(now >= change.activate_after, VaultError::ConfigChangeNotReady);
+        Ok(())
+    }
+
+    /// Rechecked before and after CPI. Existing delegates and foreign close authority
+    /// are not compatible with a vault-only authorization/balance-delta boundary.
+    pub fn verify_token_account_scope(account: &TokenAccount, vault: Pubkey, mint: Pubkey) -> Result<()> {
+        require_keys_eq!(account.owner, vault, VaultError::InvalidTokenAccountScope);
+        require_keys_eq!(account.mint, mint, VaultError::MintMismatch);
+        require!(account.delegate.is_none(), VaultError::InvalidTokenAccountScope);
+        require!(account.delegated_amount == 0, VaultError::InvalidTokenAccountScope);
+        if let solana_program::program_option::COption::Some(authority) = account.close_authority {
+            require_keys_eq!(authority, vault, VaultError::InvalidTokenAccountScope);
+        }
+        Ok(())
+    }
 
     /// Verifies the vault token spend invariant: spent <= max_in
     pub fn verify_token_in_delta(in_before: u64, in_after: u64, max_in: u64) -> Result<u64> {

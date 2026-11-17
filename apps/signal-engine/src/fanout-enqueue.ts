@@ -1,6 +1,7 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
-import { tradeQueueForChain, chainFromTokenMint } from '@swat/shared';
-import type { PoolClient } from 'pg';
+import { classifyFanoutRefusal, requireStableFanoutExclusions } from './fanout-canonical.js';
+import { tradeQueueForChain, chainFromTokenMint, resolveChainAddress } from '@swat/shared';
+import type { PoolClient } from '@swat/db';
 import {
   ensureFanoutEnumeration, getFanoutBatch, claimFanoutEnumeration, failFanoutEnumeration,
   completeFanoutEnumeration, listFanoutDeliveries, prepareFanoutDeliveryQueueWithClient,
@@ -105,6 +106,13 @@ export interface FanoutTradeJobData {
   readonly executionMode?: ExecutionMode | 'shadow';
   /** What this user's subscription state permits. Absent on the operator job. */
   readonly mirrors?: MirrorEligibility;
+  /** Present only after admitted same-client canonical claim/captured policy. */
+  readonly copyExecutionId?: string;
+  readonly chain?: Chain;
+  readonly masterWalletAddress?: string;
+  readonly requestedBaseQuantity?: string | null;
+  readonly requestedQuoteQuantity?: string | null;
+  readonly exitLotId?: string | null;
 }
 
 export interface FanoutJobOptions {
@@ -380,6 +388,10 @@ export interface DurableFanoutCaller {
   now(): Date;
   enumerate(jobPlan: FanoutJobPlan): Promise<{ recipients: readonly FanoutRecipient[]; exclusions: readonly FanoutExclusion[] }>;
   admission(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{ allowed: boolean; reason?: string }>;
+  /** Invoke only after admission, inside the descriptor snapshot transaction. */
+  canonicalPrepare(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{
+    descriptor: FanoutJobDescriptor | null; reason?: string;
+  }>;
 }
 
 /** Actual producer adapter: failed enumeration retains its separately committed
@@ -401,9 +413,70 @@ export function createDurableFanoutDelivery(caller: DurableFanoutCaller): Fanout
         if (!claim) throw new Error('Fanout enumeration busy; retain pending obligation');
         try {
           const snapshot = await caller.enumerate(jobPlan);
-          await caller.transaction(client => completeFanoutEnumeration(client, claim, {
-            ...snapshot, chain: jobPlan.chain, now: caller.now()
-          }));
+          requireStableFanoutExclusions(snapshot.exclusions);
+          await caller.transaction(async client => {
+            const recipients: FanoutRecipient[] = [];
+            const exclusions: FanoutExclusion[] = [...snapshot.exclusions];
+            // Discovery is unlocked comparison data, not authority. Acquire the
+            // entire cohort's canonical position keys before any shared signal
+            // or current-policy row lock; later canonical claims reenter them.
+            const discovery = await client.query<{ chain: Chain; token_mint: string }>(
+              `SELECT source.chain, source.token_mint FROM signals signal
+               JOIN source_trades source ON source.id = signal.source_trade_id
+               WHERE signal.id = $1 AND source.id = $2`, [signalId, sourceTradeId]);
+            const canonical = discovery.rows[0];
+            if (!canonical || canonical.chain !== jobPlan.chain || canonical.token_mint !== jobPlan.operator.data.tokenMint) {
+              throw new Error('Fanout canonical source position scope unavailable');
+            }
+            const positionKeys = new Set<string>();
+            for (const recipient of snapshot.recipients) {
+              const candidate = recipient.descriptor as unknown as FanoutJobDescriptor;
+              const identity = fanoutDescriptorIdentity(candidate);
+              const target = resolveChainAddress(recipient.targetAccount);
+              const token = resolveChainAddress(candidate.data.tokenMint);
+              if (identity.signalId !== recipient.signalId || recipient.signalId !== signalId
+                || identity.userId !== recipient.userId || identity.executionMode !== recipient.executionMode
+                || identity.targetAccount !== recipient.targetAccount || candidate.options.jobId !== recipient.jobId
+                || candidate.chain !== jobPlan.chain || candidate.data.sourceTradeId !== sourceTradeId
+                || candidate.data.tokenMint !== jobPlan.operator.data.tokenMint
+                || target.chain !== jobPlan.chain || token.chain !== jobPlan.chain
+                || target.prefixed !== recipient.targetAccount || token.prefixed !== candidate.data.tokenMint
+                || (recipient.userId !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(recipient.userId))) {
+                throw new Error('Fanout candidate canonical position scope mismatch');
+              }
+              positionKeys.add(JSON.stringify([target.prefixed, canonical.chain, canonical.token_mint, recipient.userId]));
+            }
+            for (const key of [...positionKeys].sort()) {
+              await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
+            }
+            for (const recipient of snapshot.recipients) {
+              const candidate = recipient.descriptor as unknown as FanoutJobDescriptor;
+              const identity = fanoutDescriptorIdentity(candidate);
+              if (identity.signalId !== recipient.signalId || identity.userId !== recipient.userId
+                || identity.executionMode !== recipient.executionMode || identity.targetAccount !== recipient.targetAccount
+                || candidate.options.jobId !== recipient.jobId) throw new Error('Fanout candidate identity mismatch');
+              const admitted = await caller.admission(client, candidate);
+              if (!admitted.allowed) {
+                if (classifyFanoutRefusal(admitted.reason) !== 'excluded') {
+                  throw new Error(admitted.reason ?? 'current-admission-unavailable');
+                }
+                exclusions.push({ userId: recipient.userId,
+                  code: (admitted.reason ?? 'current-admission-denied').slice(0, 128) }); continue;
+              }
+              const prepared = await caller.canonicalPrepare(client, candidate);
+              if (!prepared.descriptor) {
+                if (classifyFanoutRefusal(prepared.reason) !== 'excluded') {
+                  throw new Error(prepared.reason ?? 'canonical-source-claim-unavailable');
+                }
+                exclusions.push({ userId: recipient.userId,
+                  code: (prepared.reason ?? 'canonical-source-claim-denied').slice(0, 128) }); continue;
+              }
+              recipients.push({ ...recipient, descriptor: prepared.descriptor as unknown as Record<string, unknown> });
+            }
+            await completeFanoutEnumeration(client, claim, {
+              recipients, exclusions, chain: jobPlan.chain, now: caller.now()
+            });
+          });
         } catch (error) {
           await caller.transaction(client => failFanoutEnumeration(client, claim,
             String(error instanceof Error ? error.message : error).slice(0, 2000) || 'enumeration failed'));
@@ -414,15 +487,16 @@ export function createDurableFanoutDelivery(caller: DurableFanoutCaller): Fanout
         const rows = await listFanoutDeliveries(client, signalId);
         const descriptors: FanoutJobDescriptor[] = [];
         for (const row of rows) {
+          if (row.state === 'completed') continue;
+          // Persisted row identity is authoritative for repair. The DB preparer
+          // quarantines incomplete legacy terms without backfill and returns null.
+          const identity: FanoutDeliveryIdentity = { signalId: row.signal_id, userId: row.user_id,
+            executionMode: row.execution_mode, targetAccount: row.target_account };
           const descriptor = row.descriptor as unknown as FanoutJobDescriptor;
-          const identity = fanoutDescriptorIdentity(descriptor);
-          if (row.signal_id !== identity.signalId || row.user_id !== identity.userId
-            || row.execution_mode !== identity.executionMode || row.target_account !== identity.targetAccount
-            || row.job_id !== descriptor.options.jobId) throw new Error('Fanout stored descriptor identity mismatch');
           const prepared = await prepareFanoutDeliveryQueueWithClient(client, identity, {
             now: caller.now(), admission: locked => caller.admission(locked, descriptor)
           });
-          if (prepared) descriptors.push(descriptor);
+          if (prepared) descriptors.push(prepared.descriptor as unknown as FanoutJobDescriptor);
         }
         return descriptors;
       });

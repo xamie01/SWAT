@@ -975,7 +975,7 @@ export async function fetchMasterWindowNotional(params: {
   const rows = await query<MasterWindowNotionalRow>(
     `SELECT COALESCE(SUM(notional_usd), 0)::text AS committed_notional_usd,
             COUNT(notional_usd)::text            AS priced_leg_count,
-            COUNT(*) FILTER (WHERE notional_usd IS NULL)::text AS unpriced_leg_count
+            COUNT(*) FILTER (WHERE notional_usd IS NULL OR unassessed_fill_count > 0)::text AS unpriced_leg_count
        FROM master_capacity_ledger
       WHERE master_wallet_address = $1
         AND chain = $2
@@ -1641,7 +1641,8 @@ export interface CapacityFillAccrualResult {
  * the caller decides — see the call-site note in the report.
  */
 export async function accrueMasterCapacityFillNotional(
-  input: CapacityFillAccrualInput
+  input: CapacityFillAccrualInput,
+  client?: PoolClient
 ): Promise<CapacityFillAccrualResult> {
   const decision = decideCapacityFillAccrual(input);
   if (decision.code !== 'accrue') {
@@ -1654,12 +1655,10 @@ export async function accrueMasterCapacityFillNotional(
     };
   }
 
-  const rows = await query<AccrueLedgerNotionalRow>(ACCRUE_LEDGER_NOTIONAL_SQL, [
-    decision.deltaUsd,
-    decision.notionalBasis,
-    input.sourceTradeId,
-    input.executionMode
-  ]);
+  const values = [decision.deltaUsd, decision.notionalBasis, input.sourceTradeId, input.executionMode];
+  const rows = client
+    ? (await client.query<AccrueLedgerNotionalRow>(ACCRUE_LEDGER_NOTIONAL_SQL, values)).rows
+    : await query<AccrueLedgerNotionalRow>(ACCRUE_LEDGER_NOTIONAL_SQL, values);
 
   const row = rows[0];
   if (!row) {

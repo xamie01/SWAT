@@ -64,10 +64,17 @@ def test_raw_public_write_rejects_symlink_partition(tmp_path: Path) -> None:
 
 def test_raw_public_write_stays_local() -> None:
     frame = Mock(height=1, columns=[])
+    # Storage writes a temporary native leaf, then fingerprints its actual bytes.
+    frame.write_parquet.side_effect = lambda path, **kwargs: Path(path).write_bytes(b"opaque parquet fixture")
     with Storage() as storage:
         path = storage.write_raw_parquet("solana", SOL, frame)
         assert path.is_relative_to(config.PROJECT_ROOT)
-        frame.write_parquet.assert_called_once_with(path, compression="zstd")
+        frame.write_parquet.assert_called_once()
+        staging = frame.write_parquet.call_args.args[0]
+        assert staging.parent == path.parent and staging.suffix == ".tmp"
+        assert frame.write_parquet.call_args.kwargs == {"compression": "zstd"}
+        assert path.read_bytes() == b"opaque parquet fixture"
+        assert not staging.exists()
 
 
 def test_raw_list_rejects_symlink_file(tmp_path: Path) -> None:

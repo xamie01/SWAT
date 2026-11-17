@@ -1,3 +1,5 @@
+import type { ReducingRequest, ReducingService } from '@swat/db';
+import { requireFinancial } from '@swat/db';
 import {
   OrderSide,
   PerpsTimeInForce,
@@ -258,6 +260,13 @@ export async function executePerpsOrder(params: {
     price: order.price,
     recordedOrderId: recordedOrder.id
   };
+}
+
+/** Separate from leveraged opening: no margin-health veto/TP/SL that can create new exposure. */
+export async function requestDurablePerpsReduction(userId: string, request: ReducingRequest, service?: ReducingService) {
+  requireFinancial(request.venue === 'polymarket-perps', 'perps-reducing-venue-mismatch');
+  requireFinancial(service, 'perps-reducing-durable-ports-unavailable');
+  return service.request(userId, request);
 }
 
 /**

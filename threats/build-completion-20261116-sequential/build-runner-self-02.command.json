@@ -1,0 +1,30 @@
+{
+  "label": "build-runner-self-02",
+  "kind": "static",
+  "target": "runner",
+  "command": [
+    "/usr/bin/python3",
+    "-I",
+    "-S",
+    "/root/SWAT/scripts/build-completion-runner.test.py"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T08:35:58.894615+00:00",
+  "elapsedSeconds": 0.225,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "scripts/build-completion-runner.test.py": "a8e05b2105fd01bbb91f5fd703655faaa42c23569ecf01954e51b6e3240c7a17",
+    "scripts/build-completion-runner.py": "8247897055c2cc2d655492b33b48002782c93f49c61fda55fed9f7ebb93bfa2b",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "533131dad8973c589ae697ab1dd346cc55caa134cd1e536cedf26f1b057c0f1f",
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

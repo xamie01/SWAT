@@ -1,0 +1,38 @@
+{
+  "label": "build-jito-green-02",
+  "kind": "test",
+  "target": "threats/build-completion-20261116-sequential/jito.config.ts",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/root/SWAT/threats/build-completion-20261116-sequential/jito.config.ts"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T11:13:31.697653+00:00",
+  "elapsedSeconds": 6.431,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "threats/build-completion-20261116-sequential/jito.config.ts": "d13dc1be3a3faf6136a83d677bf77bde2ba56858a9171392c654d348902a3f8a",
+    "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "scripts/build-completion-runner.py": "ad19a4817fbaa42c86b68a6c7dc7bf542ff87fefe6c03a07318adabb48e580d6",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "6dc7b8c7332f5cee5c59ccbb3db6220637d091504f309e8b867c884e52632d77",
+  "workspaceInputManifest": "threats/build-completion-20261116-sequential/build-jito-green-02.inputs.json",
+  "workspaceInputManifestSha256": "fcfefc561c132196311e3b7b7b7335c873cfcb6351e0dd5dbd0aa314f84dc650",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": "503c309844b1e485bbd297df72c6c549f59c7319117146ae3561d94bf0dda721",
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

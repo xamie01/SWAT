@@ -61,7 +61,7 @@ flowchart TD
     subgraph ControlPlane ["Control Plane & User Interface"]
         API["apps/api (Fastify REST, SIWE/SIWS, CSRF)"]
         WEB["apps/web (Next.js 15 Console — 27 Routes)"]
-        DB[("PostgreSQL 16/17 (69 Migrations)")]
+        DB[("PostgreSQL 16 reference profile (76 migration sources; installed state unverified)")]
         API <--> DB
         API <--> REDIS
         WEB <--> API
@@ -245,7 +245,9 @@ RESEND_FROM_EMAIL=alerts@wakeprotocol.io
 
 ## 5. Database Migrations & Initial Seeding
 
-Wake Protocol uses an idempotent, sequential SQL migration pipeline containing **69 unified migrations** from `001_init.sql` to `069_lp_copy_trading.sql`.
+Wake Protocol discovers a checksum-bound unified SQL migration history. This checkout contains **76 migration source files** through `076_lp_valued_paper_lifecycle.sql`; file presence does not establish that any migration is installed. Forward runtime-role, risk, worker, Jito and LP migrations remain unapplied in the bounded remediation environment. Never use the runtime application role as a migrator.
+
+The instructions below are for separately authorized infrastructure provisioning, not commands to run on the remediation host. Canonical disposable reference validation currently requires PostgreSQL 16 server/pg_dump parity; PostgreSQL 17 is not accepted by that test profile without separately reviewed parity evidence.
 
 ### 1. Launch PostgreSQL and Redis
 ```bash
@@ -259,11 +261,9 @@ docker compose ps
 # redis:    127.0.0.1:6379
 ```
 
-### 2. Apply All 69 Migrations
-```bash
-pnpm db:migrate
-```
-*Output will log sequential confirmation of all 69 migrations applied successfully.*
+### 2. Separately Review and Apply the Migration Journal
+
+The legacy `pnpm db:migrate` alias reads developer environment configuration and is not a safe remediation command. Use the reviewed migrator in a separately provisioned, quiesced, independently owned database with explicit initialization/adoption approval and checksum-journal validation. Run the isolated replay twice and compare an independently generated reference before claiming migration acceptance. No application-test flag authorizes provisioning or schema application.
 
 ### 3. Seed Initial Administrator Account
 ```bash
@@ -275,21 +275,22 @@ pnpm seed:admin
 
 ## 6. Building the Monorepo Safely
 
-Build all shared packages, backend microservices, and the Next.js frontend bundle with core containment:
+Use the reviewed sequential plan in `threats/build-completion-20261116-sequential/PLAN.md`. On the bounded remediation host **do not run root Turbo build/test/typecheck, Next build, dev servers, containers or dependency installation**.
 
 ```bash
-# 1. Install dependencies
-pnpm install --frozen-lockfile
+# Existing offline dependencies only. Runner holds the shared exclusive lock.
+taskset -c 0 python3 -I -S scripts/build-completion-runner.py build-release-shared-01 emit shared
+taskset -c 0 python3 -I -S scripts/build-completion-runner.py build-release-db-01 emit db
 
-# 2. Build libraries & microservices (pinned to 2 cores)
-taskset -c 0,1 pnpm build
-
-# 3. Verify TypeScript type safety
-taskset -c 0,1 pnpm typecheck
-
-# 4. Run automated test suites (2,780+ tests)
-taskset -c 0,1 pnpm test
+# Check each service sequentially, then tools/integration/web noEmit.
+# Use a new evidence label for every invocation; no prior log is overwritten.
+taskset -c 0 python3 -I -S scripts/build-completion-runner.py build-release-api-01 typecheck api
+taskset -c 0 python3 -I -S scripts/build-completion-runner.py build-release-api-tests-01 typecheck api-tests
 ```
+
+The runner permits reviewed command classes, records source/config/tool/artifact hashes and refuses evidence drift. Tests require an explicit hash-approved literal-file config plus independent import review; Node network/credential hooks are not a subprocess/native sandbox. Tests use 512MB/one fork, emits/typechecks 640MB and CPU0. Shared and DB must emit before consumers. Complete package inventory and actual diagnostics belong in the final evidence report—not an inherited test count.
+
+Fresh Next output/route types, Rust/Anchor build and regenerated ABI, native ML parity and real DB/Redis lifecycle/restart checks require a separately approved capable environment. Static/source checks and fail-closed capability refusals do not qualify those gates. CI candidate-build/acquisition/publish remain disabled until approved immutable runtime/dependency/artifact inventories exist.
 
 ---
 

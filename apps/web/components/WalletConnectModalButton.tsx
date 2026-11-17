@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useAppKit, useAppKitAccount, useDisconnect, useAppKitProvider } from '@reown/appkit/react';
 import { useSignMessage } from 'wagmi';
 import { api } from '../lib/api.js';
-import { toBase58, deriveSolanaAnchorPda } from '../lib/wallets.js';
+import { toBase58 } from '../lib/wallets.js';
 
 interface WalletConnectModalButtonProps {
   chainKind?: 'solana' | 'robinhood-chain' | 'polygon';
@@ -87,20 +87,8 @@ export function WalletConnectModalButton({
         signature,
       });
 
-      if (isSolana) {
-        try {
-          const { pdaAddress } = deriveSolanaAnchorPda(address);
-          await api.post('/v1/me/vault/grant', {
-            chain: 'solana',
-            grantKind: 'solana_vault',
-            accountAddress: pdaAddress,
-          });
-        } catch {
-          // Grant registration non-fatal
-        }
-      }
-
-      setSuccess(`Linked ${address.slice(0, 6)}...${address.slice(-4)} via WalletConnect!`);
+      // Ownership linking does not grant vault or enrollment authority.
+      setSuccess(`Wallet ownership linked via WalletConnect. Vault deployment, enrollment and live execution remain unavailable.`);
       if (onLinked) {
         onLinked(address, chainKind);
       }

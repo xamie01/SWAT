@@ -1,5 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
+// Native password hashing is loaded only when a password operation is invoked.
+// Importing custody-adjacent code never initializes argon2 or generates material.
+async function passwordHasher() { return import('@node-rs/argon2'); }
 
 /**
  * Credential primitives shared by passwords, session tokens, and API keys.
@@ -41,17 +43,17 @@ const ARGON2_OPTIONS = {
  */
 let dummyHashPromise: Promise<string> | null = null;
 function dummyHash(): Promise<string> {
-  dummyHashPromise ??= argonHash(randomBytes(32).toString('hex'), ARGON2_OPTIONS);
+  dummyHashPromise ??= passwordHasher().then(({ hash }) => hash(randomBytes(32).toString('hex'), ARGON2_OPTIONS));
   return dummyHashPromise;
 }
 
 export async function hashPassword(password: string): Promise<string> {
-  return argonHash(password, ARGON2_OPTIONS);
+  return (await passwordHasher()).hash(password, ARGON2_OPTIONS);
 }
 
 export async function verifyPassword(encoded: string, password: string): Promise<boolean> {
   try {
-    return await argonVerify(encoded, password);
+    return await (await passwordHasher()).verify(encoded, password);
   } catch {
     // A malformed or truncated stored hash must fail closed, not throw a 500
     // that tells the caller their password was at least well-formed.
@@ -64,7 +66,8 @@ export async function verifyPassword(encoded: string, password: string): Promise
  * Always returns false.
  */
 export async function verifyPasswordAgainstDummy(password: string): Promise<boolean> {
-  await argonVerify(await dummyHash(), password).catch(() => false);
+  const { verify } = await passwordHasher();
+  await verify(await dummyHash(), password).catch(() => false);
   return false;
 }
 

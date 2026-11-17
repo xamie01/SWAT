@@ -9,6 +9,8 @@ import {
   type JitoClientOptions,
   type JupiterQuote
 } from '@swat/shared';
+import { assertQuantifiedJitoReceipt, assertJitoPrepared, type JitoIndependentIntent,
+  type QuantifiedJitoReceipt, type DurableJitoPending, type WorkerAttempt } from '@swat/db';
 import {
   decodeRuntimeValue,
   encodeRuntimeValue,
@@ -49,26 +51,9 @@ export interface JupiterJitoExecutionIdentity {
   readonly targetAccount: string;
 }
 
-export interface JupiterJitoIntent {
-  readonly inputMint: string;
-  readonly outputMint: string;
-  readonly inputAmountRaw: string;
-  readonly slippageBps: number;
-  readonly recipient: string;
-}
+export interface JupiterJitoIntent extends JitoIndependentIntent {}
 
-export interface JupiterJitoReceipt {
-  readonly execution: JupiterJitoExecutionIdentity;
-  readonly signature: string;
-  readonly slot: number;
-  readonly inputMint: string;
-  readonly outputMint: string;
-  readonly inputAmountRaw: string;
-  readonly outputAmountRaw: string;
-  readonly feeLamports: string;
-  /** Canonical exact decimal fiat valuation supplied by the receipt accounting adapter. */
-  readonly feeUsd: string;
-}
+export interface JupiterJitoReceipt extends QuantifiedJitoReceipt {}
 
 export interface JupiterJitoSubmitInput {
   /** Stable idempotency key. Must be `(signalId, target_account)`-derived. */
@@ -78,6 +63,7 @@ export interface JupiterJitoSubmitInput {
   /** Missing legacy identities cannot authorize a new submission. */
   readonly execution?: JupiterJitoExecutionIdentity;
   readonly intent?: JupiterJitoIntent;
+  readonly attempt?: WorkerAttempt;
 }
 
 export type JupiterJitoSubmission =
@@ -142,6 +128,7 @@ export interface PendingJupiterJitoSubmission {
   readonly bundleId: string | null;
   readonly execution?: JupiterJitoExecutionIdentity;
   readonly intent?: JupiterJitoIntent;
+  readonly attempt?: WorkerAttempt;
   readonly signedTransactions?: readonly string[];
   readonly signatures?: readonly string[];
   /** Expiry prevents future inclusion, not proof of an earlier non-fill. */
@@ -168,7 +155,7 @@ export interface JupiterJitoPendingStore {
   save(pending: PendingJupiterJitoSubmission): Promise<void>;
   resolve(clientOrderId: string, resolution: JupiterJitoResolution): Promise<void>;
   /** Atomic durable ownership, including the canonical execution reservation. */
-  claim?(execution: JupiterJitoExecutionIdentity): Promise<boolean>;
+  claim?(execution: JupiterJitoExecutionIdentity, intent: JupiterJitoIntent, attempt: WorkerAttempt): Promise<boolean>;
   /** Commit exact signed identity and potentially-submitted canonical state before POST. */
   prepare?(pending: PendingJupiterJitoSubmission): Promise<void>;
 }
@@ -248,6 +235,10 @@ export interface JupiterJitoRuntimeOptions {
   readonly extractSignatures?: (transactions: readonly string[]) => Promise<readonly string[]>;
   /** Must observe confirmed receipt quantities and fees, never quote estimates. */
   readonly readReceipt?: (pending: PendingJupiterJitoSubmission) => Promise<JupiterJitoReceipt | null>;
+  /** Final-byte authorization verifies BOTH transactions together, resolved ALTs,
+   * debit/recipient/cleanup/fee/tip bounds and fresh canonical authority. Never
+   * supplied by environment boot while legitimate signer authority is absent. */
+  readonly authorizeSignedBundle?: (pending: DurableJitoPending) => Promise<boolean>;
   readonly now?: () => Date;
 }
 
@@ -272,23 +263,18 @@ function quoteMatchesIntent(quote: JupiterQuote, intent: JupiterJitoIntent): boo
   const threshold = BigInt(quote.otherAmountThreshold);
   // Jupiter may round down by one base unit; that cannot silently widen tolerance.
   const minimum = output * BigInt(10000 - intent.slippageBps) / 10000n;
-  return threshold >= minimum && threshold <= output;
+  return threshold >= minimum && threshold <= output && positiveRaw(intent.minimumOutputAmountRaw)
+    && threshold === BigInt(intent.minimumOutputAmountRaw);
 }
 
+export function requireDurableJitoPending(pending: PendingJupiterJitoSubmission): DurableJitoPending {
+  const value = pending as DurableJitoPending;
+  assertJitoPrepared(value);
+  return value;
+}
 function receiptMatchesPending(receipt: JupiterJitoReceipt, pending: PendingJupiterJitoSubmission): boolean {
-  const execution = pending.execution;
-  const intent = pending.intent;
-  if (!execution || !intent || !receipt.execution || !validExecution(execution, pending.clientOrderId)
-    || !validExecution(receipt.execution, pending.clientOrderId)) return false;
-  return receipt.execution.executionId === execution.executionId
-    && receipt.execution.userId === execution.userId && receipt.execution.targetAccount === execution.targetAccount
-    && !!pending.signatures?.includes(receipt.signature)
-    && Number.isSafeInteger(receipt.slot) && receipt.slot >= 0
-    && receipt.inputMint === intent.inputMint && receipt.outputMint === intent.outputMint
-    && positiveRaw(receipt.inputAmountRaw) && positiveRaw(receipt.outputAmountRaw)
-    && BigInt(receipt.inputAmountRaw) <= BigInt(intent.inputAmountRaw)
-    && typeof receipt.feeLamports === 'string' && /^[0-9]+$/.test(receipt.feeLamports)
-    && typeof receipt.feeUsd === 'string' && /^(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/.test(receipt.feeUsd);
+  try { assertQuantifiedJitoReceipt(receipt, requireDurableJitoPending(pending)); return true; }
+  catch { return false; }
 }
 
 export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
@@ -324,16 +310,19 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
 
     const execution = input.execution;
     const intent = input.intent;
-    if (!execution || !intent || !validExecution(execution, input.clientOrderId)
+    const attempt = input.attempt;
+    if (!execution || !intent || !attempt || execution.executionId !== attempt.executionId
+      || execution.userId !== attempt.userId || !validExecution(execution, input.clientOrderId)
       || execution.targetAccount !== `solana:${input.signerPublicKey}`
       || intent.recipient !== input.signerPublicKey || !quoteMatchesIntent(input.quote, intent)) {
       return { status: 'rejected', clientOrderId: input.clientOrderId, reason: 'jito-execution-intent-mismatch' };
     }
-    if (!options.pendingStore.claim || !options.pendingStore.prepare || !options.extractSignatures) {
+    if (!options.pendingStore.claim || !options.pendingStore.prepare || !options.extractSignatures
+      || !options.authorizeSignedBundle) {
       return { status: 'rejected', clientOrderId: input.clientOrderId, reason: 'jito-durable-submit-unavailable' };
     }
     try {
-      if (!await options.pendingStore.claim(execution)) {
+      if (!await options.pendingStore.claim(execution, intent, attempt)) {
         return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'durable-submission-already-claimed' };
       }
     } catch {
@@ -424,11 +413,17 @@ export function createJupiterJitoRuntime(options: JupiterJitoRuntimeOptions) {
         throw new Error('signed submission identity invalid');
       }
       prepared = {
-        clientOrderId: input.clientOrderId, execution, intent, bundleId: null,
+        clientOrderId: input.clientOrderId, execution, intent, attempt, bundleId: null,
         signedTransactions, signatures, lastValidBlockHeight: built.lastValidBlockHeight,
         expiresAt: new Date(now().getTime() + options.pendingTtlMs), tipLamports
       };
+      requireDurableJitoPending(prepared);
       await options.pendingStore.prepare(prepared);
+      // Persist exact bytes first, then fresh final-effect authority. Refusal
+      // retains ownership and cannot be retried under a newly built transaction.
+      if (!await options.authorizeSignedBundle(requireDurableJitoPending(prepared))) {
+        return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'jito-final-byte-authority-unavailable' };
+      }
     } catch {
       // No POST, but an uncertain durable write/claim must not release ownership.
       return { status: 'submission_unknown', clientOrderId: input.clientOrderId, reason: 'durable-preparation-unavailable' };

@@ -3,7 +3,7 @@ import type { PoolClient } from 'pg';
 import {
   claimFanoutDelivery, claimFanoutEnumeration, completeFanoutEnumeration,
   ensureFanoutEnumeration, failFanoutEnumeration, listFanoutDeliveries,
-  listFanoutEnumerationRepairs, markFanoutDeliveryQueued, settleFanoutDelivery,
+  listFanoutEnumerationRepairs, markFanoutDeliveryQueued, settleFanoutDelivery, prepareFanoutDeliveryQueueWithClient,
   type FanoutDeliveryIdentity, type FanoutRecipient
 } from './package13-fanout-delivery.js';
 
@@ -17,16 +17,36 @@ const NOW = new Date('2026-11-13T12:00:00Z');
 const identity = (userId: string | null = USER): FanoutDeliveryIdentity => ({ signalId: SIGNAL, userId, executionMode: 'paper', targetAccount: TARGET });
 const enumeration = { signalId: SIGNAL, sourceTradeId: SOURCE, owner: 'enum-owner', fence: '2' };
 const claim = { ...identity(), owner: 'worker-owner', fence: '3' };
-function db(rows: unknown[][] = []) {
+function db(rows: unknown[][] = [], userId: string | null = USER) {
   const query = vi.fn();
-  for (const result of rows) query.mockResolvedValueOnce({ rows: result });
+  const normalize = (row: unknown) => {
+    const value = row as Record<string, unknown>;
+    return value.state && !Object.hasOwn(value, 'submission_id')
+      ? { ...value, job_id: recipient(userId).jobId, descriptor: recipient(userId).descriptor, execution_id: EXECUTION,
+        scope_chain: 'solana', scope_token_mint: TARGET }
+      : value;
+  };
+  const first = rows[0]?.[0] as Record<string, unknown> | undefined;
+  if (first?.state && !Object.hasOwn(first, 'submission_id')) {
+    const row = normalize(first);
+    const scope = { id: EXECUTION, target_account: TARGET, chain: 'solana', token_mint: TARGET, user_id: userId };
+    const prior = (first.state === 'claimed' ? [] : rows[1] ?? []).map(execution => ({ ...scope,
+      ...(execution as Record<string, unknown>) }));
+    const protocol = [[row], [scope], [], prior, [row], ...(first.state === 'claimed' ? rows.slice(1) : rows.slice(2))];
+    for (const result of protocol) query.mockResolvedValueOnce({ rows: result });
+  } else for (const result of rows) query.mockResolvedValueOnce({ rows: result.map(normalize) });
   query.mockResolvedValue({ rows: [{ signal_id: SIGNAL, fence: '3' }] });
   return { query, client: { query } as unknown as PoolClient };
 }
 function recipient(userId: string | null): FanoutRecipient {
   const jobId = userId === null ? 'source-operator' : `source-user-${userId}`;
   return { ...identity(userId), jobId, descriptor: {
-    chain: 'solana', data: { signalId: SIGNAL, sourceTradeId: SOURCE, ...(userId ? { userId, executionMode: 'paper' } : {}) }, options: { jobId }
+    name: 'signal-trade', queue: 'swat-trades-solana', chain: 'solana', data: {
+      copyExecutionId: EXECUTION, chain: 'solana', signalId: SIGNAL, sourceTradeId: SOURCE,
+      userId, executionMode: 'paper', targetAccount: TARGET, tokenMint: TARGET,
+      masterWalletAddress: TARGET, direction: 'buy', requestedBaseQuantity: '1.000000000000000001',
+      requestedQuoteQuantity: null, exitLotId: null
+    }, options: { jobId }
   } };
 }
 
@@ -103,22 +123,93 @@ describe('package13 unapplied SQL storage contract', () => {
   });
 });
 
+describe('legacy fanout quarantine preserves healthy delivery repair', () => {
+  it.each([['pending', [], 'blocked'], ['pending', [{ id: EXECUTION, proven_non_submitted: false }], 'reconciliation_required'],
+    ['claimed', [], 'reconciliation_required']])('quarantines legacy %s without descriptor or execution backfill', async (state, prior, expected) => {
+    const { client, query } = db(); query.mockReset();
+    const row = { state, descriptor: {}, job_id: 'legacy', execution_id: null, scope_chain: 'solana', scope_token_mint: TARGET };
+    const scoped = (prior as Array<Record<string, unknown>>).map(execution => ({ ...execution,
+      target_account: TARGET, chain: 'solana', token_mint: TARGET, user_id: USER }));
+    for (const result of [[row], scoped, [], scoped, [row]]) query.mockResolvedValueOnce({ rows: result });
+    query.mockResolvedValue({ rows: [] });
+    const admission = vi.fn();
+    expect(await claimFanoutDelivery(client, identity(), { owner: 'repair', now: NOW, leaseMs: 1000, admission })).toBeNull();
+    expect(admission).not.toHaveBeenCalled(); expect(query.mock.calls[5][1]).toContain(expected);
+    expect(query.mock.calls[5][0]).not.toMatch(/descriptor\s*=|execution_id\s*=/);
+    expect(query.mock.calls[3][0]).toContain('copy_execution_worker_attempts');
+  });
+  it('honors completed historical state before validating missing canonical terms', async () => {
+    const { client, query } = db(); query.mockReset(); query.mockResolvedValue({ rows: [{ state: 'completed', descriptor: {} }] });
+    expect(await claimFanoutDelivery(client, identity(), { owner: 'repair', now: NOW, leaseMs: 1000, admission: vi.fn() })).toBeNull();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('queue repair follows actual worker position execution delivery lock order', () => {
+  it('unlocked discovery precedes position/execution/delivery locks and permits a fake existing worker to settle first', async () => {
+    const descriptor = recipient(USER).descriptor;
+    const row = { state: 'pending', descriptor, job_id: recipient(USER).jobId, execution_id: EXECUTION,
+      scope_chain: 'solana', scope_token_mint: TARGET };
+    const execution = { id: EXECUTION, target_account: TARGET, chain: 'solana', token_mint: TARGET,
+      user_id: USER, proven_non_submitted: true };
+    let positionLocked = false, executionLocked = false, deliveryLocked = false, workerSettled = false;
+    const query = vi.fn(async (sql: string, values: unknown[]) => {
+      if (sql.startsWith('SELECT delivery.*')) { expect(sql).not.toMatch(/FOR SHARE|FOR UPDATE/); return { rows: [row] }; }
+      if (sql.startsWith('SELECT id, target_account') && !sql.includes('FOR UPDATE')) {
+        expect(deliveryLocked).toBe(false); return { rows: [execution] };
+      }
+      if (sql.includes('pg_advisory_xact_lock')) {
+        // Mock worker owns this position+execution and wants delivery. Producer
+        // has not locked delivery, so worker settlement releases both first.
+        expect(deliveryLocked).toBe(false); workerSettled = true; positionLocked = true;
+        expect(values).toEqual([JSON.stringify([TARGET, 'solana', TARGET, USER])]); return { rows: [] };
+      }
+      if (sql.includes('FROM copy_executions') && sql.includes('FOR UPDATE')) {
+        expect(positionLocked).toBe(true); expect(workerSettled).toBe(true); expect(deliveryLocked).toBe(false);
+        executionLocked = true; return { rows: [execution] };
+      }
+      if (sql.startsWith('SELECT *') && sql.includes('FOR UPDATE')) {
+        expect(positionLocked && executionLocked).toBe(true); deliveryLocked = true; return { rows: [row] };
+      }
+      if (sql.includes('RETURNING *, fence')) return { rows: [row] };
+      return { rows: [{ fence: '9' }] };
+    });
+    const client = { query } as unknown as PoolClient;
+    expect(await prepareFanoutDeliveryQueueWithClient(client, identity(), { now: NOW, admission: async locked => {
+      expect(locked).toBe(client); expect(positionLocked && executionLocked && deliveryLocked).toBe(true);
+      return { allowed: true }; } })).toBeTruthy();
+    const sql = query.mock.calls.map(call => call[0]);
+    expect(sql.findIndex(value => value.includes('pg_advisory_xact_lock'))).toBeLessThan(sql.findIndex(value => value.includes('FROM copy_executions') && value.includes('FOR UPDATE')));
+    expect(sql.filter(value => value.includes('FROM copy_executions') && /FOR SHARE/.test(value))).toEqual([]);
+  });
+  it('rejects immutable descriptor drift after discovery before current admission or claim', async () => {
+    const { client, query } = db();
+    // Explicit protocol fixture; drift does not become a rebuilt comparison term.
+    query.mockReset(); const row = { state: 'pending', descriptor: recipient(USER).descriptor,
+      execution_id: EXECUTION, job_id: recipient(USER).jobId, scope_chain: 'solana', scope_token_mint: TARGET };
+    for (const rows of [[row], [], [], [], [{ ...row, descriptor: { changed: true } }]]) query.mockResolvedValueOnce({ rows });
+    const admission = vi.fn(); await expect(claimFanoutDelivery(client, identity(), { owner: 'repair', now: NOW,
+      leaseMs: 1000, admission })).rejects.toThrow(/changed after discovery/);
+    expect(admission).not.toHaveBeenCalled();
+  });
+});
+
 describe('package13 tenant claim and truthful outcomes', () => {
   it('locks tenant/mode/target and passes the same PoolClient to current admission', async () => {
-    const { client, query } = db([[{ state: 'queued', lease_until: null }], [{ fence: '7' }]]);
+    const { client, query } = db([[{ state: 'queued', lease_until: null }], [], [{ fence: '7' }]], USER2);
     const admission = vi.fn().mockResolvedValue({ allowed: true });
     await expect(claimFanoutDelivery(client, identity(USER2), { owner: 'worker', now: NOW, leaseMs: 5000, admission })).resolves.toMatchObject({ userId: USER2, fence: '7' });
     expect(admission).toHaveBeenCalledWith(client);
-    expect(query.mock.calls[0][0]).toContain('FOR UPDATE');
+    expect(query.mock.calls[4][0]).toContain('FOR UPDATE');
     expect(query.mock.calls[0][1]).toEqual([SIGNAL, USER2, 'paper', TARGET]);
-    expect(query.mock.calls[0][0]).not.toContain('signals');
+    expect(query.mock.calls[0][0]).not.toMatch(/FOR SHARE|FOR UPDATE/);
   });
 
   it('persists verifier/authority denial as blocked without fabricating confirmation', async () => {
-    const { client, query } = db([[{ state: 'pending' }]]);
+    const { client, query } = db([[{ state: 'pending' }], []]);
     await expect(claimFanoutDelivery(client, identity(), { owner: 'worker', now: NOW, leaseMs: 5000, admission: async () => ({ allowed: false, reason: 'Source confirmation verifier unavailable' }) })).resolves.toBeNull();
-    expect(query.mock.calls[1][0]).toContain("state = 'blocked'");
-    expect(query.mock.calls[1][1]).toContain('Source confirmation verifier unavailable');
+    expect(query.mock.calls[5][0]).toContain("state = 'blocked'");
+    expect(query.mock.calls[5][1]).toContain('Source confirmation verifier unavailable');
   });
 
   it('does not resend uncertain work when a claimed worker lease expires', async () => {
@@ -126,7 +217,7 @@ describe('package13 tenant claim and truthful outcomes', () => {
     const admission = vi.fn();
     await expect(claimFanoutDelivery(client, identity(), { owner: 'worker2', now: NOW, leaseMs: 5000, admission })).resolves.toBeNull();
     expect(admission).not.toHaveBeenCalled();
-    expect(query.mock.calls[1][0]).toContain("state = 'reconciliation_required'");
+    expect(query.mock.calls[5][0]).toContain("state = 'reconciliation_required'");
   });
 
   it('blocks a clean non-submitted skip with fenced ownership, without resolving delivery', async () => {

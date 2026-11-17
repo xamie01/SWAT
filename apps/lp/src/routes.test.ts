@@ -50,6 +50,15 @@ async function buildApp(deps: Partial<LpRoutesDeps> = {}) {
       source: 'template',
       contextWarning: null
     }),
+    operations: {
+      executionMode: { resolveMode: async () => 'paper' },
+      getPosition: dbMocks.getLpPosition,
+      findOperation: async () => null,
+      request: async (_scope, input) => ({ id: 'op', userId: 'user-1', positionId: input.positionId, kind: input.kind, status: 'pending' }),
+      complete: async () => ({ id: 'op', userId: 'user-1', positionId: 'pos-1', kind: 'close', status: 'completed' }),
+      replan: async () => ({ version: 1, rangeLower: 90, rangeUpper: 110, rungs: [], steps: [], poolObservedAt: new Date().toISOString() }),
+      enqueue: async () => {}
+    },
     queueManualRebalance: async () => undefined,
     ...deps
   });
@@ -70,6 +79,7 @@ function sessionHeaders() {
 
 beforeEach(() => {
   for (const mock of Object.values(dbMocks)) mock.mockReset();
+  dbMocks.forUser.mockImplementation((userId: string) => ({ userId }));
   dbMocks.resolveSession.mockResolvedValue({
     user: { id: 'user-1', status: 'active', role: 'user' },
     sessionId: 'session-1'
@@ -140,119 +150,12 @@ describe('LP routes (Track H)', () => {
     await app.close();
   });
 
-  it('deploy returns 400 on a missing body before touching the guard', async () => {
-    const guard = { assertDeployAllowed: vi.fn() };
-    const app = await buildApp({ deployGuard: guard });
-    await app.ready();
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/lp/positions/deploy',
-      headers: sessionHeaders(),
-      payload: {}
-    });
-    expect(response.statusCode).toBe(400);
-    expect(guard.assertDeployAllowed).not.toHaveBeenCalled();
-    await app.close();
-  });
-
-  it('deploy surfaces guardrail refusals as 403 with reasons', async () => {
-    const app = await buildApp({
-      deployGuard: {
-        assertDeployAllowed: async () => ({ allowed: false, reasons: ['pool-exposure-cap'] })
-      },
-      // The build entrypoint returns refusal reasons with an empty bundle only
-      // after running the guard; stub it via the poolView path (build is not
-      // overridden here, so drive it with the guard refusal translated by the
-      // route) — instead, override build to emulate the entrypoint contract.
-      build: (async () => ({
-        positionId: '',
-        mode: 'paper' as const,
-        rungs: [],
-        steps: [],
-        rejectionReasons: ['pool-exposure-cap']
-      })) as never
-    });
-    await app.ready();
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/lp/positions/deploy',
-      headers: sessionHeaders(),
-      payload: {
-        chain: 'solana',
-        poolAddress: 'solana:pool',
-        template: 'tight-spot-scalp',
-        depositAmount: 100,
-        depositAsset: 'solana:usdc'
-      }
-    });
-    expect(response.statusCode).toBe(403);
-    expect(response.json().reasons).toEqual(['pool-exposure-cap']);
-    await app.close();
-  });
-
-  it('deploy carries the auto-rebalance opt-in into the built position', async () => {
-    const build = vi.fn(async (_deps, _scope, request) => {
-      expect(request.autoRebalance).toBe(true);
-      return {
-        positionId: 'pos-1',
-        mode: 'paper' as const,
-        rungs: [],
-        steps: [],
-        rejectionReasons: []
-      };
-    });
-    const app = await buildApp({ build: build as never });
-    await app.ready();
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/lp/positions/deploy',
-      headers: sessionHeaders(),
-      payload: {
-        chain: 'solana',
-        poolAddress: 'solana:pool',
-        template: 'tight-spot-scalp',
-        depositAmount: 100,
-        depositAsset: 'solana:usdc',
-        autoRebalance: true
-      }
-    });
-    expect(response.statusCode).toBe(200);
-    expect(build).toHaveBeenCalled();
-    await app.close();
-  });
-
-  it('a successful paper deploy returns the plan with rungs and steps', async () => {
-    const app = await buildApp({
-      build: (async () => ({
-        positionId: 'pos-1',
-        mode: 'paper' as const,
-        rungs: [{ priceLower: 99, priceUpper: 101, weight: 1, allocation: 100 }],
-        steps: [{ rungIndex: 0, kind: 'initialize-position-and-add-liquidity', totalXAmount: 100, totalYAmount: 0, binLower: 0, binUpper: 1, strategy: 'spot', description: 'rung 0' }],
-        rejectionReasons: []
-      })) as never
-    });
-    await app.ready();
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/lp/positions/deploy',
-      headers: sessionHeaders(),
-      payload: {
-        chain: 'solana',
-        poolAddress: 'solana:pool',
-        template: 'tight-spot-scalp',
-        depositAmount: 100,
-        depositAsset: 'solana:usdc'
-      }
-    });
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.positionId).toBe('pos-1');
-    expect(body.mode).toBe('paper');
-    expect(body.steps).toHaveLength(1);
+  it('legacy numeric deploy is unavailable before any build or guard callback', async () => {
+    const build = vi.fn(), guard = { assertDeployAllowed: vi.fn() };
+    const app = await buildApp({ build, deployGuard: guard }); await app.ready();
+    const response = await app.inject({ method: 'POST', url: '/v1/lp/positions/deploy', headers: sessionHeaders(),
+      payload: { depositAmount: 100, autoRebalance: true } });
+    expect(response.statusCode).toBe(503); expect(build).not.toHaveBeenCalled(); expect(guard.assertDeployAllowed).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -333,61 +236,19 @@ describe('LP routes (Track H)', () => {
     depositAsset: 'solana:usdc',
     state: 'active',
     onChainPositionAddress: null,
+    acquisitionMode: 'paper',
+    paperPlan: { version: 1 },
     autoRebalance: false,
     openedAt: new Date(),
     closedAt: null,
     updatedAt: new Date()
   };
 
-  describe('manual rebalance trigger (Track I)', () => {
-    it('queues the job, transitions to rebalancing, and reports both', async () => {
-      const queueManualRebalance = vi.fn(async () => undefined);
-      const app = await buildApp({ queueManualRebalance });
-      await app.ready();
-      dbMocks.getLpPosition.mockResolvedValue(owned);
-      dbMocks.transitionLpPosition.mockResolvedValue({ ...owned, state: 'rebalancing' });
-
-      const response = await app.inject({
-        method: 'POST',
-        url: '/v1/lp/positions/pos-1/rebalance',
-        headers: sessionHeaders()
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ queued: true, positionId: 'pos-1', state: 'rebalancing' });
-      expect(queueManualRebalance).toHaveBeenCalledWith({
-        positionId: 'pos-1',
-        chain: 'solana',
-        poolAddress: 'solana:pool'
-      });
-      await app.close();
-    });
-
-    it('refuses for other users’ positions and for terminal states', async () => {
-      const app = await buildApp();
-      await app.ready();
-      dbMocks.getLpPosition.mockResolvedValue(null);
-      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-9/rebalance', headers: sessionHeaders() })).statusCode).toBe(404);
-
-      dbMocks.getLpPosition.mockResolvedValue({ ...owned, state: 'closed' });
-      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-1/rebalance', headers: sessionHeaders() })).statusCode).toBe(409);
-      await app.close();
-    });
-
-    it('a refused transition after queueing returns 409, leaving the job a no-op', async () => {
-      const app = await buildApp();
-      await app.ready();
-      dbMocks.getLpPosition.mockResolvedValue(owned);
-      dbMocks.transitionLpPosition.mockRejectedValue(new Error('invalid lp position transition: closed -> rebalancing'));
-
-      const response = await app.inject({
-        method: 'POST',
-        url: '/v1/lp/positions/pos-1/rebalance',
-        headers: sessionHeaders()
-      });
-      expect(response.statusCode).toBe(409);
-      expect(response.json().error).toContain('transition');
-      await app.close();
+  describe('manual rebalance receipt capability', () => {
+    it('legacy request/complete/queue seams are unavailable and cannot mutate state', async () => {
+      const app = await buildApp(); await app.ready();
+      const response = await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-1/rebalance', headers: sessionHeaders(), payload: { operationKey: 'rebal' } });
+      expect(response.statusCode).toBe(503); expect(dbMocks.transitionLpPosition).not.toHaveBeenCalled(); await app.close();
     });
   });
 
@@ -433,39 +294,11 @@ describe('LP routes (Track H)', () => {
     });
   });
 
-  describe('close endpoint', () => {
-    it('closes an open position through the state machine', async () => {
-      const app = await buildApp();
-      await app.ready();
-      dbMocks.getLpPosition.mockResolvedValue({ ...owned, state: 'active' });
-      dbMocks.transitionLpPosition.mockResolvedValue({ ...owned, state: 'closed' });
-
-      const response = await app.inject({
-        method: 'POST',
-        url: '/v1/lp/positions/pos-1/close',
-        headers: sessionHeaders()
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ positionId: 'pos-1', state: 'closed' });
-      expect(dbMocks.transitionLpPosition).toHaveBeenCalledWith(
-        expect.anything(),
-        'pos-1',
-        expect.objectContaining({ toState: 'closed' })
-      );
-      await app.close();
-    });
-
-    it('refuses unknown and already-closed positions', async () => {
-      const app = await buildApp();
-      await app.ready();
-
-      dbMocks.getLpPosition.mockResolvedValue(null);
-      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-9/close', headers: sessionHeaders() })).statusCode).toBe(404);
-
-      dbMocks.getLpPosition.mockResolvedValue({ ...owned, state: 'closed' });
-      expect((await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-1/close', headers: sessionHeaders() })).statusCode).toBe(409);
-      await app.close();
+  describe('close receipt capability', () => {
+    it('missing exact domain refuses even when legacy complete callback claims completed', async () => {
+      const app = await buildApp(); await app.ready();
+      const response = await app.inject({ method: 'POST', url: '/v1/lp/positions/pos-1/close', headers: sessionHeaders(), payload: { operationKey: 'close' } });
+      expect(response.statusCode).toBe(503); expect(dbMocks.transitionLpPosition).not.toHaveBeenCalled(); await app.close();
     });
   });
 

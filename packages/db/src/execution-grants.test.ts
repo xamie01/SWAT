@@ -2,9 +2,16 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ query: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), scopedQuery: vi.fn(), tenantTransaction: vi.fn() }));
 
+// No real client/tenancy role/environment initialization is imported by this suite.
 vi.mock('./client.js', () => ({ query: mocks.query }));
+vi.mock('./transaction.js', () => ({ withTransaction: vi.fn() }));
+vi.mock('./tenancy.js', () => ({
+  isCrossTenant: (scope: { userId: string }) => scope.userId === '*',
+  forUser: (userId: string) => ({ userId }), crossTenantScope: () => ({ userId: '*' }),
+  scopedQuery: mocks.scopedQuery, withTenantTransaction: mocks.tenantTransaction
+}));
 
 import {
   assertGrantSecretMatchesKind,
@@ -19,10 +26,13 @@ import {
   loadSealedGrantSecret,
   normalizeGrantAccountAddress,
   recordExecutionGrant,
+  revokeExecutionGrant,
+  markExecutionGrantCompromised,
   retireLapsedExecutionGrants,
   type GrantKind
 } from './execution-grants.js';
 import { crossTenantScope, forUser } from './tenancy.js';
+import { buildCustodySecretBinding } from './custody-contract.js';
 
 /**
  * Delegated-authority grants (`S4-7`, migration `047`).
@@ -36,7 +46,7 @@ import { crossTenantScope, forUser } from './tenancy.js';
  */
 
 const SOLANA_VAULT = 'So11111111111111111111111111111111111111112';
-const EVM_ACCOUNT = '0x1234567890abcdef1234567890abcdef12345678';
+const EVM_ACCOUNT = '0x1234567890abcdef1234567890abcdef1234567890';
 const scope = forUser('11111111-2222-3333-4444-555555555555');
 
 /**
@@ -76,6 +86,11 @@ function grantRow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.query.mockResolvedValue([grantRow()]);
+  mocks.scopedQuery.mockImplementation(async (tenant, sql, values) => {
+    expect(tenant).toEqual(scope);
+    if (tenant.userId === '*') throw new Error('Cross-tenant queries blocked');
+    return mocks.query(sql, values);
+  });
 });
 
 describe('grant kind sets', () => {
@@ -194,12 +209,16 @@ describe('recordExecutionGrant', () => {
       grantRow({ chain: 'polygon', grant_kind: 'polymarket_signer', account_address: EVM_ACCOUNT })
     ]);
 
+    const id = '11111111-1111-4111-8111-111111111111';
     await recordExecutionGrant(scope, {
-      chain: 'polygon',
-      grantKind: 'polymarket_signer',
+      id, chain: 'polygon', grantKind: 'polymarket_signer',
       accountAddress: EVM_ACCOUNT.toUpperCase().replace('0X', '0x'),
-      sealedSecret: 'v1.env-local.Zm9v',
-      keyVersion: 1
+      sealedSecret: ['v2','fixture-wrapper','1',Buffer.from('x').toString('base64'),Buffer.alloc(12).toString('base64'),
+        Buffer.alloc(16).toString('base64'),Buffer.from('x').toString('base64')].join('.'),
+      keyVersion: 1,
+      secretBinding: buildCustodySecretBinding({ deploymentId: 'fixture-deployment', chainId: '137', userId: scope.userId,
+        grantId: id, chain: 'polygon', grantKind: 'polymarket_signer', accountAddress: EVM_ACCOUNT,
+        keyVersion: 1, scopePolicy: null, expiresAt: null })
     });
 
     const [, values] = mocks.query.mock.calls[0] as [string, unknown[]];
@@ -220,7 +239,7 @@ describe('recordExecutionGrant', () => {
   it('refuses a session grant with no expiry before opening a connection', async () => {
     await expect(
       recordExecutionGrant(scope, {
-        chain: 'polygon',
+        chain: 'robinhood-chain',
         grantKind: 'session_key_4337',
         accountAddress: EVM_ACCOUNT,
         sealedSecret: 'v1.env-local.Zm9v',
@@ -307,19 +326,36 @@ describe('platform sweeps', () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
-  it('runs the expiry sweep under a stated reason', async () => {
-    mocks.query.mockResolvedValue([]);
-    await listExpiringExecutionGrants(crossTenantScope('S4-P9 re-consent sweep'), new Date());
-    const [sql] = mocks.query.mock.calls[0] as [string];
-    expect(sql).toContain("status = 'active'");
-    expect(sql).toContain('expires_at <= $1');
+  it('blocks cross-tenant expiry sweeps even with a stated reason', async () => {
+    await expect(listExpiringExecutionGrants(crossTenantScope('S4-P9 re-consent sweep'), new Date()))
+      .rejects.toThrow('separately reviewed privileged capability');
+    expect(mocks.scopedQuery).not.toHaveBeenCalled(); expect(mocks.query).not.toHaveBeenCalled();
   });
 
-  it('retires lapsed grants rather than revoking them', async () => {
-    mocks.query.mockResolvedValue([]);
-    await retireLapsedExecutionGrants(crossTenantScope('S4-P9 lapse sweep'));
-    const [sql] = mocks.query.mock.calls[0] as [string];
-    expect(sql).toContain("SET status = 'retired'");
+  it('blocks cross-tenant lapse sweeps without a privileged capability', async () => {
+    await expect(retireLapsedExecutionGrants(crossTenantScope('S4-P9 lapse sweep')))
+      .rejects.toThrow('separately reviewed privileged capability');
+    expect(mocks.scopedQuery).not.toHaveBeenCalled(); expect(mocks.query).not.toHaveBeenCalled();
+  });
+});
+
+describe('tenant-scoped public operations', () => {
+  it.each([
+    ['record', () => recordExecutionGrant(scope, { chain: 'solana', grantKind: 'solana_vault', accountAddress: SOLANA_VAULT })],
+    ['list', () => listExecutionGrants(scope)],
+    ['active', () => findActiveExecutionGrant(scope, 'polygon', 'polymarket_signer')],
+    ['historical', () => loadSealedGrantSecret(scope, 'grant-1')],
+    ['revoke', () => revokeExecutionGrant(scope, 'grant-1')],
+    ['compromise', () => markExecutionGrantCompromised(scope, 'grant-1')]
+  ])('passes authenticated tenant scope to %s query boundary', async (_name, operation) => {
+    await operation(); expect(mocks.scopedQuery).toHaveBeenCalledTimes(1);
+    expect(mocks.scopedQuery.mock.calls[0]![0]).toEqual(scope);
+  });
+  it('does not widen the public grant projection with private lifecycle or custody fields', async () => {
+    mocks.query.mockResolvedValue([grantRow({ lifecycle_revision: '8', revocation_tombstone: new Date(),
+      sealed_secret: 'inert-ciphertext', secret_binding: { private: true } })]);
+    const [grant] = await listExecutionGrants(scope);
+    for (const field of ['lifecycleRevision','revocationTombstone','sealedSecret','secretBinding']) expect(grant).not.toHaveProperty(field);
   });
 });
 

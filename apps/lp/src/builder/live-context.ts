@@ -34,7 +34,7 @@ export function createLiveContextSource(options: LiveContextSourceOptions): Live
       tickSpacing: pool.tickSpacing,
       bins: null,
       bands: null,
-      fetchedAt: new Date(),
+      fetchedAt: pool.lastScannedAt,
       warnings: ['live context unavailable — anchored on the scan cache, which may be stale']
     };
   }

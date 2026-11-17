@@ -1,5 +1,8 @@
 import {
   recordSourceTradeEvent,
+  verifySourceTrade,
+  type SourceVerificationEvidence,
+  type TrustedSourceVerifier,
   type SourceTradeEventInput
 } from '@swat/db';
 import {
@@ -114,8 +117,28 @@ export function buildSolanaSourceTradeInput(input: {
 export async function persistSolanaSourceTrade(input: {
   event: CanonicalSolanaSwapEvent;
   source: SolanaIngestionSource;
+  /** Approved server verifier composition. Existing callers omit it and stay quarantined. */
+  verification?: { network: string; quantityScale: number; evidence: SourceVerificationEvidence; verifier: TrustedSourceVerifier };
 }) {
-  return persistSourceTrade(buildSolanaSourceTradeInput(input));
+  const observation = buildSolanaSourceTradeInput(input);
+  if (input.verification) {
+    const { network, quantityScale } = input.verification;
+    const rawQuantity = observation.quantity as string;
+    observation.quantity = formatScaledInteger(rawQuantity, quantityScale);
+    observation.verificationBinding = {
+      chain: observation.chain, network, sourceEventType: observation.sourceEventType,
+      sourceEventId: observation.sourceEventId, sourceEventIndex: observation.sourceEventIndex!,
+      transactionHash: observation.transactionHash!, walletAddress: resolveChainAddress(observation.walletAddress, 'solana').prefixed,
+      tokenMint: resolveChainValue(observation.tokenMint, 'solana').prefixed, side: observation.side,
+      rawQuantity, quantityScale, eventAt: observation.eventAt.toISOString(),
+      amountUsd: observation.amountUsd as string | null, priceUsd: observation.priceUsd as string | null, feeUsd: null
+    };
+  }
+  const persisted = await persistSourceTrade(observation);
+  if (!input.verification) return persisted;
+  const verified = await verifySourceTrade({ sourceTradeId: persisted.event.id,
+    evidence: input.verification.evidence, verifier: input.verification.verifier });
+  return { ...persisted, eligibleForCopy: ['confirmed', 'finalized'].includes(verified.confirmationState), verification: verified };
 }
 
 export function buildPolymarketSourceTradeInput(input: {

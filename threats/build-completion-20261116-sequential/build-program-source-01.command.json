@@ -1,0 +1,38 @@
+{
+  "label": "build-program-source-01",
+  "kind": "test",
+  "target": "threats/build-completion-20261116-sequential/program.config.ts",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/root/SWAT/threats/build-completion-20261116-sequential/program.config.ts"
+  ],
+  "exitCode": 1,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T20:34:27.210972+00:00",
+  "elapsedSeconds": 2.199,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "threats/build-completion-20261116-sequential/program.config.ts": "3d09c48cd08f990e94f041818178f8e4f28cb5c35784308ad0e3e677e0f711fe",
+    "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "scripts/build-completion-runner.py": "196ee213524317d9509661e3302861cf983c1c0f403fa350559043bfe075805f",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "765f2df0637e69bae2a57bea3bef2598cae65fa1fee1a06d8418fdb692c331e7",
+  "workspaceInputManifest": "threats/build-completion-20261116-sequential/build-program-source-01.inputs.json",
+  "workspaceInputManifestSha256": "439567eded6bbdfd1232187166763c6baa0c10a148d1dcfe0439c375e94df135",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 1,
+  "resultSha256": "4a6924c592791e1d0a37cd646f3fc7307f8e9f8324e24e2a5c0c9a7d1d87d1b1",
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

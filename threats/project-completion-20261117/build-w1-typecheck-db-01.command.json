@@ -1,0 +1,40 @@
+{
+  "label": "build-w1-typecheck-db-01",
+  "kind": "typecheck",
+  "target": "db",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc",
+    "-p",
+    "/root/SWAT/packages/db/tsconfig.json",
+    "--incremental",
+    "false",
+    "--noEmit"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-17T07:16:27.854492+00:00",
+  "elapsedSeconds": 10.487,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 640,
+  "inputSha256": {
+    "packages/db/tsconfig.json": "bb8d473c20d65298c48603c5c69b5ebe02fa7111a5ecb01be83266ebbd56b699",
+    "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+    "scripts/build-completion-runner.py": "fc9757dc991ce098e698882e72db023f16866aa88f8d32b8e8d7a20a43f131d1",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "workspaceInputManifest": "threats/project-completion-20261117/build-w1-typecheck-db-01.inputs.json",
+  "workspaceInputManifestSha256": "90d46a8f92436457b65ea57fe16d1b94aa502e0ec30f5117e2e9979467b41275",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": null,
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

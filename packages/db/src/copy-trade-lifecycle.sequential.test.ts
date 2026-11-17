@@ -81,8 +81,7 @@ describe('uncertified source observation persistence', () => {
   });
 
   it('does not enumerate historical applied rows as copy candidates', async () => {
-    mocks.query.mockResolvedValue([{ ...sourceRow('finalized'), source_trade_id: SOURCE_ID,
-      wallet_score: '99', cluster_confidence: '1' }]);
+    persistenceFixture('finalized');
     expect(await listSourceTradeSignalCandidates({ sourceTradeId: SOURCE_ID,
       maxEventAgeMs: 60_000, now: EVENT_AT })).toEqual([]);
     expect(mocks.query).not.toHaveBeenCalled();

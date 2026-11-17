@@ -1,3 +1,5 @@
+import type { ReducingRequest, ReducingService } from '@swat/db';
+import { requireFinancial } from '@swat/db';
 import { UnrecoverableError } from 'bullmq';
 import type { Chain } from '@swat/shared';
 import {
@@ -483,4 +485,11 @@ export function decideManualExit(input: ManualExitInput): ManualExitDecision {
       : 'manual-exit-by-venue-sell',
     reason: race.reason
   };
+}
+
+/** New durable path is explicit and injected. The legacy pure decision is not an execution/closure receipt. */
+export async function requestDurableManualExit(userId: string, request: ReducingRequest, service?: ReducingService) {
+  requireFinancial(request.venue === 'spot', 'manual-exit-venue-mismatch');
+  requireFinancial(service, 'manual-exit-durable-ports-unavailable');
+  return service.request(userId, request);
 }

@@ -106,16 +106,17 @@ def _hit_at_1(scores: np.ndarray, relevance: np.ndarray) -> float:
 
 
 def _reciprocal_rank(scores: np.ndarray, relevance: np.ndarray) -> float:
-    order = np.argsort(-scores)
+    # Ties preserve candidate order, matching the first maximum used by hit@1.
+    order = np.argsort(-scores, kind="stable")
     ranked = relevance[order]
     hits = np.where(ranked == REL_CHOSEN)[0]
     return float(1.0 / (hits[0] + 1)) if hits.size else 0.0
 
 
 def _ndcg(scores: np.ndarray, relevance: np.ndarray, k: int = 5) -> float:
-    order = np.argsort(-scores)[:k]
+    order = np.argsort(-scores, kind="stable")[:k]
     gains = (2.0 ** relevance[order] - 1) / np.log2(np.arange(2, order.size + 2))
-    ideal_order = np.argsort(-relevance)[:k]
+    ideal_order = np.argsort(-relevance, kind="stable")[:k]
     ideal = (2.0 ** relevance[ideal_order] - 1) / np.log2(
         np.arange(2, ideal_order.size + 2)
     )
@@ -348,5 +349,5 @@ def score_candidates(
     matrix = candidates.select(result.features_used).to_numpy()
     scores = result.model.predict(matrix)  # type: ignore[attr-defined]
     return candidates.with_columns(score=pl.Series("score", scores)).sort(
-        "score", descending=True
+        "score", descending=True, maintain_order=True
     )

@@ -1,0 +1,38 @@
+{
+  "label": "build-w1-fanout-tests-01",
+  "kind": "test",
+  "target": "threats/project-completion-20261117/w1-fanout.config.ts",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/root/SWAT/threats/project-completion-20261117/w1-fanout.config.ts"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-17T07:16:44.326005+00:00",
+  "elapsedSeconds": 5.489,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "threats/project-completion-20261117/w1-fanout.config.ts": "b361da06497d52e0735e1b30669878e88061390b2d1534af036dc1afd2fcc195",
+    "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "scripts/build-completion-runner.py": "fc9757dc991ce098e698882e72db023f16866aa88f8d32b8e8d7a20a43f131d1",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "987c35336889799a144c3833a6143dd1f498ae638494cce7fe71143f3b7eec43",
+  "workspaceInputManifest": "threats/project-completion-20261117/build-w1-fanout-tests-01.inputs.json",
+  "workspaceInputManifestSha256": "90d46a8f92436457b65ea57fe16d1b94aa502e0ec30f5117e2e9979467b41275",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": "a1700533eea3cbabc65bfdbcd2585761b03e38dcbcec7e56012c0ac540b51c1c",
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

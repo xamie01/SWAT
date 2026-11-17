@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), wallets: vi.fn(), email: vi.fn() }));
 vi.mock('@swat/db', () => ({
+  scopedQuery: (_scope: { userId: string }, sql: string, values: unknown[]) => mocks.query(sql, values),
   query: mocks.query, listAuthWallets: mocks.wallets, forUser: (userId: string) => ({ userId }),
   findUserById: vi.fn(), resolveSession: vi.fn(), recordExecutionGrant: vi.fn(),
   isSubscribed: vi.fn(), listTokenWatches: vi.fn(), listWalletSubscriptions: vi.fn(),

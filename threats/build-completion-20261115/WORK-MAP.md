@@ -1,5 +1,7 @@
 # Build completion work map — 2026-11-15
 
+> Historical coordination plan, not completion sign-off. Sequential remediation from commit `564818d` is tracked in `../build-completion-20261116-sequential/PLAN.md` and its fingerprinted evidence/report files. The original owner roster and baseline below remain historical. Source/test fixes and unavailable capabilities are not full build, runtime or deployment acceptance.
+
 ## Objective and acceptance
 
 User requested a complete build/deployment-readiness map and parallel implementation with report review. Baseline HEAD `08c822d`; the checkout contains substantial inherited uncommitted work. Preserve it. Baseline file fingerprints are recorded in `baseline-fingerprints.json`.

@@ -4,10 +4,10 @@ import { validateBackendTarget } from './backend-target.js';
 import { resolveLoginDestination } from './route-access.js';
 
 const saved = { ...process.env };
-afterEach(() => { process.env = { ...saved }; vi.restoreAllMocks(); vi.resetModules(); });
+afterEach(() => { vi.unstubAllEnvs(); process.env = { ...saved }; vi.restoreAllMocks(); vi.resetModules(); });
 
 it('refuses remote plaintext SSR destinations, including loopback text outside the hostname', () => {
-  process.env.NODE_ENV = 'production';
+  vi.stubEnv('NODE_ENV', 'production');
   for (const key of ['INTERNAL_API_URL', 'BACKEND_API_INTERNAL_URL', 'INTERNAL_LP_URL', 'BACKEND_LP_INTERNAL_URL']) delete process.env[key];
   expect(resolveApiBase(null, '')).toBe('http://127.0.0.1:3001');
   expect(resolveLpApiBase(null, '')).toBe('http://127.0.0.1:3010');
@@ -29,10 +29,11 @@ it('accepts exact loopback or TLS while rejecting malformed and credential-beari
 });
 
 it('uses the same validated destination for Next rewrites', async () => {
-  process.env.NODE_ENV = 'production';
+  vi.stubEnv('NODE_ENV', 'production');
   process.env.INTERNAL_API_URL = 'https://private.example';
   process.env.INTERNAL_LP_URL = 'https://private-lp.example';
-  const { default: config } = await import('../next.config.ts');
+  const module = await import('../next.config.js');
+  const config = module.default as unknown as import('next').NextConfig;
   const headers = (await config.headers!())[0]!.headers;
   expect(headers).toContainEqual({ key: 'X-Frame-Options', value: 'DENY' });
   expect(headers).toContainEqual({ key: 'Referrer-Policy', value: 'no-referrer' });
@@ -53,7 +54,7 @@ it('keeps post-login navigation same-origin and classifies decoded paths without
 });
 
 it('does not use browser public configuration for cookie-bearing SSR requests', () => {
-  process.env.NODE_ENV = 'production';
+  vi.stubEnv('NODE_ENV', 'production');
   process.env.INTERNAL_API_URL = 'https://private.example/';
   process.env.INTERNAL_LP_URL = 'https://private-lp.example/';
   expect(resolveApiBase(null, 'https://public.example')).toBe('https://private.example');

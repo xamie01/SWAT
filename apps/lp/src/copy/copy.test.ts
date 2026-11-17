@@ -232,10 +232,10 @@ describe('Track 2: Forward-Only LP Copy-Trading Engine', () => {
       };
 
       const result = await processLpCopyJob(job, deps);
-      expect(result.status).toBe('executed');
+      expect(result.status).toBe('rejected');
       expect(result.mode).toBe('paper');
-      expect(mockCreate).toHaveBeenCalled();
-      expect(mockUpdate).toHaveBeenCalledWith('exec-1', 'executed', null);
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
 
     it('rejects copy job when execution mode is off', async () => {
@@ -267,7 +267,8 @@ describe('Track 2: Forward-Only LP Copy-Trading Engine', () => {
 
       const result = await processLpCopyJob(job, deps);
       expect(result.status).toBe('rejected');
-      expect(mockUpdate).toHaveBeenCalledWith('exec-2', 'rejected', expect.stringContaining('Chain execution mode is off'));
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
     });
   });
 });

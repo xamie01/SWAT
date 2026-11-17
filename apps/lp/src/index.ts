@@ -33,6 +33,11 @@ import { createMeteoraLadderBuilder } from './builder/meteora-ladder.js';
 import { createEvmLadderBuilder } from './builder/evm-ladder.js';
 import { buildLivePreview } from './builder/live-preview.js';
 import { createLiveContextSource } from './builder/live-context.js';
+import { createLpCopyWorker } from './copy/copy-worker.js';
+import { createExactLpDomain } from './builder/exact-paper.js';
+import { createLpPaperSqlStore } from '@swat/db/dist/lp-paper-store.js';
+import { createLpExecutionMode, createPaperReplanner, requestLpOperation, processLpOperationJob, recoverLpOperations, type LpOperationDeps } from './operations.js';
+import { forUser } from '@swat/db';
 import { createRpcSolanaBinSource } from './scanner/solana-bins.js';
 
 /**
@@ -115,12 +120,12 @@ const liveContextSource = createLiveContextSource({
   solanaBinSource: createRpcSolanaBinSource({
     rpcUrl: solanaRpcUrl ?? 'https://api.mainnet-beta.solana.com'
   }),
-  evmReader: robinhoodPools.length > 0
+  evmReaders: { 'robinhood-chain': robinhoodPools.length > 0
     ? createViemRobinhoodPoolReader({
         rpcUrl: process.env.ROBINHOOD_RPC_URL ?? '',
         configuredPools: robinhoodPools
       })
-    : undefined
+    : undefined }
 });
 
 // Pool view for ladder anchoring: served from the scan cache (Track B output).
@@ -129,11 +134,14 @@ const poolView = {
     const { getLpPool } = await import('@swat/db');
     const pool = await getLpPool(chain, poolAddress);
     if (!pool) return null;
+    const context = await liveContextSource.fetchLiveContext(chain, poolAddress);
+    if (!context) return null;
     return {
       protocol: pool.protocol,
-      binStep: pool.binStep,
-      tickSpacing: pool.tickSpacing,
-      currentPrice: pool.currentPrice
+      binStep: context.binStep,
+      tickSpacing: context.tickSpacing,
+      currentPrice: context.currentPrice,
+      observedAt: context.fetchedAt
     };
   }
 };
@@ -142,15 +150,23 @@ const poolView = {
 // SDK-backed signing ports land behind the same interfaces at live certification.
 const meteoraBuilder = createMeteoraLadderBuilder(createPlanOnlyMeteoraPort());
 const evmBuilder = createEvmLadderBuilder(createPlanOnlyEvmPort());
-const executionMode = {
-  resolveMode: async (chain: import('@swat/shared').LpChain) => {
-    const resolution = await resolveChainMode(chain);
-    const mode = resolution.effectiveMode;
-    // 'live+shadow' is observe-only: for LP it maps to paper — plans are
-    // recorded, nothing is ever broadcast.
-    if (mode === 'off' || mode === 'paper' || mode === 'live') return mode;
-    return 'paper';
-  }
+const executionMode = createLpExecutionMode(resolveChainMode);
+const enqueueExactOperation: LpOperationDeps['enqueue'] = async input => {
+  const queue = executionQueueRefs[input.chain];
+  if (!queue) throw new Error('LP durable operation queue unavailable');
+  await queue.add('lp-paper-operation', input, { jobId: `lp-op-${input.operationId}`, removeOnComplete: true, removeOnFail: true });
+};
+// Default has no quote/receipt or master-event port. SQL/plan factories do not manufacture provider acceptance.
+const exactPaper = createExactLpDomain({ store: createLpPaperSqlStore(), mode: chain => executionMode.resolveMode(chain), enqueue: enqueueExactOperation });
+const builderDeps = {
+  deployGuard, executionMode, poolView, meteoraBuilder, evmBuilder, exactPaper,
+  userAddress: process.env.LP_SERVICE_USER_ADDRESS ?? '',
+  valuation: { value: async () => null }
+};
+const operationDeps: LpOperationDeps = {
+  executionMode, exactPaper,
+  replan: createPaperReplanner(builderDeps), enqueue: enqueueExactOperation
+  // No wildcard recovery scope: independent operator enumeration capability remains unavailable.
 };
 
 // --- Scheduled passes -------------------------------------------------------
@@ -208,30 +224,30 @@ async function runMonitorGuarded(): Promise<void> {
   if (monitorRunning) return;
   monitorRunning = true;
   try {
+    await recoverLpOperations(operationDeps);
     for (const chain of ['solana', 'robinhood-chain'] as const) {
       const summary = await runMonitorPass(
         {
-          pricePoller: { currentPrice: async () => null }, // live price source lands with the SDK poller
-          economics: {
-            estimate: async () => ({
-              expectedExtraFeesUsd: 0,
-              impermanentLossUsd: 0,
-              gasCostUsd: 0,
-              rebalanceCostUsd: 0,
-              inventoryChangeUsd: 0
-            })
-          },
+          pricePoller: { currentPrice: async poolAddress => {
+            const context = await liveContextSource.fetchLiveContext(chain, poolAddress);
+            const age = context ? Date.now() - context.fetchedAt.getTime() : NaN;
+            return context && Number.isFinite(age) && age >= 0 && age <= 60_000 ? context.currentPrice : null;
+          } },
+          economics: { estimate: async () => null }, // no trustworthy fee/IL/cost provider configured
           listPositions: async (c) => listPositionsForMonitor(crossTenantScope('lp position monitor sweep'), c),
-          transition: (positionId, toState, reason) => transitionLpPosition(crossTenantScope('lp position monitor sweep'), positionId, { toState, reason }),
-          queueRebalance: async (input) => {
-            await executionQueueRefs[input.chain]?.add('lp-rebalance', input, {
-              // Unique per firing: a fixed jobId + removeOnFail would let one
-              // failed job silently swallow every later add for the position.
-              jobId: `lp-rebalance-${input.positionId}-${Date.now()}`,
-              removeOnComplete: true,
-              removeOnFail: 100
+          transition: async (positionId, toState, reason) => {
+            const position = await getLpPositionAnyOwner(crossTenantScope('LP monitor owner resolution'), positionId);
+            if (!position) throw new Error('LP monitor owner unavailable');
+            return transitionLpPosition(forUser(position.userId), positionId, { toState, reason });
+          },
+          queueExactRebalance: async (input) => {
+            const position = await getLpPositionAnyOwner(crossTenantScope('LP monitor operation lookup'), input.positionId);
+            if (!position) throw new Error('LP position gone');
+            await requestLpOperation(operationDeps, forUser(position.userId), {
+              positionId: position.id, kind: 'rebalance', automatic: true, operationKey: `monitor-${position.id}-${position.updatedAt.getTime()}`
             });
-          }
+          },
+          queueRebalance: async () => { throw new Error('LP legacy float economic scheduling unavailable'); }
         },
         chain
       );
@@ -301,12 +317,8 @@ async function buildApp(): Promise<FastifyInstance> {
   await (app.register as any)(cookie);
   await registerLpAuth(app, { legacyKeyHash: apiKey ? legacyKeyHash(apiKey) : undefined });
   await registerLpRoutes(app, {
-    deployGuard,
-    executionMode,
-    poolView,
-    meteoraBuilder,
-    evmBuilder,
-    userAddress: process.env.LP_SERVICE_USER_ADDRESS ?? '',
+    ...builderDeps,
+    operations: operationDeps,
     livePreview: async (input) => {
       const context = await liveContextSource.fetchLiveContext(input.chain, input.poolAddress);
       if (!context) {
@@ -360,6 +372,8 @@ async function startExecutionWorkers(
   connection: Redis,
   closers: Array<() => Promise<void>>
 ): Promise<void> {
+  const copyWorker = createLpCopyWorker(connection, { executionMode, exactPaper });
+  closers.push(() => copyWorker.close());
   for (const [chain, queueName] of Object.entries(LP_EXECUTION_QUEUES_BY_CHAIN)) {
     const queue = new Queue(queueName, { connection });
     executionQueueRefs[chain] = queue;
@@ -368,32 +382,10 @@ async function startExecutionWorkers(
     const worker = new Worker(
       queueName,
       async (job) => {
-        const mode = await executionMode.resolveMode(chain as 'solana' | 'robinhood-chain');
-        if (mode !== 'live') {
-          // The queue is durable: between enqueue and run the position may have
-          // closed (or never left `building`), so the recorded intent must
-          // check the row it was queued for before treating the job as work.
-          const payload = job.data as { positionId?: string };
-          const position = payload.positionId
-            ? await getLpPositionAnyOwner(crossTenantScope('lp execution worker'), payload.positionId)
-            : null;
-          if (!position || position.state === 'closed' || position.state === 'building') {
-            console.log(
-              `[lp] execution job ${job.id ?? ''} skipped: position ${payload.positionId ?? '?'} ` +
-              `is ${position?.state ?? 'gone'}`
-            );
-            return { mode, broadcast: false, skipped: true };
-          }
-          console.log(
-            `[lp] execution job ${job.id ?? ''} for ${chain} recorded in ${mode} mode (not broadcast):`,
-            JSON.stringify(job.data)
-          );
-          return { mode, broadcast: false };
-        }
-        // Live path: the build/rebalance plans from Tracks E/F would be signed
-        // and submitted here through the SDK ports. Runtime-untested in this
-        // environment (no live-certified chain); fail closed rather than guess.
-        throw new Error('live LP submission requires a certified chain runtime; refusing to guess');
+        if (job.name !== 'lp-paper-operation') throw new Error('legacy LP execution intent unsupported');
+        const payload = job.data as { operationId: string; userId: string; chain: import('@swat/shared').LpChain };
+        if (payload.chain !== chain) throw new Error('LP operation queue chain mismatch');
+        return processLpOperationJob(operationDeps, payload);
       },
       { connection, concurrency: 1 }
     );

@@ -151,7 +151,7 @@ export async function generateCanonicalReference(input: OwnedInfrastructure): Pr
   await assertDisposableOwnedInfrastructure(input);
   const declaration = validatePackage28IsolationDeclarations(input.env);
   const source = await canonicalMigrationSource();
-  const { Client } = await import('pg');
+  const { Client } = await import('../../../packages/db/src/reference-driver.js');
   const client = new Client({ connectionString: declaration.databaseUrl, connectionTimeoutMillis: 5000 });
   await client.connect();
   try {
@@ -201,7 +201,7 @@ export async function compareCanonicalCandidate(reference: OwnedInfrastructure, 
   await assertDisposableOwnedInfrastructure(candidate);
   const baseline = await generateCanonicalReference(reference);
   const declaration = validatePackage28IsolationDeclarations(candidate.env);
-  const { Client } = await import('pg');
+  const { Client } = await import('../../../packages/db/src/reference-driver.js');
   const client = new Client({ connectionString: declaration.databaseUrl, connectionTimeoutMillis: 5000 });
   await client.connect();
   try {

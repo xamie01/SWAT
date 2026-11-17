@@ -38,6 +38,7 @@ describe('transactional trade state persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.clientQuery.mockImplementation(async (sql: string) => {
+      if (sql === 'COMMIT') return { command: 'COMMIT', rowCount: 0, rows: [] };
       if (sql.includes('SELECT id FROM signals')) return { rowCount: 1, rows: [{ id: 'signal-1' }] };
       if (sql.includes('FROM trades')) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO trades')) return { rowCount: 1, rows: [{ id: 'trade-1' }] };

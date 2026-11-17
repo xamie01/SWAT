@@ -1,0 +1,38 @@
+{
+  "label": "build-web-api-green-01",
+  "kind": "test",
+  "target": "threats/build-completion-20261116-sequential/web-api.config.ts",
+  "command": [
+    "/usr/bin/node",
+    "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    "/root/SWAT/threats/build-completion-20261116-sequential/web-api.config.ts"
+  ],
+  "exitCode": 0,
+  "timedOut": false,
+  "finishedUtc": "2026-11-16T20:16:46.627331+00:00",
+  "elapsedSeconds": 12.934,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "inputSha256": {
+    "threats/build-completion-20261116-sequential/web-api.config.ts": "55c7b8f4fc0de7b6df1460ddf72e55c957fbf73e98e78bd323cc190003dc8d3c",
+    "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+    "scripts/build-completion-runner.py": "196ee213524317d9509661e3302861cf983c1c0f403fa350559043bfe075805f",
+    "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+    "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+    "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+  },
+  "logSha256": "9a81cc6cf812e6ef8028a351931f0a20a5e4b1ae2dbd2b7d90660ff8b216c0c9",
+  "workspaceInputManifest": "threats/build-completion-20261116-sequential/build-web-api-green-01.inputs.json",
+  "workspaceInputManifestSha256": "cbdfbe49468e0fdd40819bb90bdeec012122becaf7cd5cef86be1a9bfe131aeb",
+  "workspaceInputsUnchanged": true,
+  "childExitCode": 0,
+  "resultSha256": "ee1e48dd71acf6062a17bf9ec158b3d47c09e0a9a4da044b7537a977ab30810a",
+  "emittedArtifactsSha256": {},
+  "syntheticEnvironment": true,
+  "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+  "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance"
+}

@@ -1,21 +1,23 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { lpApi } from '../../../lib/api.js';
 import { describeApiError } from '../../../lib/api-error-message.js';
+import { observedBuilderBounds } from '../../../lib/lp-observation.js';
+import { lpBuildNotice, legacyPaperAmount } from '../../../lib/portfolio-model.js';
 
 function BuilderContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [chain, setChain] = useState<string>('solana');
   const [poolAddress, setPoolAddress] = useState<string>('solana:Meteora-SOL-USDC');
   const [distribution, setDistribution] = useState<'spot' | 'curve' | 'bidask'>('spot');
+  const [rangeSource, setRangeSource] = useState('Manual example bounds — not observed market price');
   const [rangeLower, setRangeLower] = useState(175);
   const [rangeUpper, setRangeUpper] = useState(195);
   const [rungCount, setRungCount] = useState(12);
-  const [depositAmount, setDepositAmount] = useState(500);
+  const [depositAmount, setDepositAmount] = useState('500');
   const [autoRebalance, setAutoRebalance] = useState(true);
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState<string | null>(null);
@@ -27,20 +29,23 @@ function BuilderContent() {
 
     if (pPool) setPoolAddress(pPool);
     if (pChain) setChain(pChain);
-    if (pPrice) {
-      const price = Number(pPrice);
-      if (price > 0) {
-        setRangeLower(Number((price * 0.9).toFixed(4)));
-        setRangeUpper(Number((price * 1.1).toFixed(4)));
-      }
-    }
+    const bounds = observedBuilderBounds(pPrice);
+    if (bounds) {
+      setRangeLower(bounds.lower); setRangeUpper(bounds.upper);
+      setRangeSource('Bounds suggested from a recorded price — runtime freshness unverified');
+    } else setRangeSource('Manual example bounds — no valid price observation supplied');
   }, [searchParams]);
 
+  const operation = useRef<{ fingerprint: string; key: string } | null>(null);
   const handleDeploy = async () => {
+    if (deploying) return;
     setDeploying(true);
     setDeployResult(null);
     try {
-      await lpApi.post('/v1/lp/positions/deploy', {
+      const fingerprint = JSON.stringify({ chain, poolAddress, rangeLower, rangeUpper, rungCount, distribution, depositAmount, autoRebalance });
+      if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, key: crypto.randomUUID() };
+      const result = await lpApi.post('/v1/lp/positions/deploy', {
+        operationKey: operation.current.key,
         chain,
         poolAddress,
         custom: {
@@ -49,14 +54,11 @@ function BuilderContent() {
           rungCount,
           distribution,
         },
-        depositAmount,
+        depositAmount: legacyPaperAmount(depositAmount),
         depositAsset: `${chain}:USDC`,
         autoRebalance,
       });
-      setDeployResult('LP Ladder successfully deployed in paper/execution mode!');
-      setTimeout(() => {
-        router.push('/lp/positions');
-      }, 1500);
+      setDeployResult(lpBuildNotice(result));
     } catch (err) {
       setDeployResult(`Deploy failed: ${describeApiError(err, 'Could not deploy ladder')}`);
     } finally {
@@ -71,7 +73,7 @@ function BuilderContent() {
           Pro Custom Ladder Builder
         </h1>
         <p className="text-xs text-on-surface-variant max-w-2xl leading-relaxed">
-          Customize discrete price bins or continuous ticks, shape liquidity distributions, and enable autonomous rebalancing.
+          {rangeSource}. Plan a paper liquidity ladder with locally recorded rebalancing. Live deployment is unavailable; server valuation and current paper policy must permit acquisition.
         </p>
       </div>
 
@@ -149,7 +151,7 @@ function BuilderContent() {
                   type="number"
                   step="0.0001"
                   value={rangeLower}
-                  onChange={(e) => setRangeLower(Number(e.target.value))}
+                  onChange={(e) => { setRangeLower(Number(e.target.value)); setRangeSource('Manual user bounds — not an observed price'); }}
                   className="w-full mt-1 p-2 bg-surface-container border border-border-subtle rounded-lg font-mono text-xs text-on-surface"
                 />
               </div>
@@ -161,7 +163,7 @@ function BuilderContent() {
                   type="number"
                   step="0.0001"
                   value={rangeUpper}
-                  onChange={(e) => setRangeUpper(Number(e.target.value))}
+                  onChange={(e) => { setRangeUpper(Number(e.target.value)); setRangeSource('Manual user bounds — not an observed price'); }}
                   className="w-full mt-1 p-2 bg-surface-container border border-border-subtle rounded-lg font-mono text-xs text-on-surface"
                 />
               </div>
@@ -187,16 +189,16 @@ function BuilderContent() {
             <div>
               <div className="flex justify-between items-center">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-                  Deposit Amount ($ USD)
+                  Deposit Token Quantity (not USD)
                 </label>
-                <span className="font-mono font-bold text-primary">${depositAmount}</span>
+                <span className="font-mono font-bold text-primary">{depositAmount} {chain}:USDC units</span>
               </div>
               <input
                 type="number"
                 min="10"
                 step="10"
                 value={depositAmount}
-                onChange={(e) => setDepositAmount(Number(e.target.value))}
+                onChange={(e) => setDepositAmount(e.target.value)}
                 className="w-full mt-1 p-2 bg-surface-container border border-border-subtle rounded-lg font-mono text-xs text-on-surface"
               />
               <div className="flex gap-1.5 mt-1.5">
@@ -204,10 +206,10 @@ function BuilderContent() {
                   <button
                     key={preset}
                     type="button"
-                    onClick={() => setDepositAmount(preset)}
+                    onClick={() => setDepositAmount(String(preset))}
                     className="px-2 py-0.5 rounded bg-surface-container hover:bg-surface-container-high border border-border-subtle text-[10px] font-mono font-bold"
                   >
-                    ${preset}
+                    {preset} units
                   </button>
                 ))}
               </div>
@@ -215,7 +217,7 @@ function BuilderContent() {
 
             <div className="p-3 bg-surface-container-low border border-border-subtle rounded-lg flex items-center justify-between">
               <div>
-                <p className="text-xs font-bold text-on-surface">Autonomous Rebalance</p>
+                <p className="text-xs font-bold text-on-surface">Paper Auto-Rebalance</p>
                 <p className="text-[10px] text-on-surface-variant">Auto-recenter when fee uplift &gt; IL + cost</p>
               </div>
               <input
@@ -230,7 +232,7 @@ function BuilderContent() {
           {deployResult && (
             <div
               className={`p-3 rounded-lg text-xs font-mono ${
-                deployResult.includes('successfully')
+                deployResult.startsWith('Paper ladder recorded')
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                   : 'bg-red-500/20 text-red-300 border border-red-500/30'
               }`}
@@ -245,11 +247,11 @@ function BuilderContent() {
             className="w-full py-3 rounded-xl bg-primary text-on-primary font-bold text-sm hover:opacity-90 disabled:opacity-50 transition-opacity shadow-sm flex items-center justify-center gap-2"
           >
             {deploying ? (
-              <span>Deploying Ladder...</span>
+              <span>Recording Paper Ladder...</span>
             ) : (
               <>
                 <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
-                <span>Deploy LP Ladder</span>
+                <span>Record Paper Ladder</span>
               </>
             )}
           </button>
@@ -305,10 +307,10 @@ function BuilderContent() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 mt-4 sm:mt-6">
               <div className="p-3 bg-surface-container-low border border-border-subtle rounded-xl">
                 <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-wider block">
-                  Target Fee Yield
+                  Fee Yield Assessment
                 </span>
                 <span className="text-sm sm:text-base font-mono font-bold text-emerald-400 mt-1 block">
-                  184.2% APR
+                  Unassessed — no yield forecast
                 </span>
               </div>
               <div className="p-3 bg-surface-container-low border border-border-subtle rounded-xl">
@@ -316,7 +318,7 @@ function BuilderContent() {
                   Capital Allocation
                 </span>
                 <span className="text-sm sm:text-base font-mono font-bold text-on-surface mt-1 block">
-                  ${depositAmount} USD
+                  {depositAmount} {chain}:USDC units · USD valuation unassessed
                 </span>
               </div>
               <div className="p-3 bg-surface-container-low border border-border-subtle rounded-xl">
@@ -328,7 +330,7 @@ function BuilderContent() {
                     autoRebalance ? 'text-primary' : 'text-on-surface-variant'
                   }`}
                 >
-                  {autoRebalance ? 'ENABLED' : 'OFF'}
+                  {autoRebalance ? 'PAPER OPT-IN' : 'OFF'}
                 </span>
               </div>
             </div>
@@ -336,7 +338,7 @@ function BuilderContent() {
 
           <div className="border-t border-border-subtle pt-3 mt-4 flex items-center gap-2 text-[11px] text-on-surface-variant">
             <span className="material-symbols-outlined text-[16px] text-primary">lock</span>
-            <span>Non-custodial execution: Position tokens (NFTs / DLMM keys) remain under sole ownership of your vault.</span>
+            <span>Paper planning only: no position NFT, DLMM key, deployed vault or live custody ownership is established.</span>
           </div>
         </div>
       </div>

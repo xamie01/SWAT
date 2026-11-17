@@ -33,7 +33,7 @@ export function createDeployGuard(deps: DeployGuardDeps = {}): DeployGuardPort {
       readonly scope: UserScope;
       readonly chain: LpChain;
       readonly poolAddress: string;
-      readonly depositAmount: number;
+      readonly requestedUsd: number;
     }): Promise<PoolExposureDecision> {
       const [config, deployedUsd, poolExposureUsd] = await Promise.all([
         resolveConfig(input.scope),
@@ -44,7 +44,7 @@ export function createDeployGuard(deps: DeployGuardDeps = {}): DeployGuardPort {
       const decision = evaluatePoolExposureCap({
         deployedUsd,
         poolExposureUsd,
-        requestedUsd: input.depositAmount,
+        requestedUsd: input.requestedUsd,
         maxPoolAllocationPct: config.maxPoolAllocationPct
       });
 

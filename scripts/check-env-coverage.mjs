@@ -100,7 +100,14 @@ for (const file of files) {
   }
 }
 
-const exampleText = readFileSync(join(ROOT, '.env.example'), 'utf8');
+const namesFile = process.argv[2] === '--names-file' && process.argv.length === 4 ? process.argv[3] : null;
+if (process.argv.length > 2 && !namesFile) throw new Error('Expected --names-file <assignment-name-inventory>');
+const nameInventory = namesFile ? JSON.parse(readFileSync(namesFile, 'utf8')) : null;
+if (nameInventory && (!Array.isArray(nameInventory.assignmentNames)
+    || nameInventory.assignmentNames.some((name) => typeof name !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(name)))) {
+  throw new Error('Expected assignment names only, without values');
+}
+const exampleText = namesFile ? null : readFileSync(join(ROOT, '.env.example'), 'utf8');
 
 /**
  * "Documented" means an assignment line, NOT a prose mention.
@@ -119,7 +126,8 @@ const exampleText = readFileSync(join(ROOT, '.env.example'), 'utf8');
  * copying the file would leave it unset.
  */
 const assigned = new Set(
-  [...exampleText.matchAll(/^([A-Z][A-Z0-9_]*)\s*=/gm)].map((match) => match[1]).filter(governed)
+  (namesFile ? nameInventory.assignmentNames
+    : [...exampleText.matchAll(/^([A-Z][A-Z0-9_]*)\s*=/gm)].map((match) => match[1])).filter(governed)
 );
 const documented = assigned;
 

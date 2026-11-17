@@ -6,7 +6,7 @@ import {
   completeSignalNotification,
   markSignalNotificationUncertain,
   releaseSignalNotification
-} from '../../../packages/db/src/package24-delivery-notifications.js';
+} from '@swat/db';
 import { sendSignalTelegram } from './package24-delivery-telegram.js';
 import { Redis } from 'ioredis';
 import {

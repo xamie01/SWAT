@@ -10,10 +10,12 @@ const policy = { epoch: '3', enabled: true, cap_usd: '100', accounting_ready: tr
 let rows: Array<Record<string, unknown>>;
 let sqls: string[];
 let canonicalUsd: string | null;
+let correctionAuthorized: boolean;
 function client(): PoolClient {
   return { query: vi.fn(async (sql: string, values: unknown[] = []) => {
     sqls.push(sql);
     if (sql.includes('risk_policy_control')) return { rows: [{ ...policy }] };
+    if (sql.includes('FROM copy_execution_valuation_corrections correction')) return { rows: correctionAuthorized ? [{ authorized: true }] : [] };
     if (sql.includes('FROM copy_executions execution')) return { rows: [{ state: 'confirmed', submission_id: 'opaque-submission', confirmed_usd: canonicalUsd, unvalued_count: '0', completes_execution: true }] };
     if (sql.includes('SELECT') && sql.includes('risk_spend_reservations')) return { rows: rows.map(r => ({ ...r })) };
     if (sql.includes('INSERT INTO risk_spend_reservations')) {
@@ -26,7 +28,7 @@ function client(): PoolClient {
     if (sql.includes('UPDATE risk_spend_reservations')) {
       const row = rows.find(r => r.execution_id === values[3]);
       if (!row) return { rows: [] };
-      Object.assign(row, { state: values[4], confirmed_usd: values[5], liability_usd: values[6] });
+      Object.assign(row, { state: values[4], confirmed_usd: values[5], liability_usd: values[6], valuation_correction_id: values[7] });
       return { rows: [{ ...row }] };
     }
     throw new Error(`Unexpected SQL ${sql}`);
@@ -38,7 +40,7 @@ const request = (executionId: string, overrides = {}) => ({
 });
 const id1 = '00000000-0000-4000-8000-000000000001';
 const id2 = '00000000-0000-4000-8000-000000000002';
-beforeEach(() => { rows = []; sqls = []; canonicalUsd = null; policy.epoch = '3'; policy.enabled = true; mocks.query.mockReset(); });
+beforeEach(() => { rows = []; sqls = []; canonicalUsd = null; correctionAuthorized = false; policy.epoch = '3'; policy.enabled = true; mocks.query.mockReset(); });
 
 describe('package19 transactional spending reservations', () => {
   it('reserves 60 of cap 100 while pending and refuses the next 60', async () => {
@@ -92,6 +94,16 @@ describe('package19 transactional spending reservations', () => {
     await expect(risk.reserveRiskSpend(tx, request(id2, { requestedUsd: '61' }))).rejects.toThrow(/cap/i);
   });
 
+  it('authorized immutable correction adjusts confirmed debit once, unsupported identity cannot', async () => {
+    const tx = client(); await risk.reserveRiskSpend(tx, request(id1)); canonicalUsd = '40';
+    await risk.updateRiskSpendReservation(tx,{...request(id1),state:'confirmed',confirmedUsd:'40'});
+    canonicalUsd = '30';
+    await expect(risk.updateRiskSpendReservation(tx,{...request(id1),state:'confirmed',confirmedUsd:'30',valuationCorrectionId:'label'})).rejects.toThrow(/authorization/);
+    expect(rows[0].liability_usd).toBe('40'); correctionAuthorized = true;
+    await risk.updateRiskSpendReservation(tx,{...request(id1),state:'confirmed',confirmedUsd:'30',valuationCorrectionId:'persisted'});
+    await risk.updateRiskSpendReservation(tx,{...request(id1),state:'confirmed',confirmedUsd:'30',valuationCorrectionId:'persisted'});
+    expect(rows[0].confirmed_usd).toBe('30'); expect(rows[0].liability_usd).toBe('30');
+  });
   it.each(['', 'NaN', '-1', '0', '1e2'])('rejects invalid USD reservation %s before reads', async requestedUsd => {
     await expect(risk.reserveRiskSpend(client(), request(id1, { requestedUsd }))).rejects.toThrow(/USD/i);
     expect(sqls).toEqual([]);

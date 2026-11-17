@@ -100,6 +100,43 @@ export interface ExecutionAuthorityRequest {
    * argument-checked allowlist, not a `(target, selector)` pair).
    */
   readonly instrument?: string;
+  /** Exact effect intent required by deployed scoped adapters; legacy requests deny there. */
+  readonly effect?: DelegatedExecutionEffect;
+  readonly payloadScope?: DelegatedPayloadScope;
+}
+
+/** Complete verified signature/transaction identity, supplied by the trusted action builder. */
+export interface DelegatedPayloadScope {
+  readonly chain: Chain;
+  readonly chainId: string;
+  readonly deploymentId: string;
+  readonly ownerAddress: string;
+  readonly delegateAddress: string;
+  readonly nonce: string;
+  readonly signatureDeadline: string;
+  readonly permissionDeadline: string | null;
+  readonly signatureDomain: {
+    readonly kind: 'eip712' | 'solana-message';
+    readonly name: string;
+    readonly version: string;
+    readonly verifyingContract: string;
+    readonly salt: string | null;
+  };
+}
+
+export interface DelegatedExecutionEffect {
+  readonly action: VenueActionKind;
+  readonly direction: 'buy' | 'sell' | null;
+  readonly instrument: string;
+  readonly target: string;
+  readonly selector: string;
+  readonly recipient: string;
+  readonly spendAsset: string;
+  /** Integer base units. No number/float and no implicit decimals. */
+  readonly spendAmountBaseUnits: string;
+  readonly spender: string;
+  /** Permission effects declare their finite allowance separately from trade quantity. */
+  readonly permission: { readonly kind: 'erc20-allowance' | 'permit2'; readonly allowanceBaseUnits: string } | null;
 }
 
 /**
@@ -238,7 +275,13 @@ export type ExecutionAuthorityDenialCode =
   /** The grant exists but cannot perform this action or signing shape. */
   | 'authority-capability-unsupported'
   /** The signer threw. Distinct from a refusal: the mechanism is present. */
-  | 'authority-signing-failed';
+  | 'authority-signing-failed'
+  | 'authority-deployed-scope-unavailable'
+  | 'authority-deployed-scope-mismatch'
+  | 'authority-deployed-scope-stale'
+  | 'authority-effect-intent-missing'
+  | 'authority-effect-out-of-scope'
+  | 'authority-payload-mismatch';
 
 /**
  * A live authorization. Carries addresses and a signing capability — never key
@@ -275,6 +318,14 @@ export interface GrantedExecutionAuthority {
    * every adapter.
    */
   readonly expiresAt: Date | null;
+  /** Only produced by a verified deployment adapter, never copied from scopePolicy. */
+  readonly deployedDelegation?: {
+    readonly grantId: string;
+    readonly deploymentId: string;
+    readonly chainId: string;
+    readonly revision: string;
+    readonly verifiedAt: Date;
+  };
   sign(request: AuthoritySigningRequest): Promise<AuthoritySigningResult>;
 }
 

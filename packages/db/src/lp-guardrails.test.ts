@@ -54,7 +54,12 @@ beforeEach(() => {
   mocks.query.mockReset();
   mocks.query.mockImplementation(async () => queryQueue.shift() ?? []);
   mocks.clientQuery.mockReset();
-  mocks.clientQuery.mockImplementation(async () => ({ rows: [] }));
+  mocks.clientQuery.mockImplementation(async (sql: string) => {
+    if (sql === 'COMMIT') return { rows: [], command: 'COMMIT' };
+    if (sql.includes('FROM pg_catalog.pg_roles')) return { rows: [{ role_name: 'swat_app', session_role: 'swat_app', row_security: 'on', rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false, rolinherit: false, has_memberships: false, owns_objects: false, can_create: false }] };
+    if (sql.includes('lp_guardrail_configs')) return { rows: queryQueue.shift() ?? [] };
+    return { rows: [] };
+  });
 });
 
 describe('lp-guardrails', () => {
@@ -85,7 +90,7 @@ describe('lp-guardrails', () => {
 
     await upsertLpGuardrailConfig(scope, { profitBankPct: 75 });
 
-    const [sql, params] = mocks.query.mock.calls[1];
+    const [sql, params] = mocks.clientQuery.mock.calls.find(([sql]) => String(sql).includes('INSERT'))!;
     expect(String(sql)).toContain('ON CONFLICT (user_id)');
     // max stays at the stored 40; reserve pointer is carried through untouched.
     expect(params[1]).toBe(40);
@@ -99,13 +104,23 @@ describe('lp-guardrails', () => {
 
     await upsertLpGuardrailConfig(scope, { profitBankPct: 75 });
 
-    const [, params] = mocks.query.mock.calls[1];
+    const [, params] = mocks.clientQuery.mock.calls.find(([sql]) => String(sql).includes('INSERT'))!;
     expect(params[1]).toBe(DEFAULT_LP_GUARDRAIL_CONFIG.maxPoolAllocationPct);
     expect(params[2]).toBe(75);
     expect(params[3]).toBeNull();
     expect(params[4]).toBeNull();
   });
 
+  it('config changes use the acquisition owner -> config lock order on one client', async () => {
+    queryQueue.push([], [configRow()]);
+    await upsertLpGuardrailConfig(scope, { profitBankPct: 75 });
+    const sql = mocks.clientQuery.mock.calls.map(([sql]) => String(sql));
+    expect(sql[0]).toBe('BEGIN');
+    const owner = sql.findIndex(s => s.includes('FROM users')), config = sql.findIndex(s => s.includes('lp_guardrail_configs'));
+    expect(sql[owner]).toContain('FOR UPDATE'); expect(sql[config]).toContain('FOR UPDATE'); expect(owner).toBeLessThan(config);
+    expect(sql.findIndex(s => s.includes("set_config('app.current_user_id'"))).toBeLessThan(owner); expect(sql.at(-1)).toBe('COMMIT');
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
   it('rejects out-of-range percents before writing', async () => {
     await expect(
       upsertLpGuardrailConfig(scope, { maxPoolAllocationPct: 0 })

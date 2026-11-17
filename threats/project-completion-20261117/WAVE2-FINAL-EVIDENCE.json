@@ -1,0 +1,2002 @@
+{
+  "version": 1,
+  "scope": "Wave 2 local source and injected offline acceptance; no SQL/runtime/provider/live acceptance",
+  "commands": [
+    {
+      "label": "build-w2-final-runtime-tests-01",
+      "kind": "test",
+      "command": [
+        "/usr/bin/node",
+        "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/root/SWAT/threats/project-completion-20261117/w2-runtime.config.ts"
+      ],
+      "commandSha256": "de4e8f497fcd179b9017db0f9d0fb3570abe23752b41424614ae18aa7bda5650",
+      "logSha256": "4be38196b8805d6dd93a1c6f4f91e85811ecbe5773eacf8947018ce9c8b9535a",
+      "workspaceInputManifestSha256": "e30cb32850b1e26f121ddedf8fb4cf3453d55f85398026f86e4ba80702e59da4",
+      "exitCode": 0,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "elapsedSeconds": 20.428,
+      "timedOut": false,
+      "workspaceInputsUnchangedDuringCommand": true,
+      "artifactCount": 0,
+      "resultSha256": "3c572524016fc56a1847d54c70ce5cc12614306cfc9bde662c4b63ce345c5463",
+      "files": 6,
+      "rawAssertionCounts": {
+        "passed": 104
+      }
+    },
+    {
+      "label": "build-w2-final-financial-tests-01",
+      "kind": "test",
+      "command": [
+        "/usr/bin/node",
+        "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/root/SWAT/threats/project-completion-20261117/w2-financial.config.ts"
+      ],
+      "commandSha256": "7827100145b4b9aff559ae14ddd1ee63da1be1dc7683cf4953c2f8f4cdadb864",
+      "logSha256": "5e14bef787be1415a64391b10dd317d8f4602e83ac21d70ee9760a2599f2db1b",
+      "workspaceInputManifestSha256": "2e9c4530145bd676feec394a3797959507f1a255d3c4e854dd6b9797c276f896",
+      "exitCode": 0,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "elapsedSeconds": 10.481,
+      "timedOut": false,
+      "workspaceInputsUnchangedDuringCommand": true,
+      "artifactCount": 0,
+      "resultSha256": "a7b3f48db62ac1502b71bd5d1ac6e9a78160b5c8c561bf530c4f0068a5c5d402",
+      "files": 5,
+      "rawAssertionCounts": {
+        "passed": 75
+      }
+    },
+    {
+      "label": "build-w2-review-source-allocation-tests-01",
+      "kind": "test",
+      "command": [
+        "/usr/bin/node",
+        "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/root/SWAT/threats/project-completion-20261117/w2-source-allocation.config.ts"
+      ],
+      "commandSha256": "558052458ede78561821d3419b8d3bfbc66aef191f3c6a0a16bc005ae442a39f",
+      "logSha256": "260e30b4090a14b2dca2d0a4675363940c8b9db957187186c789aa93a702c9ad",
+      "workspaceInputManifestSha256": "3817fa63a0b6a36e8f511480a3a34de49f0f489c8e1215596b8ada557f9ed2f6",
+      "exitCode": 0,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "elapsedSeconds": 4.544,
+      "timedOut": false,
+      "workspaceInputsUnchangedDuringCommand": true,
+      "artifactCount": 0,
+      "resultSha256": "8a38b8c14a3798c591af8394e3c87097fb9051d96e9c1f6e2b59134b77a551ac",
+      "files": 3,
+      "rawAssertionCounts": {
+        "passed": 110
+      }
+    },
+    {
+      "label": "build-w2-final-queue-tests-02",
+      "kind": "test",
+      "command": [
+        "/usr/bin/node",
+        "/root/SWAT/node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/root/SWAT/threats/project-completion-20261117/w1-fanout.config.ts"
+      ],
+      "commandSha256": "08a759206426ab776d57d690a0fe7de1364abc8380a54ab8e738711e3cf1a04c",
+      "logSha256": "31904cb5f3360dfe84a0a9f8e53ff6e528e1f9813fbe92f6d50e2ba55f951c33",
+      "workspaceInputManifestSha256": "5b9206c2785ed80ad28a2e243007daa52dc770bad43a4f012ee9947b2b999abc",
+      "exitCode": 0,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "elapsedSeconds": 6.068,
+      "timedOut": false,
+      "workspaceInputsUnchangedDuringCommand": true,
+      "artifactCount": 0,
+      "resultSha256": "72883eeb2c700275138168b04d19db3dd17dbd66d3ea44c917cb82447849c130",
+      "files": 3,
+      "rawAssertionCounts": {
+        "passed": 54
+      }
+    },
+    {
+      "label": "build-w2-final-emit-db-01",
+      "kind": "emit",
+      "command": [
+        "/usr/bin/node",
+        "/root/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc",
+        "-p",
+        "/root/SWAT/packages/db/tsconfig.json",
+        "--incremental",
+        "false"
+      ],
+      "commandSha256": "f0a6fa8687ab9446129e6bd141ec18ce904d55f304307ddb066ce6b449f79958",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifestSha256": "7b8ee8332eb53e2e12ccc165019255380a19ed78f6d3ac308e2176e3ebf80a2a",
+      "exitCode": 0,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "elapsedSeconds": 16.255,
+      "timedOut": false,
+      "workspaceInputsUnchangedDuringCommand": true,
+      "artifactCount": 340
+    },
+    {
+      "label": "build-w2-final-emit-trade-executor-01",
+      "kind": "emit",
+      "command": [
+        "/usr/bin/node",
+        "/root/SWAT/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc",
+        "-p",
+        "/root/SWAT/apps/trade-executor/tsconfig.json",
+        "--incremental",
+        "false"
+      ],
+      "commandSha256": "dab02aa81a05ee24e0a11a8e233c1b3ac371e7f1e15a7290c674392d2b51f2d8",
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifestSha256": "e6cfea7adab0575dbf6e02c21e78f77462c290ec53d265b0616e82cf20b12d3d",
+      "exitCode": 0,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "elapsedSeconds": 39.909,
+      "timedOut": false,
+      "workspaceInputsUnchangedDuringCommand": true,
+      "artifactCount": 420
+    }
+  ],
+  "files": {
+    "apps/trade-executor/src/worker-entrypoint.sequential.test.ts": {
+      "sourceSha256": "60a370b16d99ebceda0f5ddd992815b6a71aad21ecbe4fb845811c42c74f1b7e",
+      "label": "build-w2-final-runtime-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "production handleJob canonical join actual createExecutorJobPorts installs immutable scope lookup and paper provider adapter consumed by processor",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "production handleJob canonical join delegates canonical work to real orchestration boundary instead of queue boolean/float legacy path",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "production handleJob canonical join reads configured Jito adapter at actual handleJob boundary without fabricating tenant scope",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "production handleJob canonical join actual sweep settlement seam uses opaque resolution identity and configured receipt committer",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "production handleJob canonical join missing approved durable tenant scope blocks before unscoped SQL or quote",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "production handleJob canonical join queue exit flags without canonical claim never reach legacy executor",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "production handleJob canonical join queue exit flags without canonical claim never reach legacy executor",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "production handleJob canonical join queue exit flags without canonical claim never reach legacy executor",
+          "status": "passed"
+        }
+      ]
+    },
+    "apps/trade-executor/src/worker-policy.sequential.test.ts": {
+      "sourceSha256": "b9e1e6c5bf20a91e880003efa8caa311812fbba81d8ab8124a9b081284b07087",
+      "label": "build-w2-final-runtime-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "real canonical worker orchestration source sell real owned per-lot proof and delivery claim compose pre-effect/financial commit before queue acknowledgement",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "real canonical worker orchestration duplicate fanout queue cannot create second submission and financial failure forbids ack",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "real canonical worker orchestration source reorg/current stop after quote prevents owned per-lot effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "real canonical worker orchestration source paper acquired lot is never reassigned live and foreign proof never admits",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "real canonical worker orchestration queue buy score cannot override persisted immutable descriptor entry admission",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "real canonical worker orchestration joins scorer claim, exact DB exit/current policy and commits before effect and acknowledgement",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "real canonical worker orchestration rejects changed immutable targetAccount before effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "real canonical worker orchestration rejects changed immutable masterWalletAddress before effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "real canonical worker orchestration rejects changed immutable userId before effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "real canonical worker orchestration rejects changed immutable signalId before effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "real canonical worker orchestration rejects changed immutable tokenMint before effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "real canonical worker orchestration rejects changed immutable requestedBaseQuantity before effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "real canonical worker orchestration cannot assign a live acquisition to current paper mode",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "real canonical worker orchestration refuses missing/stopped current policy even with closeAll=true",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "real canonical worker orchestration refuses missing/stopped current policy even with closeAll=true",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "real canonical worker orchestration refuses missing/stopped current policy even with closeAll=true",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "real canonical worker orchestration refuses missing/stopped current policy even with closeAll=true",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "real canonical worker orchestration rechecks policy after quote before external effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "real canonical worker orchestration never requotes terminal/pending confirmed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 19,
+          "fullName": "real canonical worker orchestration never requotes terminal/pending failed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 20,
+          "fullName": "real canonical worker orchestration never requotes terminal/pending cancelled",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 21,
+          "fullName": "real canonical worker orchestration never requotes terminal/pending submitted",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 22,
+          "fullName": "real canonical worker orchestration never requotes terminal/pending partially_filled",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 23,
+          "fullName": "real canonical worker orchestration never requotes terminal/pending reconciliation_required",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 24,
+          "fullName": "real canonical worker orchestration retains uncertainty when execute throws and commits before returning submitted",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 25,
+          "fullName": "real canonical worker orchestration never reports partially_filled settlement as filled",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 26,
+          "fullName": "real canonical worker orchestration never reports reconciliation_required settlement as filled",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 27,
+          "fullName": "real canonical worker orchestration revoked authority during quote blocks before durable dispatch",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 28,
+          "fullName": "real canonical worker orchestration propagates accounting failure rather than acknowledging/skipping a fill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 29,
+          "fullName": "real canonical worker orchestration refuses unavailable quote capability before creating durable attempt",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 30,
+          "fullName": "real canonical worker orchestration existing attempt is uncertainty, never redispatched",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 31,
+          "fullName": "real exact paper quote seam keeps ledger precision through exact valuation and evidence without float quantity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 32,
+          "fullName": "real exact paper quote seam refuses stale/future/missing valuation instead of price defaults",
+          "status": "passed"
+        }
+      ]
+    },
+    "apps/trade-executor/src/worker-runtime-adapters.sequential.test.ts": {
+      "sourceSha256": "b7d9099225ca8ab0430a68b63b20a4bd342833975a19f611040d45db8f0a1aa8",
+      "label": "build-w2-final-runtime-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "provenance exact simulated paper buy and sell runtime exact buy quantity, notional and simulated fee risk debit remain decimal text",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "provenance exact simulated paper buy and sell runtime exact sell preserves above-float-safe quantity and explicit fee without live lot conversion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects wrong provenance providerId",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects wrong provenance providerIdentity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects wrong provenance network",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects wrong provenance tokenMint",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects wrong provenance chain",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects wrong provenance quoteCurrency",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects stale/future price observation",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "provenance exact simulated paper buy and sell runtime rejects stale/future price observation",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "provenance exact simulated paper buy and sell runtime refuses nonrepresentable base scale and missing economics instead of rounding sell or fake zero fee",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "provenance exact simulated paper buy and sell runtime expired quote after durable prepare is uncertainty, not paper fill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "provenance exact simulated paper buy and sell runtime actual runtime factory consumes reviewed paper adapter and retains dynamic trusted Jito live seam",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "provenance exact simulated paper buy and sell runtime does not truncate simulated fee below 36 fractional digits",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "provenance exact simulated paper buy and sell runtime default missing provider is unavailable and never fabricates simulation authority",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/exact-follower-sizing.sequential.test.ts": {
+      "sourceSha256": "d2efd15cb47f3831a1bdd60fd5fd10755d649bd4506f0a9ef4d7160d85f84375",
+      "label": "build-w2-final-runtime-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "exact follower buy sizing consumed by canonical fanout computes persisted follower percentage exactly instead of master quantity or float balance",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "exact follower buy sizing consumed by canonical fanout clamps exact budget to persisted outstanding risk liabilities",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses mismatched provider userId scope",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses mismatched provider targetAccount scope",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses mismatched provider network scope",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses mismatched provider providerIdentity scope",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses mismatched provider executionMode scope",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses stale/future balance",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "exact follower buy sizing consumed by canonical fanout refuses stale/future balance",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "exact follower buy sizing consumed by canonical fanout missing trusted provider stays explicitly unavailable",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "exact follower buy sizing consumed by canonical fanout never turns missing persisted opt-in or unknown liability into a buy",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/obligation-runtime-capability.sequential.test.ts": {
+      "sourceSha256": "b336c0d69ce51e1527c0ae9d2a8d5d1aa2a6244a7dc6948d3dfc6664b2db40b1",
+      "label": "build-w2-final-runtime-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "immutable obligation scoped runtime capability uses only queue execution lookup and derives scope from protected persisted tenant",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "immutable obligation scoped runtime capability refuses absent immutable lookup id { copyExecutionId: 'not-a-uuid', userId: '11111111-1111-1111-1111-111111111111' }",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "immutable obligation scoped runtime capability refuses absent immutable lookup id { userId: '11111111-1111-1111-1111-111111111111' }",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "immutable obligation scoped runtime capability refuses absent immutable lookup id null",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "immutable obligation scoped runtime capability cannot derive authority from a valid role label or queue tenant if registry absent",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "immutable obligation scoped runtime capability refuses wrong obligation/malformed tenant/stale host-bound returned capability",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "immutable obligation scoped runtime capability operator remains unsupported before domain grants, never wildcard tenant or bypass",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "immutable obligation scoped runtime capability rejects unsafe backend role rolsuper",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "immutable obligation scoped runtime capability rejects unsafe backend role rolbypassrls",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "immutable obligation scoped runtime capability rejects unsafe backend role has_memberships",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "immutable obligation scoped runtime capability rejects unsafe backend role owns_objects",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "immutable obligation scoped runtime capability rechecks revocation each short transaction and refuses changed immutable scope",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/source-sell-lot-allocation.sequential.test.ts": {
+      "sourceSha256": "a33fe2a33db7135f9e6a5a3666e17fb747024199af44c026e3c3a083294d3d54",
+      "label": "build-w2-final-runtime-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "durable exact source sell owned per-lot allocation allocates above-safe exact quantities per-lot without aggregate floating arithmetic",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "durable exact source sell owned per-lot allocation refuses unmatched quantity and duplicate lot identity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "durable exact source sell owned per-lot allocation fresh read proves exact lot acquisition/source/evidence/mode, never fake master ownedExit",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "durable exact source sell owned per-lot allocation refuses substituted acquisition_execution_id allocation proof",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "durable exact source sell owned per-lot allocation refuses substituted acquisition_evidence_id allocation proof",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "durable exact source sell owned per-lot allocation refuses substituted acquisition_source_trade_id allocation proof",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "durable exact source sell owned per-lot allocation refuses missing physical lot or exact over-allocation",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "durable exact source sell owned per-lot allocation reorged sell or acquisition blocks owned proof before any write",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "durable exact source sell owned per-lot allocation persists immutable per-lot quantities on supplied canonical claim client before context",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "durable exact source sell owned per-lot allocation partial replay keeps original immutable request10 while proving outstanding6 after exact consumed4",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "durable exact source sell owned per-lot allocation completed replay proves zero outstanding against zero remaining without recreating lots",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "durable exact source sell owned per-lot allocation refuses foreign/inactive/mismatched or excess persisted consumption",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "durable exact source sell owned per-lot allocation refuses foreign/inactive/mismatched or excess persisted consumption",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "durable exact source sell owned per-lot allocation refuses foreign/inactive/mismatched or excess persisted consumption",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "durable exact source sell owned per-lot allocation refuses foreign/inactive/mismatched or excess persisted consumption",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "durable exact source sell owned per-lot allocation rejects non-prefix cumulative lot consumption even when aggregate confirmed total matches",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "durable exact source sell owned per-lot allocation SQL079 grants only lock-compatible UPDATE column while immutable trigger rejects all mutations",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "durable exact source sell owned per-lot allocation forbids new proof backfill after effect",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "durable exact source sell owned per-lot allocation forbids new proof backfill after effect",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/package19-risk-reservations.sequential.test.ts": {
+      "sourceSha256": "aa027fcfe8257f1efe967d134329b31f28d3836dafd87a228f7d800e79d15912",
+      "label": "build-w2-final-financial-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "package19 transactional spending reservations reserves 60 of cap 100 while pending and refuses the next 60",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "package19 transactional spending reservations replays immutable terms without double reserving",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "package19 transactional spending reservations retains unknown and partial residual liabilities even after a stop",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "package19 transactional spending reservations cannot release a possibly submitted order as a non-submission",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "package19 transactional spending reservations settles cumulative fills once, rejects reversal, and retains actual spend",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "package19 transactional spending reservations authorized immutable correction adjusts confirmed debit once, unsupported identity cannot",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "package19 transactional spending reservations rejects invalid USD reservation  before reads",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "package19 transactional spending reservations rejects invalid USD reservation NaN before reads",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "package19 transactional spending reservations rejects invalid USD reservation -1 before reads",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "package19 transactional spending reservations rejects invalid USD reservation 0 before reads",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "package19 transactional spending reservations rejects invalid USD reservation 1e2 before reads",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "package19 transactional spending reservations rejects stale epochs even on an idempotent retry",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "package19 transactional spending reservations fails closed when typed storage/current policy is unavailable",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/trades.test.ts": {
+      "sourceSha256": "e237a36f3d213002532f3c006f06680ad2ad6f758801d450eea768f99f1b7de7",
+      "label": "build-w2-final-financial-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "transactional trade state persistence rejects non-fill and shadow attempts before opening a transaction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "transactional trade state persistence persists a fill and marks its signal executed in one transaction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "transactional trade state persistence persists a confirmed partial quantity and marks its signal executed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "transactional trade state persistence persists a terminal non-fill and releases only an executing signal",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "transactional trade state persistence carries venue-derived fees through the trade insert contract",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "transactional trade state persistence stores requested notional separately from confirmed fill notional",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "transactional trade state persistence rejects an invalid venue fee before opening a transaction: -0.01",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "transactional trade state persistence rejects an invalid venue fee before opening a transaction: NaN",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "transactional trade state persistence rejects an invalid venue fee before opening a transaction: Infinity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "getRollingExposureUsd (S4-M47) scopes the sum to one tenant, so one user\u2019s spending is not charged to another\u2019s allowance",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "getRollingExposureUsd (S4-M47) matches the operator\u2019s legacy NULL rows with IS NOT DISTINCT FROM, not `=`",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "getRollingExposureUsd (S4-M47) still excludes shadow, unfilled and sell rows",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "getRollingExposureUsd (S4-M47) reads a tenant with no trades as 0 spent, which is a real answer",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "getRollingExposureUsd (S4-M47) rejects a blank user id rather than answering with the operator\u2019s ledger",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "getRollingExposureUsd (S4-M47) rejects an account label where a tenancy uuid belongs",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/worker-correction-admission.sequential.test.ts": {
+      "sourceSha256": "60c5b32668b4d05d515ee3ad05bdacd1eff9dd16ef273da1272e05b13d971956",
+      "label": "build-w2-final-financial-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "correction admission statement-time expiry keeps the retained proposal identical to the integrated migration",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "correction admission statement-time expiry assigns acceptance before authority checks and never uses transaction-start time",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "correction admission statement-time expiry compares admission expiry with a.valid_until<=NEW.accepted_at",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "correction admission statement-time expiry compares admission expiry with v.valid_until<=NEW.accepted_at",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "correction admission statement-time expiry compares admission expiry with p.valid_until>NEW.accepted_at",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "correction admission statement-time expiry compares admission expiry with proof.provider_valid_until>NEW.accepted_at",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/worker-settlement.sequential.test.ts": {
+      "sourceSha256": "2705034f089d0df1698e27e84eb552e64d8f3c1e2bc015ff6d8e19b1a73b8cbd",
+      "label": "build-w2-final-financial-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "joined same-client financial settlement settles evidence/lot, cumulative capacity delta, fees+risk, trade and attempt on exactly one client",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "joined same-client financial settlement missing capacity row fails the transaction before risk/trade/ack, never catch-and-warn",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "joined same-client financial settlement unpriced/unknown fee evidence retains risk unknown instead of terminal release",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "joined same-client financial settlement replay zero delta does not reaccrue but still joins canonical cumulative settlement",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "joined same-client financial settlement threads exact exit lot identity into the canonical trade",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "joined same-client financial settlement receipt-owned reconciliation accepts unknown fence without changing it to dispatched",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "joined same-client financial settlement unowned durable receipt cannot settle or mutate economics",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "joined same-client financial settlement sweep-first buy accounting survives late uncertainty callbacks idempotently",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "joined same-client financial settlement sweep-first sell accounting survives late uncertainty callbacks idempotently",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "joined same-client financial settlement retain-first buy stays nonresubmittable while sweep accounting and late repeats succeed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "joined same-client financial settlement retain-first sell stays nonresubmittable while sweep accounting and late repeats succeed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "joined same-client financial settlement late callback on unknown fence is idempotent even without terminal evidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "joined same-client financial settlement late callback on settled fence is idempotent even without terminal evidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "joined same-client financial settlement delivery settlement follows durable financial receipt and rejects wrong identity before effects",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "joined same-client financial settlement unknown accounting settles delivery reconciliation rather than economic completion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "joined same-client financial settlement receipt-owned correction recovery does not insert evidence or duplicate inventory",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "joined same-client financial settlement financial receipt failure prevents delivery completion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "joined same-client financial settlement trade failure prevents durable attempt completion",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/worker-valuation-corrections.sequential.test.ts": {
+      "sourceSha256": "b367818ce26db88dae1acf03b9b76d1c30d712deeeda94817a8ee7599aa0d31d",
+      "label": "build-w2-final-financial-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "immutable persisted-authorized worker valuation corrections price-only preserves original unknown fee and immutable inventory",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "immutable persisted-authorized worker valuation corrections fee-only preserves original known price and becomes complete only with coverage",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "immutable persisted-authorized worker valuation corrections multiple partial patches carry cumulative fields and duplicate has no new accrual",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "immutable persisted-authorized worker valuation corrections second uncorrected fill retains unknown coverage even with terminal first fill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies missing without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies untrusted without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies tenant without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies digest without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies clamp without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies source without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "immutable persisted-authorized worker valuation corrections denies reversal without economic writes",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "immutable persisted-authorized worker valuation corrections conflicting id/revision/predecessor fail, authorized downward price is not inventory reversal",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "immutable persisted-authorized worker valuation corrections caller transaction rollback discards append and projections together",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "immutable persisted-authorized worker valuation corrections explicit lot exit correction binds acquisition lineage instead of requiring direct source id",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "immutable persisted-authorized worker valuation corrections accepted historical correction survives admission expiry but explicit invalidation refuses replay/accounting",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "immutable persisted-authorized worker valuation corrections fee-only carries exact price field origin and denies invalid predecessor history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "immutable persisted-authorized worker valuation corrections base/native quantity precision is not restricted by USD money scale",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "immutable persisted-authorized worker valuation corrections rejects unsupported money NaN",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "immutable persisted-authorized worker valuation corrections rejects unsupported money 1e3",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 19,
+          "fullName": "immutable persisted-authorized worker valuation corrections rejects unsupported money -1",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 20,
+          "fullName": "immutable persisted-authorized worker valuation corrections rejects unsupported money 0.0000000000000000001",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 21,
+          "fullName": "immutable persisted-authorized worker valuation corrections rejects unsupported money 100000000000000000000",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 22,
+          "fullName": "immutable persisted-authorized worker valuation corrections preserves exact large decimal text without IEEE rounding",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/package15-lot-claim-recovery.sequential.test.ts": {
+      "sourceSha256": "a28ea91b522eec7eb8f09dfa0ea3b3f097ef56234c74c57baa96e4d2349c8cf8",
+      "label": "build-w2-review-source-allocation-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses No attributable open master lot inventory before insertion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses Overlapping source or explicit master exit is reserved before insertion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses Incompatible acquisition mode blocks reservation before insertion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses Unattributed pending sell blocks reservation before insertion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses Exact lot exit exceeds unreserved lot inventory before insertion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) uses the same caller client, scope lock and exact authoritative quantity before reservation/history/rebuild",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) operator null remains a real scoped tenant, not a fallback account",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) wrapper composes the actual function into one mocked transaction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) rejects unequal exact replay quantities which collide as Number",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) replays numerically equal DB-proved quantities without a second reservation or availability self-conflict",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched user_id",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched target_account",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched chain",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched token_mint",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched execution_mode",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched signal_id",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched direction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched source_trade_id",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched source_sell_fraction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 19,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses replay with DB-mismatched source_position_before_quantity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 20,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses missing trusted data {\"missingOwner\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 21,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses missing trusted data {\"missingPosition\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 22,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses missing trusted data {\"missingHeld\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 23,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses missing trusted data {\"missingDecision\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 24,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) keeps implicit full-lot claims exact and DB-sized",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 25,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) refuses numeric authority quantities before any client query",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 26,
+          "fullName": "package15 actual lifecycle lot claim recovery (no database) propagates failed insert without history/rebuild or a claimed result",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 27,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with missingEvidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 28,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongEvidenceExecution",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 29,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with observedEvidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 30,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with reversedEvidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 31,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with missingApplication",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 32,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationEvidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 33,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationExecution",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 34,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with inactiveApplication",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 35,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationPosition",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 36,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationTenant",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 37,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationAccount",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 38,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationChain",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 39,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability refuses retained lot with wrongApplicationToken",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 40,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses missingEvidence before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 41,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongEvidenceExecution before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 42,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses observedEvidence before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 43,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses reversedEvidence before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 44,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses missingApplication before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 45,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationEvidence before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 46,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationExecution before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 47,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses inactiveApplication before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 48,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationPosition before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 49,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationTenant before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 50,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationAccount before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 51,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationChain before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 52,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) new explicit claim refuses wrongApplicationToken before reservation/history",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 53,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses missingEvidence without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 54,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongEvidenceExecution without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 55,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses observedEvidence without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 56,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses reversedEvidence without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 57,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses missingApplication without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 58,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationEvidence without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 59,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationExecution without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 60,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses inactiveApplication without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 61,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationPosition without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 62,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationTenant without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 63,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationAccount without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 64,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationChain without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 65,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) explicit replay refuses wrongApplicationToken without returning old claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 66,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) reload refuses reversal after lock-key discovery before replay lookup",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 67,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) replay query independently proves the evidence/application association",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 68,
+          "fullName": "package15 acquisition evidence/application proof (mocked SQL boundaries) availability requires evidence and active application in its trusted decision, not only valid acquisitions",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 69,
+          "fullName": "package15 availability generated SQL and retained source refusal requires DB-attributed lots, exact numeric pending subtraction, trusted modes and overlap fences",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 70,
+          "fullName": "package15 availability generated SQL and retained source refusal permits implicit quantity only for an identified explicit lot",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 71,
+          "fullName": "package15 availability generated SQL and retained source refusal source direct request cannot bypass unavailable current verifier",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 72,
+          "fullName": "package15 availability generated SQL and retained source refusal source signal claim cannot bypass unavailable current verifier",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 73,
+          "fullName": "package15 availability generated SQL and retained source refusal wires both source reservation branches to actual caller-client availability without aggregate/Number fallback (structural only behind verifier)",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/source-claim.sequential.test.ts": {
+      "sourceSha256": "c4792c9e406187256ffa5cb782f11e5239acca9e666b11a44f0b0e3dc8e064fd",
+      "label": "build-w2-review-source-allocation-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) writes claim/history/captured policy on caller client without own transaction/global query",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) discovers without row locks, then position advisory precedes every signal/source/execution lock",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) revalidates discovered scope before execution mutation {\"changedSignal\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) revalidates discovered scope before execution mutation {\"changedSource\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) filters accepted authority/application before LIMIT so more than 100 revoked events cannot starve valid source",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) legacy wrapper invokes exactly one transaction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) no default verifier readiness or caller labels authorize historical source/replay",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) tenant replay returns persisted identity without duplicate policy capture/insertion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable user_id",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable token_mint",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable direction",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable chain",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable execution_mode",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable target_account",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects replay wrong immutable signal_id",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) rejects exact quantity collision and terminal replay",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) withholds ineligible/expired claim {\"status\":\"rejected\"}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) withholds ineligible/expired claim {\"expired\":true}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) resumable shared signal accepts a different tenant without borrowing their execution",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 19,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) source sell claim persists DB-master-derived allocation after capture on same client before returning",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 20,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) source sell missing allocation causes claim failure rather than a returned descriptor",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 21,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) source sell replay requires existing proof without post-effect backfill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 22,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) sell without captured position evidence refuses before inventory reservation",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 23,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) actual worker context rechecks current accepted source and withholds reorg after admission",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 24,
+          "fullName": "actual same-client source claim for atomic fanout (no DB/runtime approval) storage/capture errors propagate instead of returning committed descriptor authority",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/source-sell-evidence.sequential.test.ts": {
+      "sourceSha256": "d44beed7a47bef341920225a8a84d3566574cd1403fa63a0e0aee23f5eb43046",
+      "label": "build-w2-review-source-allocation-tests-01",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) reduces persisted ordinal lots, not acquired-at FIFO or aggregate floating quantity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) generated reduction binds every placeholder contiguously and uses fill rather than requested quantity for proceeds",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) partial later evidence consumes only remaining ordered reservation prefix",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) same evidence replay proves exact original per-lot reductions and never reapplies inventory",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) older fill replay after later consumption returns its original reductions without shifting prefix",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) refuses wrong scope/sum/prefix/replay before mutations {\"valid\":false}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) refuses wrong scope/sum/prefix/replay before mutations {\"prior\":\"2.5\",\"consumed\":[\"1\",\"1.5\"]}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) refuses wrong scope/sum/prefix/replay before mutations {\"prior\":\"1.5\",\"consumed\":[\"0.5\",\"1\"]}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) refuses wrong scope/sum/prefix/replay before mutations {\"replay\":[{\"lot_id\":\"different-lot\",\"quantity\":\"1.5\"}]}",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) acquisition receipt/application scope is required but master reorg does not strand settled follower receipt",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "actual lifecycle reserved source-sell reduction seam (mocked SQL protocol, not DB execution) physical reserved lot shortage rejects without projection update",
+          "status": "passed"
+        }
+      ]
+    },
+    "apps/signal-engine/src/fanout-canonical.sequential.test.ts": {
+      "sourceSha256": "6dd72e47c931fc0782b359d29db637dae486eeaf069ad40f03e9dcdf8e7eb0e4",
+      "label": "build-w2-final-queue-tests-02",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "actual index-used verified admission and explicit outcomes accepted per-source row permits current admission on the same client without global readiness",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "actual index-used verified admission and explicit outcomes absent protected registry/evidence refuses before current policy regardless of labels",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome balance-unknown retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome capacity-unknown retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome chain-mode-unknown retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome subscription-window-unknown retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome source-event-time-unknown retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome user-killed-or-unreadable retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome owned-exit-scope-missing-or-mixed retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome new-unrecognized-code retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "actual index-used verified admission and explicit outcomes technical initial outcome entry-safety-refused retains pending seed",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "actual index-used verified admission and explicit outcomes proven policy exclusions alone can be persisted, without regex inference",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "actual index-used verified admission and explicit outcomes unknown admission code without technical keywords retains seed rather than freezing exclusion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "actual index-used verified admission and explicit outcomes legacy row does not prevent healthy peer delivery and completed legacy row needs no validation",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam prelocks all sorted operator/two-tenant position scopes before any shared row lock with a fake waiting worker",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam does not prelock proven excluded recipients and validates every discovered scope before any key or admission",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam operator and two tenants persist distinct executions and complete parseable exact worker jobs before queue",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam current denial excludes a tenant without calling claim or exact sizing for it",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam rollback of descriptor commit rolls back claims and cannot queue",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 19,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam queue loss, removal, changed policy/mode and retry retain original descriptors/executions without replanning",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 20,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam lost queue ack requeues byte-identical persisted descriptor after queue removal",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 21,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam unavailable source admission leaves pending seed, no claims and no false empty completion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 22,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam default exact follower sizing is unavailable without master quantity/float/env fallback",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 23,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam floating exact sizing cannot reach canonical claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 24,
+          "fullName": "atomic admitted canonical fanout to actual worker comparison seam captured policy mismatch rolls back source claim before descriptor/queue",
+          "status": "passed"
+        }
+      ]
+    },
+    "apps/signal-engine/src/source-durable.sequential.test.ts": {
+      "sourceSha256": "369a851bb192cc8fb1491bf45af0419d2a243a94bf742c88b82951fc53fca791",
+      "label": "build-w2-final-queue-tests-02",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "invoked durable source fanout recovery without verifier readiness committed recipient snapshot is reused; current no-verifier admission cannot queue",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "invoked durable source fanout recovery without verifier readiness failed enumeration commits durable failure and never degrades to operator-only queue success",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "invoked durable source fanout recovery without verifier readiness prepared original descriptor commit precedes queue; queue-ack failure retains replay identity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "invoked durable source fanout recovery without verifier readiness reducing eligibility reaches owned-exit candidate stage, never restores source authority",
+          "status": "passed"
+        }
+      ]
+    },
+    "packages/db/src/package13-fanout-delivery.test.ts": {
+      "sourceSha256": "9a10c4e9f2fc15f4141399f34dc4a3027b1a90e50f020667316c27b13360063e",
+      "label": "build-w2-final-queue-tests-02",
+      "assertions": [
+        {
+          "collectionIndex": 0,
+          "fullName": "package13 unapplied SQL storage contract propagates absent tables and never fabricates durable success",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 1,
+          "fullName": "package13 unapplied SQL storage contract seeds enumeration before work, with exact immutable source identity",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 2,
+          "fullName": "package13 unapplied SQL storage contract retains a failed/partial enumeration seed instead of completing an operator-only snapshot",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 3,
+          "fullName": "package13 unapplied SQL storage contract claims bounded enumeration with a new fence and no source state promotion",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 4,
+          "fullName": "package13 unapplied SQL storage contract persists operator and two tenants before commit, never sharing a terminal state",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 5,
+          "fullName": "package13 unapplied SQL storage contract rejects stale enumeration fencing without adding any recipients",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 6,
+          "fullName": "package13 unapplied SQL storage contract refuses duplicate recipients or a changed tenant descriptor before touching SQL",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 7,
+          "fullName": "package13 unapplied SQL storage contract reads repair obligations independently of processed/expired shared source state",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 8,
+          "fullName": "package13 unapplied SQL storage contract preserves a worker clean skip/claim/completion when the queue acknowledgement arrives late",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 9,
+          "fullName": "legacy fanout quarantine preserves healthy delivery repair quarantines legacy pending without descriptor or execution backfill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 10,
+          "fullName": "legacy fanout quarantine preserves healthy delivery repair quarantines legacy pending without descriptor or execution backfill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 11,
+          "fullName": "legacy fanout quarantine preserves healthy delivery repair quarantines legacy claimed without descriptor or execution backfill",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 12,
+          "fullName": "legacy fanout quarantine preserves healthy delivery repair honors completed historical state before validating missing canonical terms",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 13,
+          "fullName": "queue repair follows actual worker position execution delivery lock order unlocked discovery precedes position/execution/delivery locks and permits a fake existing worker to settle first",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 14,
+          "fullName": "queue repair follows actual worker position execution delivery lock order rejects immutable descriptor drift after discovery before current admission or claim",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 15,
+          "fullName": "package13 tenant claim and truthful outcomes locks tenant/mode/target and passes the same PoolClient to current admission",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 16,
+          "fullName": "package13 tenant claim and truthful outcomes persists verifier/authority denial as blocked without fabricating confirmation",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 17,
+          "fullName": "package13 tenant claim and truthful outcomes does not resend uncertain work when a claimed worker lease expires",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 18,
+          "fullName": "package13 tenant claim and truthful outcomes blocks a clean non-submitted skip with fenced ownership, without resolving delivery",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 19,
+          "fullName": "package13 tenant claim and truthful outcomes refuses confirmation without matching confirmed canonical execution",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 20,
+          "fullName": "package13 tenant claim and truthful outcomes never releases an uncertain submitted execution as non-submitted blocked",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 21,
+          "fullName": "package13 tenant claim and truthful outcomes requires explicit classification for an existing execution even on a clean skip",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 22,
+          "fullName": "package13 tenant claim and truthful outcomes refuses a confirmed label without actual applied quantified evidence",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 23,
+          "fullName": "package13 tenant claim and truthful outcomes accepts matching quantified canonical completion only under the active fenced lease",
+          "status": "passed"
+        },
+        {
+          "collectionIndex": 24,
+          "fullName": "package13 tenant claim and truthful outcomes refuses another tenant execution in completion settlement",
+          "status": "passed"
+        }
+      ]
+    }
+  },
+  "deduplication": "One latest successful result per literal file; every collection index retained, including duplicate fullNames from it.each. No summing reruns.",
+  "rawCounts": {
+    "files": 17,
+    "passed": 343,
+    "failed": 0,
+    "skipped": 0,
+    "pending": 0,
+    "todo": 0
+  },
+  "migrationSha256": {
+    "packages/db/sql/079_claim_runtime_capabilities.sql": "960642ce04c9f7ffc9fb599bde1edcec4159fed6277f522d74ee11a702aa3cc3",
+    "packages/db/sql/080_immutable_valuation_corrections.sql": "9811a908c5ce769f10e7761502ef0b6786bcb4101a353081e478ff0d49ac030b"
+  },
+  "reconciliation": "Historical unrelated snapshot differences do not certify current global source. Current selected test hashes, command/log/results and emitted artifact hashes are verified individually; fixtures changed after emits only in test files.",
+  "runtimeAccepted": false,
+  "liveCapabilityAccepted": false,
+  "productionReady": false
+}

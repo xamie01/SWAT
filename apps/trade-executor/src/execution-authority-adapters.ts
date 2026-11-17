@@ -15,6 +15,15 @@ import {
 } from './execution-authority.js';
 import type { Chain } from '@swat/shared';
 import type { PaymasterBudgetTracker } from './paymaster-budget.js';
+import { createDeployedDelegationAuthority, type DeployedDelegationPorts, type DeployedDelegationPolicy } from './delegation-authority.js';
+
+export interface VerifiedDelegationAuthorityOptions extends DeployedDelegationPolicy {
+  readonly deploymentId: string;
+  readonly chainId: string;
+  readonly maxVerificationAgeMs: number;
+  readonly now: () => Date;
+  readonly ports: DeployedDelegationPorts;
+}
 
 /**
  * The six adapters behind `UserExecutionAuthority` (checklist `S4-P7`).
@@ -413,7 +422,10 @@ export interface UserGrantAuthorityOptions {
  * `authority-grant-expired` with the expiration timestamp so the skip reason
  * identifies lapsed authority rather than a generic execution failure.
  */
-export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions): UserExecutionAuthority {
+export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions,
+  verified?: VerifiedDelegationAuthorityOptions): UserExecutionAuthority {
+  const deployed = verified ? createDeployedDelegationAuthority({ ...verified,
+    id: 'user-robinhood-chain', chain: 'robinhood-chain' }) : null;
   return {
     id: 'user-robinhood-chain',
     chain: 'robinhood-chain',
@@ -458,10 +470,11 @@ export function createUserRobinhoodAuthority(options?: UserGrantAuthorityOptions
           return denied(denialCode, budget.reason ?? 'Paymaster budget exhausted');
         }
       }
+      if (deployed) return deployed.authorize(request);
       return denied(
         'authority-evm-session-key-unavailable',
-        'Per-user Robinhood Chain authority needs a 4337 session key or EIP-7702 '
-        + 'delegation; grant issuance (S4-2) and user_execution_grants (S4-7) are unbuilt '
+        'Per-user Robinhood Chain authority needs a verified deployed 4337 session key or EIP-7702 '
+        + 'delegation and approved execution service (S4-P10, ADR-0003); no verified port is configured '
         + `(requested for ${describePrincipal(request.principal)})`
       );
     }
@@ -489,8 +502,11 @@ export interface UserSolanaAuthorityOptions {
  * user-scoped authority. Refuse without even reading compatibility options.
  */
 export function createUserSolanaAuthority(
-  _options?: UserSolanaAuthorityOptions
+  _options?: UserSolanaAuthorityOptions,
+  verified?: VerifiedDelegationAuthorityOptions
 ): UserExecutionAuthority {
+  // Deliberately separate argument: never inspect legacy signer/enabled/programId.
+  if (verified) return createDeployedDelegationAuthority({ ...verified, id: 'user-solana', chain: 'solana' });
   return createUnavailableUserAuthority({
     id: 'user-solana',
     chain: 'solana',
@@ -533,15 +549,16 @@ export function createUserPolymarketAuthority(): UserExecutionAuthority {
  */
 export function createExecutionAuthorityAdapters(
   deps: OperatorAuthorityDeps,
-  userSolanaOptions?: UserSolanaAuthorityOptions
+  userSolanaOptions?: UserSolanaAuthorityOptions,
+  verified?: { readonly solana?: VerifiedDelegationAuthorityOptions; readonly robinhoodChain?: VerifiedDelegationAuthorityOptions }
 ): readonly UserExecutionAuthority[] {
   // Do not inspect/copy user options or borrow operator authority while the
   // deployed user-scoped Solana mechanism remains unavailable.
   return [
     createOperatorSolanaAuthority(deps.solana),
-    createUserSolanaAuthority(userSolanaOptions),
+    createUserSolanaAuthority(userSolanaOptions, verified?.solana),
     createOperatorRobinhoodAuthority(deps.robinhoodChain),
-    createUserRobinhoodAuthority(),
+    createUserRobinhoodAuthority(undefined, verified?.robinhoodChain),
     createOperatorPolymarketAuthority(deps.polygon),
     createUserPolymarketAuthority()
   ];
