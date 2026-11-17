@@ -149,6 +149,21 @@ def synthetic_environment(label, heap):
     }
 
 
+def verification_lock():
+    # Reuse flock's inherited open-file description; reopening it would deadlock.
+    expected = LOCK.stat() if LOCK.exists() else None
+    if expected is not None:
+        for entry in Path('/proc/self/fd').iterdir():
+            try:
+                fd = int(entry.name)
+                actual = os.fstat(fd)
+                if fd > 2 and (actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino):
+                    return os.fdopen(os.dup(fd), 'a')
+            except (OSError, ValueError):
+                continue
+    return LOCK.open('a')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('label')
@@ -171,7 +186,7 @@ def main():
     record_path = OUT / f'{options.label}.command.json'
     result_path = OUT / f'{options.label}.json'
     os.sched_setaffinity(0, {0})
-    with LOCK.open('a') as lock:
+    with verification_lock() as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if any(path.exists() for path in (log_path, record_path, result_path)):
             raise FileExistsError('Evidence label already exists; use a new label')

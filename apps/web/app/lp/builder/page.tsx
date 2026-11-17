@@ -1,26 +1,24 @@
 'use client';
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { lpApi } from '../../../lib/api.js';
-import { describeApiError } from '../../../lib/api-error-message.js';
+import { FinancialRequestPanel } from '../../../components/FinancialRequestPanel.js';
 import { observedBuilderBounds } from '../../../lib/lp-observation.js';
-import { lpBuildNotice, legacyPaperAmount } from '../../../lib/portfolio-model.js';
 
 function BuilderContent() {
   const searchParams = useSearchParams();
 
-  const [chain, setChain] = useState<string>('solana');
+  const [chain, setChain] = useState<'solana' | 'robinhood-chain' | 'base' | 'ethereum' | 'bsc'>('solana');
   const [poolAddress, setPoolAddress] = useState<string>('solana:Meteora-SOL-USDC');
   const [distribution, setDistribution] = useState<'spot' | 'curve' | 'bidask'>('spot');
   const [rangeSource, setRangeSource] = useState('Manual example bounds — not observed market price');
   const [rangeLower, setRangeLower] = useState(175);
   const [rangeUpper, setRangeUpper] = useState(195);
   const [rungCount, setRungCount] = useState(12);
-  const [depositAmount, setDepositAmount] = useState('500');
-  const [autoRebalance, setAutoRebalance] = useState(true);
-  const [deploying, setDeploying] = useState(false);
-  const [deployResult, setDeployResult] = useState<string | null>(null);
+  const [depositRaw, setDepositRaw] = useState('');
+  const [depositScale, setDepositScale] = useState('9');
+  const [depositAsset, setDepositAsset] = useState('solana:USDC');
+  const [autoRebalance, setAutoRebalance] = useState(false);
 
   useEffect(() => {
     const pPool = searchParams.get('pool');
@@ -28,7 +26,7 @@ function BuilderContent() {
     const pPrice = searchParams.get('price');
 
     if (pPool) setPoolAddress(pPool);
-    if (pChain) setChain(pChain);
+    if (pChain && ['solana', 'robinhood-chain', 'base', 'ethereum', 'bsc'].includes(pChain)) setChain(pChain as typeof chain);
     const bounds = observedBuilderBounds(pPrice);
     if (bounds) {
       setRangeLower(bounds.lower); setRangeUpper(bounds.upper);
@@ -36,35 +34,6 @@ function BuilderContent() {
     } else setRangeSource('Manual example bounds — no valid price observation supplied');
   }, [searchParams]);
 
-  const operation = useRef<{ fingerprint: string; key: string } | null>(null);
-  const handleDeploy = async () => {
-    if (deploying) return;
-    setDeploying(true);
-    setDeployResult(null);
-    try {
-      const fingerprint = JSON.stringify({ chain, poolAddress, rangeLower, rangeUpper, rungCount, distribution, depositAmount, autoRebalance });
-      if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, key: crypto.randomUUID() };
-      const result = await lpApi.post('/v1/lp/positions/deploy', {
-        operationKey: operation.current.key,
-        chain,
-        poolAddress,
-        custom: {
-          rangeLower,
-          rangeUpper,
-          rungCount,
-          distribution,
-        },
-        depositAmount: legacyPaperAmount(depositAmount),
-        depositAsset: `${chain}:USDC`,
-        autoRebalance,
-      });
-      setDeployResult(lpBuildNotice(result));
-    } catch (err) {
-      setDeployResult(`Deploy failed: ${describeApiError(err, 'Could not deploy ladder')}`);
-    } finally {
-      setDeploying(false);
-    }
-  };
 
   return (
     <div className="space-y-4 sm:space-y-6 max-w-full overflow-hidden">
@@ -92,10 +61,10 @@ function BuilderContent() {
               </label>
               <select
                 value={chain}
-                onChange={(e) => setChain(e.target.value)}
+                onChange={(e) => setChain(e.target.value as typeof chain)}
                 className="w-full mt-1 p-2.5 bg-surface-container border border-border-subtle rounded-lg text-xs text-on-surface"
               >
-                <option value="solana">Solana (Meteora DLMM / Raydium)</option>
+                <option value="solana">Solana (Meteora DLMM; Raydium unavailable)</option>
                 <option value="robinhood-chain">Robinhood Chain (Uniswap v3)</option>
                 <option value="base">Base (Uniswap v3)</option>
                 <option value="ethereum">Ethereum Mainnet (Uniswap v3)</option>
@@ -187,32 +156,10 @@ function BuilderContent() {
             </div>
 
             <div>
-              <div className="flex justify-between items-center">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-                  Deposit Token Quantity (not USD)
-                </label>
-                <span className="font-mono font-bold text-primary">{depositAmount} {chain}:USDC units</span>
-              </div>
-              <input
-                type="number"
-                min="10"
-                step="10"
-                value={depositAmount}
-                onChange={(e) => setDepositAmount(e.target.value)}
-                className="w-full mt-1 p-2 bg-surface-container border border-border-subtle rounded-lg font-mono text-xs text-on-surface"
-              />
-              <div className="flex gap-1.5 mt-1.5">
-                {[100, 250, 500, 1000].map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setDepositAmount(String(preset))}
-                    className="px-2 py-0.5 rounded bg-surface-container hover:bg-surface-container-high border border-border-subtle text-[10px] font-mono font-bold"
-                  >
-                    {preset} units
-                  </button>
-                ))}
-              </div>
+              <p className="text-xs">Deposit quantity uses canonical raw units and explicit scale, never floating USD. Scale is validated against trusted asset evidence.</p>
+              <label className="block">Deposit asset<input aria-label="depositAsset" value={depositAsset} onChange={e => setDepositAsset(e.target.value)} className="border p-2 w-full" /></label>
+              <label className="block">Deposit raw<input aria-label="depositRaw" inputMode="numeric" value={depositRaw} onChange={e => setDepositRaw(e.target.value)} className="border p-2 w-full" /></label>
+              <label className="block">Deposit scale<input aria-label="depositScale" inputMode="numeric" value={depositScale} onChange={e => setDepositScale(e.target.value)} className="border p-2 w-full" /></label>
             </div>
 
             <div className="p-3 bg-surface-container-low border border-border-subtle rounded-lg flex items-center justify-between">
@@ -229,32 +176,8 @@ function BuilderContent() {
             </div>
           </div>
 
-          {deployResult && (
-            <div
-              className={`p-3 rounded-lg text-xs font-mono ${
-                deployResult.startsWith('Paper ladder recorded')
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                  : 'bg-red-500/20 text-red-300 border border-red-500/30'
-              }`}
-            >
-              {deployResult}
-            </div>
-          )}
-
-          <button
-            disabled={deploying}
-            onClick={() => void handleDeploy()}
-            className="w-full py-3 rounded-xl bg-primary text-on-primary font-bold text-sm hover:opacity-90 disabled:opacity-50 transition-opacity shadow-sm flex items-center justify-center gap-2"
-          >
-            {deploying ? (
-              <span>Recording Paper Ladder...</span>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
-                <span>Record Paper Ladder</span>
-              </>
-            )}
-          </button>
+          <FinancialRequestPanel kind="lp-acquire" lpRequest={{ chain, poolAddress, depositAsset,
+            deposit: { raw: depositRaw, scale: Number(depositScale) }, strategy: { distribution, rangeLower, rangeUpper, rungCount }, autoRebalance }} />
         </div>
 
         {/* Visualizer Column */}
@@ -318,7 +241,7 @@ function BuilderContent() {
                   Capital Allocation
                 </span>
                 <span className="text-sm sm:text-base font-mono font-bold text-on-surface mt-1 block">
-                  {depositAmount} {chain}:USDC units · USD valuation unassessed
+                  {depositRaw || 'Unset'} raw · scale {depositScale} · {depositAsset} · USD valuation unassessed
                 </span>
               </div>
               <div className="p-3 bg-surface-container-low border border-border-subtle rounded-xl">

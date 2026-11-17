@@ -9,6 +9,7 @@ CREATE TABLE lp_exact_positions (
   acquisition_key TEXT NOT NULL CHECK(acquisition_key ~ '^[A-Za-z0-9_-]{1,128}$'),
   subscription_id UUID,
   master_event_id TEXT,
+  acquisition_data JSONB NOT NULL CHECK(jsonb_typeof(acquisition_data)='object'),
   data JSONB NOT NULL CHECK(data ?& ARRAY['id','userId','chain','protocol','poolAddress','depositAsset','acquisitionKey','acquisitionFingerprint',
     'mode','deposit','depositMicroUsd','acquisitionQuote','copyOrigin','currentAmount','plan','revision','state','autoRebalance',
     'cumulativeFeesMicroUsd','cumulativeCostsMicroUsd','realizedMicroUsd','lastReceiptKey']),
@@ -28,6 +29,18 @@ CREATE TABLE lp_exact_positions (
   CHECK(data->>'state' <> 'closed' OR (data->'currentAmount'->>'raw'='0' AND data->>'lastReceiptKey' IS NOT NULL)),
   CHECK(data->>'realizedMicroUsd' IS NULL OR data->>'realizedMicroUsd' ~ '^(0|-?[1-9][0-9]{0,77})$')
 );
+CREATE FUNCTION lp_exact_acquisition_snapshot_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.acquisition_data IS DISTINCT FROM NEW.data OR NEW.data->>'state' IS DISTINCT FROM 'active'
+     OR NEW.data->>'revision' IS DISTINCT FROM '0' OR NEW.data->'currentAmount' IS DISTINCT FROM NEW.data->'deposit'
+     OR NEW.data->>'cumulativeFeesMicroUsd' IS DISTINCT FROM '0' OR NEW.data->>'cumulativeCostsMicroUsd' IS DISTINCT FROM '0'
+     OR NEW.data->'realizedMicroUsd' IS DISTINCT FROM 'null'::jsonb OR NEW.data->'lastReceiptKey' IS DISTINCT FROM 'null'::jsonb THEN
+    RAISE EXCEPTION 'LP acquisition retry snapshot must equal initial committed position';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_lp_exact_acquisition_snapshot BEFORE INSERT ON lp_exact_positions
+  FOR EACH ROW EXECUTE FUNCTION lp_exact_acquisition_snapshot_guard();
 CREATE TABLE lp_exact_operations (
   id UUID PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -76,6 +89,13 @@ CREATE TRIGGER trg_lp_exact_receipt_immutable BEFORE UPDATE OR DELETE ON lp_exac
 CREATE FUNCTION lp_exact_operation_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP='DELETE' THEN RAISE EXCEPTION 'LP operation intent is immutable'; END IF;
+  IF TG_OP='INSERT' THEN
+    IF NEW.status IS DISTINCT FROM 'pending' OR NEW.completed_at IS NOT NULL
+       OR NEW.data->'receipt' IS DISTINCT FROM 'null'::jsonb THEN
+      RAISE EXCEPTION 'LP operation admission requires pending state without receipt';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.id<>OLD.id OR NEW.user_id<>OLD.user_id OR NEW.position_id<>OLD.position_id OR NEW.operation_key<>OLD.operation_key
      OR NEW.receipt_key<>OLD.receipt_key OR NEW.created_at<>OLD.created_at
      OR (NEW.data-'status'-'receipt') IS DISTINCT FROM (OLD.data-'status'-'receipt') THEN
@@ -88,27 +108,32 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER trg_lp_exact_operation_guard BEFORE UPDATE OR DELETE ON lp_exact_operations
+CREATE TRIGGER trg_lp_exact_operation_guard BEFORE INSERT OR UPDATE OR DELETE ON lp_exact_operations
   FOR EACH ROW EXECUTE FUNCTION lp_exact_operation_guard();
 CREATE FUNCTION lp_exact_position_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE op lp_exact_operations%ROWTYPE;
 BEGIN
   IF TG_OP='DELETE' THEN RAISE EXCEPTION 'LP exact acquisition immutable'; END IF;
-  IF ROW(NEW.position_id,NEW.user_id,NEW.acquisition_key,NEW.subscription_id,NEW.master_event_id)
+  IF NEW.acquisition_data IS DISTINCT FROM OLD.acquisition_data OR ROW(NEW.position_id,NEW.user_id,NEW.acquisition_key,NEW.subscription_id,NEW.master_event_id)
       IS DISTINCT FROM ROW(OLD.position_id,OLD.user_id,OLD.acquisition_key,OLD.subscription_id,OLD.master_event_id)
-     OR (NEW.data-'currentAmount'-'plan'-'revision'-'state'-'cumulativeFeesMicroUsd'-'cumulativeCostsMicroUsd'-'realizedMicroUsd'-'lastReceiptKey')
-        IS DISTINCT FROM (OLD.data-'currentAmount'-'plan'-'revision'-'state'-'cumulativeFeesMicroUsd'-'cumulativeCostsMicroUsd'-'realizedMicroUsd'-'lastReceiptKey') THEN
+     OR (NEW.data-'currentAmount'-'plan'-'revision'-'state'-'autoRebalance'-'cumulativeFeesMicroUsd'-'cumulativeCostsMicroUsd'-'realizedMicroUsd'-'lastReceiptKey')
+        IS DISTINCT FROM (OLD.data-'currentAmount'-'plan'-'revision'-'state'-'autoRebalance'-'cumulativeFeesMicroUsd'-'cumulativeCostsMicroUsd'-'realizedMicroUsd'-'lastReceiptKey') THEN
     RAISE EXCEPTION 'LP exact acquisition evidence immutable';
   END IF;
   SELECT * INTO op FROM lp_exact_operations WHERE user_id=NEW.user_id AND position_id=NEW.position_id
     AND receipt_key=NEW.data->>'lastReceiptKey' AND status='completed';
-  IF NOT FOUND OR op.data->>'positionRevision' <> OLD.data->>'revision'
+  IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM lp_exact_receipts r
+       WHERE r.operation_id=op.id AND r.user_id=op.user_id AND r.position_id=op.position_id
+         AND r.receipt_key=op.receipt_key AND r.data=op.data->'receipt')
+     OR op.data->>'positionRevision' <> OLD.data->>'revision'
      OR (NEW.data->>'revision')::numeric <> (OLD.data->>'revision')::numeric+1
+     OR op.data->'amountBefore' IS DISTINCT FROM OLD.data->'currentAmount'
      OR NEW.data->'currentAmount' IS DISTINCT FROM op.data->'receipt'->'amountAfter'
      OR NEW.data->'currentAmount'->>'scale' <> OLD.data->'deposit'->>'scale'
      OR (NEW.data->>'cumulativeFeesMicroUsd')::numeric <> (OLD.data->>'cumulativeFeesMicroUsd')::numeric+(op.data->'receipt'->>'collectedFeesMicroUsd')::numeric
      OR (NEW.data->>'cumulativeCostsMicroUsd')::numeric <> (OLD.data->>'cumulativeCostsMicroUsd')::numeric+(op.data->'receipt'->>'executionCostsMicroUsd')::numeric
      OR (op.data->>'action'='close' AND (NEW.data->>'state'<>'closed' OR NEW.data->'currentAmount'->>'raw'<>'0'
+       OR NEW.data->'plan' IS DISTINCT FROM OLD.data->'plan'
        OR (NEW.data->>'realizedMicroUsd')::numeric IS DISTINCT FROM
          (op.data->'receipt'->>'proceedsMicroUsd')::numeric+(NEW.data->>'cumulativeFeesMicroUsd')::numeric
            -(NEW.data->>'cumulativeCostsMicroUsd')::numeric-(NEW.data->>'depositMicroUsd')::numeric))
@@ -123,12 +148,19 @@ CREATE TRIGGER trg_lp_exact_position_guard BEFORE UPDATE OR DELETE ON lp_exact_p
 -- Prevent old receiptless financial UPDATE paths from bypassing the exact domain.
 CREATE FUNCTION lp_exact_legacy_financial_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
+  IF OLD.acquisition_provenance='exact-injected-paper-v2' AND OLD.state='closed' AND NEW.state<>'closed' THEN
+    RAISE EXCEPTION 'LP exact closed inventory cannot be reopened by legacy state';
+  END IF;
   IF OLD.acquisition_provenance='exact-injected-paper-v2' AND
-     (NEW.state='closed' AND OLD.state<>'closed' OR NEW.paper_plan IS DISTINCT FROM OLD.paper_plan) THEN
+     (NEW.state='closed' AND OLD.state<>'closed' OR NEW.paper_plan IS DISTINCT FROM OLD.paper_plan
+       OR ROW(NEW.range_lower,NEW.range_upper,NEW.strategy_type) IS DISTINCT FROM ROW(OLD.range_lower,OLD.range_upper,OLD.strategy_type)) THEN
     IF NOT EXISTS(SELECT 1 FROM lp_exact_positions e JOIN lp_exact_operations o
       ON o.position_id=e.position_id AND o.user_id=e.user_id AND o.receipt_key=e.data->>'lastReceiptKey'
       WHERE e.position_id=NEW.id AND e.user_id=NEW.user_id AND o.status='completed'
-        AND e.data->>'state'=NEW.state AND e.data->'plan'=NEW.paper_plan) THEN
+        AND e.data->>'state'=NEW.state AND e.data->'plan'=NEW.paper_plan
+        AND (e.data->'plan'->'strategy'->>'rangeLower')::numeric=NEW.range_lower
+        AND (e.data->'plan'->'strategy'->>'rangeUpper')::numeric=NEW.range_upper
+        AND e.data->'plan'->'strategy'->>'distribution'=NEW.strategy_type) THEN
       RAISE EXCEPTION 'LP financial mutation requires exact completed receipt';
     END IF;
   END IF;

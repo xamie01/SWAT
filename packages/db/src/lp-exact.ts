@@ -72,6 +72,17 @@ export interface LpEconomicEvidence {
 export type LpEconomicDecision =
   | { readonly assessed: false; readonly shouldRebalance: false; readonly netMicroUsd: null; readonly reason: 'economics-unassessed' }
   | { readonly assessed: true; readonly shouldRebalance: boolean; readonly netMicroUsd: string; readonly reason: 'positive' | 'not-positive' };
+export interface LpCopyRiskEvidence {
+  readonly providerId: string;
+  readonly userId: string;
+  readonly subscriptionId: string;
+  readonly subscriptionRevision: string;
+  readonly masterEvidenceHash: string;
+  readonly intentHash: string;
+  readonly poolEvidenceId: string;
+  readonly approved: boolean;
+  readonly observedAt: string;
+}
 export interface LpCopyOrigin {
   readonly subscriptionId: string;
   readonly subscriptionRevision: string;
@@ -81,6 +92,8 @@ export interface LpCopyOrigin {
   readonly masterEvidenceHash: string;
   readonly masterDepositMicroUsd: LpMicroUsd;
   readonly budgetMicroUsd: LpMicroUsd;
+  /** Trusted assessment persisted separately from the acquisition intent hash. */
+  readonly riskEvidence?: LpCopyRiskEvidence;
 }
 export interface LpExactAcquisitionRequest {
   readonly operationKey: string;
@@ -261,7 +274,8 @@ export function lpStrategy(strategy: LpExactStrategy): void {
 export function lpRecenterStrategy(strategy: LpExactStrategy, currentPrice: number): LpExactStrategy {
   lpStrategy(strategy);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) throw new Error('LP current geometric price required');
-  const factor = currentPrice / Math.sqrt(strategy.rangeLower * strategy.rangeUpper);
+  const midpoint = Math.exp((Math.log(strategy.rangeLower) + Math.log(strategy.rangeUpper)) / 2);
+  const factor = currentPrice / midpoint;
   const next = { ...strategy, rangeLower: strategy.rangeLower * factor, rangeUpper: strategy.rangeUpper * factor };
   lpStrategy(next); return next;
 }
@@ -287,8 +301,13 @@ function canonical(value: unknown): string {
 export function lpExactHash(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex'); }
 export function lpSnapshot<T>(value: T): T { return JSON.parse(canonical(value)) as T; }
 export function lpAcquisitionHash(request: LpExactAcquisitionRequest, origin: LpCopyOrigin | null = null): string {
+  const intentOrigin = origin === null ? null : {
+    subscriptionId: origin.subscriptionId, subscriptionRevision: origin.subscriptionRevision, eventId: origin.eventId,
+    masterWalletAddress: origin.masterWalletAddress, masterPositionId: origin.masterPositionId,
+    masterEvidenceHash: origin.masterEvidenceHash, masterDepositMicroUsd: origin.masterDepositMicroUsd, budgetMicroUsd: origin.budgetMicroUsd
+  };
   return lpExactHash({ chain: request.chain, poolAddress: request.poolAddress, depositAsset: request.depositAsset,
-    deposit: request.deposit, strategy: request.strategy, autoRebalance: request.autoRebalance === true, origin });
+    deposit: request.deposit, strategy: request.strategy, autoRebalance: request.autoRebalance === true, origin: intentOrigin });
 }
 export function lpEconomics(evidence: LpEconomicEvidence | null): LpEconomicDecision {
   if (evidence === null) return { assessed: false, shouldRebalance: false, netMicroUsd: null, reason: 'economics-unassessed' };

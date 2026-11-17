@@ -21,12 +21,12 @@ describe('LP position reads and nonfinancial preferences remain tenant scoped', 
   it('close and rebalance transition refuse financial state mutation', async () => {
     await expect(transitionLpPosition(scope, 'p', { toState: 'closed', reason: 'close' })).rejects.toThrow('durable paper');
     await expect(transitionLpPosition(scope, 'p', { toState: 'rebalancing', reason: 'rebalance' })).rejects.toThrow('durable paper');
-    expect(mocks.clientQuery.mock.calls.some(call => call[0].includes('UPDATE'))).toBe(false);
+    expect(mocks.clientQuery.mock.calls.some(call => call[0].match(/^\s*UPDATE\b/))).toBe(false);
   });
   it('automatic preference takes same owner lock, returns actual affected owned row and never financial state', async () => {
     await setLpPositionAutoRebalance(scope, 'p', true);
     expect(mocks.clientQuery.mock.calls[0]![0]).toContain('FROM users');
-    const update = mocks.clientQuery.mock.calls.find(call => call[0].includes('UPDATE'))!;
+    const update = mocks.clientQuery.mock.calls.find(call => call[0].match(/^\s*UPDATE\b/))!;
     expect(update[0]).not.toContain('SET state'); expect(update[1]).toEqual(['p', 'alice', true]);
   });
   it('platform sweep marker is not an accepted cross-tenant RLS bypass', async () => {

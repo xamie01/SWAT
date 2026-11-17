@@ -3,11 +3,13 @@ import { ApiError } from './api.js';
 import { createRequestMachine, requestEditable, type ImmutableOperation, type RequestState } from './financial-request-state.js';
 import type { FinancialResponse } from './domain-transport.js';
 const operation: ImmutableOperation = { key: 'key-1', kind: 'reducing', positionId: 'position-1', venue: 'spot',
-  request: { requestKey: 'key-1', quantityRaw: '900719925474099312345678', network: 'genesis', maxFeeRaw: '0' } };
+  request: { requestKey: 'key-1', quantityRaw: '900719925474099312345678', network: 'genesis', maxFeeRaw: '0',
+    feeAssetId: 'gas-asset', feeAssetScale: 6, feeFundingAccountId: 'gas-account' } };
 const response = (status: string, terminal = false): FinancialResponse => ({ capability: {}, record: {
-  id: 'intent-1', intentHash: 'hash', status, terminal, completedRaw: status === 'settled' ? '900719925474099312345678' : '40',
+  id: 'intent-1', intentHash: 'hash', status, terminal, completedRaw: status === 'settled' ? '900719925474099312345678' : status === 'cancelled' ? '0' : '40',
+  cancellationReason: status === 'cancelled' ? 'expired-before-attempt' : null,
   intent: { ...operation.request, kind: 'reducing', positionId: 'position-1', venue: 'spot', mode: 'paper', assetScale: 9 }
-} } as FinancialResponse);
+} } as unknown as FinancialResponse);
 it('writes immutable intent before dispatch and lost admission response cannot generate a replacement operation', () => {
   const writes: RequestState[] = []; const machine = createRequestMachine(state => writes.push(state));
   machine.beginAdmission(operation); expect(writes[0]!.phase).toBe('dispatching');
@@ -49,7 +51,7 @@ it.each(['reducing', 'withdrawal'] as const)('earlier unknown %s admission survi
 });
 it('old persisted dispatch without an ambiguity field is conservatively fenced after reload', () => {
   const machine = createRequestMachine(() => {}); machine.beginAdmission(operation);
-  const legacy = { ...machine.state() } as Partial<RequestState>; delete legacy.admissionUnknown;
+  const { admissionUnknown: _omitted, ...legacy } = machine.state();
   const restarted = createRequestMachine(() => {}, legacy as RequestState); restarted.retryAdmission();
   restarted.admissionError(new ApiError(400, 'validation', { code: 'INVALID_EXACT_REDUCTION' }));
   expect(requestEditable(restarted.state())).toBe(false); expect(restarted.state().admissionUnknown).toBe(true);
@@ -83,6 +85,18 @@ it('audited cancelled and terminal partial are resolved outcomes, not expiry-der
   machine.observe(response('cancelled', true)); expect(machine.state().phase).toBe('terminal'); machine.startFresh();
   machine.beginAdmission(operation); machine.observe(response('partial', false));
   expect(() => machine.startFresh()).toThrow();
+});
+it.each(['feeAssetId', 'feeAssetScale', 'feeFundingAccountId'])('substituted %s never releases a persisted ambiguity fence', field => {
+  const machine = createRequestMachine(() => {}); machine.beginAdmission(operation); machine.unknown();
+  const restarted = createRequestMachine(() => {}, machine.state());
+  const changed = response('settled', true); changed.record.intent[field] = field === 'feeAssetScale' ? 18 : 'substituted';
+  expect(() => restarted.observe(changed)).toThrow(); expect(() => restarted.startFresh()).toThrow();
+  expect(restarted.retryAdmission()).toEqual(operation);
+});
+it.each([{ terminal: false }, { completedRaw: '1' }, { cancellationReason: null }])('unverified cancellation %j cannot release the original key', patch => {
+  const machine = createRequestMachine(() => {}); machine.beginAdmission(operation);
+  const changed = response('cancelled', true); Object.assign(changed.record, patch);
+  expect(() => machine.observe(changed)).toThrow(); expect(() => machine.startFresh()).toThrow();
 });
 it('a persisted uncertain operation never becomes editable merely due to reload or time passing', () => {
   const machine = createRequestMachine(() => {}); machine.beginAdmission(operation); machine.observe(response('uncertain'));

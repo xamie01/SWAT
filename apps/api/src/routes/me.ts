@@ -72,6 +72,7 @@ export interface MeRouteOptions {
   readonly tokenDiscoveryQueue: Queue;
   readonly now?: () => Date;
   readonly coolingOffMs?: number;
+  /** Injected admission/status only; no runner, receipt writer, signer or default live activation. */
   readonly financial?: MeFinancialPorts;
   readonly custody?: MeCustodyPorts;
   /** Compatibility only; never durable authority. */

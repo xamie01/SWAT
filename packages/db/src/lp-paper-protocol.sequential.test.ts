@@ -106,6 +106,37 @@ describe('invoked exact LP acquisition and durable receipt lifecycle', () => {
     await expect(f.service.requestOperation(alice, { positionId: p.id, operationKey: 'other', action: 'close' })).rejects.toThrow('pending');
     await expect(f.service.recover({ userId: '*' } as UserScope)).rejects.toThrow('tenant');
   });
+  it('acquisition retry returns the immutable initial result after close and mode/provider removal', async () => {
+    const f = lpPaperFixture(plan); const p = await f.service.acquire(alice, request);
+    const op = await f.service.requestOperation(alice, { positionId: p.id, operationKey: 'close-retry', action: 'close' });
+    f.receipts.available = true; await f.service.process(alice, { operationId: op.operation.id, chain: 'solana' });
+    f.mode.value = 'live';
+    const restarted = createLpPaperService({ ...f.deps, protocol: undefined });
+    expect(await restarted.acquire(alice, request)).toEqual(p);
+    expect((await restarted.position(alice, p.id))?.state).toBe('closed');
+    expect(f.seen.quotes).toHaveLength(2);
+    await expect(restarted.acquire(alice, { ...request, deposit: { ...request.deposit, raw: '1' } })).rejects.toThrow('replay conflict');
+  });
+  it('rebalance recenters immutable quoted geometry without changing acquisition or exact inventory', async () => {
+    const f = lpPaperFixture(plan); const p = await f.service.acquire(alice, request);
+    f.transforms.quote = q => ({ ...q, pool: { ...q.pool, currentPrice: 200 } });
+    const op = await f.service.requestOperation(alice, { positionId: p.id, operationKey: 'recenter', action: 'rebalance' });
+    expect(op.operation.plan!.strategy.rangeLower).toBeGreaterThan(180);
+    expect(op.operation.plan!.strategy.rangeUpper).toBeGreaterThan(220);
+    expect(op.operation.plan!.rungs[0]!.allocation).toEqual(request.deposit);
+    f.receipts.available = true; await f.service.process(alice, { operationId: op.operation.id, chain: 'solana' });
+    expect(f.state.positions[p.id]!.plan).toEqual(op.operation.plan);
+    expect(await f.service.acquire(alice, request)).toEqual(p);
+  });
+  it('operation retry in live mode returns committed intent without queueing or requoting', async () => {
+    const f = lpPaperFixture(plan); const p = await f.service.acquire(alice, request);
+    const input = { positionId: p.id, operationKey: 'stable-close', action: 'close' as const };
+    const first = await f.service.requestOperation(alice, input); f.mode.value = 'live';
+    const queueCount = f.seen.queue.length;
+    const replay = await f.service.requestOperation(alice, input);
+    expect(replay.operation).toEqual(first.operation); expect(replay.queued).toBe(false);
+    expect(f.seen.queue).toHaveLength(queueCount); expect(f.seen.quotes).toHaveLength(2);
+  });
   it('unknown/nonpositive economics and withdrawn automatic consent fail closed', async () => {
     const f = lpPaperFixture(plan); const p = await f.service.acquire(alice, request); f.econ.evidence = null;
     await expect(f.service.requestOperation(alice, { positionId: p.id, operationKey: 'no-econ', action: 'rebalance' })).rejects.toThrow('unassessed');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lpAmountForBudget, lpDecimal, lpEconomics, lpExactHash, lpMicro, lpRaw, lpStoredMicro, lpValueMicro, lpProtocol } from './lp-exact.js';
+import { lpAmountForBudget, lpDecimal, lpEconomics, lpExactHash, lpMicro, lpRaw, lpStoredMicro, lpValueMicro, lpProtocol, lpRecenterStrategy } from './lp-exact.js';
 
 describe('exact LP rawscale and economic contracts', () => {
   it('preserves fractional quantities above float64 safe raw range', () => {
@@ -22,6 +22,17 @@ describe('exact LP rawscale and economic contracts', () => {
     const amount = lpAmountForBudget('6000000', price, 18);
     expect(lpMicro(lpValueMicro(amount, price))).toBeLessThanOrEqual(6000000n);
     expect(lpValueMicro(amount, price)).toBe('5999999');
+  });
+  it('microdollar strings remain canonical, bounded and signed only when requested', () => {
+    for (const raw of ['-0', '+1', '01', '1.0', '1e6', '9'.repeat(79)]) expect(() => lpMicro(raw, true)).toThrow('canonical');
+    expect(() => lpMicro('-1')).toThrow('canonical'); expect(lpMicro('-1', true)).toBe(-1n);
+    expect(() => lpValueMicro({ raw: '1', scale: 30 }, { raw: '1', scale: 30 })).toThrow('below one');
+    expect(() => lpValueMicro({ raw: '9'.repeat(78), scale: 0 }, { raw: '9'.repeat(78), scale: 0 })).toThrow('canonical');
+  });
+  it('recenter geometry avoids intermediate multiplication overflow', () => {
+    const next = lpRecenterStrategy({ distribution: 'spot', rangeLower: 1e200, rangeUpper: 4e200, rungCount: 1 }, 2e200);
+    expect(next.rangeLower).toBeGreaterThan(0); expect(Number.isFinite(next.rangeUpper)).toBe(true);
+    expect(next.rangeUpper / next.rangeLower).toBeCloseTo(4);
   });
   it('unknown economics is not zero-safe', () => {
     expect(lpEconomics(null)).toEqual({ assessed: false, shouldRebalance: false, netMicroUsd: null, reason: 'economics-unassessed' });

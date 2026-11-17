@@ -15,7 +15,7 @@ vi.mock('@swat/shared', async () => ({ chainSchema: (await import('../../../../p
 import { registerMeRoutes } from './me.js';
 import { createReducingService } from '@swat/db/dist/reducing-service.js';
 import type { ReducingExposure, ReducingIntent } from '@swat/db/dist/reducing-contract.js';
-import { withdrawalSqlFixture } from '@swat/db/dist/withdrawal-test-fixture.js';
+import { withdrawalSqlFixture, financialFundingFixture, reducingMappingFixture, financialAuthorizationFixture } from '@swat/db/dist/withdrawal-test-fixture.js';
 import type { FinancialAttempt, FinancialReceipt, FinancialRecord } from '@swat/db/dist/withdrawal-contract.js';
 import { createDurableFinancialRunner } from '../../../trade-executor/src/reducing-orchestration.js';
 const apps: ReturnType<typeof Fastify>[] = [];
@@ -25,10 +25,13 @@ async function setup(venue: 'spot' | 'polymarket-perps' = 'polymarket-perps', si
   db.state().held = '100'; // canonical fixture inventory matches the authoritative exposure used for admission
   const input = { requestKey: 'reduce-1', chain: venue === 'spot' ? 'solana' as const : 'polygon' as const,
     network: 'inert-network', assetId: 'asset-1', assetScale: 8, mode: 'paper' as const, maxFeeRaw: '0', accountId: 'account-1',
+    feeAssetId: 'fee-asset', feeAssetScale: 6, feeFundingAccountId: 'fee-account',
     positionSide: side, quantityRaw: '100', limitPriceExact: '65000.000000000000000001', expectedRevision: 'r1' };
   const exposure: ReducingExposure = { ...input, venue, positionId: 'position-1', userId: 'user-1', heldRaw: '100', revision: 'r1',
     observedAt: db.now, validUntil: '2026-11-17T12:01:00.000Z', proof: 'inert-independent-exposure' };
-  const service = createReducingService({ transaction: db.transaction, lockExposure: async () => exposure });
+  const service = createReducingService({ transaction: db.transaction, lockExposure: async () => exposure,
+    lockFunding: async (_client, userId, budget) => financialFundingFixture(userId, budget, db.now),
+    lockVenueMapping: async (_client, record) => { const mapping = reducingMappingFixture(record, db.now); db.admitMapping(record, mapping); return mapping; } });
   const app = Fastify({ logger: false }); apps.push(app);
   app.addHook('onRequest', async request => {
     const id = request.headers['x-fixture-user'];
@@ -71,15 +74,30 @@ it('rejects public provider receipt/authority and path identity substitution', a
   expect((await s.app.inject({ method: 'POST', url: s.url, payload: s.input })).statusCode).toBe(401);
   expect(s.db.events).toHaveLength(0);
 });
+it('actual expired no-attempt cancellation is visible through me status without claiming position closure', async () => {
+  const s = await setup('spot'); const admitted = (await s.post()).json(); s.db.advance(300_001);
+  const submit = vi.fn(), authorize = vi.fn();
+  const runner = createDurableFinancialRunner<ReducingIntent>({ transaction: s.db.transaction, revalidate: s.service.revalidate,
+    effects: { authorize, submit, reconcile: async () => null, verify: async () => null }, account: vi.fn() });
+  const cancelled = await runner.cancelExpired('user-1', admitted.record.id);
+  expect(cancelled.status).toBe('cancelled');
+  expect((await s.status(admitted.record.id)).json().record).toMatchObject({ status: 'cancelled', terminal: true,
+    completedRaw: '0', cancellationReason: 'expired-before-attempt', intent: { feeAssetId: s.input.feeAssetId,
+      feeAssetScale: s.input.feeAssetScale, feeFundingAccountId: s.input.feeFundingAccountId } });
+  expect(s.db.state().held).toBe('100'); expect(submit).not.toHaveBeenCalled(); expect(authorize).not.toHaveBeenCalled();
+});
 it('actual runner receipt progress is observed by actual me status; uncertain retries never resubmit or falsely close', async () => {
   const s = await setup(); const admission = (await s.post()).json();
   let selected: FinancialReceipt | null = null;
   let pinned: { record: FinancialRecord<ReducingIntent>; attempt: FinancialAttempt } | null = null;
   const submit = vi.fn(async () => null);
   const runner = createDurableFinancialRunner<ReducingIntent>({ transaction: s.db.transaction, revalidate: s.service.revalidate,
-    effects: { authorize: async (record, attempt) => { pinned = { record, attempt }; return { inert: true }; }, submit,
+    effects: { authorize: async (record, attempt) => { pinned = { record, attempt }; return financialAuthorizationFixture(record, attempt, s.db.now); }, submit,
       reconcile: async () => selected, verify: async (_record, _attempt, observed) => observed as FinancialReceipt | null },
     account: async (client, record, receipt, delta, fee) => {
+      // Explicit inert journal on the same fixture transaction, not a provider/PnL assertion.
+      await client.query('SELECT $1,$2,$3,$4,$5 /* fixture:economics */', [record.id, record.userId, receipt.receiptId,
+        'inert-journal:' + receipt.receiptId, JSON.stringify({ deltaRaw: delta, deltaFeeRaw: fee, fixtureOnly: true })]);
       await client.query('SELECT $1 /* fixture:account */', [delta, fee]); return 'canonical:' + record.id + ':' + receipt.receiptId;
     } });
   await runner.run('user-1', admission.record.id); await runner.run('user-1', admission.record.id);
@@ -89,7 +107,8 @@ it('actual runner receipt progress is observed by actual me status; uncertain re
     if (!pinned) throw new Error('Missing prepared attempt');
     return { receiptId, providerIdentity: 'inert-independent-verifier', proof: 'fixture-proof', intentId: pinned.record.id,
       intentHash: pinned.record.intentHash, attemptId: pinned.attempt.id, clientOrderId: pinned.attempt.clientOrderId,
-      cumulativeRaw, feeRaw: '0', terminal, outcome: 'fill', observedAt: s.db.now };
+      cumulativeRaw, feeRaw: '0', feeAssetId: s.input.feeAssetId, feeAssetScale: s.input.feeAssetScale,
+      feeFundingAccountId: s.input.feeFundingAccountId, terminal, outcome: 'fill', observedAt: s.db.now };
   };
   selected = receipt('40', false, 'partial'); s.db.admit(selected, 'user-1'); await runner.run('user-1', admission.record.id);
   expect((await s.status(admission.record.id)).json().record).toMatchObject({ status: 'partial', completedRaw: '40', terminal: false });

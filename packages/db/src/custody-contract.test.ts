@@ -45,7 +45,7 @@ describe('custody binding is metadata authenticated by injected service, not exe
   });
   it.each(['deploymentId', 'chainId', 'contextVersion', 'scopeVersion', 'purpose'])('rejects substituted binding %s', field => {
     const binding = buildCustodySecretBinding(base);
-    expect(() => assertCustodyBindingMatches({ ...binding, [field]: 'substitute' } as any, { ...base, id: base.grantId })).toThrow();
+    expect(() => assertCustodyBindingMatches({ ...binding, [field]: 'substitute' } as any, { ...base, id: base.grantId }, { deploymentId: base.deploymentId, chainId: base.chainId })).toThrow();
   });
   it('rejects unknown binding fields rather than authenticating an incomplete projection', () => {
     expect(() => assertCustodyBindingMatches({ ...buildCustodySecretBinding(base), extra: true } as any, { ...base, id: base.grantId })).toThrow();

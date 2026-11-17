@@ -5,13 +5,14 @@ vi.mock('@swat/db', async () => ({
   ...await import('@swat/db/dist/withdrawal-service.js'), ...await import('@swat/db/dist/reducing-contract.js'),
   forUser: (userId: string) => ({ userId }), findUserById: vi.fn(), resolveSession: vi.fn()
 }));
-import { registerMeFinancialRoutes } from './me-financial.js';
+import { registerMeFinancialRoutes, publicFinancialRecord, withdrawalRequestSchema, reducingRequestSchema } from './me-financial.js';
 import { createWithdrawalService, type WithdrawalEligibility } from '@swat/db/dist/withdrawal-service.js';
-import { withdrawalSqlFixture } from '@swat/db/dist/withdrawal-test-fixture.js';
-import { financialHash } from '@swat/db/dist/withdrawal-contract.js';
+import { withdrawalSqlFixture, financialFundingFixture } from '@swat/db/dist/withdrawal-test-fixture.js';
+import { financialHash, withdrawalIntent } from '@swat/db/dist/withdrawal-contract.js';
 const USER = 'user-1';
 const input = { requestKey: 'withdraw-1', chain: 'polygon' as const, network: 'polygon:137:genesis', assetId: 'polygon:USDC',
-  assetScale: 6, sourceWalletId: 'wallet-1', destination: '0x' + 'a'.repeat(40), amountRaw: '900719925474099312345678', maxFeeRaw: '10', mode: 'paper' as const };
+  assetScale: 6, sourceWalletId: 'wallet-1', destination: '0x' + 'a'.repeat(40), amountRaw: '900719925474099312345678', maxFeeRaw: '10',
+  feeAssetId: 'polygon:USDC', feeAssetScale: 6, feeFundingAccountId: 'wallet-1', mode: 'paper' as const };
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); });
 async function setup() {
@@ -23,6 +24,7 @@ async function setup() {
   const issue = vi.fn(async (hash: string) => ({ code: '123456', digest: financialHash([hash, '123456']) }));
   const deliver = vi.fn(async () => { db.events.push('deliver'); return true; });
   const service = createWithdrawalService({ transaction: db.transaction, lockEligibility: async () => evidence,
+    lockFunding: async (_client, userId, budget) => financialFundingFixture(userId, budget, db.now, evidence.availableRaw),
     otp: { issue, deliver, digest: async (hash, code) => financialHash([hash, code]) } });
   const app = Fastify({ logger: false }); apps.push(app);
   app.addHook('onRequest', async request => {
@@ -45,7 +47,10 @@ it('actual factory route commits before code delivery and preserves exact units 
   expect(response.headers['cache-control']).toBe('no-store');
   expect(result.record.intent).toMatchObject(input);
   expect(result.record).toMatchObject({ status: 'awaiting-authorization', completedRaw: '0', terminal: false });
-  expect(response.body).not.toContain('123456'); expect(response.body).not.toContain('balanceProof');
+  const scalarValues = (value: unknown): unknown[] => value && typeof value === 'object'
+    ? Object.values(value).flatMap(scalarValues) : [value];
+  expect(scalarValues(result)).not.toContain('123456'); expect(response.body).not.toContain('balanceProof');
+  expect(result).not.toHaveProperty('otp'); expect(result).not.toHaveProperty('code');
   expect(result).not.toHaveProperty('digest'); expect(result.record.intent).not.toHaveProperty('userId');
   expect(s.db.events.indexOf('commit:' + USER)).toBeLessThan(s.db.events.indexOf('deliver'));
   expect(result.capability).toMatchObject({ admissionSupported: true, supported: false, injectedVerified: false, runtimeAccepted: false, liveAccepted: false });
@@ -62,9 +67,9 @@ it('actual confirm consumes one-use authorization with outbox and exact retries 
   const writes = s.db.transcript.filter(t => ['withdrawal:consume', 'financial:outbox', 'financial:reserve', 'financial:queue'].includes(t.marker));
   expect(writes).toHaveLength(4); expect(writes.every(t => t.client === writes[0]!.client)).toBe(true);
 });
-it.each(['amountRaw', 'maxFeeRaw', 'network', 'assetScale', 'destination', 'mode'])('request replay rejects substituted %s at actual service boundary', async field => {
+it.each(['amountRaw', 'maxFeeRaw', 'feeAssetId', 'feeAssetScale', 'feeFundingAccountId', 'network', 'assetScale', 'destination', 'mode'])('request replay rejects substituted %s at actual service boundary', async field => {
   const s = await setup(); await s.auth();
-  const changed: Record<string, unknown> = { amountRaw: '2', maxFeeRaw: '11', network: 'other', assetScale: 7, destination: '0x' + 'b'.repeat(40), mode: 'live' };
+  const changed: Record<string, unknown> = { amountRaw: '2', maxFeeRaw: '11', feeAssetId: 'polygon:POL', feeAssetScale: 18, feeFundingAccountId: 'other-wallet', network: 'other', assetScale: 7, destination: '0x' + 'b'.repeat(40), mode: 'live' };
   const response = await s.post('/v1/me/trading/withdraw/request-otp', { ...input, [field]: changed[field] });
   expect(response.statusCode).toBe(409); expect(s.issue).toHaveBeenCalledTimes(1); expect(s.db.state().outbox).toHaveLength(0);
 });
@@ -102,4 +107,28 @@ it('failed or unknown delivery never enables confirm or implicit resend on retry
   const s = await setup(); s.deliver.mockResolvedValue(false); const { confirmation, result } = await s.auth();
   expect(result.delivery).toBe('failed'); expect((await s.post('/v1/me/trading/withdraw', confirmation)).statusCode).toBe(409);
   await s.auth(); expect(s.deliver).toHaveBeenCalledTimes(1); expect(s.issue).toHaveBeenCalledTimes(1);
+});
+it('final fee identity/scale/funding is mandatory even with zero fee and public economics remain excluded', () => {
+  for (const field of ['feeAssetId', 'feeAssetScale', 'feeFundingAccountId']) {
+    const incomplete = { ...input, maxFeeRaw: '0' } as Record<string, unknown>; delete incomplete[field];
+    expect(withdrawalRequestSchema.safeParse(incomplete).success).toBe(false);
+  }
+  for (const extra of [{ userId: USER }, { receipt: {} }, { economics: {} }, { collateralAssetId: 'caller-USDC' }, { provider: 'caller' }]) {
+    expect(withdrawalRequestSchema.safeParse({ ...input, ...extra }).success).toBe(false);
+    expect(reducingRequestSchema.safeParse({ requestKey: 'r', chain: 'polygon', network: 'n', assetId: 'p', assetScale: 8,
+      maxFeeRaw: '0', feeAssetId: 'gas', feeAssetScale: 18, feeFundingAccountId: 'f', mode: 'paper', accountId: 'a',
+      positionSide: 'LONG', quantityRaw: '1', limitPriceExact: '1', expectedRevision: 'r1', ...extra }).success).toBe(false);
+  }
+});
+it('projects audited zero-effect cancellation and separate fees without leaking storage/private authority', () => {
+  const intent = withdrawalIntent(USER, { ...input, feeAssetId: 'polygon:POL', feeAssetScale: 18, feeFundingAccountId: 'fee-wallet' }, '2026-11-17T12:01:00.000Z');
+  const record = { id: 'cancelled-1', userId: USER, intent, intentHash: financialHash(intent), status: 'cancelled' as const,
+    completedRaw: '0', terminal: true, cancellationReason: 'expired-before-attempt', createdAt: '2026-11-17T12:00:00.000Z',
+    sealedPrivate: { signingKey: 'never-public' }, providerProof: 'never-public' };
+  expect(publicFinancialRecord(record, USER)).toMatchObject({ status: 'cancelled', cancellationReason: 'expired-before-attempt', intent: {
+    feeAssetId: 'polygon:POL', feeAssetScale: 18, feeFundingAccountId: 'fee-wallet', assetScale: 6 } });
+  expect(JSON.stringify(publicFinancialRecord(record, USER))).not.toContain('never-public');
+  for (const patch of [{ completedRaw: '1' }, { terminal: false }, { cancellationReason: null }, { userId: 'other' }]) {
+    expect(() => publicFinancialRecord({ ...record, ...patch }, USER)).toThrow();
+  }
 });

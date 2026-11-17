@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { lpApi } from '../lib/api.js';
 import { describeApiError } from '../lib/api-error-message.js';
+import { FinancialRequestPanel } from './FinancialRequestPanel.js';
 import { observe, loadingObservation, usd, legacyPaperAmount, type Observation } from '../lib/portfolio-model.js';
 
 import { lpMasterCount, lpWinRate, type LpMasterObservation as Master } from '../lib/lp-observation.js';
@@ -37,6 +38,8 @@ export default function LpCopyPanel({ title = 'LP copy records' }: { title?: str
     <p role="status" className="text-xs">Recorded observations only. Subscription status is not acquisition or execution authority. Provider/runtime/live qualification is unavailable; no yield or fresh-range guarantee is established.</p>
     <button className="border rounded p-2" disabled={busy} onClick={() => void refresh()}>Refresh records</button>
     {notice && <p role="status">{notice}</p>}
+    <FinancialRequestPanel kind="lp-copy-mint" />
+    <p className="text-xs">Exact copy mint uses raw/scale server evidence. Legacy subscription budgets and allocation history below remain numeric observations; fractional exact subscription-budget creation and exact aggregate lists are unavailable.</p>
     <section className="border rounded p-4"><h2>Recorded LP masters</h2>
       {masters.state === 'loading' ? <p>Loading…</p> : masters.state === 'unavailable' ? <p role="alert">{masters.error} — not an empty leaderboard.</p>
         : !Array.isArray(masters.data) ? <p role="alert">Malformed observation; unavailable.</p> : masters.data.length === 0 ? <p>No recorded masters.</p>
@@ -50,7 +53,7 @@ export default function LpCopyPanel({ title = 'LP copy records' }: { title?: str
       return lpApi.post('/v1/lp/copy/subscribe', { masterWalletAddress: fields.masterWalletAddress, chain: fields.chain, venue: fields.venue,
         allocatedBudgetUsd: legacyPaperAmount(fields.budget), maxCapitalPerPositionUsd: legacyPaperAmount(fields.capital) });
     }, 'Subscription recorded only. No copied acquisition or live execution is confirmed.'); }}>
-      <h2>Record subscription</h2><p className="text-xs">Legacy paper contract: safe whole USD budgets only. Exact fractional/raw LP contract is pending.</p>
+      <h2>Record subscription</h2><p className="text-xs">Legacy paper subscription contract: safe whole USD budgets only. This does not create an exact fractional budget or prove copy risk approval.</p>
       {Object.keys(fields).map(key => <label key={key} className="flex gap-2">{key}<input value={fields[key as keyof typeof fields]} disabled={busy}
         className="border rounded p-2 bg-surface-container" onChange={event => setFields({ ...fields, [key]: event.target.value })} /></label>)}
       <button disabled={busy} className="border rounded p-2">Record subscription (not execution)</button>

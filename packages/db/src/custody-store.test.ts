@@ -59,7 +59,7 @@ describe('custody SQL adapter (injected same-client only, no PG execution)', () 
   });
 });
 describe('081 proposal source restrictions, not migrated database acceptance', () => {
-  const sql = readFileSync(new URL('../../../../threats/project-completion-20261117/081-custody-schema.proposal.sql', import.meta.url), 'utf8');
+  const sql = readFileSync(new URL('../../../threats/project-completion-20261117/081-custody-schema.proposal.sql', import.meta.url), 'utf8');
   it('requires a separate immutable admission writer and never provisions one', () => {
     expect(sql).toContain("current_user <> 'swat_custody_writer' OR session_user <> 'swat_custody_writer'");
     expect(sql).toContain('custody admissions are immutable');

@@ -15,7 +15,8 @@ const config = createPackageConfig([
   'apps/web/lib/wallets.sequential.test.ts',
   'apps/web/lib/domain-transport.sequential.test.ts',
   'apps/web/lib/financial-request-state.sequential.test.ts',
-  'apps/web/lib/lp-observation.sequential.test.ts'
+  'apps/web/lib/lp-observation.sequential.test.ts',
+  'apps/web/lib/lp-request-state.sequential.test.ts'
 ]);
 // Exact API-safe subpaths avoid a whole DB barrel import and stale dist artifacts.
 const domainModules = ['withdrawal-contract', 'withdrawal-store', 'withdrawal-service', 'withdrawal-test-fixture',

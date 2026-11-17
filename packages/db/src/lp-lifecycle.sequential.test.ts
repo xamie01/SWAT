@@ -28,8 +28,17 @@ describe('legacy LP numeric and receiptless lifecycle is explicitly disabled', (
     const old = readFileSync(new URL('../sql/076_lp_valued_paper_lifecycle.sql', import.meta.url), 'utf8');
     const proposal = readFileSync(new URL('../../../threats/project-completion-20261117/083-lp-schema.proposal.sql', import.meta.url), 'utf8');
     expect(old).toContain("DEFAULT 'unknown'"); expect(old).toContain('LP acquisition evidence is immutable');
+    expect(proposal).toContain('LP operation admission requires pending state without receipt');
+    expect(proposal).toContain('BEFORE INSERT OR UPDATE OR DELETE ON lp_exact_operations');
+    expect(proposal).toContain("NEW.data->'receipt' IS DISTINCT FROM 'null'::jsonb");
+    expect(proposal).toContain('r.position_id=op.position_id');
+    expect(proposal).toContain("r.data=op.data->'receipt'");
     expect(proposal).toContain('LP completion requires immutable durable receipt');
     expect(proposal).toContain('LP position update requires completed revision-bound receipt');
+    expect(proposal).toContain('LP acquisition retry snapshot must equal initial committed position');
+    expect(proposal).toContain('NEW.acquisition_data IS DISTINCT FROM OLD.acquisition_data');
+    expect(proposal).toContain('LP exact closed inventory cannot be reopened by legacy state');
+    expect(proposal).toContain("NEW.data->'plan' IS DISTINCT FROM OLD.data->'plan'");
     expect(proposal).toContain('FORCE ROW LEVEL SECURITY'); expect(proposal).not.toContain('SECURITY DEFINER');
   });
 });

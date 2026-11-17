@@ -1,5 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { createPackageConfig } from '../sequential-fixes/package12-29-harness.js';
+// Literal offline selection only. Import inventory and hashes: WAVE3-G-IMPLEMENTATION.md.
+// Coordinator review/global freeze required; this config is not test or runtime acceptance.
 const config = createPackageConfig([
   'packages/db/src/lp-exact.sequential.test.ts',
   'packages/db/src/lp-paper-protocol.sequential.test.ts',

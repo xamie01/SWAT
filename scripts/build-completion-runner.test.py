@@ -1,6 +1,9 @@
 """Keyless unit tests for the bounded check planner; never launches children."""
 import importlib.util
+import fcntl
+import os
 from pathlib import Path
+import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().with_name('build-completion-runner.py')
@@ -53,6 +56,20 @@ class RunnerTests(unittest.TestCase):
         command, inputs, _ = runner.command_for('static', 'env')
         self.assertIn('--names-file', command)
         self.assertIn(runner.ROOT / '.env.example', inputs)
+
+    def test_inherited_lock_reuses_open_file_description(self):
+        previous = runner.LOCK
+        with tempfile.TemporaryDirectory() as directory:
+            runner.LOCK = Path(directory) / 'checks.lock'
+            try:
+                with runner.LOCK.open('a') as outer:
+                    fcntl.flock(outer, fcntl.LOCK_EX)
+                    with runner.verification_lock() as inner:
+                        fcntl.flock(inner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        self.assertNotEqual(outer.fileno(), inner.fileno())
+                        self.assertEqual(os.fstat(outer.fileno()).st_ino, os.fstat(inner.fileno()).st_ino)
+            finally:
+                runner.LOCK = previous
 
     def test_external_paths_rejected(self):
         with self.assertRaises(ValueError):

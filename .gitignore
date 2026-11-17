@@ -17,6 +17,16 @@ yarn-error.log*
 pnpm-debug.log*
 .swat-dev.pid
 
+# Generated completion-check evidence (keep locally for audit/reconciliation)
+/threats/*completion*/build-*.json
+/threats/*completion*/tmp/
+/threats/*completion*/cache/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
+
 # OS Files
 .DS_Store
 Thumbs.db

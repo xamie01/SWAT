@@ -89,9 +89,10 @@ export function lpMode(position: LpPositionView): string {
   if (position.acquisitionMode === 'live') return 'Live acquisition — execution unavailable';
   return 'Acquisition mode unknown — execution unavailable';
 }
-export function lpActionAllowed(position: LpPositionView, kind: 'close' | 'rebalance' | 'auto-rebalance'): boolean {
-  return position.acquisitionMode === 'paper' && position.onChainPositionAddress === null && !!position.paperPlan
-    && position.state !== 'closed' && (kind === 'close' || ['active', 'near_edge', 'out_of_range'].includes(position.state));
+export function lpActionAllowed(_position: LpPositionView, _kind: 'close' | 'rebalance' | 'auto-rebalance'): boolean {
+  // This DTO is legacy numeric observation-only, even when it carries historical paper labels.
+  // Exact mutation requires a separate current raw/scale read and immutable exact request.
+  return false;
 }
 export async function submitLpAction(position: LpPositionView, kind: 'close' | 'rebalance' | 'auto-rebalance', post: () => Promise<unknown>): Promise<unknown> {
   if (!lpActionAllowed(position, kind)) throw new ApiError(503, 'This LP action is unavailable for this acquisition or state. No request was submitted.');

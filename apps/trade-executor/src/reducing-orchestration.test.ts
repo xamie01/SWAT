@@ -16,7 +16,7 @@ import { financialHash, type FinancialAttempt, type FinancialRecord, type Financ
 
 function setup(venue:'spot'|'polymarket-perps'='polymarket-perps',positionSide:'LONG'|'SHORT'='LONG') {
   const db=withdrawalSqlFixture();
-  const input:ReducingRequest={requestKey:'close-1',chain:'polygon',network:'polygon-137',venue,positionId:'position-1',accountId:'account-1',
+  const input: { -readonly [K in keyof ReducingRequest]: ReducingRequest[K] } = {requestKey:'close-1',chain:'polygon',network:'polygon-137',venue,positionId:'position-1',accountId:'account-1',
     assetId:'1',assetScale:8,mode:'paper',positionSide,quantityRaw:'100',maxFeeRaw:'0',
     feeAssetId:'USDC',feeAssetScale:6,feeFundingAccountId:'fee-account',limitPriceExact:'65000',expectedRevision:'r1'};
   const exposure:ReducingExposure={userId:'user-1',positionId:input.positionId,accountId:input.accountId,assetId:input.assetId,

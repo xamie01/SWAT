@@ -9,7 +9,8 @@ it('actual api transport serializes raw units/network/fee exactly and confirms o
   vi.stubGlobal('fetch', fetch);
   const transport = createDomainTransport(api);
   const request = { requestKey: 'withdraw-1', chain: 'polygon' as const, network: 'network-genesis', assetId: 'USDC', assetScale: 18,
-    sourceWalletId: 'custody-1', destination: '0x' + 'a'.repeat(40), amountRaw: '900719925474099312345678', maxFeeRaw: '123456789012345678', mode: 'paper' as const };
+    sourceWalletId: 'custody-1', destination: '0x' + 'a'.repeat(40), amountRaw: '900719925474099312345678', maxFeeRaw: '123456789012345678',
+    feeAssetId: 'POL', feeAssetScale: 18, feeFundingAccountId: 'gas-account', mode: 'paper' as const };
   await transport.requestWithdrawal(request);
   const init = fetch.mock.calls[0]![1] as RequestInit;
   expect(JSON.parse(String(init.body))).toEqual(request); expect(init.credentials).toBe('include');
@@ -40,6 +41,8 @@ it('success/queued/uncertain/partial are not rendered as closed or transferred',
   expect(financialNotice({ record: { ...record, status: 'partial', completedRaw: '40', terminal: true } })).toContain('not closed');
   expect(financialNotice({ record: { ...record, status: 'settled', terminal: false } })).not.toContain('settled in');
   expect(financialNotice({ record: { ...record, status: 'settled', terminal: true } })).toContain('not live provider acceptance');
+  expect(financialNotice({ record: { ...record, status: 'cancelled', terminal: true, cancellationReason: 'expired-before-attempt' } })).toContain('expired-before-attempt');
+  expect(financialNotice({ record: { ...record, status: 'cancelled', terminal: true, completedRaw: '1', cancellationReason: 'expired-before-attempt' } })).not.toContain('resolved as cancelled');
 });
 it('legacy LP number DTO refuses precision loss, scientific notation and fractional/raw claims', () => {
   expect(legacyPaperAmount('500')).toBe(500);

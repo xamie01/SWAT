@@ -2,8 +2,8 @@ import type { UserScope } from './tenancy.js';
 import type { LpChain } from '@swat/shared';
 import {
   lpAcquisitionHash, lpAmountForBudget, lpAssertPlan, lpEconomics, lpExactHash, lpFresh, lpIdentity, lpKey, lpMicro,
-  lpProtocol, lpRaw, lpSameAmount, lpSnapshot, lpStrategy, lpTime, lpValueMicro,
-  type LpCopyOrigin, type LpEconomicDecision, type LpExactAcquisitionRequest, type LpExactCapabilities,
+  lpProtocol, lpRaw, lpRecenterStrategy, lpSameAmount, lpSnapshot, lpStrategy, lpTime, lpValueMicro,
+  type LpCopyOrigin, type LpCopyRiskEvidence, type LpEconomicDecision, type LpExactAcquisitionRequest, type LpExactCapabilities,
   type LpExactOperation, type LpExactPlan, type LpExactPosition, type LpExactSubscription,
   type LpMasterMintEvidence, type LpPaperAction, type LpPaperQuote, type LpPaperReceipt, type LpRawAmount
 } from './lp-exact.js';
@@ -74,6 +74,9 @@ export interface LpPaperServiceDeps {
   readonly plan: (quote: LpPaperQuote, strategy: LpExactAcquisitionRequest['strategy']) => Promise<LpExactPlan>;
   readonly enqueue?: (input: { userId: string; operationId: string; chain: LpChain }) => Promise<void>;
   readonly master?: { readonly providerId: string; read(eventId: string): Promise<LpMasterMintEvidence | null> };
+  readonly copyRisk?: { readonly providerId: string; assess(input: {
+    readonly userId: string; readonly subscription: LpExactSubscription; readonly event: LpMasterMintEvidence; readonly quote: LpPaperQuote
+  }): Promise<LpCopyRiskEvidence | null> };
   readonly now?: () => Date;
 }
 function tenant(scope: UserScope): void {
@@ -170,7 +173,8 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
   deps = { ...deps,
     ...(deps.protocol ? { protocol: { providerId: deps.protocol.providerId, networks: lpSnapshot(deps.protocol.networks),
       quote: deps.protocol.quote.bind(deps.protocol), receipt: deps.protocol.receipt.bind(deps.protocol) } } : {}),
-    ...(deps.master ? { master: { providerId: deps.master.providerId, read: deps.master.read.bind(deps.master) } } : {}) };
+    ...(deps.master ? { master: { providerId: deps.master.providerId, read: deps.master.read.bind(deps.master) } } : {}),
+    ...(deps.copyRisk ? { copyRisk: { providerId: deps.copyRisk.providerId, assess: deps.copyRisk.assess.bind(deps.copyRisk) } } : {}) };
   const clock = deps.now ?? (() => new Date());
   async function paper(chain: LpChain): Promise<void> {
     if (await deps.mode(chain) !== 'paper') throw new Error('LP current mode refuses paper mutation; live protocol unavailable');
@@ -180,11 +184,14 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
     return deps.protocol;
   }
   async function hint(scope: UserScope, op: LpExactOperation, chain: LpChain): Promise<boolean> {
-    if (op.status !== 'pending' || !deps.enqueue) return false;
-    try { await deps.enqueue({ userId: scope.userId, operationId: op.id, chain }); return true; } catch { return false; }
+    if (op.userId !== scope.userId || op.status !== 'pending' || !deps.enqueue) return false;
+    try {
+      if (await deps.mode(chain) !== 'paper') return false;
+      await deps.enqueue({ userId: scope.userId, operationId: op.id, chain }); return true;
+    } catch { return false; }
   }
   async function acquire(scope: UserScope, input: LpExactAcquisitionRequest): Promise<LpExactPosition> {
-    tenant(scope); const request = lpSnapshot(input); requestValid(request); await paper(request.chain);
+    tenant(scope); const request = lpSnapshot(input); requestValid(request);
     const fingerprint = lpAcquisitionHash(request);
     const replay = await deps.store.transaction(scope, tx => tx.acquisition(request.operationKey));
     if (replay) {
@@ -192,6 +199,7 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
       if (replay.acquisitionFingerprint !== fingerprint) throw new Error('LP acquisition replay conflict');
       return replay;
     }
+    await paper(request.chain);
     const port = provider();
     const qInput: LpQuoteInput = { userId: scope.userId, chain: request.chain, poolAddress: request.poolAddress, depositAsset: request.depositAsset,
       deposit: request.deposit, action: 'acquire', intentHash: fingerprint, positionId: null, positionRevision: null };
@@ -212,6 +220,7 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
   async function requestOperation(scope: UserScope, input: { positionId: string; operationKey: string; action: 'rebalance' | 'close'; automatic?: boolean }) {
     tenant(scope); const request = lpSnapshot(input); lpKey(request.operationKey);
     if (!['rebalance', 'close'].includes(request.action)) throw new Error('LP action required');
+    if (request.automatic !== undefined && typeof request.automatic !== 'boolean') throw new Error('LP automatic boolean required');
     const initial = await deps.store.transaction(scope, async tx => ({ position: await tx.position(request.positionId), replay: await tx.operationByKey(request.operationKey) }));
     ownedPosition(initial.position, scope); const position = initial.position;
     if (initial.replay) {
@@ -227,10 +236,11 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
     if (quote.pool.protocol !== position.protocol) throw new Error('LP protocol substitution');
     const economics = lpEconomics(quote.economics);
     if (request.action === 'rebalance' && (!economics.assessed || !economics.shouldRebalance)) throw new Error(`LP rebalance ${economics.reason}`);
-    const plan = request.action === 'rebalance' ? lpSnapshot(await deps.plan(lpSnapshot(quote), lpSnapshot(position.plan.strategy))) : null;
+    const strategy = request.action === 'rebalance' ? lpRecenterStrategy(position.plan.strategy, quote.pool.currentPrice) : null;
+    const plan = strategy ? lpSnapshot(await deps.plan(lpSnapshot(quote), lpSnapshot(strategy))) : null;
     if (plan) {
       lpAssertPlan(plan, position.currentAmount, position.protocol, quote.pool.evidenceId);
-      if (lpExactHash(plan.strategy) !== lpExactHash(position.plan.strategy)) throw new Error('LP rebalance strategy substitution');
+      if (lpExactHash(plan.strategy) !== lpExactHash(strategy)) throw new Error('LP rebalance strategy substitution');
     }
     const op = await deps.store.transaction(scope, async tx => {
       const prior = await tx.operationByKey(request.operationKey);
@@ -283,13 +293,19 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
   }
   async function copyMint(scope: UserScope, input: { subscriptionId: string; eventId: string; assetScale: number }): Promise<LpExactPosition> {
     tenant(scope); const request = lpSnapshot(input); lpKey(request.eventId); lpRaw({ raw: '0', scale: request.assetScale });
-    const initial = await deps.store.transaction(scope, async tx => ({ sub: await tx.subscription(request.subscriptionId), prior: await tx.copyPosition(request.subscriptionId, request.eventId), spent: await tx.copySpentMicroUsd(request.subscriptionId) }));
+    const initial = await deps.store.transaction(scope, async tx => ({ sub: await tx.subscription(request.subscriptionId), prior: await tx.copyPosition(request.subscriptionId, request.eventId) }));
     const sub = initial.sub;
     if (!sub || sub.userId !== scope.userId) throw new Error('LP owned subscription unavailable');
-    if (initial.prior) { ownedPosition(initial.prior, scope); return initial.prior; }
+    if (initial.prior) {
+      ownedPosition(initial.prior, scope);
+      if (initial.prior.deposit.scale !== request.assetScale) throw new Error('LP copy acquisition replay conflict');
+      return initial.prior;
+    }
     if (sub.status !== 'active') throw new Error('LP subscription not active');
     await paper(sub.chain); const port = provider();
     if (!deps.master) throw new Error('LP verified master mint evidence unavailable');
+    const riskPort = deps.copyRisk;
+    if (!riskPort || !riskPort.providerId.trim()) throw new Error('LP trusted copy risk capability unavailable');
     const output = await deps.master.read(request.eventId);
     if (!output) throw new Error('LP master evidence unavailable'); const event = lpSnapshot(output);
     if (event.providerId !== deps.master.providerId || !event.providerId.trim() || event.eventId !== request.eventId
@@ -298,7 +314,7 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
         || event.masterWalletAddress !== sub.masterWalletAddress || !event.masterPositionId?.trim()
         || lpTime(event.openedAt) < lpTime(sub.createdAt) || lpTime(event.openedAt) > lpTime(event.observedAt)) throw new Error('LP canonical forward-only master evidence refused');
     lpFresh(event.observedAt, clock()); lpIdentity(event.chain, event.poolAddress); lpIdentity(event.chain, event.depositAsset); lpStrategy(event.strategy);
-    const remaining = lpMicro(sub.budgetMicroUsd) - lpMicro(initial.spent);
+    const remaining = lpMicro(sub.budgetMicroUsd) - lpMicro(await deps.store.transaction(scope, tx => tx.copySpentMicroUsd(sub.id)));
     const budget = [remaining, lpMicro(sub.capMicroUsd), lpMicro(event.masterDepositMicroUsd)].reduce((a, b) => a < b ? a : b);
     if (budget < 1_000_000n) throw new Error('LP remaining copy budget below minimum');
     const operationKey = `copy-${lpExactHash([scope.userId, sub.id, event.eventId])}`;
@@ -320,18 +336,28 @@ export function createLpPaperService(deps: LpPaperServiceDeps) {
     const quoteOutput = await port.quote(lpSnapshot(qInput)); if (!quoteOutput) throw new Error('LP follower acquisition quote unavailable');
     const quote = lpSnapshot(quoteOutput); lpValidateQuote(quote, qInput, port, clock());
     if (quote.pool.protocol !== sub.venue || lpMicro(quote.valueMicroUsd) > budget || lpMicro(quote.valueMicroUsd) < 1_000_000n) throw new Error('LP follower valuation exceeds exact sizing');
+    const riskOutput = await riskPort.assess(lpSnapshot({ userId: scope.userId, subscription: sub, event, quote }));
+    if (!riskOutput) throw new Error('LP trusted copy risk unavailable');
+    const riskEvidence = lpSnapshot(riskOutput);
+    if (riskEvidence.providerId !== riskPort.providerId || riskEvidence.userId !== scope.userId || riskEvidence.subscriptionId !== sub.id
+        || riskEvidence.subscriptionRevision !== sub.revision || riskEvidence.masterEvidenceHash !== origin.masterEvidenceHash
+        || riskEvidence.intentHash !== fingerprint || riskEvidence.poolEvidenceId !== quote.pool.evidenceId || riskEvidence.approved !== true) throw new Error('LP trusted copy risk binding refused');
+    lpFresh(riskEvidence.observedAt, clock());
+    if (lpTime(riskEvidence.observedAt) < lpTime(quote.observedAt)) throw new Error('LP copy risk predates quote');
+    const assessedOrigin: LpCopyOrigin = { ...origin, riskEvidence };
     const plan = lpSnapshot(await deps.plan(lpSnapshot(quote), lpSnapshot(event.strategy))); lpAssertPlan(plan, deposit, sub.venue, quote.pool.evidenceId);
     if (lpExactHash(plan.strategy) !== lpExactHash(event.strategy)) throw new Error('LP copy strategy substitution');
     return deps.store.transaction(scope, async tx => {
-      const prior = await tx.copyPosition(sub.id, event.eventId); if (prior) { ownedPosition(prior, scope); return prior; }
+      const prior = await tx.copyPosition(sub.id, event.eventId);
+      if (prior) { ownedPosition(prior, scope); if (prior.deposit.scale !== request.assetScale) throw new Error('LP copy acquisition replay conflict'); return prior; }
       const current = await tx.subscription(sub.id);
       if (!current || current.userId !== scope.userId || current.status !== 'active' || current.revision !== sub.revision
           || current.chain !== sub.chain || current.venue !== sub.venue || current.masterWalletAddress !== sub.masterWalletAddress) throw new Error('LP subscription authority changed');
       const spent = lpMicro(await tx.copySpentMicroUsd(sub.id));
       if (spent + lpMicro(quote.valueMicroUsd) > lpMicro(current.budgetMicroUsd) || lpMicro(quote.valueMicroUsd) > lpMicro(current.capMicroUsd)) throw new Error('LP copy budget reservation conflict');
-      await paper(sub.chain); lpFresh(event.observedAt, clock()); lpValidateQuote(quote, qInput, port, clock());
+      await paper(sub.chain); lpFresh(event.observedAt, clock()); lpFresh(riskEvidence.observedAt, clock()); lpValidateQuote(quote, qInput, port, clock());
       lpAssertPolicy(await tx.policy(sub.chain, event.poolAddress), quote.valueMicroUsd);
-      return tx.insertAcquisition({ request: acquisition, fingerprint, quote, plan, origin });
+      return tx.insertAcquisition({ request: acquisition, fingerprint, quote, plan, origin: assessedOrigin });
     });
   }
   return {

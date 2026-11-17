@@ -5,7 +5,7 @@ import { createLpPaperService, lpResultAfterReceipt, type LpPaperServiceDeps, ty
 /** Keyless test fixture, not PostgreSQL/runtime/provider evidence. Transaction copies model rollback explicitly. */
 export function lpPaperFixture(plan: LpPaperServiceDeps['plan']) {
   const time = { now: new Date('2026-11-17T12:00:00.000Z') };
-  const state = { positions: {} as Record<string, LpExactPosition>, operations: {} as Record<string, LpExactOperation>,
+  const state = { positions: {} as Record<string, LpExactPosition>, acquisitions: {} as Record<string, LpExactPosition>, operations: {} as Record<string, LpExactOperation>,
     subscriptions: {} as Record<string, LpExactSubscription>, next: 1, commits: [] as string[] };
   const policy = { totalMicroUsd: '0', poolMicroUsd: '0', unassessedPositions: 0, poolCapBps: 10000 };
   const fault = { settle: false, queue: false };
@@ -25,13 +25,13 @@ export function lpPaperFixture(plan: LpPaperServiceDeps['plan']) {
     const owned = (p: LpExactPosition | undefined) => p?.userId === scope.userId ? p : null;
     const ownedOp = (op: LpExactOperation | undefined) => op?.userId === scope.userId ? op : null;
     const tx: LpPaperTransaction = {
-      acquisition: async key => Object.values(working.positions).find(p => p.userId === scope.userId && p.acquisitionKey === key) ?? null,
+      acquisition: async key => Object.values(working.acquisitions).find(p => p.userId === scope.userId && p.acquisitionKey === key) ?? null,
       position: async id => owned(working.positions[id]), operation: async id => ownedOp(working.operations[id]),
       operationByKey: async key => Object.values(working.operations).find(op => op.userId === scope.userId && op.operationKey === key) ?? null,
       pendingForPosition: async id => Object.values(working.operations).find(op => op.userId === scope.userId && op.positionId === id && op.status === 'pending') ?? null,
       pending: async limit => Object.values(working.operations).filter(op => op.userId === scope.userId && op.status === 'pending').slice(0, limit),
       policy: async () => lpSnapshot(policy), subscription: async id => working.subscriptions[id]?.userId === scope.userId ? working.subscriptions[id]! : null,
-      copyPosition: async (sub, event) => Object.values(working.positions).find(p => p.userId === scope.userId && p.copyOrigin?.subscriptionId === sub && p.copyOrigin.eventId === event) ?? null,
+      copyPosition: async (sub, event) => Object.values(working.acquisitions).find(p => p.userId === scope.userId && p.copyOrigin?.subscriptionId === sub && p.copyOrigin.eventId === event) ?? null,
       copySpentMicroUsd: async sub => Object.values(working.positions).filter(p => p.userId === scope.userId && p.copyOrigin?.subscriptionId === sub).reduce((sum, p) => sum + BigInt(p.depositMicroUsd), 0n).toString(),
       insertAcquisition: async input => {
         const id = `position-${working.next++}`;
@@ -40,7 +40,8 @@ export function lpPaperFixture(plan: LpPaperServiceDeps['plan']) {
           deposit: input.request.deposit, depositMicroUsd: input.quote.valueMicroUsd, acquisitionQuote: input.quote, copyOrigin: input.origin, currentAmount: input.request.deposit,
           plan: input.plan, revision: '0', state: 'active', autoRebalance: input.request.autoRebalance === true,
           cumulativeFeesMicroUsd: '0', cumulativeCostsMicroUsd: '0', realizedMicroUsd: null, lastReceiptKey: null };
-        working.positions[id] = position; working.commits.push(input.origin ? 'acquisition+copy' : 'acquisition'); return lpSnapshot(position);
+        working.positions[id] = position; working.acquisitions[id] = lpSnapshot(position);
+        working.commits.push(input.origin ? 'acquisition+copy' : 'acquisition'); return lpSnapshot(position);
       },
       insertOperation: async input => {
         const id = `operation-${working.next++}`;
@@ -62,6 +63,12 @@ export function lpPaperFixture(plan: LpPaperServiceDeps['plan']) {
   const deps: LpPaperServiceDeps = { store, now: () => time.now, mode: async () => mode.value, plan,
     enqueue: async input => { seen.queue.push(lpSnapshot(input)); if (fault.queue) throw new Error('queue unavailable'); },
     master: { providerId: 'master-fixture', read: async () => lpSnapshot(master.event) },
+    copyRisk: { providerId: 'risk-fixture', assess: async input => {
+      const { lpExactHash } = await import('./lp-exact.js');
+      return { providerId: 'risk-fixture', userId: input.userId, subscriptionId: input.subscription.id,
+        subscriptionRevision: input.subscription.revision, masterEvidenceHash: lpExactHash(input.event), intentHash: input.quote.intentHash,
+        poolEvidenceId: input.quote.pool.evidenceId, approved: true, observedAt: time.now.toISOString() };
+    } },
     protocol: { providerId: 'paper-fixture', networks: { solana: 'solana:test-fixture', base: 'base:test-fixture' },
       quote: async input => {
         seen.quotes.push(lpSnapshot(input));

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('@swat/db', () => ({ forUser: (userId: string) => ({ userId }), resolveChainMode: vi.fn() }));
 import { lpPaperFixture } from '@swat/db/dist/lp-paper-fixture.js';
+import { createLpPaperService } from '@swat/db/dist/lp-paper-service.js';
 import { buildExactPaperPlan, createExactLpDomain } from './exact-paper.js';
 import { buildExactPosition, buildPosition } from './build-position.js';
 import { requestLpOperation, processLpOperationJob, recoverLpOperations } from '../operations.js';
@@ -64,6 +65,29 @@ describe('existing LP builder worker operations and copy consume exact domain', 
     if (reason === 'snapshot') (f.master.event as any).provenance = 'wallet-snapshot-diff';
     await expect(f.service.copyMint(scope, { subscriptionId: 'sub', eventId: 'mint-event', assetScale: 18 })).rejects.toThrow();
     expect(f.state.commits).toEqual([]);
+  });
+  it.each(['missing', 'rejected', 'tenant', 'intent', 'stale'] as const)('copy %s trusted risk assessment cannot acquire', async reason => {
+    const f = lpPaperFixture(buildExactPaperPlan); const base = f.deps.copyRisk!;
+    const service = createLpPaperService({ ...f.deps, copyRisk: reason === 'missing' ? undefined : {
+      providerId: base.providerId, assess: async input => {
+        const risk = (await base.assess(input))!;
+        return { ...risk, ...(reason === 'rejected' ? { approved: false } : reason === 'tenant' ? { userId: 'bob' }
+          : reason === 'intent' ? { intentHash: 'forged' } : { observedAt: '2026-11-17T11:00:00.000Z' }) };
+      }
+    } });
+    await expect(service.copyMint(scope, { subscriptionId: 'sub', eventId: 'mint-event', assetScale: 18 })).rejects.toThrow();
+    expect(f.state.commits).toEqual([]);
+  });
+  it('copy retry preserves committed acquisition after close and refuses changed raw scale', async () => {
+    const f = lpPaperFixture(buildExactPaperPlan);
+    const input = { subscriptionId: 'sub', eventId: 'mint-event', assetScale: 18 };
+    const p = await f.service.copyMint(scope, input);
+    expect(p.copyOrigin?.riskEvidence).toMatchObject({ approved: true, providerId: 'risk-fixture' });
+    const op = await f.service.requestOperation(scope, { positionId: p.id, operationKey: 'copy-close', action: 'close' });
+    f.receipts.available = true; await f.service.process(scope, { operationId: op.operation.id, chain: 'solana' });
+    f.mode.value = 'off'; f.state.subscriptions.sub = { ...f.state.subscriptions.sub!, status: 'paused' };
+    expect(await f.service.copyMint(scope, input)).toEqual(p);
+    await expect(f.service.copyMint(scope, { ...input, assetScale: 6 })).rejects.toThrow('replay conflict');
   });
   it('multiple master events cannot spend full subscription budget repeatedly', async () => {
     const f = lpPaperFixture(buildExactPaperPlan);

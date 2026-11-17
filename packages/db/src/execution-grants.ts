@@ -365,6 +365,9 @@ export async function listExecutionGrants(scope: UserScope): Promise<ExecutionGr
 /**
  * The one active grant for a (user, chain, kind), or null.
  *
+ * This public metadata projection is not execution authority; execution requires
+ * the custody/delegation admission and lifecycle checks.
+ *
  * Single-row by construction: `uq_ueg_active_per_user_chain_kind` is the
  * guarantee, so this does not need a `LIMIT` to be deterministic.
  */
@@ -377,8 +380,7 @@ export async function findActiveExecutionGrant(
     `SELECT ${GRANT_COLUMNS}
        FROM user_execution_grants
       WHERE user_id = $1 AND chain = $2 AND grant_kind = $3 AND status = 'active'
-         AND (expires_at IS NULL OR expires_at > NOW())
-         AND grant_kind NOT IN ('solana_vault', 'eip7702', 'session_key_4337')`,
+         AND (expires_at IS NULL OR expires_at > NOW())`,
     [scope.userId, chain, grantKind]
   );
   return rows[0] ? toGrant(rows[0]) : null;

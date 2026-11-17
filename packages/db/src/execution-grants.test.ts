@@ -46,7 +46,7 @@ import { buildCustodySecretBinding } from './custody-contract.js';
  */
 
 const SOLANA_VAULT = 'So11111111111111111111111111111111111111112';
-const EVM_ACCOUNT = '0x1234567890abcdef1234567890abcdef1234567890';
+const EVM_ACCOUNT = '0x1234567890abcdef1234567890abcdef12345678';
 const scope = forUser('11111111-2222-3333-4444-555555555555');
 
 /**
@@ -283,6 +283,16 @@ describe('the public read projection', () => {
     // The only occurrence of the bare column name is inside that boolean
     // projection; the second match is the `has_sealed_secret` alias.
     expect(sql.match(/(?<!has_)sealed_secret/g)).toHaveLength(1);
+  });
+
+  it.each(['solana_vault', 'eip7702', 'session_key_4337'] as const)('returns public metadata for active %s without granting execution authority', async grantKind => {
+    mocks.query.mockResolvedValue([grantRow({ grant_kind: grantKind, sealed_secret: 'inert-ciphertext', secret_binding: { private: true } })]);
+    const grant = await findActiveExecutionGrant(scope, grantKind === 'solana_vault' ? 'solana' : 'robinhood-chain', grantKind);
+    expect(grant?.grantKind).toBe(grantKind);
+    expect(grant).not.toHaveProperty('sealedSecret'); expect(grant).not.toHaveProperty('secretBinding');
+    const [sql] = mocks.query.mock.calls[0] as [string];
+    expect(sql).not.toContain('grant_kind NOT IN');
+    expect(sql).toContain('expires_at > NOW()');
   });
 
   it('scopes every public read by user_id', async () => {

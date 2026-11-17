@@ -21,7 +21,8 @@ const text = z.string().min(1).max(256).refine(v => v.trim() === v && v !== '*' 
 const raw = z.string().max(78).regex(/^(0|[1-9][0-9]*)$/);
 const positiveRaw = raw.refine(v => v !== '0');
 const common = { requestKey: text, chain: z.enum(['solana', 'polygon', 'robinhood-chain']), network: text,
-  assetId: text, assetScale: z.number().int().min(0).max(36), mode: z.enum(['paper', 'live']), maxFeeRaw: raw };
+  assetId: text, assetScale: z.number().int().min(0).max(36), mode: z.enum(['paper', 'live']), maxFeeRaw: raw,
+  feeAssetId: text, feeAssetScale: z.number().int().min(0).max(36), feeFundingAccountId: text };
 export const withdrawalRequestSchema = z.object({ ...common, sourceWalletId: text, destination: text, amountRaw: positiveRaw }).strict();
 export const withdrawalConfirmSchema = z.object({ intentId: text, authorizationId: text, otp: z.string().regex(/^[0-9]{6,10}$/) }).strict();
 export const reducingRequestSchema = z.object({ ...common, accountId: text, positionSide: z.enum(['LONG', 'SHORT']),
@@ -33,20 +34,34 @@ export function publicFinancialRecord(record: FinancialRecord<WithdrawalIntent |
     throw new Error('Invalid domain projection');
   }
   const intent = record.intent;
-  if (!/^(0|[1-9][0-9]*)$/.test(record.completedRaw) || typeof record.terminal !== 'boolean'
-    || !['awaiting-authorization', 'queued', 'prepared', 'uncertain', 'partial', 'settled', 'failed'].includes(record.status)
-    || (record.status === 'settled' && (!record.terminal || record.completedRaw !== (intent.kind === 'withdrawal' ? intent.amountRaw : intent.quantityRaw)))) {
+  const maximum = intent.kind === 'withdrawal' ? intent.amountRaw : intent.quantityRaw;
+  if (!raw.safeParse(record.completedRaw).success || !positiveRaw.safeParse(maximum).success || typeof record.terminal !== 'boolean'
+    || BigInt(record.completedRaw) > BigInt(maximum)
+    || !['awaiting-authorization', 'queued', 'prepared', 'uncertain', 'partial', 'settled', 'failed', 'cancelled'].includes(record.status)
+    || (record.status === 'settled' && (!record.terminal || record.completedRaw !== maximum))
+    || (record.status === 'cancelled' && (!record.terminal || record.completedRaw !== '0' || !text.safeParse(record.cancellationReason).success))
+    || (record.status !== 'cancelled' && record.cancellationReason != null)
+    || (record.terminal && !['settled', 'partial', 'failed', 'cancelled'].includes(record.status))) {
     throw new Error('Invalid domain progress');
   }
   const base = { version: 1, requestKey: intent.requestKey, chain: intent.chain, network: intent.network,
-    assetId: intent.assetId, assetScale: intent.assetScale, mode: intent.mode, maxFeeRaw: intent.maxFeeRaw, expiresAt: intent.expiresAt };
+    assetId: intent.assetId, assetScale: intent.assetScale, mode: intent.mode, maxFeeRaw: intent.maxFeeRaw,
+    feeAssetId: intent.feeAssetId, feeAssetScale: intent.feeAssetScale, feeFundingAccountId: intent.feeFundingAccountId, expiresAt: intent.expiresAt };
+  const { expiresAt: _expiresAt, version: _version, ...requestBase } = base;
+  const projectedRequest = intent.kind === 'withdrawal'
+    ? { ...requestBase, sourceWalletId: intent.sourceWalletId, destination: intent.destination, amountRaw: intent.amountRaw }
+    : { ...requestBase, accountId: intent.accountId, positionSide: intent.positionSide, quantityRaw: intent.quantityRaw,
+      limitPriceExact: intent.limitPriceExact, expectedRevision: intent.expectedRevision };
+  if (!(intent.kind === 'withdrawal' ? withdrawalRequestSchema : reducingRequestSchema).safeParse(projectedRequest).success) {
+    throw new Error('Invalid domain intent');
+  }
   const binding = intent.kind === 'withdrawal'
     ? { ...base, kind: 'withdrawal', sourceWalletId: intent.sourceWalletId, destination: intent.destination, amountRaw: intent.amountRaw }
     : { ...base, kind: 'reducing', venue: intent.venue, positionId: intent.positionId, accountId: intent.accountId,
       positionSide: intent.positionSide, side: intent.side, quantityRaw: intent.quantityRaw,
       limitPriceExact: intent.limitPriceExact, expectedRevision: intent.expectedRevision };
   return { id: record.id, intentHash: record.intentHash, intent: binding, status: record.status,
-    completedRaw: record.completedRaw, terminal: record.terminal, createdAt: record.createdAt };
+    completedRaw: record.completedRaw, terminal: record.terminal, cancellationReason: record.cancellationReason ?? null, createdAt: record.createdAt };
 }
 export function financialRouteError(error: unknown, reply: FastifyReply) {
   if (!(error instanceof WithdrawalProtocolError)) return reply.code(503).send({ code: 'FINANCIAL_DOMAIN_UNAVAILABLE', message: 'Domain request unavailable. No completion is confirmed.' });

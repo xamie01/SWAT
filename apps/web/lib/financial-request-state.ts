@@ -70,7 +70,10 @@ export function createRequestMachine(persist: (state: RequestState) => void, ini
       }
       const maximum = record.intent.kind === 'withdrawal' ? record.intent.amountRaw : record.intent.quantityRaw;
       if (typeof maximum !== 'string' || !/^(0|[1-9][0-9]*)$/.test(maximum) || !/^(0|[1-9][0-9]*)$/.test(record.completedRaw)
-        || BigInt(record.completedRaw) > BigInt(maximum) || (record.status === 'settled' && (!record.terminal || record.completedRaw !== maximum))) {
+        || BigInt(record.completedRaw) > BigInt(maximum) || (record.status === 'settled' && (!record.terminal || record.completedRaw !== maximum))
+        || (record.status === 'cancelled' && (!record.terminal || record.completedRaw !== '0' || typeof record.cancellationReason !== 'string' || !record.cancellationReason.trim()))
+        || (record.status !== 'cancelled' && record.cancellationReason != null)
+        || (record.terminal && !['partial', 'settled', 'failed', 'cancelled'].includes(record.status))) {
         save({ ...state, phase: 'unknown', admissionUnknown: state.admissionUnknown || !state.recordId }); throw new Error('Contradictory settlement outcome');
       }
       const terminal = record.terminal && ['partial', 'settled', 'failed', 'cancelled'].includes(record.status);

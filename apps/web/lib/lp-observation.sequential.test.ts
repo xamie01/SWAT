@@ -21,7 +21,7 @@ it('finite extreme prices cannot produce nonfinite or rounded zero bounds', () =
   expect(bounds).not.toBeNull(); expect(Number.isFinite(bounds!.lower)).toBe(true); expect(Number.isFinite(bounds!.upper)).toBe(true);
 });
 it('loading/failure/successful empty have exclusive presentation states', async () => {
-  expect(lpListState(loadingObservation())).toBe('loading');
+  expect(lpListState(loadingObservation<unknown[]>())).toBe('loading');
   const failed = await observe<string[]>(async () => { throw new Error('offline fixture'); }, 'Unavailable');
   expect(lpListState(failed)).toBe('unavailable');
   expect(lpListState(await observe(async () => [], 'Unavailable'))).toBe('empty');

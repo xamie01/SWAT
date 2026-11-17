@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { lpApi } from '../../../lib/api.js';
 import { describeApiError } from '../../../lib/api-error-message.js';
-import { lpActionAllowed, lpMode, lpOperationNotice, submitLpAction, usd, type LpPositionView } from '../../../lib/portfolio-model.js';
+import { lpActionAllowed, lpMode, usd, type LpPositionView } from '../../../lib/portfolio-model.js';
+import { FinancialRequestPanel } from '../../../components/FinancialRequestPanel.js';
 
 type PositionItem = LpPositionView;
 
@@ -13,8 +14,7 @@ export default function LpPositionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const operationKeys = useRef(new Map<string, string>());
+  const pendingId: string | null = null;
 
   const fetchPositions = useCallback(async () => {
     setLoading(true);
@@ -35,26 +35,8 @@ export default function LpPositionsPage() {
     void fetchPositions();
   }, [fetchPositions]);
 
-  const runAction = async (pos: PositionItem, kind: 'close' | 'rebalance' | 'auto-rebalance') => {
-    if (pendingId || loading || error) return;
-    setPendingId(pos.id);
-    setNotice(null);
-    try {
-      const result = await submitLpAction(pos, kind, async () => {
-        if (kind === 'close' && !confirm('Close this paper LP record locally? No live liquidity will be removed.')) return null;
-        if (kind === 'auto-rebalance') return lpApi.patch(`/v1/lp/positions/${pos.id}/auto-rebalance`, { enabled: !pos.autoRebalance });
-        const identity = JSON.stringify([pos.id, kind, pos.rangeLower, pos.rangeUpper, pos.state]);
-        if (!operationKeys.current.has(identity)) operationKeys.current.set(identity, crypto.randomUUID());
-        return lpApi.post(`/v1/lp/positions/${pos.id}/${kind}`, { operationKey: operationKeys.current.get(identity) });
-      });
-      if (result === null) return;
-      setNotice(kind === 'auto-rebalance' ? 'Local paper auto-rebalance setting updated. No live execution was enabled.' : lpOperationNotice(result, kind, pos.id));
-      await fetchPositions();
-    } catch (err) {
-      setNotice(describeApiError(err, 'LP action unavailable; no completion is confirmed'));
-    } finally {
-      setPendingId(null);
-    }
+  const runAction = async (_pos: PositionItem, _kind: 'close' | 'rebalance' | 'auto-rebalance') => {
+    setNotice('Legacy numeric LP read is observation-only. Use the separate current exact position control; no request was submitted.');
   };
   const handleToggleAutoRebalance = (pos: PositionItem) => runAction(pos, 'auto-rebalance');
   const handleTriggerRebalance = (pos: PositionItem) => runAction(pos, 'rebalance');
@@ -115,7 +97,7 @@ export default function LpPositionsPage() {
             </span>
           </div>
           <p className="text-xs text-on-surface-variant max-w-2xl leading-relaxed">
-            Recorded LP acquisitions and paper lifecycle operations. Live or unknown acquisitions cannot be reduced here.
+            Legacy numeric LP read is explicitly observation-only; fractional exact quantity is unavailable in this list. No exact quantities are synthesized. Use the separate current exact read for paper operations.
           </p>
         </div>
 
@@ -137,6 +119,7 @@ export default function LpPositionsPage() {
         </div>
       </div>
 
+      <FinancialRequestPanel kind="lp-operation" />
       {error && (
         <div className="p-3 bg-red-950/40 border border-red-500/30 text-red-300 rounded-lg text-xs font-mono">
           {error}

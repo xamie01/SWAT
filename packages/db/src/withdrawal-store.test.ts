@@ -81,7 +81,7 @@ describe('082 proposal governance/security source obligations (NOT PostgreSQL ac
     expect(schema).toContain('permanent provider no-future-acceptance tombstone required');
   });
   it('expired cancellation locks no-attempt proof and permanently prevents later dispatch',()=>{
-    expect(schema).toContain("parent.status<>'queued' OR parent.terminal OR parent.expires_at>statement_timestamp()");
+    expect(schema).toContain("parent.status<>'queued' OR parent.terminal OR parent.expires_at>clock_timestamp()");
     expect(schema).toContain('OR EXISTS(SELECT 1 FROM public.withdrawal_reducing_attempts WHERE intent_id=parent.id)');
     expect(schema).toContain("status='cancelled',terminal=true");expect(schema).toContain('withdrawal_reducing_cancellations');
   });
@@ -90,7 +90,8 @@ describe('082 proposal governance/security source obligations (NOT PostgreSQL ac
     expect(guard).toContain('user_id=NEW.user_id FOR UPDATE');
     expect(guard.indexOf('FOR UPDATE')).toBeLessThan(guard.indexOf("parent.status<>'queued'"));
     expect(guard).toContain('parent.terminal OR parent.cancelled_at IS NOT NULL');
-    expect(guard).toContain('parent.expires_at<=statement_timestamp()');
+    expect(guard).toContain('parent.expires_at<=clock_timestamp()');
+    expect(guard).not.toContain('parent.expires_at<=statement_timestamp()');
     // RLS app direct INSERT stays granted, but this boundary serializes against cancel locked-parent absence proof.
     expect(schema).toContain('public.withdrawal_reducing_outbox,public.withdrawal_reducing_attempts,public.withdrawal_reducing_applications TO swat_app');
   });

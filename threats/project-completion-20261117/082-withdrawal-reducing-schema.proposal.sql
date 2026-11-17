@@ -257,7 +257,7 @@ BEGIN
   -- Parent row lock serializes direct app INSERT with cancellation; expiry is evaluated AFTER any lock wait.
   SELECT * INTO parent FROM public.withdrawal_reducing_intents WHERE id=NEW.intent_id AND user_id=NEW.user_id FOR UPDATE;
   IF parent.id IS NULL OR parent.status<>'queued' OR parent.terminal OR parent.cancelled_at IS NOT NULL OR parent.intent_hash<>NEW.intent_hash
-   OR parent.expires_at<=statement_timestamp() OR NEW.state<>'prepared' OR NEW.completed_raw<>0 OR NEW.completed_fee_raw<>0 OR NEW.terminal
+   OR parent.expires_at<=clock_timestamp() OR NEW.state<>'prepared' OR NEW.completed_raw<>0 OR NEW.completed_fee_raw<>0 OR NEW.terminal
    OR NOT EXISTS(SELECT 1 FROM public.withdrawal_reducing_outbox WHERE intent_id=parent.id AND intent_hash=parent.intent_hash)
   THEN RAISE EXCEPTION 'attempt must derive from durable queued intent'; END IF;
   NEW.created_at:=statement_timestamp(); RETURN NEW;
@@ -475,7 +475,7 @@ BEGIN
    AND user_id=public.current_app_user_id() FOR UPDATE;
  IF parent.id IS NULL THEN RAISE EXCEPTION 'owned expired intent unavailable'; END IF;
  IF parent.status='cancelled' THEN RETURN true; END IF;
- IF parent.status<>'queued' OR parent.terminal OR parent.expires_at>statement_timestamp()
+ IF parent.status<>'queued' OR parent.terminal OR parent.expires_at>clock_timestamp()
   OR EXISTS(SELECT 1 FROM public.withdrawal_reducing_attempts WHERE intent_id=parent.id)
  THEN RAISE EXCEPTION 'only expired queued no-attempt intent can cancel'; END IF;
  FOR budget IN SELECT budget_key FROM public.withdrawal_reducing_reservations WHERE intent_id=parent.id ORDER BY budget_key LOOP

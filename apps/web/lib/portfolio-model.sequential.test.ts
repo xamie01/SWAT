@@ -51,7 +51,9 @@ describe('truthful portfolio presentation and handler guards', () => {
   it('guards missing paper evidence, on-chain exposure and terminal/pending states', () => {
     for (const position of [{ ...lp, paperPlan: null }, { ...lp, onChainPositionAddress: 'on-chain' }, { ...lp, state: 'closed' }]) expect(lpActionAllowed(position, 'close')).toBe(false);
     expect(lpActionAllowed({ ...lp, state: 'rebalancing' }, 'rebalance')).toBe(false);
-    expect(lpActionAllowed(lp, 'close')).toBe(true);
+    expect(lpActionAllowed(lp, 'close')).toBe(false);
+    expect(lpActionAllowed(lp, 'rebalance')).toBe(false);
+    expect(lpActionAllowed(lp, 'auto-rebalance')).toBe(false);
   });
   it('separates token quantity from nullable USD valuation and never claims live paper closure', () => {
     expect(lp.depositAmount).toBe(4); expect(usd(lp.depositValueUsd)).toBe('Unassessed');
@@ -86,7 +88,8 @@ describe('truthful portfolio presentation and handler guards', () => {
   it('LP builder has no hardcoded yield, custody ownership or dollar-valued token presets', () => {
     const page = readFileSync('apps/web/app/lp/builder/page.tsx', 'utf8');
     expect(page).toContain('Unassessed — no yield forecast');
-    expect(page).toContain('{preset} units');
+    expect(page).toContain('deposit: { raw: depositRaw, scale: Number(depositScale) }');
+    expect(page).not.toContain('legacyPaperAmount');
     expect(page).toContain('no position NFT, DLMM key, deployed vault or live custody ownership is established');
     expect(page).not.toMatch(/184\.2|\$\{preset\}|remain under sole ownership/);
   });

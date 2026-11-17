@@ -10,12 +10,12 @@ import {
 } from './lp-paper-service.js';
 
 export type LpTenantTransaction = <T>(scope: UserScope, action: (client: PoolClient) => Promise<T>) => Promise<T>;
-interface ExactPositionRow { data: LpExactPosition; state: LpExactPosition['state']; auto_rebalance: boolean }
+interface ExactPositionRow { data: LpExactPosition; acquisition_data: LpExactPosition; state: LpExactPosition['state']; auto_rebalance: boolean }
 interface ExactOperationRow { data: LpExactOperation }
 function position(row: ExactPositionRow | undefined): LpExactPosition | null {
   return row ? { ...lpSnapshot(row.data), state: row.state, autoRebalance: row.auto_rebalance } : null;
 }
-const positionSelect = `SELECT e.data, p.state, p.auto_rebalance FROM lp_exact_positions e
+const positionSelect = `SELECT e.data, e.acquisition_data, p.state, p.auto_rebalance FROM lp_exact_positions e
   JOIN lp_positions p ON p.id=e.position_id AND p.user_id=e.user_id`;
 function operation(row: ExactOperationRow | undefined): LpExactOperation | null { return row ? lpSnapshot(row.data) : null; }
 async function journal(client: PoolClient, id: string, from: string | null, to: string, reason: string): Promise<void> {
@@ -33,7 +33,7 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
   return {
     acquisition: async key => {
       const rows = await client.query<ExactPositionRow>(`${positionSelect} WHERE e.user_id=$1 AND e.acquisition_key=$2 FOR UPDATE OF p,e`, [userId, key]);
-      return position(rows.rows[0]);
+      return rows.rows[0] ? lpSnapshot(rows.rows[0].acquisition_data) : null;
     },
     position: getPosition,
     operation: getOperation,
@@ -74,10 +74,15 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
     },
     copyPosition: async (subscriptionId, eventId) => {
       const rows = await client.query<ExactPositionRow>(`${positionSelect} WHERE e.user_id=$1 AND e.subscription_id=$2 AND e.master_event_id=$3 FOR UPDATE OF p,e`, [userId, subscriptionId, eventId]);
-      return position(rows.rows[0]);
+      return rows.rows[0] ? lpSnapshot(rows.rows[0].acquisition_data) : null;
     },
     copySpentMicroUsd: async subscriptionId => {
-      const rows = await client.query<{ spent: string }>("SELECT COALESCE(SUM((data->>'depositMicroUsd')::numeric),0)::text AS spent FROM lp_exact_positions WHERE user_id=$1 AND subscription_id=$2", [userId, subscriptionId]);
+      const legacy = await client.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM lp_copy_executions c
+        WHERE c.user_id=$1 AND c.subscription_id=$2 AND c.status IN ('pending','executing','executed')
+          AND NOT EXISTS(SELECT 1 FROM lp_exact_positions e WHERE e.user_id=c.user_id AND e.subscription_id=c.subscription_id
+            AND e.position_id=c.follower_position_id)`, [userId, subscriptionId]);
+      if (legacy.rows[0]?.count !== '0') throw new Error('LP legacy copy capital unassessed');
+      const rows = await client.query<{ spent: string }>("SELECT COALESCE(SUM((acquisition_data->>'depositMicroUsd')::numeric),0)::text AS spent FROM lp_exact_positions WHERE user_id=$1 AND subscription_id=$2", [userId, subscriptionId]);
       const spent = rows.rows[0]?.spent; if (spent === undefined) throw new Error('LP copy budget observation unavailable');
       lpMicro(spent); return spent;
     },
@@ -103,8 +108,8 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
         deposit: request.deposit, depositMicroUsd: quote.valueMicroUsd, acquisitionQuote: quote, copyOrigin: origin,
         currentAmount: request.deposit, plan, revision: '0', state: 'active', autoRebalance: request.autoRebalance === true,
         cumulativeFeesMicroUsd: '0', cumulativeCostsMicroUsd: '0', realizedMicroUsd: null, lastReceiptKey: null };
-      await client.query(`INSERT INTO lp_exact_positions(position_id,user_id,acquisition_key,subscription_id,master_event_id,data)
-        VALUES($1,$2,$3,$4,$5,$6::jsonb)`, [id, userId, request.operationKey, origin?.subscriptionId ?? null, origin?.eventId ?? null, JSON.stringify(data)]);
+      await client.query(`INSERT INTO lp_exact_positions(position_id,user_id,acquisition_key,subscription_id,master_event_id,data,acquisition_data)
+        VALUES($1,$2,$3,$4,$5,$6::jsonb,$6::jsonb)`, [id, userId, request.operationKey, origin?.subscriptionId ?? null, origin?.eventId ?? null, JSON.stringify(data)]);
       await journal(client, id, null, 'building', 'exact valued injected paper acquisition; no broadcast');
       await client.query("UPDATE lp_positions SET state='active',updated_at=statement_timestamp() WHERE id=$1 AND user_id=$2", [id, userId]);
       await journal(client, id, 'building', 'active', 'exact plan committed; keyless injected evidence only');
@@ -148,7 +153,8 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
     }
   };
 }
-/** Production transaction boundary is lazy: constructing/importing the factory performs no SQL. */
+/** Constructing the factory performs no SQL. Default import reaches tenancy/client pool configuration;
+ * offline selection must mock tenancy or client before import, not treat this module as pure. */
 export function createLpPaperSqlStore(run: LpTenantTransaction = withTenantTransaction): LpPaperStore {
   return {
     transaction: async (scope, action) => {
