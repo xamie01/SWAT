@@ -1,0 +1,50 @@
+{
+  "authorization": "REPLACE_WITH_AUTHORIZED_DISPOSABLE_WAVE4_LOAD_AFTER_REVIEW",
+  "runId": "wave4-replace-unique-run",
+  "seedCount": 100000,
+  "sampleCount": 10000,
+  "secondRamp": "2m",
+  "readPercent": 80,
+  "clockTicksPerSecond": 100,
+  "intervalSeconds": 10,
+  "minQueueAdmissions": 8000,
+  "baseUrl": "http://127.0.0.1:3001",
+  "expectedDatabase": "swat_wave4_disposable",
+  "seedDb": { "host": "127.0.0.1", "port": 5432, "database": "swat_wave4_disposable", "user": "swat_migrator", "password": "SET_PRIVATELY" },
+  "monitorDb": { "host": "127.0.0.1", "port": 5432, "database": "swat_wave4_disposable", "user": "wave4_observer", "password": "SET_PRIVATELY" },
+  "runtimeDb": { "host": "127.0.0.1", "port": 6432, "database": "swat_wave4_disposable", "user": "swat_app", "password": "SET_PRIVATELY" },
+  "poolAdmin": { "host": "127.0.0.1", "port": 6432, "database": "pgbouncer", "user": "wave4_pool_observer", "password": "SET_PRIVATELY" },
+  "redis": { "host": "127.0.0.1", "port": 6379, "db": 0, "username": "wave4_observer", "password": "SET_PRIVATELY" },
+  "queuePrefix": "bull",
+  "queues": ["swat-backfill-wallet", "swat-token-discovery"],
+  "processes": [
+    { "name": "application", "pid": 2, "commandIncludes": "apps/api" },
+    { "name": "worker", "pid": 3, "commandIncludes": "fixture-worker" },
+    { "name": "postgres", "pid": 4, "commandIncludes": "postgres" },
+    { "name": "redis", "pid": 5, "commandIncludes": "redis-server" },
+    { "name": "pgbouncer", "pid": 6, "commandIncludes": "pgbouncer" }
+  ],
+  "allowlist": {
+    "apiOrigins": ["http://127.0.0.1:3001"],
+    "seedDb": ["127.0.0.1:5432/swat_wave4_disposable"],
+    "monitorDb": ["127.0.0.1:5432/swat_wave4_disposable"],
+    "runtimeDb": ["127.0.0.1:6432/swat_wave4_disposable"],
+    "poolAdmin": ["127.0.0.1:6432/pgbouncer"],
+    "redis": ["127.0.0.1:6379/0"],
+    "metricsOrigins": []
+  },
+  "attestations": {
+    "isolatedDisposable": false,
+    "egressContainedFixtureWorkers": false,
+    "applicationUsesQualifiedPoolRole": false,
+    "reviewedLimiterCapacity": false,
+    "noLiveCredentialsOrFinancialEffects": false,
+    "authorizedMetricsPublication": false
+  },
+  "evidence": [
+    { "kind": "deployment", "path": "/private/wave4/deployment-proof.txt", "sha256": "REPLACE_WITH_ACTUAL_SHA256" },
+    { "kind": "egress", "path": "/private/wave4/egress-proof.txt", "sha256": "REPLACE_WITH_ACTUAL_SHA256" },
+    { "kind": "limiter", "path": "/private/wave4/limiter-proof.txt", "sha256": "REPLACE_WITH_ACTUAL_SHA256" },
+    { "kind": "worker", "path": "/private/wave4/worker-proof.txt", "sha256": "REPLACE_WITH_ACTUAL_SHA256" }
+  ]
+}

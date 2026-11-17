@@ -1,0 +1,34 @@
+{
+  "scope": "source-and-injected-offline-load-harness-contracts-only",
+  "check": "build-w4-load-offline-02",
+  "literalFiles": 1,
+  "rawAssertionsPassed": 44,
+  "failedAssertions": 0,
+  "skippedAssertions": 0,
+  "cpuAffinity": [
+    0
+  ],
+  "nodeHeapMb": 512,
+  "forks": 1,
+  "workspaceInputsUnchanged": true,
+  "resultSha256": "3b0d91c20661199d04844d2f9ce69652880b40ba6dde144b916e7f7b6352f8bb",
+  "logSha256": "5585729efdef46513430c09d8160ff30e4f874e71fe1d974abd04d73be93d33a",
+  "workspaceInputManifestSha256": "c5858953f10ed0794a3e0a55a71b88aff15b0eadbc24af64151961bdf63e8023",
+  "sourceSha256": {
+    "deploy/loadtest/wave4/config.example.json": "83a0525fb8df3e141565fa7f749d360c801d6bee9a1ad79616f47207dde2e98b",
+    "deploy/loadtest/wave4/README.md": "6cc6a346a1b536721b8787d4aabedc990e3dc9f9b368f5ac1b78950421e4140b",
+    "deploy/loadtest/wave4/run.sh": "33175b5d7cee5d3c32e89e58a37ea1a23ebacceba46e981cc81eecf60560c1d2",
+    "deploy/loadtest/wave4/core.mjs": "b8d9aad4a2fc4fd1e08cf06fdaa849d5d34456829c5fe6cf5ecf8de47e481d7c",
+    "deploy/loadtest/wave4/.gitignore": "e1ef88b23c4e90a50704191391161d721cc520709b0a88efbdc82b77af65ea54",
+    "deploy/loadtest/wave4/workload.js": "7eda9aada30becee2725520424043ee301f25896a50ce28edbc2a6fd20512653",
+    "deploy/loadtest/wave4/report.mjs": "42780e50f3bbce1be210ee2e442eae51907fb5fc3b1e6f12f150fc505448a330",
+    "deploy/loadtest/wave4/collect.mjs": "e34db11e53fc5e90b8907b15931294275e85b0c85340f7bec272c7cf638123e4",
+    "deploy/loadtest/wave4/harness.test.ts": "884e04eecd6cc762ca471ba773b1cf816a1ab00c1e9bf42b444f62499334de42",
+    "deploy/loadtest/wave4/runtime.mjs": "b065fed186b6fc5ded3105988d14d60ba3a49d759d100583cdeb92d37526b17c",
+    "threats/project-completion-20261117/w4-load.config.ts": "2adbfa9d60d2206fc26f71fc17d19edd0fd731f30061ca7f21f46d55e5b9ebec"
+  },
+  "sqlApplied": false,
+  "loadExecuted": false,
+  "runtimeAccepted": false,
+  "liveCapabilityAccepted": false
+}
