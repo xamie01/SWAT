@@ -40,7 +40,7 @@ async function inspect(kind: 'container' | 'network', id: string): Promise<any> 
 }
 
 /** Read-only metadata guard. No create/start/stop/delete, network mutation or cleanup. */
-export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastructure): Promise<void> {
+export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastructure, inspectMetadata = inspect): Promise<void> {
   const declaration = validatePackage28IsolationDeclarations(input.env);
   if (!['reference','candidate'].includes(input.purpose)
     || input.postgresId === input.redisId || !hex.test(input.postgresImageId) || !hex.test(input.redisImageId)) {
@@ -51,7 +51,7 @@ export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastruc
     [input.postgresId,input.postgresImageId,declaration.databaseUrl,'5432/tcp','/var/lib/postgresql/data'],
     [input.redisId,input.redisImageId,declaration.redisUrl,'6379/tcp','/data']
   ]) {
-    const c: DockerContainer = await inspect('container', id!);
+    const c: DockerContainer = await inspectMetadata('container', id!);
     const labels = c.Config.Labels;
     const bindings = c.NetworkSettings.Ports[port!];
     const networks = Object.values(c.NetworkSettings.Networks);
@@ -71,7 +71,7 @@ export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastruc
     }
     networkId = networks[0]!.NetworkID;
   }
-  const network = await inspect('network', networkId!);
+  const network = await inspectMetadata('network', networkId!);
   if (network.Id !== networkId || network.Internal !== true
     || network.Labels?.['swat.integration.run-id'] !== declaration.runId
     || network.Labels?.['swat.integration.purpose'] !== input.purpose

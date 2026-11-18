@@ -1,0 +1,731 @@
+{
+  "version": 1,
+  "date": "2026-11-18",
+  "scope": "Incomplete local source build and injected offline contracts; not runtime acceptance",
+  "sourceComplete": false,
+  "independentRepairReview": "credential-and-unconditional-proposal-containment-source-accepted-whole-package-withheld",
+  "queueSourceReview": "threats/project-completion-20261117/WAVE4-QUEUE-SOURCE-REVIEW.md",
+  "currentOfflineTestsPassed": 422,
+  "currentLiteralFiles": 15,
+  "checks": [
+    {
+      "label": "build-w4-main-offline-23",
+      "kind": "test",
+      "target": "threats/project-completion-20261117/w4-main.config.ts",
+      "command": "threats/project-completion-20261117/build-w4-main-offline-23.command.json",
+      "exitCode": 0,
+      "timedOut": false,
+      "finishedUtc": "2026-11-18T13:42:08.837447+00:00",
+      "elapsedSeconds": 17.577,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "inputSha256": {
+        "threats/project-completion-20261117/w4-main.config.ts": "bd0f61c3d4bc1ec12c1972b109321ee4a8b8ac419eb929e6affaee25ebcbd948",
+        "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "logSha256": "f9c934301b800df3d1b0710df4e51afe259066ad89dbdb296e52483cab77e31a",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-offline-23.inputs.json",
+      "workspaceInputManifestSha256": "1dfae5d1bb77647abd90bc5360979bff58dcd984797fc9571993d6375b4d0c19",
+      "workspaceInputsUnchanged": true,
+      "childExitCode": 0,
+      "resultSha256": "73174630b780b3b2dcc4f72fd91cbf88dc6cd4a5f1d2cdd4db8efaa20c44cbc8",
+      "emittedArtifactsSha256": {},
+      "syntheticEnvironment": true,
+      "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+      "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance",
+      "commandSha256": "bf752fcff9e802b181150c3f9b42e3be29b9a755c67f6645e14a07191efb9983",
+      "currentMainCheckpoint": true,
+      "passed": 422,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "literalFiles": [
+        {
+          "path": "tests/unit/build-schema.test.ts",
+          "passed": 13
+        },
+        {
+          "path": "tests/unit/package28-chaos-containment.test.ts",
+          "passed": 2
+        },
+        {
+          "path": "tests/unit/package28-preflight.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/catalog.offline.test.ts",
+          "passed": 9
+        },
+        {
+          "path": "tests/qualification/wave4/containment.offline.test.ts",
+          "passed": 39
+        },
+        {
+          "path": "tests/qualification/wave4/custody.offline.test.ts",
+          "passed": 16
+        },
+        {
+          "path": "tests/qualification/wave4/lp-admission.offline.test.ts",
+          "passed": 26
+        },
+        {
+          "path": "tests/qualification/wave4/lp-copy-observer.offline.test.ts",
+          "passed": 30
+        },
+        {
+          "path": "tests/qualification/wave4/lp-copy.offline.test.ts",
+          "passed": 32
+        },
+        {
+          "path": "tests/qualification/wave4/lp-privileges.offline.test.ts",
+          "passed": 10
+        },
+        {
+          "path": "tests/qualification/wave4/orchestrator.offline.test.ts",
+          "passed": 38
+        },
+        {
+          "path": "tests/qualification/wave4/pipeline.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/queue.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/rollback.offline.test.ts",
+          "passed": 4
+        },
+        {
+          "path": "tests/qualification/wave4/withdrawal.offline.test.ts",
+          "passed": 35
+        }
+      ]
+    },
+    {
+      "label": "build-w4-main-typecheck-21",
+      "kind": "typecheck",
+      "target": "qualification",
+      "command": "threats/project-completion-20261117/build-w4-main-typecheck-21.command.json",
+      "exitCode": 0,
+      "timedOut": false,
+      "finishedUtc": "2026-11-18T13:41:43.393909+00:00",
+      "elapsedSeconds": 15.346,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "inputSha256": {
+        "tsconfig.qualification.json": "dae0d805a75d5d99d969130b90b63dc49618aa3110340b5d6fba8bae0f391b23",
+        "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-typecheck-21.inputs.json",
+      "workspaceInputManifestSha256": "1dfae5d1bb77647abd90bc5360979bff58dcd984797fc9571993d6375b4d0c19",
+      "workspaceInputsUnchanged": true,
+      "childExitCode": 0,
+      "resultSha256": null,
+      "emittedArtifactsSha256": {},
+      "syntheticEnvironment": true,
+      "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+      "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance",
+      "commandSha256": "a102e10a7405dfdc23d1e3196442c2217dfdf1c95efd7baf8c817504ff1c7835",
+      "currentMainCheckpoint": true
+    },
+    {
+      "label": "build-w4-main-offline-22",
+      "kind": "test",
+      "target": "threats/project-completion-20261117/w4-main.config.ts",
+      "command": "threats/project-completion-20261117/build-w4-main-offline-22.command.json",
+      "exitCode": 0,
+      "timedOut": false,
+      "finishedUtc": "2026-11-18T13:23:47.138706+00:00",
+      "elapsedSeconds": 15.491,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "inputSha256": {
+        "threats/project-completion-20261117/w4-main.config.ts": "7c666e6f840581cb810c84bc10a4e7d6dc86c92f564c616bc551364654eb6f4b",
+        "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "logSha256": "06b444be73429bff6e2db9c6258194cc29f08e75a5c16a7f3720194271979282",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-offline-22.inputs.json",
+      "workspaceInputManifestSha256": "30edcb7a79173968e857aa51889ffe45f54a2bc913616eb56859a97f50b21f3b",
+      "workspaceInputsUnchanged": true,
+      "childExitCode": 0,
+      "resultSha256": "6799ef13aa9f84b876d5f6e50e95c4408a568d9a30335d5a3a6f3674399ad0a4",
+      "emittedArtifactsSha256": {},
+      "syntheticEnvironment": true,
+      "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+      "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance",
+      "commandSha256": "76664fe2f2579eed3d496d78efb5559a9452f9e9172811e8af629c3c0a5664c7",
+      "currentMainCheckpoint": false,
+      "passed": 396,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "literalFiles": [
+        {
+          "path": "tests/unit/build-schema.test.ts",
+          "passed": 13
+        },
+        {
+          "path": "tests/unit/package28-chaos-containment.test.ts",
+          "passed": 2
+        },
+        {
+          "path": "tests/unit/package28-preflight.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/catalog.offline.test.ts",
+          "passed": 9
+        },
+        {
+          "path": "tests/qualification/wave4/containment.offline.test.ts",
+          "passed": 39
+        },
+        {
+          "path": "tests/qualification/wave4/custody.offline.test.ts",
+          "passed": 16
+        },
+        {
+          "path": "tests/qualification/wave4/lp-copy-observer.offline.test.ts",
+          "passed": 30
+        },
+        {
+          "path": "tests/qualification/wave4/lp-copy.offline.test.ts",
+          "passed": 32
+        },
+        {
+          "path": "tests/qualification/wave4/lp-privileges.offline.test.ts",
+          "passed": 10
+        },
+        {
+          "path": "tests/qualification/wave4/orchestrator.offline.test.ts",
+          "passed": 38
+        },
+        {
+          "path": "tests/qualification/wave4/pipeline.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/queue.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/rollback.offline.test.ts",
+          "passed": 4
+        },
+        {
+          "path": "tests/qualification/wave4/withdrawal.offline.test.ts",
+          "passed": 35
+        }
+      ]
+    },
+    {
+      "label": "build-w4-main-typecheck-20",
+      "kind": "typecheck",
+      "target": "qualification",
+      "command": "threats/project-completion-20261117/build-w4-main-typecheck-20.command.json",
+      "exitCode": 0,
+      "timedOut": false,
+      "finishedUtc": "2026-11-18T13:23:22.455580+00:00",
+      "elapsedSeconds": 16.693,
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "inputSha256": {
+        "tsconfig.qualification.json": "dae0d805a75d5d99d969130b90b63dc49618aa3110340b5d6fba8bae0f391b23",
+        "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-typecheck-20.inputs.json",
+      "workspaceInputManifestSha256": "30edcb7a79173968e857aa51889ffe45f54a2bc913616eb56859a97f50b21f3b",
+      "workspaceInputsUnchanged": true,
+      "childExitCode": 0,
+      "resultSha256": null,
+      "emittedArtifactsSha256": {},
+      "syntheticEnvironment": true,
+      "nodeNetworkAndCredentialGuard": "threats/sequential-fixes/offline-guard.cjs",
+      "scope": "Reviewed offline check; not native, SQL, provider or deployment acceptance",
+      "commandSha256": "de9419d820b7c46ae42ac47a58425dcfbd44e0c76a8f43edff21f59b8960a7e5",
+      "currentMainCheckpoint": false
+    },
+    {
+      "label": "build-w4-main-offline-18",
+      "kind": "test",
+      "target": "threats/project-completion-20261117/w4-main.config.ts",
+      "exitCode": 0,
+      "logSha256": "c77a7f860b8478e489f8049d7baaf16d15e98466501b4bffd54bcab82899d992",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-offline-18.inputs.json",
+      "workspaceInputManifestSha256": "9137bbd1b613dfb552cea6d9f1e894f53f96e54cbbf6d54a27bde71c5f0f5369",
+      "workspaceInputsUnchanged": true,
+      "inputSha256": {
+        "threats/project-completion-20261117/w4-main.config.ts": "b60700d4666f941d3c17b0c711f86fb2c57f96ef6e1d86d03acdc8be754040c2",
+        "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "syntheticEnvironment": true,
+      "command": "threats/project-completion-20261117/build-w4-main-offline-18.command.json",
+      "commandSha256": "f8fd1430a4bf1fe741b115934e7b574a4ac20c78c483568fb4f647fdfcbb861b",
+      "currentMainCheckpoint": false,
+      "resultSha256": "2ce5f0d7194bf4a6f99648ca77db8a3e98f3f6221e9a589fbce28b2fc65adb2a",
+      "passed": 366,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "literalFiles": [
+        {
+          "path": "tests/unit/build-schema.test.ts",
+          "passed": 13
+        },
+        {
+          "path": "tests/unit/package28-chaos-containment.test.ts",
+          "passed": 2
+        },
+        {
+          "path": "tests/unit/package28-preflight.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/catalog.offline.test.ts",
+          "passed": 9
+        },
+        {
+          "path": "tests/qualification/wave4/containment.offline.test.ts",
+          "passed": 39
+        },
+        {
+          "path": "tests/qualification/wave4/custody.offline.test.ts",
+          "passed": 16
+        },
+        {
+          "path": "tests/qualification/wave4/lp-copy.offline.test.ts",
+          "passed": 32
+        },
+        {
+          "path": "tests/qualification/wave4/lp-privileges.offline.test.ts",
+          "passed": 10
+        },
+        {
+          "path": "tests/qualification/wave4/orchestrator.offline.test.ts",
+          "passed": 38
+        },
+        {
+          "path": "tests/qualification/wave4/pipeline.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/queue.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/rollback.offline.test.ts",
+          "passed": 4
+        },
+        {
+          "path": "tests/qualification/wave4/withdrawal.offline.test.ts",
+          "passed": 35
+        }
+      ]
+    },
+    {
+      "label": "build-w4-main-typecheck-16",
+      "kind": "typecheck",
+      "target": "qualification",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-typecheck-16.inputs.json",
+      "workspaceInputManifestSha256": "9137bbd1b613dfb552cea6d9f1e894f53f96e54cbbf6d54a27bde71c5f0f5369",
+      "workspaceInputsUnchanged": true,
+      "inputSha256": {
+        "tsconfig.qualification.json": "dae0d805a75d5d99d969130b90b63dc49618aa3110340b5d6fba8bae0f391b23",
+        "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "syntheticEnvironment": true,
+      "command": "threats/project-completion-20261117/build-w4-main-typecheck-16.command.json",
+      "commandSha256": "f4a832bb263b27f7908aeb93ff401e00c42f8d539660b61af2e8687aae5c1066",
+      "currentMainCheckpoint": false
+    },
+    {
+      "label": "build-w4-main-offline-14",
+      "command": "threats/project-completion-20261117/build-w4-main-offline-14.command.json",
+      "commandSha256": "d15e7350ec0cec505988d0f8e6a8049ba1fef38ddc22e34b00a1bc5239799b7d",
+      "kind": "test",
+      "target": "threats/project-completion-20261117/w4-main.config.ts",
+      "exitCode": 0,
+      "logSha256": "fa63d4c969c72b92a5d6cdb1278c6ce935ef6d37ac2b527ad3f9a9ea0daca8ed",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-offline-14.inputs.json",
+      "workspaceInputManifestSha256": "a04f20c67162bb6aa3892304bc4f54f08c3b1d883803bcfce4d2a9d7cb2627fa",
+      "inputSha256": {
+        "threats/project-completion-20261117/w4-main.config.ts": "72026d38f872c229b0da8e95f56b234cd05cc6cbe71b2e2ee7fd2ae9aa1a3ece",
+        "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "syntheticEnvironment": true,
+      "currentMainCheckpoint": false,
+      "resultSha256": "052ea95628eb7567a76d08b3d3ac03a1f7875675d539d29817d8adb7c7e7d798",
+      "passed": 208,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "literalFiles": [
+        {
+          "path": "tests/unit/build-schema.test.ts",
+          "passed": 13
+        },
+        {
+          "path": "tests/unit/package28-chaos-containment.test.ts",
+          "passed": 2
+        },
+        {
+          "path": "tests/unit/package28-preflight.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/containment.offline.test.ts",
+          "passed": 39
+        },
+        {
+          "path": "tests/qualification/wave4/orchestrator.offline.test.ts",
+          "passed": 38
+        },
+        {
+          "path": "tests/qualification/wave4/queue.offline.test.ts",
+          "passed": 56
+        },
+        {
+          "path": "tests/qualification/wave4/rollback.offline.test.ts",
+          "passed": 4
+        }
+      ]
+    },
+    {
+      "label": "build-w4-main-typecheck-12",
+      "command": "threats/project-completion-20261117/build-w4-main-typecheck-12.command.json",
+      "commandSha256": "3e2bd45bbddddc9cbc7df31f113644b5d2777c7a7ee9c2b6b0728e0e7fbfe01c",
+      "kind": "typecheck",
+      "target": "qualification",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-main-typecheck-12.inputs.json",
+      "workspaceInputManifestSha256": "a04f20c67162bb6aa3892304bc4f54f08c3b1d883803bcfce4d2a9d7cb2627fa",
+      "inputSha256": {
+        "tsconfig.qualification.json": "dae0d805a75d5d99d969130b90b63dc49618aa3110340b5d6fba8bae0f391b23",
+        "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "syntheticEnvironment": true,
+      "currentMainCheckpoint": false
+    },
+    {
+      "label": "build-w4-lp-regression-01",
+      "command": "threats/project-completion-20261117/build-w4-lp-regression-01.command.json",
+      "commandSha256": "ca353e3fde05e87d0fb39bbc8451aea02927789f9e8e50fdd2c644656738d2ff",
+      "kind": "test",
+      "target": "threats/project-completion-20261117/w3-g.config.ts",
+      "exitCode": 0,
+      "logSha256": "37bf38783e78c9f2a4689841d317341c00138ad49db6fb28c60e52f69d24113b",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-lp-regression-01.inputs.json",
+      "workspaceInputManifestSha256": "1d648222fe4cd365c9277192ecca07ea4175858f9848fbba2b2c5f919846b5f2",
+      "inputSha256": {
+        "threats/project-completion-20261117/w3-g.config.ts": "8e1351e2ad89afecdd527687d9b64885c60bcbe48b8554b0183f038a44b73d82",
+        "node_modules/.pnpm/vitest@3.2.6_@types+node@22.19.19_jiti@1.21.7_tsx@4.21.0/node_modules/vitest/vitest.mjs": "39db22f579acf5639bbb17a261408debbde03f4692c0c439e77e7f13aeba74d6",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "syntheticEnvironment": true,
+      "currentMainCheckpoint": false,
+      "resultSha256": "4db1506a958d9ed91df3fb2ce0f4f782cf825c968300d15fba73a88a8890efee",
+      "passed": 160,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "literalFiles": [
+        {
+          "path": "apps/lp/src/lifecycle.sequential.test.ts",
+          "passed": 3
+        },
+        {
+          "path": "apps/lp/src/routes-exact.sequential.test.ts",
+          "passed": 12
+        },
+        {
+          "path": "apps/lp/src/routes.test.ts",
+          "passed": 22
+        },
+        {
+          "path": "packages/db/src/lp-copy-trading.test.ts",
+          "passed": 6
+        },
+        {
+          "path": "packages/db/src/lp-exact.sequential.test.ts",
+          "passed": 22
+        },
+        {
+          "path": "packages/db/src/lp-guardrails.test.ts",
+          "passed": 6
+        },
+        {
+          "path": "packages/db/src/lp-lifecycle.sequential.test.ts",
+          "passed": 5
+        },
+        {
+          "path": "packages/db/src/lp-paper-protocol.sequential.test.ts",
+          "passed": 29
+        },
+        {
+          "path": "packages/db/src/lp-paper-store.sequential.test.ts",
+          "passed": 8
+        },
+        {
+          "path": "packages/db/src/lp-positions.test.ts",
+          "passed": 5
+        },
+        {
+          "path": "apps/lp/src/builder/build-position.test.ts",
+          "passed": 3
+        },
+        {
+          "path": "apps/lp/src/builder/exact-paper.sequential.test.ts",
+          "passed": 23
+        },
+        {
+          "path": "apps/lp/src/copy/copy.test.ts",
+          "passed": 8
+        },
+        {
+          "path": "apps/lp/src/monitor/monitor-job.test.ts",
+          "passed": 8
+        }
+      ]
+    },
+    {
+      "label": "build-w4-db-typecheck-01",
+      "command": "threats/project-completion-20261117/build-w4-db-typecheck-01.command.json",
+      "commandSha256": "90f20c5d1c7a92d9d7ef2e3b69c96b22702e1a505c0fec4fc35d767da4aafcda",
+      "kind": "typecheck",
+      "target": "db",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-db-typecheck-01.inputs.json",
+      "workspaceInputManifestSha256": "1d648222fe4cd365c9277192ecca07ea4175858f9848fbba2b2c5f919846b5f2",
+      "inputSha256": {
+        "packages/db/tsconfig.json": "bb8d473c20d65298c48603c5c69b5ebe02fa7111a5ecb01be83266ebbd56b699",
+        "node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/bin/tsc": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 640,
+      "syntheticEnvironment": true,
+      "currentMainCheckpoint": false
+    },
+    {
+      "label": "build-w4-runner-01",
+      "command": "threats/project-completion-20261117/build-w4-runner-01.command.json",
+      "commandSha256": "121067ae8c7af8d138e7b0769b49df6751e63c714a6471daeb4197bf63d5520e",
+      "kind": "static",
+      "target": "runner",
+      "exitCode": 0,
+      "logSha256": "caacc0e3d2b5585e870b294a667cdab9a3b386a9eb22bceab98d844bc888f34f",
+      "workspaceInputManifest": "threats/project-completion-20261117/build-w4-runner-01.inputs.json",
+      "workspaceInputManifestSha256": "1d648222fe4cd365c9277192ecca07ea4175858f9848fbba2b2c5f919846b5f2",
+      "inputSha256": {
+        "scripts/build-completion-runner.test.py": "e888a83366efd129a13ce95bbf09e78c031cd3ad9a12435c04bda37553df9430",
+        "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+        "threats/sequential-fixes/offline-guard.cjs": "966b8ec41414001f3828feba2f12cfc38cf66cc310c1ef3b20820def54a7cebf",
+        "pnpm-lock.yaml": "aeb22cc34047d068050525165e53a0e0462be1b1951929149f2995a51153744f",
+        "threats/sequential-fixes/package12-29-harness.ts": "3fbd032892766a169293ee3da69c5e1cb05ddb980c5883f30c85bbd0e0401c2d"
+      },
+      "cpuAffinity": [
+        0
+      ],
+      "nodeHeapMb": 512,
+      "syntheticEnvironment": true,
+      "currentMainCheckpoint": false
+    }
+  ],
+  "sourceSha256": {
+    "packages/db/sql/084_wave4_lp_runtime_privileges.sql": "92e662015a2527a6cfb7ed42a7efec628cc42e35cc69bfec95cc4c5099f224e2",
+    "packages/db/src/lp-paper-store.ts": "0c034487739eaf3416efe52327bf1e5028af9e8e1055d8d3a84e7781a2283161",
+    "scripts/build-completion-runner.py": "089634f01fa15f9ecbb2f3fd7544a1f19d69c6b6fdf0d4d3a213caf96bde9c5c",
+    "scripts/build-completion-runner.test.py": "e888a83366efd129a13ce95bbf09e78c031cd3ad9a12435c04bda37553df9430",
+    "tests/integration/helpers/schema-guard.ts": "e33f0dc9b3b11b69983b94e6d7026d4e25b296e0116ff24bc3c2acbd1712609e",
+    "tests/qualification/wave4/catalog.offline.test.ts": "f1cf7c228a494c491ab1bf8544300fdb03dfef852236fd1d38ece3b928e2a5df",
+    "tests/qualification/wave4/cli.ts": "d66142f5b447073d7a9dcabbeeb87f8499298993cea9b9fcb26d36348be9bbbc",
+    "tests/qualification/wave4/config.ts": "adb5199a181b30feb3cd813ad737ea7516364e8a5ee7ba061f1a6e77b082d51f",
+    "tests/qualification/wave4/containment.offline.test.ts": "4296d0e1743f3f1252b70a40a386996aef2f551f136a7609f96286b2f291c9cb",
+    "tests/qualification/wave4/containment.ts": "e41490fa8a020de3daac3ed7422aa4ee7fe5decd38c461524a4786dc7233f9eb",
+    "tests/qualification/wave4/core.ts": "899bd4285594b5e2d133a07613b7d9b81c98535cb72ab159284294f9064cdf95",
+    "tests/qualification/wave4/custody-scenarios.ts": "0b0c5210ecc07055c8cc0046c7e15e66cc923fe7f175464d5e28e6f8bd1d63ae",
+    "tests/qualification/wave4/custody.offline.test.ts": "f713a548f1d4c7c63fb2a183e6b9e15846cbb3589f1c55472b44c0f18dff3f9a",
+    "tests/qualification/wave4/domains.ts": "1ef96e5b6c7f5f1b416f257acaedeaf881fe36208a544a1f5ccd03d095f41108",
+    "tests/qualification/wave4/faults.ts": "11c173e967fd66faf7ccbb6c06465189491fbd276243eec82f0baa15818e05e7",
+    "tests/qualification/wave4/infrastructure.ts": "c29feae6e6918df39904d8f444f0a459d5cf01033c7bd1c7f4222ccb97fcb76c",
+    "tests/qualification/wave4/lp-copy-scenarios.ts": "251221e83e54f3afee2fb1e7f82f66cca30032efc2583c37c8be8701ed42e5af",
+    "tests/qualification/wave4/lp-copy.offline.test.ts": "5165fe2e011da5c135bbc6615b9e100d1c67f26aff96cfbc841be1d461d9aa4a",
+    "tests/qualification/wave4/lp-privileges.offline.test.ts": "6b3353873bdd4c452e82d89a7853fbe37f5e3f62440b703eb805e11f5201506f",
+    "tests/qualification/wave4/offline-fixture.ts": "4612180bb4c833de4fa7922660387e93bc2a686d5d1b331f9b58dda96d3d3dea",
+    "tests/qualification/wave4/orchestrator.offline.test.ts": "d3fe57d6f5caf488a709d78100bf9b566d1fce82520386d59980daf2171d8d80",
+    "tests/qualification/wave4/owned-clients.ts": "238bcaac2ce4bd94f97f40c38a475cd842819cda6cf0abfc67dac765ea1d40dc",
+    "tests/qualification/wave4/owned-command.ts": "61647091f39f0ed5cb7dcb75e5171dfbc848b6d6de4ae1aa9070cf1b4308e0df",
+    "tests/qualification/wave4/pipeline.offline.test.ts": "2a169d2e5f5ad922811abc7b186bf9471b34365d11477e5051e7abe2978c9ccd",
+    "tests/qualification/wave4/pipeline.ts": "afdefd1a427b27e73a7538c7d4a85d6cf2ee4740a658ef15c4fc12d0c815facd",
+    "tests/qualification/wave4/queue-contract.ts": "f47f407f82861301dea7699d816abf4129d3606f96cb3ec60950184d1d91da65",
+    "tests/qualification/wave4/queue-journal.ts": "226ea96562df11a1919943e7f1bf7b5b443f6cb88d1e975c8ce331b79beb8f74",
+    "tests/qualification/wave4/queue-redis.ts": "fa564342705155fe6d9a79a5f7e38d28d620be005aae50fed2137ceec007d12b",
+    "tests/qualification/wave4/queue-runtime.ts": "bf802dc246edfeb4e907be5b5eaefccfac6dd4be8bd9556748c78bff35890761",
+    "tests/qualification/wave4/queue-scenario.ts": "b8b6f7cca53c20a0562d5fd6f4d77721326cb8772136a0309f53e74aeb60ccfe",
+    "tests/qualification/wave4/queue-worker-child.ts": "fb2b85a718e58836208aaec372e531775573d2e630a2d26d8d863e2194112f39",
+    "tests/qualification/wave4/queue.offline.test.ts": "5cd6ec9496a9e664a5cf71045f1eba7aed59b405a9acb4e1466a04f95406e265",
+    "tests/qualification/wave4/rollback-schedule.ts": "a323d0c292c600e1ca29900774ad504e7544c68e2ca087352a7ed96431df749e",
+    "tests/qualification/wave4/rollback.offline.test.ts": "03d7c272e511783596cb9efb9acc3f8e5549ccfccc36043eecce19528188fa92",
+    "tests/qualification/wave4/withdrawal-scenarios.ts": "3eea64f64809a80fa31b160bfb7d33d96e4b8f455217628c2988442659b0534e",
+    "tests/qualification/wave4/withdrawal.offline.test.ts": "fbcdfd951e9202d6cb906dd576ecb8f45dbc8384397173853c5175627860c213",
+    "tests/qualification/wave4/worker-child.ts": "cad3f785361461cdeea7d12b7848adf5ff3e3e4e7ead451b64dfe7ef1e864c31",
+    "tests/unit/build-schema.test.ts": "2fb6fb7ad19b5b6221d7126238d0cc49beafbb82ab1ee15ed1cab726b7fc65a2",
+    "threats/project-completion-20261117/reviewed-configs.json": "73d99ecd514263f7eb7c5f6de447bbfc9769813c0def712f081460e7dd93df58",
+    "threats/project-completion-20261117/w4-main.config.ts": "bd0f61c3d4bc1ec12c1972b109321ee4a8b8ac419eb929e6affaee25ebcbd948",
+    "tsconfig.qualification.json": "dae0d805a75d5d99d969130b90b63dc49618aa3110340b5d6fba8bae0f391b23",
+    "tests/qualification/wave4/lp-copy-observer.ts": "3ed63e1507f82f71d218ec6fae759f31d0fc645fdb3fc1617ec5b846cabc5e2e",
+    "tests/qualification/wave4/lp-copy-observer.offline.test.ts": "da2927e6deb2a32cfb7f5e09fc87400be8b02ef2b20b50d9ef778274e9342b7a",
+    "packages/db/src/lp-paper-admission-contract.ts": "a90e5d0e02df18be82dce019e0ad978896bc8379c560a94e91e74faac8e9102c",
+    "tests/qualification/wave4/lp-admission.offline.test.ts": "bbef6ee5f76a95245b9f657637e4250a7a4c964f929ed72f5c3ff56129d4f877"
+  },
+  "reportSha256": {
+    "tests/qualification/wave4/.gitignore": "85eff96f5e59f9cda896e12c420f3d6f1960e66ac6e576cd0e9cd8f03d5eb7f9",
+    "tests/qualification/wave4/README.md": "1ec31fcbb3d1df44e373965f00d2dc0aca25e3eb79fd3b6f50aed75dc48983bd",
+    "threats/project-completion-20261117/STAGE-LEDGER.json": "d4b38ff647abcca7d8cd61fd9f1f40acea7964b9512bc244e7b238c74bcec5eb",
+    "threats/project-completion-20261117/WAVE4-CLOSEOUT-MAP.md": "872743048ed084d964c3c5de44b9999104777e31a1f3794bcfde530fcc57ff7b",
+    "threats/project-completion-20261117/WAVE4-CUSTODY-SOURCE.md": "a1218c3622eb281ed0c5d7819ad224f0533acb9ed40299a3e52d2d9198a54d44",
+    "threats/project-completion-20261117/WAVE4-LP-COPY-SOURCE.md": "62e5c3d954915a464067f7c3d55300ed6c69f8037ec59972d7cabec1dcb49c25",
+    "threats/project-completion-20261117/WAVE4-LP-PRIVILEGES-PROPOSAL.md": "049ac2d04638d9b0d145ace8828875bebf94a3b3fae446c607a463a426ce28d9",
+    "threats/project-completion-20261117/WAVE4-MAIN-CHECKPOINT.md": "90bff352770be1ebdb59c378ae029e8cfd4b1b5b58e33d566b84176143b428be",
+    "threats/project-completion-20261117/WAVE4-PIPELINE-SOURCE.md": "7b0d0d0692933b63db2ca228c9965a4f9629dfef7ac45ecf4fa9297e0a7c18b4",
+    "threats/project-completion-20261117/WAVE4-QUEUE-SOURCE-REVIEW.md": "9a7f494f39382671f71ac458f1844c5cd99fb4c547aa8e9996cacfe56e608366",
+    "threats/project-completion-20261117/WAVE4-REVIEW-REPAIRS.md": "0e512dc8c58620c9270ae27fdbf8fdb263252da7ead760acabb0e90f89d56d50",
+    "threats/project-completion-20261117/WAVE4-WITHDRAWAL-SOURCE.md": "2d4c16b58bdcc17359d61ff186338224c1b450a68b349ec5671eff3ed79cd376",
+    "threats/project-completion-20261117/WORK-MAP.md": "9c8834f632e066fc0178d6fe225df2cd63f197a8287e93691153f42d19791cb4",
+    "threats/project-completion-20261117/WAVE4-LP-COPY-OBSERVER-REVIEW.md": "17784df2ea44ad025a1e6378f81bb9705ef0e561396378b05ac77b7d9837a6e2",
+    "threats/project-completion-20261117/WAVE4-LP-ADMISSION-SOURCE.md": "288cb39f97c263d62e75698040f565c776b5bb148bb00e3788ac2b946488fa75"
+  },
+  "retainedFailedChecks": [
+    "build-w4-main-offline-05",
+    "build-w4-main-offline-15",
+    "build-w4-main-typecheck-05",
+    "build-w4-main-typecheck-09",
+    "build-w4-main-typecheck-13",
+    "build-w4-main-typecheck-17",
+    "build-w4-main-typecheck-19"
+  ],
+  "runtimeEntrypoint": "unconditionally-refused",
+  "sqlApplied": false,
+  "runtimeAccepted": false,
+  "liveCapabilityAccepted": false,
+  "productionReady": false,
+  "infrastructureExecuted": false,
+  "loadExecuted": false,
+  "committed": false,
+  "pushed": false,
+  "expandedIndependentReviewer": "agent_2c9a653b-3ab4-41b1-a6c5-57e942cf5018",
+  "targetedIndependentReviewer": "agent_4f7b29ea-0748-4d30-9ba6-63ebb0adf334",
+  "sourceRepairReview": "threats/project-completion-20261117/WAVE4-REVIEW-REPAIRS.md",
+  "unresolvedHighFindings": [
+    "SQL083 lacks independently protected admitted paper receipt/quote/economic SQL binding"
+  ],
+  "lpPrivilegeProposalStatus": "unconditionally-refused-contained-not-usable-migration",
+  "currentCodeInputsMatchManifest": true,
+  "currentWorkspaceInputManifestSha256": "1dfae5d1bb77647abd90bc5360979bff58dcd984797fc9571993d6375b4d0c19",
+  "supersededExpandedChecks": [
+    "build-w4-main-offline-16",
+    "build-w4-main-typecheck-14",
+    "build-w4-main-offline-17",
+    "build-w4-main-typecheck-15",
+    "build-w4-main-offline-18",
+    "build-w4-main-typecheck-16",
+    "build-w4-main-offline-19",
+    "build-w4-main-typecheck-18",
+    "build-w4-main-offline-20",
+    "build-w4-main-offline-21",
+    "build-w4-main-offline-22",
+    "build-w4-main-typecheck-20"
+  ],
+  "observerSourceReview": "threats/project-completion-20261117/WAVE4-LP-COPY-OBSERVER-REVIEW.md",
+  "observerIndependentReviewer": "agent_ecbee261-52f0-447d-9347-6d915b119aba",
+  "observerSourceStatus": "one-close-repaired-source-injected-contracts-narrowly-accepted",
+  "observerRuntimeComposition": "unproven-owned-authenticated-transaction-lock-commit-containment",
+  "observerOfflineAssertionsPassed": 30,
+  "observerReviewerVerifiedRawCommands": false,
+  "preservedSourceSha256": {
+    "packages/db/sql/083_lp_exact_paper_operations.sql": "be0a956dce9b23f94c0453f84eaf00647c8abdf9b0e4250f46cf0faa07feda15",
+    "deploy/loadtest/wave4/runtime.mjs": "b065fed186b6fc5ded3105988d14d60ba3a49d759d100583cdeb92d37526b17c",
+    "threats/project-completion-20261117/w4-load.config.ts": "2adbfa9d60d2206fc26f71fc17d19edd0fd731f30061ca7f21f46d55e5b9ebec"
+  },
+  "admissionSourceReview": "threats/project-completion-20261117/WAVE4-LP-ADMISSION-SOURCE.md",
+  "admissionIndependentReviewer": "agent_93c18f67-07ea-465c-a1a9-38ae8f7ad6cd",
+  "admissionSourceStatus": "unwired-comparison-only-repaired-source-narrowly-accepted",
+  "admissionOfflineAssertionsPassed": 26,
+  "admissionProductionIntegration": false,
+  "protectedAdmissionWriterConfigured": false
+}

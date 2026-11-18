@@ -18,7 +18,7 @@ OUT = ROOT / 'threats/build-completion-20261116-sequential'
 GUARD = ROOT / 'threats/sequential-fixes/offline-guard.cjs'
 LOCK = Path('/tmp/swat-package11-checks.lock')
 PACKAGES = ('shared', 'db', 'api', 'indexer', 'signal-engine', 'trade-executor',
-            'scorer', 'discovery', 'alert-service', 'lp', 'web', 'tools', 'integration', 'api-tests')
+            'scorer', 'discovery', 'alert-service', 'lp', 'web', 'tools', 'integration', 'api-tests', 'qualification')
 
 
 def digest(path):
@@ -36,11 +36,11 @@ def confined(path):
 def command_for(kind, target):
     node = '/usr/bin/node'
     if kind in ('emit', 'typecheck'):
-        if target not in PACKAGES or (kind == 'emit' and target in ('web', 'tools', 'integration', 'api-tests')):
+        if target not in PACKAGES or (kind == 'emit' and target in ('web', 'tools', 'integration', 'api-tests', 'qualification')):
             raise ValueError('Unsupported compiler target')
         if target == 'api-tests':
             config = ROOT / 'apps/api/tsconfig.test.json'
-        elif target in ('tools', 'integration'):
+        elif target in ('tools', 'integration', 'qualification'):
             config = ROOT / f'tsconfig.{target}.json'
         else:
             directory = 'packages' if target in ('shared', 'db') else 'apps'
@@ -164,6 +164,19 @@ def verification_lock():
     return LOCK.open('a')
 
 
+def wait_for_check(child, timeout_seconds):
+    try:
+        return child.wait(timeout=timeout_seconds or None), False
+    except subprocess.TimeoutExpired:
+        os.killpg(child.pid, signal.SIGTERM)
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+        return 124, True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('label')
@@ -172,7 +185,11 @@ def main():
     parser.add_argument('--evidence-dir', choices=('threats/build-completion-20261116-sequential',
                                                   'threats/project-completion-20261117'),
                         default='threats/build-completion-20261116-sequential')
+    parser.add_argument('--timeout-seconds', type=int, default=240,
+                        help='Check wall-clock limit; zero waits without a time cap')
     options = parser.parse_args()
+    if options.timeout_seconds < 0:
+        parser.error('Check timeout must be nonnegative')
     global OUT
     OUT = ROOT / options.evidence_dir
     if not re.fullmatch(r'build-[A-Za-z0-9_-]{1,100}', options.label):
@@ -205,17 +222,7 @@ def main():
         with log_path.open('x') as log:
             child = subprocess.Popen(command, cwd=ROOT, env=synthetic_environment(options.label, heap),
                                      stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-            try:
-                code = child.wait(timeout=240)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                os.killpg(child.pid, signal.SIGTERM)
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
-                code = 124
+            code, timed_out = wait_for_check(child, options.timeout_seconds)
         unchanged = (source_hashes == workspace_inputs(options.kind, options.target)
                      and all(digest(ROOT / name) == value for name, value in hashes.items()))
         child_code = code
@@ -230,6 +237,7 @@ def main():
         record = {
             'label': options.label, 'kind': options.kind, 'target': options.target,
             'command': command, 'exitCode': code, 'timedOut': timed_out,
+            'timeoutSeconds': options.timeout_seconds or None,
             'finishedUtc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'elapsedSeconds': round(time.monotonic() - start, 3),
             'cpuAffinity': sorted(os.sched_getaffinity(0)), 'nodeHeapMb': heap,

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.integration.json",
+  "include": ["tests/qualification/wave4/**/*.ts"],
+  "compilerOptions": { "noEmit": true, "incremental": false }
+}

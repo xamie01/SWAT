@@ -1,0 +1,11 @@
+# Wave4 migration handoff design constraint — 2026-11-18
+
+SQL070 requires the runtime role disabled during migration; this is compatible with a two-phase disabled provisioning followed by separately authorized login activation. SQL079's runtime lookup owner and SQL082's financial settler are intentionally NOLOGIN function owners, not direct-login writers.
+
+Historical SQL079/082 transfer selected functions to these restricted owners. PostgreSQL's ordinary ALTER OWNER requires target membership/SET ROLE authority and target schema CREATE; the required membership-free restricted migrator cannot execute those statements. A NOLOGIN owner alone does not repair that conflict. Sealed migration bytes and their recorded scope must be preserved.
+
+The provisioning/migration source package must either provide an explicitly installed narrow privileged ownership-handoff capability, or refuse before applying those migrations with precise missing-capability evidence. A source-complete replay implementation cannot merely relabel this known adapter gap as missing credentials.
+
+A supported implementation can retain original SQL/checksum as the source identity, replace only exact allowlisted ownership-transfer statements with a separately reviewed same-transaction broker invocation, and record the actual installed SQL checksum plus explicit audit reference. The broker must be externally installed/authenticated, validate exact session/current migrator and full function source/signature/target identity, permit only immutable allowlisted transfers, leave all application/writer roles membership-free without CREATE/bypass expansion, and remove its installed capability after the authorized handoff. Both independently replayed reference and candidate must use the identical checksummed installation variant; catalog comparison must record and compare source+installed checksums and audit identity. No fabricated journal or hidden SQL omission is allowed. A freeform SECURITY DEFINER executor or arbitrary SQL callback is not an acceptable substitute.
+
+The broker is privileged infrastructure provisioning and MUST NOT be installed/executed during local source work. No environment authorization, admin session, role login, SQL apply or services are supplied here.

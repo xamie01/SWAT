@@ -59,7 +59,11 @@ describe('schema canonical source and fail-closed qualification', () => {
       HostConfig:{Privileged:false,ReadonlyRootfs:true,Binds:[],CapDrop:['ALL'],SecurityOpt:['no-new-privileges'],PidMode:'',IpcMode:''},
       Mounts:[{Type:'tmpfs',Destination:'/var/lib/postgresql/data'}],
       NetworkSettings:{Ports:{'5432/tcp':[{HostIp:'127.0.0.1',HostPort:'55432'}]},Networks:{only:{NetworkID:'e'.repeat(64)}}} };
-    await expect(assertDisposableOwnedInfrastructure(owned)).rejects.toThrow(/exact disposable-owned/);
+    const inspect = vi.fn(async (kind: string, id: string) => {
+      effects.calls.push(['docker',kind,'inspect',id]);
+      return effects.container;
+    });
+    await expect(assertDisposableOwnedInfrastructure(owned, inspect)).rejects.toThrow(/exact disposable-owned/);
     expect(effects.calls).toEqual([['docker','container','inspect',owned.postgresId]]);
   });
   it('rejects abbreviated/injected Docker identities without spawning', async () => {
@@ -84,7 +88,7 @@ describe('forward proposal schema contracts (static, not SQL/runtime acceptance)
     expect(text).toContain('FORCE ROW LEVEL SECURITY');
     expect(text).toContain('ENABLE ROW LEVEL SECURITY');
     expect(text).toContain('REVOKE ALL');
-    expect(text).not.toMatch(/CREATE ROLE|CREATE TABLE IF NOT EXISTS|SECURITY DEFINER|GRANT .*ALL TABLES|app\.bypass_rls|PASSWORD/);
+    expect(text.replace(/--[^\n]*/g, '')).not.toMatch(/CREATE ROLE|CREATE TABLE IF NOT EXISTS|SECURITY DEFINER|GRANT .*ALL TABLES|app\.bypass_rls|PASSWORD/);
   });
   it('fanout allows empty cohorts and operator exclusions, committed cohort is deferred and immutable', () => {
     const text = source('packages/db/sql/071_durable_source_fanout.sql');

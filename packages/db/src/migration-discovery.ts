@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
+import { selectMigrations, type ReviewedMigrationSelection } from './migration-selection.js';
 
 export type MigrationProfile = 'core' | 'lp';
 
@@ -18,14 +19,25 @@ export function migrationProfileFromEnv(value: string | undefined): MigrationPro
 }
 
 /**
- * Discovers and sorts all SQL migrations in packages/db/sql/.
- * All platform migrations execute sequentially in a single unified pipeline.
+ * Production discovery refuses unreviewed forward proposals. An explicit reviewed
+ * selection accounts for every source file, including the checksummed084 omission.
  */
 export async function discoverMigrations(
   sqlRoot: string,
   _lpSqlRoot?: string,
-  _profile?: MigrationProfile
+  _profile?: MigrationProfile,
+  selection?: ReviewedMigrationSelection
 ): Promise<MigrationFile[]> {
+  const files = await discoverMigrationInventory(sqlRoot);
+  if (selection !== undefined) return selectMigrations(files, selection);
+  if (files.some(row => Number(row.file.slice(0, 3)) >= 84)) {
+    throw new Error('Unreviewed migration proposals/refused 084 present; explicit reviewed selection required (no SQL silently omitted)');
+  }
+  return files;
+}
+
+/** Inspection only: complete source inventory, including refused proposals. Never implies permission to apply. */
+export async function discoverMigrationInventory(sqlRoot: string): Promise<MigrationFile[]> {
   const root = resolve(sqlRoot);
   const names = (await readdir(root)).filter(file => file.endsWith('.sql')).sort();
   const versions = new Set<string>();

@@ -1,9 +1,11 @@
 import type { PoolClient } from 'pg';
-import { withTenantTransaction, type UserScope } from './tenancy.js';
+import type { UserScope } from './tenancy.js';
 import {
   lpDecimal, lpExactHash, lpMicro, lpSnapshot, lpStoredMicro,
   type LpExactOperation, type LpExactPosition, type LpExactSubscription, type LpPaperReceipt
 } from './lp-exact.js';
+import { lpProjectProtectedPosition } from './lp-paper-admission-contract.js';
+import { lpPaperAdmissionLookup } from './lp-paper-admission-store.js';
 import {
   lpResultAfterReceipt, type LpAcquisitionCommit, type LpOperationCommit,
   type LpPaperStore, type LpPaperTransaction
@@ -13,13 +15,19 @@ export type LpTenantTransaction = <T>(scope: UserScope, action: (client: PoolCli
 interface ExactPositionRow { data: LpExactPosition; acquisition_data: LpExactPosition; state: LpExactPosition['state']; auto_rebalance: boolean }
 interface ExactOperationRow { data: LpExactOperation }
 function position(row: ExactPositionRow | undefined): LpExactPosition | null {
-  return row ? { ...lpSnapshot(row.data), state: row.state, autoRebalance: row.auto_rebalance } : null;
+  return row ? lpProjectProtectedPosition(row.data, row.state, row.auto_rebalance) : null;
 }
 const positionSelect = `SELECT e.data, e.acquisition_data, p.state, p.auto_rebalance FROM lp_exact_positions e
   JOIN lp_positions p ON p.id=e.position_id AND p.user_id=e.user_id`;
 function operation(row: ExactOperationRow | undefined): LpExactOperation | null { return row ? lpSnapshot(row.data) : null; }
 async function journal(client: PoolClient, id: string, from: string | null, to: string, reason: string): Promise<void> {
   await client.query('INSERT INTO lp_position_state_history (position_id,from_state,to_state,reason) VALUES ($1,$2,$3,$4)', [id, from, to, reason]);
+}
+function legacyRungs(plan: LpExactPosition['plan'], amount: LpExactPosition['currentAmount']) {
+  return plan.rungs.map(rung => ({ priceLower: rung.priceLower, priceUpper: rung.priceUpper,
+    weight: Number(BigInt(rung.allocation.raw) * 1_000_000_000_000n / BigInt(amount.raw)) / 1_000_000_000_000,
+    ...(rung.binLower === undefined ? {} : { binId: rung.binLower }),
+    ...(rung.tickLower === undefined ? {} : { tickLower: rung.tickLower, tickUpper: rung.tickUpper }) }));
 }
 function transactionStore(client: PoolClient, userId: string): LpPaperTransaction {
   async function getPosition(id: string): Promise<LpExactPosition | null> {
@@ -87,12 +95,11 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
       lpMicro(spent); return spent;
     },
     insertAcquisition: async (input: LpAcquisitionCommit) => {
+      input = lpSnapshot(input);
+      await lpPaperAdmissionLookup.quote(client, userId, { kind: 'acquisition', commit: input });
       const { request, quote, plan, origin, fingerprint } = input;
       // Compatibility columns retain exact NUMERIC text, but old numeric DTO is NOT an exact financial interface.
-      const weights = plan.rungs.map(rung => ({ priceLower: rung.priceLower, priceUpper: rung.priceUpper,
-        weight: Number(BigInt(rung.allocation.raw) * 1_000_000_000_000n / BigInt(request.deposit.raw)) / 1_000_000_000_000,
-        ...(rung.binLower === undefined ? {} : { binId: rung.binLower }),
-        ...(rung.tickLower === undefined ? {} : { tickLower: rung.tickLower, tickUpper: rung.tickUpper }) }));
+      const weights = legacyRungs(plan, request.deposit);
       const rows = await client.query<{ id: string }>(
         `INSERT INTO lp_positions(user_id,chain,protocol,pool_address,strategy_type,range_lower,range_upper,rung_allocations,
           deposit_amount,deposit_asset,state,auto_rebalance,acquisition_mode,acquisition_provenance,deposit_value_usd,
@@ -123,6 +130,10 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
       return lpSnapshot(data);
     },
     insertOperation: async (input: LpOperationCommit) => {
+      input = lpSnapshot(input);
+      const current = await getPosition(input.position.id);
+      if (!current || lpExactHash(current) !== lpExactHash(input.position)) throw new Error('LP current operation context mismatch');
+      await lpPaperAdmissionLookup.quote(client, userId, { kind: 'operation', commit: input });
       const rows = await client.query<{ id: string }>('SELECT gen_random_uuid()::text AS id');
       const id = rows.rows[0]?.id; if (!id) throw new Error('LP durable operation id unavailable');
       const data: LpExactOperation = { id, userId, positionId: input.position.id, operationKey: input.operationKey,
@@ -134,6 +145,13 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
       return lpSnapshot(data);
     },
     settle: async (op, current, receipt: LpPaperReceipt) => {
+      op = lpSnapshot(op); current = lpSnapshot(current); receipt = lpSnapshot(receipt);
+      const locked = await getPosition(current.id), saved = await getOperation(op.id);
+      if (!locked || !saved || locked.userId !== userId || saved.userId !== userId
+          || lpExactHash(locked) !== lpExactHash(current) || lpExactHash(saved) !== lpExactHash(op)) {
+        throw new Error('LP canonical settlement context mismatch');
+      }
+      await lpPaperAdmissionLookup.settlement(client, op, current, receipt);
       const next = lpResultAfterReceipt(current, op, receipt);
       // Receipt inserted before financial state update; all four writes share this checked-out transaction.
       await client.query(`INSERT INTO lp_exact_receipts(user_id,operation_id,position_id,receipt_key,provider_id,receipt_id,receipt_hash,data)
@@ -143,7 +161,9 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
       await client.query('UPDATE lp_exact_positions SET data=$3::jsonb WHERE user_id=$1 AND position_id=$2', [userId, current.id, JSON.stringify(next)]);
       if (op.action === 'rebalance') {
         await client.query(`UPDATE lp_positions SET state='active',paper_plan=$3::jsonb,range_lower=$4,range_upper=$5,
-          updated_at=statement_timestamp() WHERE user_id=$1 AND id=$2`, [userId, current.id, JSON.stringify(next.plan), next.plan.strategy.rangeLower, next.plan.strategy.rangeUpper]);
+          rung_allocations=$6::jsonb,strategy_type=$7,updated_at=statement_timestamp() WHERE user_id=$1 AND id=$2`,
+          [userId, current.id, JSON.stringify(next.plan), next.plan.strategy.rangeLower, next.plan.strategy.rangeUpper,
+            JSON.stringify(legacyRungs(next.plan, current.currentAmount)), next.plan.strategy.distribution]);
         await journal(client, current.id, current.state, 'active', `receipt ${receipt.receiptKey}: exact paper replacement plan and costs committed`);
       } else {
         await client.query("UPDATE lp_positions SET state='closed',closed_at=statement_timestamp(),updated_at=statement_timestamp() WHERE user_id=$1 AND id=$2", [userId, current.id]);
@@ -153,13 +173,16 @@ function transactionStore(client: PoolClient, userId: string): LpPaperTransactio
     }
   };
 }
-/** Constructing the factory performs no SQL. Default import reaches tenancy/client pool configuration;
- * offline selection must mock tenancy or client before import, not treat this module as pure. */
-export function createLpPaperSqlStore(run: LpTenantTransaction = withTenantTransaction): LpPaperStore {
+/** Caller-supplied transactions avoid creating the application's ambient pool in qualification tools. */
+export function createLpPaperSqlStore(run?: LpTenantTransaction): LpPaperStore {
+  const transact: LpTenantTransaction = run ?? (async (scope, action) => {
+    const { withTenantTransaction } = await import('./tenancy.js');
+    return withTenantTransaction(scope, action);
+  });
   return {
     transaction: async (scope, action) => {
       if (!scope || !scope.userId.trim() || scope.userId === '*') throw new Error('LP SQL tenant scope required');
-      return run(scope, async client => {
+      return transact(scope, async client => {
         const owner = await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [scope.userId]);
         if (!owner.rows[0]) throw new Error('LP owner unavailable');
         return action(transactionStore(client, scope.userId));
