@@ -31,7 +31,7 @@ async function buildApp(deps: Partial<LpRoutesDeps> = {}) {
   await (app.register as any)(cookie);
   // Direct calls, not app.register: the auth hook must apply to the routes'
   // sibling scope (same pattern apps/api uses to avoid encapsulation).
-  await registerLpAuth(app, { legacyKeyHash: legacyKeyHash('service-key') });
+  await registerLpAuth(app, { resolveSession: dbMocks.resolveSession, legacyKeyHash: legacyKeyHash('service-key') });
   await registerLpRoutes(app, {
     deployGuard: {
       assertDeployAllowed: async () => ({ allowed: true, reasons: [] })

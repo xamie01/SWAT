@@ -1,6 +1,9 @@
 import { createRequire } from 'node:module';
 import { canonicalMigrationSource, assertDisposableOwnedInfrastructure } from '../../integration/helpers/schema-guard.js';
 import { assertDatabaseRole } from '../../../packages/db/src/database-role.js';
+import { assertInstallationBootstrap, assertInstallationHistory } from '../../../packages/db/src/installation-plan.js';
+import type { ReviewedMigrationSelection } from '../../../packages/db/src/migration-selection.js';
+import { authenticationInstallationSource,installCommittedAuthentication,validateInstalledAuthentication,type AuthenticationInstallation } from '../../../deploy/postgres/auth-installation.js';
 import { declarations, hash, requireCheck, transaction, type Environment, type QualificationConfig, type SqlClient } from './core.js';
 
 import { Deadline, tmpfsBytes } from './containment.js';
@@ -96,16 +99,20 @@ export async function bindRedis(client: any, address: string) {
   requireCheck(Number(await client.dbsize()) === 0, 'Connected Redis must be exact inspected pristine Redis7');
   return runId;
 }
-export async function migratePristine(client: SqlClient, deadline: Deadline) {
+export async function migratePristine(client: SqlClient, deadline: Deadline, selection?: ReviewedMigrationSelection,authentication?:AuthenticationInstallation) {
   deadline.check();
-  const source = await canonicalMigrationSource();
+  const source = await canonicalMigrationSource(selection);
+  const authSql=authenticationInstallationSource(source,authentication);
   deadline.check();
   await transaction(client, null, async c => {
     await assertDatabaseRole(c as any, 'migration');
+    const bootstrap = source.plan ? await assertInstallationBootstrap(c, source.plan) : null;
     const clean = await c.query(`SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%')
       OR EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-      WHERE n.nspname NOT IN ('pg_catalog','information_schema')) AS dirty`);
+      WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+        AND NOT (p.pronamespace=$1::oid AND p.oid=ANY($2::oid[]))) AS dirty`,
+      [bootstrap?.namespaceOid ?? 0, bootstrap?.functionOids ?? []]);
     requireCheck(clean.rows[0]?.dirty === false, 'Canonical migration target is not pristine');
     await c.query('SET LOCAL search_path = public, pg_catalog');
     await c.query(`CREATE TABLE public.swat_schema_migrations(file text PRIMARY KEY,
@@ -114,14 +121,22 @@ export async function migratePristine(client: SqlClient, deadline: Deadline) {
       recorded_at timestamptz NOT NULL DEFAULT now(), recorded_by text NOT NULL DEFAULT session_user)`);
     for (const migration of source.files) {
       deadline.check();
-      await c.query(migration.sql);
-      await c.query('INSERT INTO public.swat_schema_migrations(file,checksum,installed_checksum) VALUES($1,$2,$2)', [migration.file, migration.checksum]);
+      const installed = source.plan?.migrations.find(row => row.file === migration.file);
+      await c.query(installed?.installedSql ?? migration.sql);
+      await c.query('INSERT INTO public.swat_schema_migrations(file,checksum,installed_checksum,audit_reference) VALUES($1,$2,$3,$4)',
+        [migration.file, migration.checksum, installed?.installedChecksum ?? migration.checksum, installed?.auditReference ?? null]);
     }
+    if (source.plan) await c.query(source.plan.handoff.cleanupSql);
     await c.query('REVOKE ALL ON public.swat_schema_migrations FROM PUBLIC, swat_app');
   });
+  // transaction() must have returned a checked COMMIT before external DBA acquisition.
+  if(authSql){deadline.check();await installCommittedAuthentication(authentication!,authSql);deadline.check();}
   return source;
 }
-export async function catalog(client: SqlClient, url: string, deadline: Deadline) {
+export async function catalog(client: SqlClient, url: string, deadline: Deadline, selection?: ReviewedMigrationSelection,authentication?:AuthenticationInstallation) {
+  const source = await canonicalMigrationSource(selection);
+  const authSql=authenticationInstallationSource(source,authentication);
+  if(authSql){deadline.check();await validateInstalledAuthentication(authentication!,authSql,'disabled');deadline.check();}
   const u = new URL(url);
   const username = decodeURIComponent(u.username), password = decodeURIComponent(u.password);
   requireCheck(/\b16\./.test((await command(deadline, 'pg_dump', ['--version'])).stdout), 'PostgreSQL16 pg_dump required');
@@ -139,8 +154,10 @@ export async function catalog(client: SqlClient, url: string, deadline: Deadline
     'database',(SELECT jsonb_build_object('owner',pg_get_userbyid(datdba),'acl',datacl::text,'encoding',encoding,
       'collate',datcollate,'ctype',datctype) FROM pg_database WHERE datname=current_database())) AS catalog`)).rows[0]?.catalog;
   const journal = (await client.query('SELECT file,checksum,installed_checksum,audit_reference FROM public.swat_schema_migrations ORDER BY file')).rows;
-  const source = await canonicalMigrationSource();
-  requireCheck(journal.length === source.files.length && journal.every((r, i) => r.file === source.files[i]?.file
+  requireCheck(journal.length === source.files.length, 'Migration journal mismatch');
+  if (source.plan) {
+    try { assertInstallationHistory(journal, source.plan); } catch { throw new Error('Migration journal mismatch'); }
+  } else requireCheck(journal.every((r, i) => r.file === source.files[i]?.file
     && r.checksum === source.files[i]?.checksum && r.installed_checksum === r.checksum && r.audit_reference === null), 'Migration journal mismatch');
   requireCheck(ddl.includes('CREATE TABLE public.swat_schema_migrations') && roles, 'Incomplete catalog capture');
   return { digest: hash({ ddl, roles }), sourceDigest: source.digest, journalDigest: hash(journal), journal, ddl, roles };

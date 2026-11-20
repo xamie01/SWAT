@@ -1,3 +1,4 @@
+import { EmailAlreadyRegisteredError } from './auth-owned.js';
 import { query } from './client.js';
 import { withTransaction } from './transaction.js';
 import {
@@ -50,14 +51,10 @@ function toUser(row: UserRow): UserRecord {
 
 const USER_COLUMNS = 'id, email, display_name, role, tier, tier_expires_at, status, created_at';
 
-/** Raised when the email is already registered. Mapped to HTTP 409 by the API. */
-export class EmailAlreadyRegisteredError extends Error {
-  constructor() {
-    super('Email already registered');
-    this.name = 'EmailAlreadyRegisteredError';
-  }
-}
+export { EmailAlreadyRegisteredError } from './auth-owned.js';
 
+/** @deprecated Legacy pre-087 bootstrap only. App signup must use OwnedAuthStore.signup;
+ * 087 intentionally revokes these unscoped authentication mutations. */
 export async function createUser(input: {
   email: string;
   password: string;
@@ -87,6 +84,9 @@ export async function findUserById(id: string): Promise<UserRecord | null> {
 }
 
 /**
+ * @deprecated Incompatible with 087 app ACLs. Use explicit checked direct
+ * OwnedAuthStore.login; never broaden app password/session privileges.
+ *
  * Verifies a password against an email.
  *
  * Returns `null` for both "no such user" and "wrong password", and burns an
@@ -116,6 +116,9 @@ export async function authenticateUser(
 }
 
 /**
+ * @deprecated Incompatible with 087 app ACLs. Use OwnedAuthStore.changePassword
+ * with a freshly authenticated token on a checked direct auth capability.
+ *
  * Changes a password and revokes every live session, in one transaction.
  *
  * These must not be separable. A password change that leaves existing sessions
@@ -153,6 +156,8 @@ export interface IssuedSession {
   readonly expiresAt: Date;
 }
 
+/** @deprecated Pre-087 bootstrap API; use OwnedAuthStore signup/login admissions,
+ * which publish a session only after checked direct-auth COMMIT. */
 export async function createSession(input: {
   userId: string;
   ip?: string | null;
@@ -187,6 +192,10 @@ export function sessionCacheSize(): number { return 0; }
 export function invalidateUserSessionCache(_userId: string): void {}
 
 /**
+ * @deprecated Retained for pre-087 compatibility contracts only. The app has no
+ * session UPDATE under 087. Production API/LP must use OwnedAuthStore.resolveSession
+ * over an explicitly supplied checked direct-auth lease; no app/replica fallback.
+ *
  * Every request uses authoritative database state. The second statement obtains
  * a fresh snapshot after the touch: a pre-revocation lookup cannot restore a
  * grant after a committed revoke/password change/deactivation. A revoke after
@@ -217,6 +226,7 @@ export async function resolveSession(token: string): Promise<ResolvedSession | n
   return row?.status === 'active' ? { sessionId: row.session_id, user: toUser(row) } : null;
 }
 
+/** @deprecated Incompatible with 087 app ACLs; use checked OwnedAuthStore.revokeSession. */
 export async function revokeSession(token: string): Promise<void> {
   await query(
     'UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL',
@@ -224,6 +234,7 @@ export async function revokeSession(token: string): Promise<void> {
   );
 }
 
+/** @deprecated Incompatible with 087 app ACLs; use checked OwnedAuthStore.revokeAllSessions with a fresh token. */
 export async function revokeAllSessions(scope: UserScope): Promise<number> {
   const rows = await query<{ id: string }>(
     `UPDATE user_sessions SET revoked_at = NOW()

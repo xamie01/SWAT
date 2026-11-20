@@ -5,7 +5,7 @@ vi.mock('./transaction.js', () => ({ withTransaction: vi.fn() }));
 vi.mock('./worker-policy.js', () => ({ captureWorkerPolicyWithClient: vi.fn() }));
 vi.mock('@swat/shared', () => ({ isAppliedSourceConfirmation: (state: string) => ['confirmed','finalized'].includes(state),
   canTransitionSourceConfirmation: vi.fn(), canTransitionCopyExecution: vi.fn(), resolveChainAddress: vi.fn(), resolveChainValue: vi.fn() }));
-import { synchronizeSourceSellLotEvidenceWithClient, type CopyExecutionRecord } from './copy-trade-lifecycle.js';
+import { synchronizeSourceSellLotEvidenceWithClient, type CopyExecutionRecord } from './copy-trade-lifecycle-owned.js';
 const execution = { id: 'sell', userId: 'tenant', chain: 'solana', tokenMint: 'solana:token', targetAccount: 'solana:target',
   direction: 'sell', executionMode: 'paper', sourceTradeId: 'source-sell', requestedBaseQuantity: '3', exitLotId: null } as CopyExecutionRecord;
 const evidence = { id: 'fill-1', baseQuantity: '1.5', quoteQuantity: '6', occurredAt: new Date('2026-11-17T00:00:00.000Z') };

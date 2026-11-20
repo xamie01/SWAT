@@ -19,7 +19,7 @@ import {
   transitionLpPosition,
   crossTenantScope
 } from '@swat/db';
-import { registerLpAuth, legacyKeyHash } from './auth.js';
+import { registerLpAuth, legacyKeyHash, loadExternalLpAuthResolver } from './auth.js';
 import { createDeployGuard } from './guardrails/deploy-guard.js';
 import { runRiskPass } from './risk/risk-pass.js';
 import { registerLpRoutes } from './routes.js';
@@ -53,6 +53,10 @@ import { createRpcSolanaBinSource } from './scanner/solana-bins.js';
  * (`resolveChainMode`): with the platform at paper, the workers record plans
  * and the monitors act, but nothing is ever broadcast.
  */
+
+// Refuse missing authentication composition before RPC readers, Redis, HTTP or workers.
+// The external local module receives no ambient app pool/credentials.
+const resolveLpSession = await loadExternalLpAuthResolver(process.env.SWAT_LP_AUTH_COMPOSITION_MODULE);
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const port = Number(process.env.LP_PORT ?? 3010);
@@ -315,7 +319,7 @@ async function buildApp(): Promise<FastifyInstance> {
     credentials: true
   });
   await (app.register as any)(cookie);
-  await registerLpAuth(app, { legacyKeyHash: apiKey ? legacyKeyHash(apiKey) : undefined });
+  await registerLpAuth(app, { resolveSession: resolveLpSession, legacyKeyHash: apiKey ? legacyKeyHash(apiKey) : undefined });
   await registerLpRoutes(app, {
     ...builderDeps,
     operations: operationDeps,

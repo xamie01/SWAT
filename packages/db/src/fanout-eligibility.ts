@@ -1,7 +1,7 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { capabilitiesFor, effectiveTier, tierAllowsChain, type UserTier } from '@swat/shared';
 import { evaluateForwardOnlyMirror, type ForwardOnlySkipCode } from './forward-only.js';
-import { mirrorEligibilityForState, type MirrorEligibility } from './subscriptions.js';
+import { mirrorEligibilityForState, type MirrorEligibility } from './subscription-state.js';
 
 /**
  * Fan-out eligibility (`S4-13`) — who copies this signal, and why not.

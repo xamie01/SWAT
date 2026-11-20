@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PoolClient } from 'pg';
 import { readFileSync } from 'node:fs';
-vi.mock('./client.js', () => ({ query: vi.fn() }));
-import { insertTradeWithClient } from './trades.js';
+import { insertTradeWithClient } from './trades-owned.js';
 const input = { signalId: 'signal', sourceTradeId: null, copyExecutionId: 'execution', exitLotId: 'lot', userId: null,
   tokenMint: 'solana:token', chain: 'solana' as const, direction: 'sell' as const, executionMode: 'paper', tokenAmount: '0.000000000000000001' };
 describe('real trade SQL contract for migration061 canonical exits', () => {

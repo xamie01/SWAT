@@ -66,7 +66,9 @@ describe('main Wave4 offline qualification contracts (not infrastructure evidenc
       if (sql === 'COMMIT' && mode === 'commit-reject') throw new Error('disconnected');
       return { rows: [], command: sql === 'COMMIT' && mode === 'rollback-command' ? 'ROLLBACK' : sql }; } };
     await expect(transaction(client, null, async () => { if (mode === 'action-reject') throw new Error('failed'); return 'descriptor'; }).then(enqueue)).rejects.toThrow();
-    expect(enqueue).not.toHaveBeenCalled(); expect(calls.at(-1)).toBe('ROLLBACK');
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(calls.at(-1)).toBe(mode === 'action-reject' ? 'ROLLBACK' : 'COMMIT');
+    expect(calls.includes('ROLLBACK')).toBe(mode === 'action-reject');
   });
   it('SQL negative checks reject unrelated connection failures as proof', async () => {
     const client = { query: vi.fn(async (_sql: string) => ({ rows: [] })) };

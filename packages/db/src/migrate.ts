@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withDirectAdvisoryLock } from './direct-session.js';
 import { discoverMigrations, migrationProfileFromEnv, type MigrationFile } from './migration-discovery.js';
+import { assertInstallationBootstrap, assertInstallationHistory, createInstallationPlan, type InstallationPlan } from './installation-plan.js';
+import type { ReviewedMigrationSelection } from './migration-selection.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const hash = /^[a-f0-9]{64}$/;
@@ -17,9 +19,11 @@ export type MigrationOptions = {
   initialize?: boolean;
   quiesced?: boolean;
   baseline?: MigrationBaseline;
+  selection?: ReviewedMigrationSelection;
 };
 
-function checkHistory(history: History[], migrations: MigrationFile[]): void {
+function checkHistory(history: History[], migrations: MigrationFile[], plan: InstallationPlan | null): void {
+  if (plan) { assertInstallationHistory(history, plan); return; }
   for (let i = 0; i < history.length; i++) {
     const row = history[i];
     if (row.file !== migrations[i]?.file || row.checksum !== migrations[i]?.checksum
@@ -30,13 +34,14 @@ function checkHistory(history: History[], migrations: MigrationFile[]): void {
   }
 }
 
-function auditedBaseline(value: MigrationBaseline, database: string, migrations: MigrationFile[]): History[] {
+function auditedBaseline(value: MigrationBaseline, database: string, migrations: MigrationFile[], plan: InstallationPlan | null): History[] {
   if (!value || value.database !== database || typeof value.auditReference !== 'string'
       || !value.auditReference.trim() || value.auditReference.length > 2000
       || !Array.isArray(value.migrations) || !value.migrations.length) throw new Error('Invalid audited baseline');
-  const rows = value.migrations.map(row => ({ file: row?.file, checksum: row?.checksum,
-    installed_checksum: row?.installedChecksum, audit_reference: value.auditReference }));
-  try { checkHistory(rows, migrations); } catch { throw new Error('Invalid baseline prefix/checksum'); }
+  if (plan && value.auditReference !== plan.auditReference) throw new Error('Baseline audit differs from reviewed installation plan');
+  const rows = value.migrations.map((row, index) => ({ file: row?.file, checksum: row?.checksum,
+    installed_checksum: row?.installedChecksum, audit_reference: plan ? plan.migrations[index]?.auditReference ?? null : value.auditReference }));
+  try { checkHistory(rows, migrations, plan); } catch { throw new Error('Invalid baseline prefix/checksum'); }
   return rows;
 }
 
@@ -44,19 +49,23 @@ function auditedBaseline(value: MigrationBaseline, database: string, migrations:
  * Both use the legacy lock key 1 so an old runner cannot race a new runner.
  */
 export async function runMigrations(options: MigrationOptions = {}): Promise<void> {
-  const migrations = await discoverMigrations(options.sqlDir ?? resolve(dirname(__filename), '../sql'));
+  const migrations = await discoverMigrations(options.sqlDir ?? resolve(dirname(__filename), '../sql'), undefined, undefined, options.selection);
+  const plan = options.selection ? createInstallationPlan(migrations, {
+    selection: options.selection, auditReference: options.selection.auditReference
+  }) : null;
   const outcome = await withDirectAdvisoryLock('migration', 1, async client => {
     const { rows: state } = await client.query("SELECT to_regclass('public.swat_schema_migrations') AS journal, current_database() AS database");
     if (state.length !== 1 || typeof state[0].database !== 'string') throw new Error('Cannot establish migration journal state');
     const exists = state[0].journal !== null;
     const history: History[] = exists
       ? (await client.query<History>('SELECT file, checksum, installed_checksum, audit_reference FROM public.swat_schema_migrations ORDER BY file')).rows : [];
-    checkHistory(history, migrations);
+    checkHistory(history, migrations, plan);
     let adopting: History[] | undefined;
     if (options.baseline) {
       if (history.length || options.initialize) throw new Error('Baseline adoption requires an untracked database and no initialization');
-      adopting = auditedBaseline(options.baseline, state[0].database, migrations);
+      adopting = auditedBaseline(options.baseline, state[0].database, migrations, plan);
     } else if (!history.length) {
+      const bootstrap = plan ? await assertInstallationBootstrap(client, plan) : null;
       // Any user schema relation or routine is evidence of an existing DB, not its version.
       const { rows } = await client.query(`SELECT (
         EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -65,8 +74,9 @@ export async function runMigrations(options: MigrationOptions = {}): Promise<voi
             AND c.oid <> COALESCE(to_regclass('public.swat_schema_migrations'), 0::oid)
             AND c.oid NOT IN (SELECT indexrelid FROM pg_index WHERE indrelid = to_regclass('public.swat_schema_migrations')))
         OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-          WHERE n.nspname NOT IN ('pg_catalog', 'information_schema'))
-      ) AS has_objects`);
+          WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+            AND NOT (p.pronamespace=$1::oid AND p.oid=ANY($2::oid[])))
+      ) AS has_objects`, [bootstrap?.namespaceOid ?? 0, bootstrap?.functionOids ?? []]);
       if (rows[0]?.has_objects !== false) throw new Error('Existing untracked database requires an independently audited baseline; no guessed replay');
       if (options.initialize !== true) throw new Error('Empty database requires explicit initialization');
     }
@@ -99,10 +109,18 @@ export async function runMigrations(options: MigrationOptions = {}): Promise<voi
       if (adopting) {
         for (const row of adopting) await insert(row);
       } else {
+        if (plan && pending.some(row => row.file === '079_claim_runtime_capabilities.sql' || row.file === '082_withdrawal_reducing_intent.sql')) {
+          await assertInstallationBootstrap(client, plan);
+        }
         // One commit for the whole pending suffix: never publish a temporary 066 lifecycle.
         for (const migration of pending) {
-          await client.query(migration.sql);
-          await insert({ file: migration.file, checksum: migration.checksum, installed_checksum: migration.checksum, audit_reference: null });
+          const installed = plan?.migrations.find(row => row.file === migration.file);
+          await client.query(installed?.installedSql ?? migration.sql);
+          await insert({ file: migration.file, checksum: migration.checksum,
+            installed_checksum: installed?.installedChecksum ?? migration.checksum, audit_reference: installed?.auditReference ?? null });
+        }
+        if (plan && pending.some(row => row.file === '079_claim_runtime_capabilities.sql' || row.file === '082_withdrawal_reducing_intent.sql')) {
+          await client.query(plan.handoff.cleanupSql);
         }
       }
       const result = await client.query('COMMIT');
@@ -122,7 +140,9 @@ async function main(): Promise<void> {
   for (let i = 0; i < flags.length; i++) {
     if (flags[i] === '--quiesced') options.quiesced = true;
     else if (flags[i] === '--initialize-empty') options.initialize = true;
-    else if (flags[i] === '--adopt-baseline' && flags[i + 1]) {
+    else if (flags[i] === '--reviewed-selection' && flags[i + 1]) {
+      options.selection = JSON.parse(await readFile(resolve(flags[++i]), 'utf8'));
+    } else if (flags[i] === '--adopt-baseline' && flags[i + 1]) {
       options.baseline = JSON.parse(await readFile(resolve(flags[++i]), 'utf8'));
     } else throw new Error('Unknown or incomplete migration option');
   }

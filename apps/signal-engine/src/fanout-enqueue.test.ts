@@ -1,23 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-/**
- * `@swat/db` re-exports its own barrel, whose `client.ts` throws
- * `DATABASE_URL is required` while being evaluated. Hoisted so it runs before
- * the imports below — the same guard `fanout-eligibility.test.ts` and
- * `apps/scorer/src/stop-loss.test.ts` use. Nothing here opens a connection; the
- * pure decision layer is the only thing imported from it.
- */
-vi.hoisted(() => {
-  process.env.DATABASE_URL ??= 'postgres://swat:swat@127.0.0.1:5432/swat_unit_tests';
-});
-
 import {
   planFanout,
   type FanoutCandidate,
   type FanoutPlan,
   type FanoutPlatformInputs,
   type FanoutSignal
-} from '@swat/db';
+} from '@swat/db/dist/fanout-eligibility.js';
 import { TRADE_QUEUES_BY_CHAIN } from '@swat/shared';
 import {
   FANOUT_JOB_ID_SEPARATOR,

@@ -60,6 +60,7 @@ export async function runEvidenceQualification(input: QualificationConfig, direc
     await writer.write('evidence-index.json', { version: 1, runId: config.candidate.runId, records,
       observedGatesComplete: report.observedGatesComplete, inspectionComplete, closeStarted, closeComplete,
       runtimeAccepted: false, liveCapabilityAccepted: false, productionReady: false });
+    writer.seal();
     await writer.settle();
     return report;
   } catch {
@@ -70,6 +71,7 @@ export async function runEvidenceQualification(input: QualificationConfig, direc
       if (!cleanupRecorded) {
         await writer.write('cleanup-final.json', { closeStarted, closeComplete, inspectionComplete });
       }
+      writer.seal();
       await writer.settle();
     }
     throw new Error('Qualification evidence failed; preserve the private partial output directory');

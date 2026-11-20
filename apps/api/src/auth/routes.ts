@@ -1,385 +1,150 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import '@fastify/cookie';
-import type { Redis } from 'ioredis';
 import { z } from 'zod';
-import {
-  AUDIT_EVENTS,
-  authenticateUser,
-  createSession,
-  createUser,
-  EmailAlreadyRegisteredError,
-  findUserById,
-  findUserIdByAuthWallet,
-  forUser,
-  linkAuthWallet,
-  listAuthWallets,
-  recordAuditEvent,
-  revokeSession,
-  WalletAlreadyLinkedError,
-  type UserRecord
-} from '@swat/db';
-import {
-  buildSignInMessage,
-  generateNonce,
-  normaliseAddress,
-  NONCE_TTL_SECONDS,
-  verifySignInSignature
-} from './wallet-signature.js';
-import {
-  CSRF_COOKIE,
-  SESSION_COOKIE,
-  issueCsrfToken,
-  requireUser
-} from './plugin.js';
+import { EmailAlreadyRegisteredError, WalletAlreadyLinkedError, AuthSessionRequiredError,
+  type OwnedAuthStore, type AuthAdmission } from '@swat/db/dist/auth-owned.js';
+import type { UserRecord, IssuedSession } from '@swat/db/dist/users.js';
+import { buildSignInMessage, generateNonce, normaliseAddress, NONCE_TTL_SECONDS, verifySignInSignature } from './wallet-signature.js';
+import { CSRF_COOKIE, SESSION_COOKIE, issueCsrfToken, requireUser } from './plugin.js';
 
-const emailSchema = z.string().trim().min(3).max(254).email();
-/**
- * Length over composition. Composition rules push users toward predictable
- * substitutions ("Password1!") without adding real entropy; 12 characters is the
- * OWASP-aligned floor.
- */
-const passwordSchema = z.string().min(12).max(200);
-
-const signupSchema = z.object({
-  email: emailSchema,
-  password: passwordSchema,
-  displayName: z.string().trim().min(1).max(64).optional()
-});
-
-const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1).max(200)
-});
-
-const chainKindSchema = z.enum(['evm', 'solana']);
-
-const nonceSchema = z.object({
-  chainKind: chainKindSchema,
-  address: z.string().trim().min(32).max(100)
-});
-
-const verifySchema = z.object({
-  chainKind: chainKindSchema,
-  address: z.string().trim().min(32).max(100),
-  message: z.string().min(1).max(2000),
-  signature: z.string().min(1).max(500)
-});
-
+const email = z.string().trim().min(3).max(254).email();
+const password = z.string().min(12).max(200);
+const signup = z.object({ email, password, displayName: z.string().trim().min(1).max(64).optional() });
+const login = z.object({ email, password: z.string().min(1).max(200) });
+const wallet = z.object({ chainKind: z.enum(['evm','solana']), address: z.string().trim().min(32).max(100) });
+const verify = wallet.extend({ message: z.string().min(1).max(2000), signature: z.string().min(1).max(500) });
+export interface AuthNonceStore {
+  set(key: string,value: string,mode: 'EX',seconds: number): Promise<unknown>;
+  getdel(key: string): Promise<string | null>;
+}
 export interface AuthRouteOptions {
-  readonly redis: Redis;
+  readonly store: OwnedAuthStore;
+  readonly redis: AuthNonceStore;
   readonly isProduction: boolean;
-  /** Origin this server accepts sign-in messages for. Bound into every nonce. */
   readonly domain: string;
   readonly uri: string;
   readonly allowedOrigins?: readonly string[];
 }
-
-function publicUser(user: UserRecord) {
-  return {
-    id: user.id,
-    email: user.email,
-    displayName: user.displayName,
-    role: user.role,
-    tier: user.tier,
-    tierExpiresAt: user.tierExpiresAt
-  };
+function publicUser(u: UserRecord) {
+  return { id:u.id,email:u.email,displayName:u.displayName,role:u.role,tier:u.tier,tierExpiresAt:u.tierExpiresAt };
 }
-
-export async function registerAuthRoutes(
-  app: FastifyInstance,
-  options: AuthRouteOptions
-): Promise<void> {
-  const { redis } = options;
-
-  /** Issues the session + CSRF cookie pair. */
-  async function establishSession(
-    reply: FastifyReply,
-    user: UserRecord,
-    ip: string | null,
-    userAgent: string | null
-  ): Promise<void> {
-    const session = await createSession({ userId: user.id, ip, userAgent });
-    const csrf = issueCsrfToken();
-    const isSecure = options.isProduction || process.env.COOKIE_SECURE === 'true';
-    reply.setCookie(SESSION_COOKIE, session.token, {
-      httpOnly: true,
-      secure: isSecure,
-      // Lax, not Strict: the wallet-linking flow can return the user via a
-      // top-level cross-site navigation, which Strict would strip the cookie
-      // from. The double-submit CSRF token covers what Lax does not.
-      sameSite: 'lax',
-      path: '/',
-      expires: session.expiresAt
-    });
-    reply.setCookie(CSRF_COOKIE, csrf, {
-      // Deliberately readable by JavaScript — the client must echo it in a
-      // header. That is the "double submit"; secrecy is not what makes it work,
-      // same-origin read access is.
-      httpOnly: false,
-      secure: isSecure,
-      sameSite: 'lax',
-      path: '/',
-      expires: session.expiresAt
-    });
+export async function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptions): Promise<void> {
+  const { store,redis } = options;
+  if (!store || typeof store.signup!=='function' || typeof store.resolveSession!=='function') throw new Error('Protected owned auth store required');
+  const originSet = new Set(options.allowedOrigins?.length ? options.allowedOrigins : [options.uri]);
+  for (const origin of originSet) {
+    const u=new URL(origin);
+    if (u.origin!==origin || options.isProduction && u.protocol!=='https:') throw new Error('Exact auth origin required');
   }
-
-  app.post('/v1/auth/signup', async (request, reply) => {
-    const parsed = signupSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid signup payload' });
-    }
-    try {
-      const user = await createUser({
-        email: parsed.data.email,
-        password: parsed.data.password,
-        displayName: parsed.data.displayName ?? null
-      });
-      await establishSession(reply, user, request.ip, request.headers['user-agent'] ?? null);
-      await recordAuditEvent({
-        actorType: 'user',
-        actorId: user.id,
-        event: AUDIT_EVENTS.signup,
-        ip: request.ip,
-        userAgent: request.headers['user-agent'] ?? null
-      });
-      return reply.code(201).send({ user: publicUser(user) });
-    } catch (error) {
-      if (error instanceof EmailAlreadyRegisteredError) {
-        return reply.code(409).send({ error: 'Email already registered' });
-      }
-      throw error;
-    }
+  if (new URL(options.uri).host!==options.domain || !originSet.has(options.uri)) throw new Error('Auth domain/URI configuration mismatch');
+  function establish(reply: FastifyReply, session: IssuedSession) {
+    // Store promises resolve only AFTER checked successful COMMIT. No cookie on rejection.
+    const secure=options.isProduction || process.env.COOKIE_SECURE==='true';
+    reply.setCookie(SESSION_COOKIE,session.token,{httpOnly:true,secure,sameSite:'lax',path:'/',expires:session.expiresAt});
+    reply.setCookie(CSRF_COOKIE,issueCsrfToken(),{httpOnly:false,secure,sameSite:'lax',path:'/',expires:session.expiresAt});
+  }
+  function admission(reply: FastifyReply,a: AuthAdmission,status=200,walletLogin=false) {
+    if (a.kind==='invalid') return reply.code(401).send({error:walletLogin ? 'Wallet not linked to any account' : 'Invalid credentials'});
+    if (a.kind==='inactive') return reply.code(403).send({error:'Account suspended'});
+    establish(reply,a.session);
+    return reply.code(status).send({user:publicUser(a.user)});
+  }
+  app.post('/v1/auth/signup',async(request,reply)=>{
+    const p=signup.safeParse(request.body);
+    if(!p.success) return reply.code(400).send({error:'Bad Request',message:'Invalid signup payload'});
+    try { return admission(reply,await store.signup(p.data,{ip:request.ip,userAgent:request.headers['user-agent']}),201); }
+    catch(e) { if(e instanceof EmailAlreadyRegisteredError) return reply.code(409).send({error:'Email already registered'}); throw e; }
   });
-
-  app.post('/v1/auth/login', async (request, reply) => {
-    const parsed = loginSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid login payload' });
-    }
-    const user = await authenticateUser(parsed.data.email, parsed.data.password);
-    if (!user) {
-      await recordAuditEvent({
-        actorType: 'anonymous',
-        event: AUDIT_EVENTS.loginFailed,
-        ip: request.ip,
-        userAgent: request.headers['user-agent'] ?? null,
-        // The attempted email is the whole point of this row for abuse
-        // detection. It is not a secret; the password never appears.
-        metadata: { email: parsed.data.email }
-      });
-      // Identical body for unknown-email and wrong-password. `authenticateUser`
-      // burns a matching argon2 verify in the unknown case so timing matches too.
-      return reply.code(401).send({ error: 'Invalid credentials' });
-    }
-    if (user.status !== 'active') {
-      return reply.code(403).send({ error: 'Account suspended' });
-    }
-    await establishSession(reply, user, request.ip, request.headers['user-agent'] ?? null);
-    await recordAuditEvent({
-      actorType: 'user',
-      actorId: user.id,
-      event: AUDIT_EVENTS.login,
-      ip: request.ip,
-      userAgent: request.headers['user-agent'] ?? null
-    });
-    return reply.send({ user: publicUser(user) });
+  app.post('/v1/auth/login',async(request,reply)=>{
+    const p=login.safeParse(request.body);
+    if(!p.success) return reply.code(400).send({error:'Bad Request',message:'Invalid login payload'});
+    return admission(reply,await store.login(p.data.email,p.data.password,{ip:request.ip,userAgent:request.headers['user-agent']}));
   });
-
-  app.post('/v1/auth/logout', async (request, reply) => {
-    const token = (request.cookies as Record<string, string | undefined>)[SESSION_COOKIE];
-    if (token) await revokeSession(token);
-    reply.clearCookie(SESSION_COOKIE, { path: '/' });
-    reply.clearCookie(CSRF_COOKIE, { path: '/' });
-    if (request.principal?.kind === 'user') {
-      await recordAuditEvent({
-        actorType: 'user',
-        actorId: request.principal.user.id,
-        event: AUDIT_EVENTS.logout,
-        ip: request.ip
-      });
-    }
-    return reply.send({ ok: true });
+  app.post('/v1/auth/logout',async(request,reply)=>{
+    const token=request.cookies[SESSION_COOKIE];
+    if(token) await store.revokeSession(token,{ip:request.ip});
+    reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
+    return reply.send({ok:true});
   });
-
-  app.get('/v1/auth/me', async (request, reply) => {
-    const scope = requireUser(request, reply);
-    if (!scope) return;
-    const user = await findUserById(scope.userId);
-    if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-    const wallets = await listAuthWallets(scope);
-    return reply.send({
-      user: publicUser(user),
-      wallets: wallets.map((wallet) => ({
-        chainKind: wallet.chainKind,
-        address: wallet.address,
-        verifiedAt: wallet.verifiedAt
-      }))
-    });
+  app.post('/v1/auth/logout-all',async(request,reply)=>{
+    if(!requireUser(request,reply)) return;
+    const token=request.cookies[SESSION_COOKIE];
+    if(!token) return reply.code(401).send({error:'Unauthorized'});
+    try { await store.revokeAllSessions(token); }
+    catch(e) { if(e instanceof AuthSessionRequiredError) return reply.code(401).send({error:'Unauthorized'}); throw e; }
+    reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
+    return reply.send({ok:true});
   });
-
-  app.post('/v1/auth/wallet/nonce', async (request, reply) => {
-    const parsed = nonceSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid nonce payload' });
-    }
-    const address = normaliseAddress(parsed.data.chainKind, parsed.data.address);
-    const nonce = generateNonce();
-    const issuedAt = new Date().toISOString();
-
-    const rawOrigin = (typeof request.headers.origin === 'string' && request.headers.origin.trim().length > 0)
-      ? request.headers.origin.trim()
-      : null;
-    let requestDomain = options.domain;
-    let requestUri = options.uri;
-    if (rawOrigin) {
-      // Validate rawOrigin against configured allowlist or options.uri (H-04)
-      const isAllowed = options.allowedOrigins && options.allowedOrigins.length > 0
-        ? options.allowedOrigins.includes(rawOrigin)
-        : rawOrigin === options.uri;
-
-      if (isAllowed || !options.isProduction) {
-        try {
-          const u = new URL(rawOrigin);
-          requestDomain = u.host;
-          requestUri = `${u.protocol}//${u.host}`;
-        } catch {
-          // Fallback to options default
-        }
-      }
-    }
-
-    const message = buildSignInMessage({
-      domain: requestDomain,
-      uri: requestUri,
-      address,
-      nonce,
-      issuedAt,
-      chainKind: parsed.data.chainKind
-    });
-    // Bound to the address it was issued for, so a nonce minted for one wallet
-    // cannot be spent proving control of another.
-    await redis.set(
-      `swat:siwe:${nonce}`,
-      JSON.stringify({ chainKind: parsed.data.chainKind, address, domain: requestDomain, uri: requestUri }),
-      'EX',
-      NONCE_TTL_SECONDS
-    );
-    return reply.send({
-      nonce,
-      message,
-      expiresAt: new Date(Date.now() + NONCE_TTL_SECONDS * 1000).toISOString()
-    });
+  app.post('/v1/auth/password',async(request,reply)=>{
+    if(!requireUser(request,reply)) return;
+    const p=z.object({password}).safeParse(request.body),token=request.cookies[SESSION_COOKIE];
+    if(!p.success) return reply.code(400).send({error:'Bad Request'});
+    if(!token) return reply.code(401).send({error:'Unauthorized'});
+    try { await store.changePassword(token,p.data.password); }
+    catch(e) { if(e instanceof AuthSessionRequiredError) return reply.code(401).send({error:'Unauthorized'}); throw e; }
+    reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
+    return reply.send({ok:true});
   });
-
-  app.post('/v1/auth/wallet/verify', async (request, reply) => {
-    const parsed = verifySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: 'Bad Request', message: 'Invalid verify payload' });
+  app.get('/v1/auth/me',async(request,reply)=>{
+    if(!requireUser(request,reply)) return;
+    const token=request.cookies[SESSION_COOKIE];
+    const p=token ? await store.profile(token) : null;
+    if(!p) return reply.code(401).send({error:'Unauthorized'});
+    return reply.send({user:publicUser(p.user),wallets:p.wallets.map(w=>({chainKind:w.chainKind,address:w.address,verifiedAt:w.verifiedAt}))});
+  });
+  app.delete('/v1/auth/wallet',async(request,reply)=>{
+    if(!requireUser(request,reply)) return;
+    const p=wallet.safeParse(request.body),token=request.cookies[SESSION_COOKIE];
+    if(!p.success) return reply.code(400).send({error:'Bad Request'});
+    if(!token) return reply.code(401).send({error:'Unauthorized'});
+    try { return reply.send({removed:await store.unlinkWallet(token,{...p.data,address:normaliseAddress(p.data.chainKind,p.data.address)})}); }
+    catch(e) { if((e as {code?:string}).code==='28000') return reply.code(401).send({error:'Unauthorized'}); throw e; }
+  });
+  app.post('/v1/auth/wallet/nonce',async(request,reply)=>{
+    const p=wallet.safeParse(request.body);
+    if(!p.success) return reply.code(400).send({error:'Bad Request',message:'Invalid nonce payload'});
+    const origin=typeof request.headers.origin==='string' ? request.headers.origin : options.uri;
+    if(!originSet.has(origin)) return reply.code(403).send({error:'Forbidden origin'});
+    const uri=origin,domain=new URL(uri).host,address=normaliseAddress(p.data.chainKind,p.data.address),nonce=generateNonce();
+    const message=buildSignInMessage({domain,uri,address,nonce,issuedAt:new Date().toISOString(),chainKind:p.data.chainKind});
+    // Bind full issued message and session/link intent. A challenge minted under one
+    // session cannot later be spent linking to another account or logging in anonymously.
+    await redis.set(`swat:siwe:${nonce}`,JSON.stringify({chainKind:p.data.chainKind,address,domain,uri,message,
+      sessionId:request.principal?.kind==='user' ? request.principal.sessionId : null}),'EX',NONCE_TTL_SECONDS);
+    return reply.send({nonce,message,expiresAt:new Date(Date.now()+NONCE_TTL_SECONDS*1000).toISOString()});
+  });
+  app.post('/v1/auth/wallet/verify',async(request,reply)=>{
+    const p=verify.safeParse(request.body);
+    if(!p.success) return reply.code(400).send({error:'Bad Request',message:'Invalid verify payload'});
+    const address=normaliseAddress(p.data.chainKind,p.data.address);
+    const nonce=p.data.message.split('\n').find(l=>l.startsWith('Nonce: '))?.slice(7).trim();
+    if(!nonce || !/^[a-f0-9]{32}$/.test(nonce)) return reply.code(400).send({error:'Bad Request',message:'Missing nonce'});
+    const raw=await redis.getdel(`swat:siwe:${nonce}`);
+    if(!raw) return reply.code(410).send({error:'Nonce expired or already used'});
+    let b: {chainKind:string;address:string;domain:string;uri:string;message:string;sessionId:string|null};
+    try { b=JSON.parse(raw); } catch { return reply.code(401).send({error:'Invalid signature'}); }
+    const currentSession=request.principal?.kind==='user' ? request.principal.sessionId : null;
+    if(!b || b.chainKind!==p.data.chainKind || b.address!==address || b.message!==p.data.message
+      || !originSet.has(b.uri) || new URL(b.uri).host!==b.domain || b.sessionId!==currentSession
+      || request.headers.origin!==undefined && request.headers.origin!==b.uri)
+      return reply.code(401).send({error:'Invalid signature'});
+    const result=await verifySignInSignature({...p.data,address,expectedNonce:nonce,expectedDomain:b.domain,expectedUri:b.uri});
+    if(!result.ok) {
+      await store.walletFailure({chainKind:p.data.chainKind,address},{ip:request.ip});
+      return reply.code(401).send({error:'Invalid signature'});
     }
-    const address = normaliseAddress(parsed.data.chainKind, parsed.data.address);
-
-    const nonceLine = parsed.data.message
-      .split('\n')
-      .find((line) => line.startsWith('Nonce: '));
-    const nonce = nonceLine?.slice('Nonce: '.length).trim();
-    if (!nonce) return reply.code(400).send({ error: 'Bad Request', message: 'Missing nonce' });
-
-    // Atomic consume-and-read. GETDEL makes replay impossible: two concurrent
-    // requests with the same nonce cannot both observe it, which a GET-then-DEL
-    // pair would allow.
-    const bound = await redis.getdel(`swat:siwe:${nonce}`);
-    if (!bound) return reply.code(410).send({ error: 'Nonce expired or already used' });
-
-    let boundChain = parsed.data.chainKind;
-    let boundAddr = address;
-    let expectedDomain = options.domain;
-    let expectedUri = options.uri;
-
-    try {
-      const parsedBound = JSON.parse(bound);
-      boundChain = parsedBound.chainKind;
-      boundAddr = parsedBound.address;
-      expectedDomain = parsedBound.domain || options.domain;
-      expectedUri = parsedBound.uri || options.uri;
-    } catch {
-      // Legacy string format fallback
-      if (bound !== `${parsed.data.chainKind}:${address}`) {
-        return reply.code(401).send({ error: 'Invalid signature' });
-      }
-    }
-
-    if (boundChain !== parsed.data.chainKind || boundAddr !== address) {
-      return reply.code(401).send({ error: 'Invalid signature' });
-    }
-
-    const result = await verifySignInSignature({
-      chainKind: parsed.data.chainKind,
-      address,
-      message: parsed.data.message,
-      signature: parsed.data.signature,
-      expectedNonce: nonce,
-      expectedDomain,
-      expectedUri
-    });
-    if (!result.ok) {
-      await recordAuditEvent({
-        actorType: 'anonymous',
-        event: AUDIT_EVENTS.walletLoginFailed,
-        ip: request.ip,
-        metadata: { chainKind: parsed.data.chainKind, address, reason: result.reason }
-      });
-      return reply.code(401).send({ error: 'Invalid signature' });
-    }
-
-    // Authenticated session present → link. Otherwise → wallet-only login.
-    if (request.principal?.kind === 'user') {
-      const scope = forUser(request.principal.user.id);
+    if(request.principal?.kind==='user') {
+      const token=request.cookies[SESSION_COOKIE];
+      if(!token) return reply.code(401).send({error:'Unauthorized'});
       try {
-        const wallet = await linkAuthWallet(scope, {
-          chainKind: parsed.data.chainKind,
-          address
-        });
-        await recordAuditEvent({
-          actorType: 'user',
-          actorId: scope.userId,
-          event: AUDIT_EVENTS.walletLinked,
-          targetType: 'auth_wallet',
-          targetId: address,
-          ip: request.ip
-        });
-        return reply.send({
-          wallet: {
-            chainKind: wallet.chainKind,
-            address: wallet.address,
-            verifiedAt: wallet.verifiedAt
-          }
-        });
-      } catch (error) {
-        if (error instanceof WalletAlreadyLinkedError) {
-          return reply.code(409).send({ error: 'Wallet already linked to another account' });
-        }
-        throw error;
+        const w=await store.linkWallet(token,{chainKind:p.data.chainKind,address},{ip:request.ip});
+        return reply.send({wallet:{chainKind:w.chainKind,address:w.address,verifiedAt:w.verifiedAt}});
+      } catch(e) {
+        if(e instanceof WalletAlreadyLinkedError) return reply.code(409).send({error:'Wallet already linked to another account'});
+        if((e as {code?:string}).code==='28000') return reply.code(401).send({error:'Unauthorized'});
+        throw e;
       }
     }
-
-    const userId = await findUserIdByAuthWallet(parsed.data.chainKind, address);
-    if (!userId) {
-      // A proven signature for an unlinked wallet is not an account. Creating one
-      // here would let anyone with a keypair mint accounts without an email.
-      return reply.code(401).send({ error: 'Wallet not linked to any account' });
-    }
-    const user = await findUserById(userId);
-    if (!user || user.status !== 'active') {
-      return reply.code(403).send({ error: 'Account suspended' });
-    }
-    await establishSession(reply, user, request.ip, request.headers['user-agent'] ?? null);
-    await recordAuditEvent({
-      actorType: 'user',
-      actorId: user.id,
-      event: AUDIT_EVENTS.login,
-      ip: request.ip,
-      metadata: { method: 'wallet', chainKind: parsed.data.chainKind }
-    });
-    return reply.send({ user: publicUser(user) });
+    return admission(reply,await store.walletLogin({chainKind:p.data.chainKind,address},{ip:request.ip,userAgent:request.headers['user-agent']}),200,true);
   });
 }

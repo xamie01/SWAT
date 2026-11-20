@@ -1,13 +1,13 @@
 import type { PoolClient } from 'pg';
 import { assertExactExitQuantity } from './lot-allocation.js';
 import { recordCopyExecutionEvidenceWithClient, transitionCopyExecutionWithClient,
-  type CopyExecutionRecord, type RecordCopyExecutionEvidenceInput } from './copy-trade-lifecycle.js';
+  type CopyExecutionRecord, type RecordCopyExecutionEvidenceInput } from './copy-trade-lifecycle-owned.js';
 import { createHash } from 'node:crypto';
 import { settleFanoutDelivery, type FanoutDeliveryClaim } from './package13-fanout-delivery.js';
 import { appendWorkerValuationCorrectionWithClient, readWorkerFinancialTotalsWithClient, projectWorkerEconomicsWithClient,
   type WorkerValuationCorrectionInput } from './worker-valuation-corrections.js';
-import { updateRiskSpendReservation, type RiskSpendScope } from './risk-policy.js';
-import { insertTradeWithClient } from './trades.js';
+import { updateRiskSpendReservation, type RiskSpendScope } from './risk-spend-owned.js';
+import { insertTradeWithClient } from './trades-owned.js';
 import { assertWorkerAttemptWithClient, finishWorkerAttemptWithClient, type WorkerAttempt } from './worker-execution.js';
 export type WorkerReceiptOwnership = (client: PoolClient, attempt: WorkerAttempt,
   evidence: RecordCopyExecutionEvidenceInput) => Promise<void>;

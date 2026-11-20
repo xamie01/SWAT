@@ -9,6 +9,7 @@
   "intervalSeconds": 10,
   "minQueueAdmissions": 8000,
   "baseUrl": "http://127.0.0.1:3001",
+  "migrationSelection": null,
   "expectedDatabase": "swat_wave4_disposable",
   "seedDb": { "host": "127.0.0.1", "port": 5432, "database": "swat_wave4_disposable", "user": "swat_migrator", "password": "SET_PRIVATELY" },
   "monitorDb": { "host": "127.0.0.1", "port": 5432, "database": "swat_wave4_disposable", "user": "wave4_observer", "password": "SET_PRIVATELY" },

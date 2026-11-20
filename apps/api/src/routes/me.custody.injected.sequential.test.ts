@@ -27,8 +27,12 @@ async function setup() {
     proof: 'independent-fixture-proof', validUntil: '2026-11-17T12:01:00.000Z', policyDigest: custodyPolicyDigest({ purpose: 'local-only' }),
     deploymentVerified: true, input: { chain: body.chain, grantKind: body.grantKind, accountAddress: body.accountAddress,
       secret: Uint8Array.from([7, 8, 9]), scopePolicy: { purpose: 'local-only' }, expiresAt: null } };
-  const verified = vi.fn(async <T>(_scope: unknown, _request: unknown, commit: (value: VerifiedEnrollmentContext) => Promise<T>) => commit(context));
-  const ports: MeCustodyPorts = { enrollment, now: () => now, deploymentId: 'inert-deployment', chainIds: { polygon: '137' }, withVerifiedConsent: verified };
+  const verified = vi.fn();
+  const withVerifiedConsent: MeCustodyPorts['withVerifiedConsent'] = async (_scope, _request, commit) => {
+    verified(_scope, _request);
+    return commit(context);
+  };
+  const ports: MeCustodyPorts = { enrollment, now: () => now, deploymentId: 'inert-deployment', chainIds: { polygon: '137' }, withVerifiedConsent };
   const app = Fastify({ logger: false }); apps.push(app);
   app.addHook('onRequest', async request => {
     const id = request.headers['x-fixture-user']; if (typeof id === 'string') request.principal = { kind: 'user', sessionId: null, user: { id } as never };

@@ -36,8 +36,11 @@ export async function createEvidenceWriter(directory: string) {
   const names = new Set<string>();
   let pending = Promise.resolve();
   const failures: Error[] = [];
+  let sealed = false;
   return {
+    seal() { sealed = true; },
     write(file: string, value: unknown): Promise<EvidenceRecord> {
+      requireCheck(!sealed, 'Evidence capture is sealed');
       requireCheck(/^[a-z][a-z0-9-]{0,100}\.json$/.test(file) && !names.has(file), 'Unique bounded evidence filename required');
       const safe = nonsecretEvidence(value);
       const bytes = Buffer.from(JSON.stringify(safe, null, 2) + '\n');

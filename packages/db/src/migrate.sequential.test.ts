@@ -59,7 +59,9 @@ vi.mock('./client.js', async () => {
   const { Client } = await import('pg');
   return { pool: { connect: async () => new Client() }, closePool: async () => {} };
 });
-import { discoverMigrations } from './migration-discovery.js';
+import { discoverMigrationInventory, discoverMigrations } from './migration-discovery.js';
+import { createMigrationSelectionProposal, reviewMigrationSelection } from './migration-selection.js';
+import { createInstallationPlan } from './installation-plan.js';
 import { runMigrations } from './migrate.js';
 const checksum = (text: string) => createHash('sha256').update(text).digest('hex');
 const records = () => Object.entries(db.files).sort().map(([file, sql]) => ({ file, checksum: checksum(sql), installed_checksum: checksum(sql), audit_reference: null }));
@@ -166,11 +168,25 @@ it('serializes two actual runner invocations at the dedicated-session seam', asy
   resume(); await first;
   expect(db.held).toBe(false); expect(db.ends).toBe(2); expect(db.applied).toEqual([]);
 });
+it.each(['installed_checksum', 'audit_reference'])('refuses forged reviewed-plan %s before migration work', async field => {
+  const sqlDir = fileURLToPath(new URL('../sql', import.meta.url));
+  const selection = reviewMigrationSelection(createMigrationSelectionProposal(await discoverMigrationInventory(sqlDir)), 'offline-migration-identity-not-runtime-authorization');
+  const source = await discoverMigrations(sqlDir, undefined, undefined, selection);
+  const plan = createInstallationPlan(source, { selection, auditReference: selection.auditReference });
+  db.journal = plan.migrations.map(m => ({ file: m.file, checksum: m.checksum, installed_checksum: m.installedChecksum, audit_reference: m.auditReference }));
+  const index = db.journal.findIndex(row => row.installed_checksum !== row.checksum);
+  db.journal[index][field] = field === 'installed_checksum' ? db.journal[index].checksum : 'unrelated-audit';
+  await expect(runMigrations({ sqlDir, selection })).rejects.toThrow('exact reviewed source/installed/audit');
+  expect(db.statements).not.toContain('BEGIN');
+  expect(db.applied).toEqual([]);
+});
 it('skips the real checked-in 066/067 source SQL when the whole source history is recorded', async () => {
   const sqlDir = fileURLToPath(new URL('../sql', import.meta.url));
-  const source = await discoverMigrations(sqlDir);
-  db.journal = source.map(m => ({ file: m.file, checksum: m.checksum, installed_checksum: m.checksum, audit_reference: null }));
-  await runMigrations({ sqlDir });
+  const selection = reviewMigrationSelection(createMigrationSelectionProposal(await discoverMigrationInventory(sqlDir)), 'offline-migration-skip-not-runtime-authorization');
+  const source = await discoverMigrations(sqlDir, undefined, undefined, selection);
+  const plan = createInstallationPlan(source, { selection, auditReference: selection.auditReference });
+  db.journal = plan.migrations.map(m => ({ file: m.file, checksum: m.checksum, installed_checksum: m.installedChecksum, audit_reference: m.auditReference }));
+  await runMigrations({ sqlDir, selection });
   expect(db.statements).not.toContain(source.find(m => m.file === '066_lp_dashboard.sql')!.sql);
   expect(db.statements).not.toContain(source.find(m => m.file === '067_lp_auto_rebalance.sql')!.sql);
   expect(db.statements).not.toContain('BEGIN');

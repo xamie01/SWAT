@@ -7,6 +7,7 @@ export const WAVE4_REFUSAL = {
   reason: '084 is a preserved refusal proposal, not executable authority; reviewed protected admission 085 and restricted composition 086 replace its proposed grants.'
 } as const;
 export const WAVE4_COMPOSITION_FILE = '086_wave4_restricted_composition.sql';
+export const WAVE4_AUTHENTICATION_FILE = '087_wave4_protected_authentication.sql';
 export const REVIEWED_085_CHECKSUM = '3abc3a000b11051a2b46243a845b7b29e74979d791550160592a7f403513e0d6';
 export type MigrationIdentity = { readonly file: string; readonly checksum: string };
 export type MigrationSelectionProposal = {
@@ -29,7 +30,7 @@ export function requireAuditReference(value: unknown): asserts value is string {
       || /[\x00-\x1f\x7f]/.test(value)) throw new Error('Explicit bounded external audit reference required');
 }
 function identities(inventory: readonly MigrationFile[]): MigrationIdentity[] {
-  if (inventory.length !== 86) throw new Error('Wave4 selection requires complete 001–086 inventory including refused 084');
+  if (inventory.length !== 87) throw new Error('Wave4 selection requires complete 001–087 inventory including refused 084');
   return inventory.map((migration, index) => {
     if (!new RegExp(`^${String(index + 1).padStart(3, '0')}_[a-z0-9_]+\\.sql$`).test(migration.file)
         || !/^[a-f0-9]{64}$/.test(migration.checksum)
@@ -42,7 +43,7 @@ export function createMigrationSelectionProposal(inventory: readonly MigrationFi
   const all = identities(inventory);
   if (all[83]?.file !== WAVE4_REFUSAL.file || all[83]?.checksum !== WAVE4_REFUSAL.checksum
       || all[84]?.file !== '085_lp_protected_paper_admission.sql' || all[84]?.checksum !== REVIEWED_085_CHECKSUM
-      || all[85]?.file !== WAVE4_COMPOSITION_FILE) throw new Error('Wave4 reviewed/refusal source identity drift');
+      || all[85]?.file !== WAVE4_COMPOSITION_FILE || all[86]?.file !== WAVE4_AUTHENTICATION_FILE) throw new Error('Wave4 reviewed/refusal source identity drift');
   const body = { version: 1 as const, purpose: 'wave4-authorized-qualification' as const,
     inventory: all, included: all.filter(row => row.file !== WAVE4_REFUSAL.file), excluded: [{ ...WAVE4_REFUSAL }] };
   return { ...body, manifestChecksum: sourceChecksum(JSON.stringify(body)) };

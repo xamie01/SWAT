@@ -282,9 +282,9 @@ describe('package15 availability generated SQL and retained source refusal', () 
     expect(reservations(calls)).toEqual([]);
   });
   it('wires both source reservation branches to actual caller-client availability without aggregate/Number fallback (structural only behind verifier)', () => {
-    const source = readFileSync(new URL('./copy-trade-lifecycle.ts', import.meta.url), 'utf8');
-    for (const [start, end] of [['export async function requestCopyExecution', 'export interface LotExitExecutionInput'],
-      ['export async function claimSourceSignalForCopyExecution', 'export async function transitionCopyExecution']]) {
+    const source = readFileSync(new URL('./copy-trade-lifecycle-owned.ts', import.meta.url), 'utf8');
+    for (const [start, end] of [['function prepareRequestCopyExecutionTerms', 'export interface LotExitExecutionInput'],
+      ['export async function claimSourceSignalForCopyExecutionWithClient', 'export async function transitionCopyExecutionWithClient']]) {
       const body = source.slice(source.indexOf(start), source.indexOf(end));
       expect(body).toContain('await getMasterSellAvailabilityWithClient(client,');
       expect(body).toContain('masterWalletAddress: source.wallet_address');

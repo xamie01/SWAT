@@ -1,3 +1,4 @@
+import { AUTH_FUNCTION_SIGNATURES } from './auth-provisioning.js';
 import { requireAuditReference } from '../../packages/db/src/migration-selection.js';
 
 export type RoleCapability = { readonly role: string; readonly kind: 'runtime' | 'migrator' | 'writer' | 'service' | 'observer' | 'function-owner';
@@ -9,7 +10,8 @@ export const SOURCE_CAPABILITY_MATRIX = {
   custodyWriter: { role: 'swat_custody_writer', kind: 'writer', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: ['081 custody admissions'] },
   financialReceiptWriter: { role: 'swat_financial_receipt_writer', kind: 'writer', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: ['082 independent receipts/accounting'] },
   lpAdmitter: { role: 'swat_lp_admitter', kind: 'writer', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: ['085 tenant paper admissions'] },
-  authService: { role: 'swat_auth_service', kind: 'service', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: [] },
+  authService: { role: 'swat_auth_service', kind: 'service', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: ['087 fixed protected authentication; external committed owner handoff required'] },
+  authOwner: { role: 'swat_auth_owner', kind: 'function-owner', login: 'never', ownsObjects: true, schemaCreate: false, sourceCapabilities: ['087 exact fixed auth routines only; direct external DBA handoff'] },
   systemObserver: { role: 'swat_system_observer', kind: 'observer', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: ['pg_control_system only; no tenant grants'] },
   sourceProviderWriter: { role: 'swat_source_provider_writer', kind: 'writer', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: [] },
   riskWriter: { role: 'swat_risk_writer', kind: 'writer', login: 'externally-approved-direct-only', ownsObjects: false, schemaCreate: false, sourceCapabilities: ['072 policy control; disabled during migration'] },
@@ -29,15 +31,18 @@ export type RoleIdentity = {
   readonly ownedFunctionSignatures?: readonly string[];
 };
 export const FUNCTION_OWNER_ALLOWLIST = {
+  authOwner: AUTH_FUNCTION_SIGNATURES,
   runtimeLookup: ['public.swat_claim_runtime_capability(uuid)', 'public.has_worker_execution_capability(uuid)'],
   financialSettler: ['public.swat_apply_perps_reducing_receipt(uuid,text)', 'public.w3_apply_financial_receipt()',
     'public.w3_perps_accounting_requires_application()', 'public.swat_cancel_expired_financial_intent(uuid)', 'public.w3_guard_perps_position_mutation()']
 } as const;
-/** Checks observed facts, not environment labels or assumed login authority. Caller supplies real catalog evidence. */
+/** Checks caller-supplied observed facts for consistency only. Owner reports and reviewed
+ * manifests are not authenticated authorization or a substitute for catalog validation. */
 export function validateRoleIdentity(key: ProvisionedRole, identity: RoleIdentity, phase: 'disabled' | 'active-direct'): void {
   const capability = SOURCE_CAPABILITY_MATRIX[key];
   const allowedFunctions: readonly string[] = key === 'runtimeLookup' ? FUNCTION_OWNER_ALLOWLIST.runtimeLookup
-    : key === 'financialSettler' ? FUNCTION_OWNER_ALLOWLIST.financialSettler : [];
+    : key === 'financialSettler' ? FUNCTION_OWNER_ALLOWLIST.financialSettler
+    : key === 'authOwner' ? FUNCTION_OWNER_ALLOWLIST.authOwner : [];
   if (identity?.ownsFunctions && capability?.kind === 'function-owner'
       && (!Array.isArray(identity.ownedFunctionSignatures) || !identity.ownedFunctionSignatures.length
         || new Set(identity.ownedFunctionSignatures).size !== identity.ownedFunctionSignatures.length
@@ -61,8 +66,15 @@ export function validateRoleIdentity(key: ProvisionedRole, identity: RoleIdentit
 export type LoginLifecycleApproval = { readonly role: ProvisionedRole; readonly auditReference: string;
   readonly expiresAt: string; readonly credentialProvisionedExternally: true; readonly sessionsDrained: true;
   readonly sourceCapabilitiesIndependentlyQualified: true };
-/** Separate external lifecycle source, not an execution API. No password material, SET ROLE or membership grant. */
-export function createLoginActivationSource(approval: LoginLifecycleApproval, now: Date): { sql: string; disableSql: string; auditReference: string } {
+export type LoginActivationSource = Readonly<{ sql: string; disableSql: string; auditReference: string;
+  passwordValidUntil: string;
+  requiredExternalDisable: Readonly<{ scheduledNoLoginAt: string; sessionDrainAt: string; enforcedByThisSource: false }> }>;
+/** External lifecycle SOURCE ONLY. VALID UNTIL expires password authentication, not
+ * LOGIN authority or existing sessions (and not certificate/peer authentication).
+ * An external DBA must schedule NOLOGIN and session drain at the declared deadline;
+ * this API neither installs that schedule nor authenticates the approval artifacts.
+ */
+export function createLoginActivationSource(approval: LoginLifecycleApproval, now: Date): LoginActivationSource {
   requireAuditReference(approval?.auditReference);
   const role = SOURCE_CAPABILITY_MATRIX[approval.role];
   const expiry = Date.parse(approval.expiresAt);
@@ -70,6 +82,8 @@ export function createLoginActivationSource(approval: LoginLifecycleApproval, no
       || approval.sourceCapabilitiesIndependentlyQualified !== true || !Number.isFinite(now.getTime())
       || !Number.isFinite(expiry) || new Date(expiry).toISOString() !== approval.expiresAt
       || expiry <= now.getTime() || expiry > now.getTime() + 86_400_000) throw new Error('Explicit bounded direct LOGIN lifecycle approval required');
-  return { sql: `-- EXTERNAL DBA ONLY; validateRoleIdentity(disabled) first; runtime/risk stay disabled throughout migration.\nALTER ROLE ${role.role} LOGIN VALID UNTIL '${approval.expiresAt}';`,
-    disableSql: `ALTER ROLE ${role.role} NOLOGIN PASSWORD NULL; -- Drain/terminate surviving sessions externally; NOLOGIN does not disconnect them.`, auditReference: approval.auditReference };
+  return { sql: `-- EXTERNAL DBA ONLY; validateRoleIdentity(disabled) first; runtime/risk stay disabled throughout migration.\n-- VALID UNTIL expires passwords ONLY. External scheduled NOLOGIN AND session drain REQUIRED at ${approval.expiresAt}.\nALTER ROLE ${role.role} LOGIN VALID UNTIL '${approval.expiresAt}';`,
+    disableSql: `ALTER ROLE ${role.role} NOLOGIN PASSWORD NULL; -- Drain/terminate surviving sessions externally; NOLOGIN does not disconnect them.`,
+    auditReference: approval.auditReference, passwordValidUntil: approval.expiresAt,
+    requiredExternalDisable: Object.freeze({ scheduledNoLoginAt: approval.expiresAt, sessionDrainAt: approval.expiresAt, enforcedByThisSource: false }) };
 }

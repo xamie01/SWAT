@@ -84,6 +84,21 @@ describe('joined evidence session, injected capabilities only', () => {
     expect(await readdir(directory)).not.toContain('late.json');
     expect((await read(directory, 'evidence-index.json')).records.some((r: { file: string }) => r.file === 'raw-snapshot.json')).toBe(true);
   }));
+  it('seals evidence before an uncooperative inspection resumes after report return', async () => withOutput(async directory => {
+    let finish: () => void = () => {};
+    const report = await runEvidenceQualification(config(), directory, { ...ports(), inspect: (_c, deadline) => {
+      const work = new Promise<void>(resolve => { finish = resolve; });
+      deadline.abort();
+      return work;
+    } });
+    const before = (await readdir(directory)).sort();
+    expect(report.containmentComplete).toBe(false);
+    expect(report.pendingWork).toBe(1);
+    finish();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect((await readdir(directory)).sort()).toEqual(before);
+    expect(before).not.toContain('inspection.json');
+  }));
   it('never overwrites an existing evidence directory', async () => withOutput(async directory => {
     await runEvidenceQualification(config(), directory, ports());
     const p = ports();

@@ -1,48 +1,40 @@
-# Wave4 main build checkpoint — 2026-11-18
+# Wave 4 main build checkpoint — 2026-11-20
 
-**Outcome: 422 offline tests across 15 files and qualification typecheck21 pass. The repaired one-close SQL observer, unwired admission comparison contract, credential repair and SQL084 refusal received narrow independent acceptance; whole Wave4 remains incomplete.** The original gates and added load subgate are preserved. No services, Docker inspection, SQL application, seeding, real credentials, fault children, signing or load traffic ran.
+**P3 authentication retains bounded independent source acceptance; P4a owned production pipeline foundations started2026-11-20.** The preceding frozen checkpoint passed948 main offline tests/36 files,46 separate load contracts and five noEmit checks. Those passes do not cover new P4 bytes. One implementation owner is active; verification waits for source freeze. Wave4 remains source-incomplete, and dependent Wave5 runtime remains blocked. [Remaining-work map](WAVE4-REMAINING-WORK.md) records the full sequence.
 
-## Current source coverage
+## Source and review boundaries
 
-- Shared monotonic deadlines, owned PG/Redis/command/child lifetimes, private bounded no-follow configuration reads and numeric tmpfs/resource checks remain implemented as source/mocked contracts. Socket destruction does not prove server COMMIT rollback.
-- Actual SQL-store LP acquisition/rebalance/close/recovery and controlled rollback/competing schedules remain unexecuted source. IPC acknowledgement is not BullMQ completion.
-- Genuine same-job BullMQ normal stall/redelivery retains narrowly accepted queue repairs: run-derived namespace and Redis identity, owned Worker post-COMMIT kill boundary, persisted attempts/stalls/events and exact immutable receipt/acquisition/history/economics reconciliation. No actual queue ran.
-- Catalog retains exact migration rows and digests; credential components are decoded once and password stays in PGPASSWORD.
-- Withdrawal has 35 injected actual-service/store contracts for OTP/idempotency/one-use/cooling/reservation/refusal and reducing admission, not deployed OTP/dispatch/receipt/collateral composition.
-- LP-copy has 32 actual-service/inert-store contracts for independent BigInt sizing, provenance/budget/receipt/closed economics/replay, plus a concrete ONE-CLOSE SQL observer with 30 injected transcript contracts and narrow repaired acceptance. Authenticated owned runtime composition, actual lock/COMMIT proof and protected initialization remain missing.
-- Custody has 16 contracts using explicit synthetic bytes and fresh local AEAD, full binding/lifecycle/ABA/expiry/zeroing checks. No wallet key, signing, deployed wrap/unwrap identity or delegation proof.
-- Pipeline has 56 inert journal reconciliation contracts for buy/sell/reversal/correction/replay, not a protected executed pipeline. Public entrypoint remains refused.
-- A new unwired admission comparison contract has 26 synthetic contracts for full quote/context/actual settlement binding, independent record absence, exact rebalance positivity and chronology. Narrow repaired comparison-only review is accepted; no protected registry, writer, SQL/store/service integration or authority exists. See `WAVE4-LP-ADMISSION-SOURCE.md`.
-- SQL084 now refuses application before all eleven proposed grants, which remain inside the same block. Proposed trigger/body prerequisites are stronger but unexecuted. SQL083 remains unchanged and its independent receipt-admission/economic boundary remains unresolved.
+- P1 protected LP admission and P2 repaired migration installation retain narrow independent source acceptance. SQL083 is preserved, 084 remains refused, and 085–087 are unapplied.
+- Canonical selection is 001–087 excluding pinned084: 86 migrations. The existing 079/082 broker remains exactly seven transfers; 087 installs inert auth objects followed only by separate committed external DBA handoff and bounded external activation.
+- The [second independent repair review](WAVE4-AUTHENTICATION-SECOND-REPAIR-REVIEW.md) resolved B (shared target binding) and C (runtime lease custody), while retaining **REJECT** for incoming FKs whose child was outside the auth inventory. Original findings 1/3/4/5/6 remain resolved. All preceding reviews are preserved as historical evidence.
+- The latest four-file repair removes the ANY-FK exemption and independently pins 42 legitimate external-child plus five auth-child constraints: 47 constraints and 188 enforcement paths. It validates exact constraint/enforcement closure and rejects additional, orphaned or spoofed touching paths, including a private-table wallet unlink blocker. [Fresh independent read-only re-review](WAVE4-AUTHENTICATION-FK-CLOSURE-REVIEW.md) returned **ACCEPT for bounded P3 source**, closing original findings1–6 and A/B/C. The reviewer did not reproduce tests or independently authenticate the manifest; coordinator artifact reconciliation is separate.
+- Actual LP authoritative injection, policy-helper/catalog/PUBLIC ACL closure, late capability poison fences, integrated nonce/signature/origin/session-intent wallet route execution and separate-client overlap source remain implemented. Synthetic catalog/lock fixtures do not prove PostgreSQL behavior.
+- Evidence writer13, evidence session14, lifetime4 and owned obligation38 contracts retain their earlier scope and open independent review. Positive pipeline56 cases still reconcile inert journals rather than execute the protected production pipeline. Queue and local financial-domain contracts retain their earlier bounded scope.
 
-## Independent review
+Detailed repairs and artifact reconciliation are in [WAVE4-AUTHENTICATION-FK-CLOSURE-CHECKPOINT.md](WAVE4-AUTHENTICATION-FK-CLOSURE-CHECKPOINT.md). Earlier [781/36](WAVE4-AUTHENTICATION-SECOND-REPAIR-CHECKPOINT.md) and [748/36](WAVE4-AUTHENTICATION-REPAIR-CHECKPOINT.md) checkpoints remain historical.
 
-Expanded reviewer `agent_2c9a653b-3ab4-41b1-a6c5-57e942cf5018` withheld acceptance for incomplete SQL084 trigger/function checks, SQL083 tenant-writable paper receipts without independently admitted quote/economic binding, and URL-encoded catalog credentials. Narrow reviewer `agent_4f7b29ea-0748-4d30-9ba6-63ebb0adf334` accepted credential repair and unconditional proposal containment after six focused reads. That acceptance is not usable migration, installed ACL, whole-source or runtime acceptance. HIGH receipt integrity remains unresolved. See `WAVE4-REVIEW-REPAIRS.md`. Earlier queue affected-source acceptance is preserved separately. Reviewer `agent_ecbee261-52f0-447d-9347-6d915b119aba` confirmed narrow repaired ONE-CLOSE observer acceptance after two targeted Reads; actual transaction ownership, authentication, cancellation, COMMIT and concurrency remain unproven. The reviewer did not verify raw command results; the coordinator reconciled those separately. See `WAVE4-LP-COPY-OBSERVER-REVIEW.md`.
+## Frozen verification
 
-## Actual offline verification
-
-All checks ran sequentially via CPU0 shared flock and `scripts/build-completion-runner.py`; synthetic environment and offline Node network/credential guard. Tests use one fork/512MB heap; compiler 640MB. Heap bounds are not process RSS/cgroup limits.
-
-| Current check | Result |
+| Immutable check label | Result |
 | --- | --- |
-| build-w4-main-offline-23 | 422 passed, zero failed/skipped/todo; 15 literal files; exit0 |
-| build-w4-main-typecheck-21 | Qualification noEmit, incremental false; exit0 |
+| `build-w4-auth-fkclosure-main-offline-01` | 948 passed; 36 unique literal files; zero failed/skipped/todo |
+| `build-w4-auth-fkclosure-load-offline-01` | 46 passed; one file; real MJS source-loader child exercised |
+| `build-w4-auth-fkclosure-db-typecheck-01` | DB noEmit, incremental false; exit 0 |
+| `build-w4-auth-fkclosure-qualification-typecheck-01` | Qualification noEmit, incremental false; exit 0 |
+| `build-w4-auth-fkclosure-api-typecheck-01` | API noEmit; exit 0 |
+| `build-w4-auth-fkclosure-api-tests-typecheck-01` | API tests noEmit; exit 0 |
+| `build-w4-auth-fkclosure-lp-typecheck-01` | LP noEmit; exit 0 |
 
-Per-file totals: orchestrator38, containment39, rollback4, queue56, catalog9, LP privileges10, withdrawal35, pipeline56, LP-copy32, LP-copy observer30, admission comparison26, custody16, Package28 preflight56, Package28 containment2, schema13.
+All seven first-run checks share immutable consumed-input manifest `738c69d08ce17fdd2cda58f9eb5fa75bd5dc95854495fbb8eaa4adb7a024dcf6` and report unchanged inputs. Current complete runner inputs match; report-only ledger/checkpoint/review edits are excluded by runner policy. Reconciliation validates raw command/log/result/manifest byte hashes and exact literal file/assertion inventories. The 59 preceding recorded checks were also validated against their historical artifacts. Config approval hashes and protected SQL083/084/087 and installation-plan pins remain unchanged.
 
-Shared consumed-input manifest: `1dfae5d1bb77647abd90bc5360979bff58dcd984797fc9571993d6375b4d0c19`. Both commands report workspaceInputsUnchanged=true. Coordinator reconciliation checked raw command/log/result/input hashes, literal inventory and all current consumed code/config/SQL bytes with zero mismatches. Documentation-only reconciliation followed. Raw artifacts remain local; compact records are in `WAVE4-MAIN-EVIDENCE.json`.
+Checks ran sequentially through `build-completion-runner.py` under CPU0 shared flock, one test fork/512MB Node heap and compiler640MB, synthetic environment and offline network/credential guard. `timeoutSeconds:null` removes runner wall-clock caps, not application transaction/operation/cancellation/shutdown/load-drain deadlines. Heap caps are not RSS/cgroup limits. Fresh DB emit `build-w4-auth-repair-db-emit-01` remains separately recorded; this round did not alter emitted DB implementation source.
 
-Earlier passing 208/344/360/366/394 checkpoints and the396 checkpoint and intermediate396 checks are superseded, not summed. Retained failures include offline05 (two fixture/static-contract errors), typecheck05/09 (typing), expanded offline15 (334 passed/10 failed from one-rung fixture versus required two-rung plan), typecheck13 (missing/narrowed types), typecheck17 (hostile toString return annotation) and typecheck19 (readonly mutation fixture). The observer compiler repairs were test-only and did not weaken production readonly types. Production validation was not weakened; fixture allocations conserve exact BigInt capital. Historical LP160/DB/runner checks retain their own inputs and are not current full-workspace rechecks.
+No check failed in the incoming-FK repair epoch. Earlier second-repair fixture/promisification, wrapped-error and mock lease-type failures remain retained, along with historical 781/36, 748/36, 709/35, 602/24 and earlier epochs. They are never summed into current or runtime coverage. `git diff --check` passes.
 
-## Every remaining gate
+## Remaining implementation and acceptance
 
-- **I1:** independently owned infrastructure/images/migrations/catalog/identity, narrow observer capability, actual server/socket/child settlement and measured resource/shutdown containment.
-- **I2:** safe authenticated login/pre-session/global-read composition, least-privilege roles and real forced RLS/PgBouncer reset/limits; usable canonical LP privileges and protected receipt admission. SQL084 refusal is containment, not completion.
-- **I3:** concrete pool-free protected source/provider/capture/obligation/fanout/worker/receipt/valuation composition and actual durable pipeline journals.
-- **I4:** deployed distinct custody/delegation/OTP/funding/receipt/mapping composition, canonical reducing/collateral/accounting and concrete authenticated LP observers; hostile SQL receipt/economic integrity proof.
-- **I5:** canonical claims, post-lock expiry/cancel, cross-tenant/account/fee races, actual controlled lock/rollback evidence and exact conservation.
-- **I6:** actual accepted same-job queue execution plus missing Redis-loss/source/outbox/canonical fault source and uncertain reconciliation. Wording is current; functional gaps remain.
-- **I7:** independently joined durable load completions/economics and actual PostgreSQL/PgBouncer/Redis/BullMQ/host/app/worker/generator observations. Accepted 44-contract portable load addition remains unchanged and unexecuted; it still pins SQL083, so the future baseline needs affected review.
-- **I8:** whole repaired source review, authorized actual I1–I7 evidence, frozen artifact/source/config joins, cleanup and coordinator acceptance. No such acceptance exists.
+P3 bounded source acceptance is reconciled. P4a now implements shared mandatory-client lifecycle/intake/signal/trade/risk, explicit fanout/worker/quote imports, mirror state and production owned obligation reuse. It requires fresh containment/injected/affected checks and independent review before slice acceptance. P4b protected backing/provisioning and P4c executed scenario/durable observer remain, followed by P5 financial integration, P6 races/faults, P7 durable load correctness, P8 private coordinator/cleanup and P9 final audit. These are coding work, not merely missing credentials.
 
-Precise separately authorized disposable environment/tool/target/image/provision/migration/seed/fault/load/cleanup inputs are absent. They must not be improvised. `sourceComplete=false`, `runtimeAccepted=false`, `liveCapabilityAccepted=false`, `productionReady=false`; public CLI/pipeline/Package28 refusals remain. Wave5 is blocked. No commit/push/publication.
+Actual PostgreSQL16 catalog/deparser/RLS/ACL/locking/COMMIT, Redis7/BullMQ/PgBouncer, 100000-user seed, random10000 pool and 9000-peak staged load require separately authorized disposable infrastructure and real observations. No runtime services, real Docker inspection, SQL application, seeding, actual load traffic, real credentials, live signing capability, funds, commit, push or publication occurred. Offline tests used synthetic catalog/lock fixtures, ephemeral signatures and source-loader children only.
+
+`authenticationSourceAccepted=true` is bounded P3 source acceptance only. `sourceComplete=false`, `runtimeAccepted=false`, `liveCapabilityAccepted=false`, `productionReady=false`. Public qualification/pipeline and Package28 refusals remain.

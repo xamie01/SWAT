@@ -1,15 +1,17 @@
-type PoolClient = Parameters<Parameters<typeof import('@swat/db').withTransaction>[0]>[0];
+import type { PoolClient } from 'pg';
 import type { Chain, ExecutionMode } from '@swat/shared';
-import {
-  assertLotExitExecutionMatches, claimLotExitExecutionWithClient,
-  normalizeTenantId, readWorkerExecutionContextWithClient, readCapturedWorkerPolicyWithClient,
-  readCurrentWorkerPolicyWithClient, prepareWorkerAttemptWithClient, markWorkerAttemptDispatchedWithClient,
-  reserveRiskSpend, updateRiskSpendReservation, settleWorkerFillWithClient, retainWorkerUncertaintyWithClient,
-  type CopyExecutionRecord, type WorkerExecutionContext, type WorkerAttempt, type RiskSpendScope,
-  type WorkerPolicySnapshot, type RecordCopyExecutionEvidenceInput,
-  claimFanoutDelivery, assertCanonicalFanoutDescriptor, settleFanoutDelivery,
-  type FanoutDeliveryClaim, type FanoutDeliveryRow
-} from '@swat/db';
+import { claimLotExitExecutionWithClient, normalizeTenantId,
+  type CopyExecutionRecord, type RecordCopyExecutionEvidenceInput } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
+import { assertLotExitExecutionMatches } from '@swat/db/dist/lot-allocation.js';
+import { readWorkerExecutionContextWithClient, prepareWorkerAttemptWithClient, markWorkerAttemptDispatchedWithClient,
+  type WorkerExecutionContext, type WorkerAttempt } from '@swat/db/dist/worker-execution.js';
+import { readCapturedWorkerPolicyWithClient, readCurrentWorkerPolicyWithClient,
+  type WorkerPolicySnapshot } from '@swat/db/dist/worker-policy.js';
+import { settleWorkerFillWithClient, retainWorkerUncertaintyWithClient } from '@swat/db/dist/worker-settlement.js';
+import { reserveRiskSpend, updateRiskSpendReservation, type RiskSpendScope } from '@swat/db/dist/risk-spend-owned.js';
+import { claimFanoutDelivery, settleFanoutDelivery,
+  type FanoutDeliveryClaim, type FanoutDeliveryRow } from '@swat/db/dist/package13-fanout-delivery.js';
+import { assertCanonicalFanoutDescriptor } from '@swat/db/dist/fanout-worker-descriptor.js';
 import { evaluateExecutionPolicy } from './policy.js';
 import type { ExecutionAuthorityResolver, GrantedExecutionAuthority } from './execution-authority.js';
 function authorityTerms(authority: GrantedExecutionAuthority): string {

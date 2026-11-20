@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PoolClient } from 'pg';
 const mocks = vi.hoisted(() => ({ evidence: vi.fn(), transition: vi.fn(), capacity: vi.fn(), risk: vi.fn(), trade: vi.fn(),
   totals: vi.fn(), correction: vi.fn(), delivery: vi.fn(), assert: vi.fn(), finish: vi.fn() }));
-vi.mock('./copy-trade-lifecycle.js', () => ({ recordCopyExecutionEvidenceWithClient: mocks.evidence, transitionCopyExecutionWithClient: mocks.transition }));
+vi.mock('./copy-trade-lifecycle-owned.js', () => ({ recordCopyExecutionEvidenceWithClient: mocks.evidence, transitionCopyExecutionWithClient: mocks.transition }));
 vi.mock('./worker-valuation-corrections.js', () => ({ readWorkerFinancialTotalsWithClient: mocks.totals,
   projectWorkerEconomicsWithClient: mocks.capacity, appendWorkerValuationCorrectionWithClient: mocks.correction }));
 vi.mock('./package13-fanout-delivery.js', () => ({ settleFanoutDelivery: mocks.delivery }));
-vi.mock('./risk-policy.js', () => ({ updateRiskSpendReservation: mocks.risk }));
-vi.mock('./trades.js', () => ({ insertTradeWithClient: mocks.trade }));
+vi.mock('./risk-spend-owned.js', () => ({ updateRiskSpendReservation: mocks.risk }));
+vi.mock('./trades-owned.js', () => ({ insertTradeWithClient: mocks.trade }));
 vi.mock('./worker-execution.js', () => ({ assertWorkerAttemptWithClient: mocks.assert, finishWorkerAttemptWithClient: mocks.finish }));
 import { settleWorkerFillWithClient, reconcileWorkerFillWithClient, retainWorkerUncertaintyWithClient, reconcileWorkerValuationWithClient } from './worker-settlement.js';
 const execution = { id: 'execution', userId: null, signalId: 'signal', sourceTradeId: 'source', chain: 'solana',

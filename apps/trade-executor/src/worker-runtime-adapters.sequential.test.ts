@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CopyExecutionRecord } from '@swat/db';
+import type { CopyExecutionRecord } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import { createExactPaperQuote, type ProvenancePaperValuation } from './worker-paper-quote.js';
 import { createExecutorRuntimePorts } from './worker-runtime-adapters.js';
 const now = new Date('2026-11-17T00:00:00Z');

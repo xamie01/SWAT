@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import type { Chain, CopyExecutionMode } from '@swat/shared';
-import { getCopyExecutionByIdWithClient, type CopyExecutionRecord } from './copy-trade-lifecycle.js';
+import { getCopyExecutionByIdWithClient, type CopyExecutionRecord } from './copy-trade-lifecycle-owned.js';
 import { assertExactExitQuantity } from './lot-allocation.js';
 import { hasAcceptedSourceVerificationWithClient } from './source-verification-store.js';
 import { readSourceSellLotProofWithClient, type SourceSellLotProof } from './source-sell-lot-allocation.js';

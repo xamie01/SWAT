@@ -1,17 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
-/**
- * `./plugin.js` statically imports `@swat/db`, whose barrel throws
- * `DATABASE_URL is required` while being evaluated. Hoisted so it runs before
- * that import, and `??=` so CI's real value is left alone. No query is ever
- * issued: every function under test is pure over `request.principal`, `pg`
- * connects lazily, and `client.ts` skips its shutdown handlers under
- * NODE_ENV=test. Same pattern as `src/routes/execution-settings.test.ts`.
- */
-vi.hoisted(() => {
-  process.env.DATABASE_URL ??= 'postgres://swat:swat@127.0.0.1:5432/swat_route_tests';
-});
 import { requireUser, requireRole, isUserReachable, issueCsrfToken } from './plugin.js';
 
 function replyStub() {

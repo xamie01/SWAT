@@ -45,6 +45,7 @@
       // its item 2, applied permanently rather than as a throwaway probe.
       "@swat/shared": ["packages/shared/src/index.ts"],
       "@swat/db": ["packages/db/src/index.ts"],
+      "@swat/db/dist/*": ["packages/db/src/*"],
 
       // Two fastify copies are installed: `fastify@5.11.2` (root devDependency,
       // what these suites import) and `fastify@5.8.5` (`apps/api`'s dependency,

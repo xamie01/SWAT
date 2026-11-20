@@ -1,18 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-/**
- * `./subscriptions.js` -- where `mirrorEligibilityForState` lives, and using the
- * real one is the point, since it is the single definition of what each state
- * permits -- statically imports `./client.js`, which throws
- * `DATABASE_URL is required` while being evaluated. Hoisted so it runs before
- * that import, and `??=` so CI's real value is left alone. No query is ever
- * issued: every function under test is pure, `pg` connects lazily, and
- * `client.ts` skips its shutdown handlers under NODE_ENV=test. Same pattern as
- * `apps/api/src/routes/execution-settings.test.ts`.
- */
-vi.hoisted(() => {
-  process.env.DATABASE_URL ??= 'postgres://swat:swat@127.0.0.1:5432/swat_unit_tests';
-});
 import { capabilitiesFor, tierAllowsChain } from '@swat/shared';
 import {
   assessFanoutCandidate,

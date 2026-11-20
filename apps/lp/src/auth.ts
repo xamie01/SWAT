@@ -1,7 +1,9 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import '@fastify/cookie';
-import { resolveSession, forUser, type UserScope, type UserRecord } from '@swat/db';
+import { forUser, type UserScope, type UserRecord } from '@swat/db';
+import { createCheckedAuthTransaction, createOwnedAuthStore, type AuthClientLease } from '@swat/db/dist/auth-owned.js';
+import type { ResolvedSession } from '@swat/db/dist/users.js';
 
 /**
  * Layered authentication for the LP service, mirroring apps/api's model (D12)
@@ -53,11 +55,25 @@ export function legacyKeyHash(apiKey: string): Buffer {
 }
 
 export interface LpAuthOptions {
+  /** Explicit primary direct-auth resolver. Never infer an app pool or cached barrel resolver. */
+  readonly resolveSession: (token: string) => Promise<ResolvedSession | null>;
   /** SHA-256 digest of the legacy shared key (API_KEY). Optional if unconfigured in development. */
   readonly legacyKeyHash?: Buffer;
 }
 
+export function createLpAuthResolver(acquire: () => Promise<AuthClientLease>): LpAuthOptions['resolveSession'] {
+  return createOwnedAuthStore(createCheckedAuthTransaction(acquire)).resolveSession;
+}
+export async function loadExternalLpAuthResolver(modulePath: string | undefined): Promise<LpAuthOptions['resolveSession']> {
+  if (!modulePath?.startsWith('/') || !/\.(?:mjs|js)$/.test(modulePath)) throw new Error('SWAT_LP_AUTH_COMPOSITION_MODULE absolute local module required');
+  const { pathToFileURL } = await import('node:url');
+  const module = await import(pathToFileURL(modulePath).href) as { acquireDirectAuthLease?: () => Promise<AuthClientLease> };
+  if (typeof module.acquireDirectAuthLease !== 'function') throw new Error('External LP direct auth lease required');
+  return createLpAuthResolver(module.acquireDirectAuthLease);
+}
+
 export async function registerLpAuth(app: FastifyInstance, options: LpAuthOptions): Promise<void> {
+  if (typeof options?.resolveSession !== 'function') throw new Error('Explicit checked direct LP auth resolver required');
   app.decorateRequest('principal', undefined);
 
   app.addHook('onRequest', async (request, reply) => {
@@ -68,7 +84,7 @@ export async function registerLpAuth(app: FastifyInstance, options: LpAuthOption
     const cookies = (request as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
     const sessionToken = cookies[SESSION_COOKIE];
     if (sessionToken) {
-      const resolved = await resolveSession(sessionToken);
+      const resolved = await options.resolveSession(sessionToken);
       if (resolved && resolved.user.status === 'active') {
         if (request.method !== 'GET' && request.method !== 'HEAD' && !csrfValid(request)) {
           return reply.code(403).send({ error: 'Invalid CSRF token', code: 'csrf_invalid' });

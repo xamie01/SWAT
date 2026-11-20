@@ -44,11 +44,15 @@ import {
 import { registerAttributionRoutes } from './attribution-routes.js';
 import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
 import { registerAuthRoutes } from './auth/routes.js';
+import { loadExternalAuthRuntime } from './auth/auth-runtime.js';
 import { registerMeRoutes } from './routes/me.js';
 import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 import { registerBillingRoutes } from './routes/billing.js';
 import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
 
+// Fail before Redis/queues/provider startup if the separately supplied direct auth
+// lease composition is missing. No swat_app/default URL fallback.
+const authStore = await loadExternalAuthRuntime(process.env.SWAT_API_AUTH_COMPOSITION_MODULE);
 const limiterConfig = loadPackage28LimiterConfig(process.env);
 
 initLogger('api');
@@ -149,6 +153,7 @@ await registerPackage28Limiters(app, limiterConfig);
 // a populated `request.principal` — and `POST /v1/auth/wallet/verify` would then
 // treat an authenticated link request as an anonymous wallet-only login.
 await registerAuth(app, {
+  resolveSession: authStore.resolveSession,
   legacyKeyHash: API_KEY_HASH,
   isProduction: process.env.NODE_ENV === 'production',
   // `del` returns the number of keys removed, so a ticket can only ever be
@@ -161,6 +166,7 @@ await registerAdminOnlyGlobals(app);
 // Keep the existing auth route scope; the parent limiter hooks cover it.
 await app.register(async (scope) => {
   await registerAuthRoutes(scope, {
+    store: authStore,
     redis,
     isProduction: process.env.NODE_ENV === 'production',
     domain: process.env.AUTH_DOMAIN ?? 'localhost:3000',

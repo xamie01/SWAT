@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({ ensure: vi.fn(), batch: vi.fn(), claim: vi.fn(), fail: vi.fn(), complete: vi.fn(),
   list: vi.fn(), prepare: vi.fn(), queued: vi.fn(), context: vi.fn(), captured: vi.fn(), current: vi.fn() }));
-vi.mock('@swat/db', async () => ({
-  ...(await import('../../../packages/db/src/fanout-worker-descriptor.js')),
+vi.mock('@swat/db/dist/package13-fanout-delivery.js', () => ({
   ensureFanoutEnumeration: db.ensure, getFanoutBatch: db.batch, claimFanoutEnumeration: db.claim,
   failFanoutEnumeration: db.fail, completeFanoutEnumeration: db.complete, listFanoutDeliveries: db.list,
   prepareFanoutDeliveryQueueWithClient: db.prepare, markFanoutDeliveryQueued: db.queued,
-  normalizeTenantId: (id: string) => id, readWorkerExecutionContextWithClient: db.context,
-  readCapturedWorkerPolicyWithClient: db.captured, readCurrentWorkerPolicyWithClient: db.current,
-  getSourceConfirmationReadiness: () => ({ ready: false, reason: 'unavailable' }),
-  assertLotExitExecutionMatches: vi.fn(), claimLotExitExecutionWithClient: vi.fn(), prepareWorkerAttemptWithClient: vi.fn(),
-  markWorkerAttemptDispatchedWithClient: vi.fn(), reserveRiskSpend: vi.fn(), updateRiskSpendReservation: vi.fn(),
-  settleWorkerFillWithClient: vi.fn(), retainWorkerUncertaintyWithClient: vi.fn() }));
+  claimFanoutDelivery: vi.fn(), settleFanoutDelivery: vi.fn()
+}));
+vi.mock('@swat/db/dist/copy-trade-lifecycle-owned.js', () => ({ normalizeTenantId: (id: string) => id,
+  claimLotExitExecutionWithClient: vi.fn() }));
+vi.mock('@swat/db/dist/lot-allocation.js', () => ({ assertLotExitExecutionMatches: vi.fn() }));
+vi.mock('@swat/db/dist/worker-execution.js', () => ({ readWorkerExecutionContextWithClient: db.context,
+  prepareWorkerAttemptWithClient: vi.fn(), markWorkerAttemptDispatchedWithClient: vi.fn() }));
+vi.mock('@swat/db/dist/worker-policy.js', () => ({ readCapturedWorkerPolicyWithClient: db.captured,
+  readCurrentWorkerPolicyWithClient: db.current }));
+vi.mock('@swat/db/dist/risk-spend-owned.js', () => ({ reserveRiskSpend: vi.fn(), updateRiskSpendReservation: vi.fn() }));
+vi.mock('@swat/db/dist/worker-settlement.js', () => ({ settleWorkerFillWithClient: vi.fn(), retainWorkerUncertaintyWithClient: vi.fn() }));
 import { createDurableFanoutDelivery, enqueueFanoutTradeJobs, fanoutDescriptorIdentity, planFanoutTradeJobs,
   type DurableFanoutCaller, type FanoutJobDescriptor } from './fanout-enqueue.js';
 import { createCanonicalFanoutPreparation, unavailableExactFanoutEntryRequest, createVerifiedFanoutAdmission,
@@ -20,7 +24,9 @@ import { createCanonicalFanoutPreparation, unavailableExactFanoutEntryRequest, c
 // compilation pull another app's source into this package's production program.
 const workerModule = '../../trade-executor/src/worker-policy.js';
 const { parseCanonicalWorkerJob, runCanonicalWorkerJob } = await import(workerModule);
-import type { CopyExecutionRecord, FanoutRecipient, FanoutExclusion, PoolClient } from '@swat/db';
+import type { PoolClient } from 'pg';
+import type { CopyExecutionRecord } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
+import type { FanoutRecipient, FanoutExclusion } from '@swat/db/dist/package13-fanout-delivery.js';
 const SIGNAL = '11111111-1111-4111-8111-111111111111', SOURCE = '22222222-2222-4222-8222-222222222222';
 const USERS = [null, '33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'];
 const TARGET = 'solana:11111111111111111111111111111111', MASTER = 'solana:11111111111111111111111111111112';

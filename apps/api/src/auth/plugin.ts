@@ -1,7 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import '@fastify/cookie';
-import { findUserById, resolveSession, forUser, type UserScope, type UserRecord } from '@swat/db';
+import type { UserScope } from '@swat/db/dist/tenancy.js';
+import type { UserRecord, ResolvedSession } from '@swat/db/dist/users.js';
 
 /**
  * Layered authentication (D12).
@@ -42,6 +43,7 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 export interface AuthPluginOptions {
+  readonly resolveSession: (token: string) => Promise<ResolvedSession | null>;
   /** SHA-256 digest of the legacy shared key. */
   readonly legacyKeyHash: Buffer;
   readonly isProduction: boolean;
@@ -126,6 +128,7 @@ export async function registerAdminOnlyGlobals(app: FastifyInstance): Promise<vo
 }
 
 export async function registerAuth(app: FastifyInstance, options: AuthPluginOptions): Promise<void> {
+  if (typeof options.resolveSession !== 'function') throw new Error('Protected owned auth resolver required');
   app.decorateRequest('principal', undefined);
 
   app.addHook('onRequest', async (request, reply) => {
@@ -136,7 +139,7 @@ export async function registerAuth(app: FastifyInstance, options: AuthPluginOpti
 
     const sessionToken = (request.cookies as Record<string, string | undefined>)[SESSION_COOKIE];
     if (sessionToken) {
-      const resolved = await resolveSession(sessionToken);
+      const resolved = await options.resolveSession(sessionToken);
       if (resolved && resolved.user.status === 'active') {
         // State-changing cookie requests must carry the double-submit token.
         // Applies on public paths too: `POST /v1/auth/wallet/verify` links a
@@ -198,7 +201,9 @@ export function requireUser(request: FastifyRequest, reply: FastifyReply): UserS
     reply.code(401).send({ error: 'Unauthorized' });
     return null;
   }
-  return forUser(request.principal.user.id);
+  const id = request.principal.user.id;
+  if (!id?.trim() || id === '*') { reply.code(401).send({ error: 'Unauthorized' }); return null; }
+  return { userId: id } as UserScope;
 }
 
 export function requireRole(
@@ -240,6 +245,7 @@ export function requireTier(
   return user;
 }
 
-export async function loadPrincipalUser(userId: string): Promise<UserRecord | null> {
-  return findUserById(userId);
+export async function loadPrincipalUser(token: string, resolver: AuthPluginOptions['resolveSession']): Promise<UserRecord | null> {
+  if (typeof resolver !== 'function') throw new Error('Protected resolver required');
+  return (await resolver(token))?.user ?? null;
 }

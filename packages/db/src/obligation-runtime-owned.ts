@@ -49,7 +49,7 @@ export async function readOwnedWorkerRuntimeCapability(client: PoolClient, id: s
       && value.length > r.chain.length + 1)
     && validTime(r.expires_at) && validTime(r.observed_at)
     && r.expires_at.getTime() > time && r.observed_at.getTime() <= time
-    && time - r.observed_at.getTime() <= maximumAgeMs, 'persisted scope or expiry mismatch');
+    && time - r.observed_at.getTime() <= maximumAgeMs, 'persisted scope/expiry mismatch');
   return { capabilityId: r.capability_id, revision: r.revision, executionId: r.execution_id, userId: r.user_id,
     chain: r.chain, tokenMint: r.token_mint, targetAccount: r.target_account, executionMode: r.execution_mode,
     obligationKind: r.obligation_kind, obligationId: r.obligation_id, backendIdentity: r.backend_identity,
@@ -74,13 +74,13 @@ export function createOwnedObligationScopedTransaction(input: {
     let terms: string | null = null;
     return operation => transaction(async client => {
       const capability = await readOwnedWorkerRuntimeCapability(client, id, now(), maximumAgeMs);
-      check(capability, 'approved immutable obligation unavailable');
-      check(capability.userId !== null, 'operator obligation domain unsupported');
+      check(capability, 'Approved immutable obligation runtime capability unavailable');
+      check(capability.userId !== null, 'Operator obligation domain runtime capability unsupported');
       const current = JSON.stringify(capability);
-      check(terms === null || current === terms, 'revoked or changed immutable scope');
+      check(terms === null || current === terms, 'Runtime capability revoked or immutable scope changed');
       terms ??= current;
-      await client.query("SELECT set_config('app.current_user_id',$1,true)", [capability.userId]);
-      await client.query("SELECT set_config('app.worker_execution_id',$1,true)", [capability.executionId]);
+      await client.query("SELECT set_config('app.current_user_id', $1, true)", [capability.userId]);
+      await client.query("SELECT set_config('app.worker_execution_id', $1, true)", [capability.executionId]);
       return operation(client);
     });
   };

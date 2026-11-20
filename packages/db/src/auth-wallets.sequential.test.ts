@@ -1,35 +1,27 @@
-import { beforeEach, expect, it, vi } from 'vitest';
-const db = vi.hoisted(() => ({ query: vi.fn(), client: { query: vi.fn(), on: vi.fn(), off: vi.fn(), release: vi.fn() }, rows: [] as any[], events: [] as any[] }));
-vi.mock('./client.js', () => ({ query: db.query, pool: { connect: async () => db.client } }));
-import { linkAuthWallet, listAuthWallets, findUserIdByAuthWallet } from './auth-wallets.js';
-const userId = '11111111-1111-4111-8111-111111111111';
-const address = '0x1111111111111111111111111111111111111111';
-beforeEach(() => {
-  vi.clearAllMocks(); db.rows = []; db.events = [];
-  db.query.mockImplementation(async (sql: string) => db.rows.filter(r => !sql.includes('EXISTS') || db.events.some(e => e === r.address)));
-  let rows: any[], events: any[];
-  db.client.query.mockImplementation(async (sql: string) => {
-    if (sql === 'COMMIT') return { rows: [], command: 'COMMIT' };
-    if (sql === 'BEGIN') { rows = [...db.rows]; events = [...db.events]; }
-    if (sql === 'ROLLBACK') { db.rows = rows; db.events = events; }
-    if (sql.includes('INSERT INTO user_auth_wallets')) { db.rows = [{ id: 'wallet', user_id: userId, chain_kind: 'evm', address, verified_at: new Date() }]; return { rows: db.rows }; }
-    if (sql.includes('INSERT INTO audit_log')) db.events.push(address);
-    return { rows: [] };
-  });
+import {beforeEach,expect,it,vi} from 'vitest';
+const db=vi.hoisted(()=>({scoped:vi.fn()}));
+vi.mock('./tenancy.js',()=>({scopedQuery:db.scoped}));
+import {listAuthWallets,linkAuthWallet,findUserIdByAuthWallet,unlinkAuthWallet} from './auth-wallets.js';
+const userId='11111111-1111-4111-8111-111111111111';
+beforeEach(()=>vi.clearAllMocks());
+it('uses actual tenant-scoped protected proof join for me/billing reads',async()=>{
+ db.scoped.mockResolvedValue([{id:'wallet',user_id:userId,chain_kind:'evm',address:'0x'+'1'.repeat(40),verified_at:new Date('2026-01-01')}]);
+ const result=await listAuthWallets({userId} as any);
+ expect(result[0]?.userId).toBe(userId);
+ expect(db.scoped.mock.calls[0]?.[0]).toEqual({userId});
+ expect(db.scoped.mock.calls[0]?.[1]).toContain('JOIN auth_wallet_proofs');
+ expect(db.scoped.mock.calls[0]?.[1]).not.toContain('audit_log');
 });
-it('does not expose a historical link without a verified-link audit as a login or payer', async () => {
-  db.rows = [{ user_id: userId, chain_kind: 'evm', address }];
-  expect(await listAuthWallets({ userId } as any)).toEqual([]);
-  expect(await findUserIdByAuthWallet('evm', address)).toBeNull();
+it('rejects legacy scope/labels as wallet linking or lookup authority',async()=>{
+ await expect(linkAuthWallet({userId} as any,{chainKind:'evm',address:'fixture'} as any,undefined as any)).rejects.toThrow('Protected');
+ await expect(findUserIdByAuthWallet('evm' as any,'fixture')).rejects.toThrow('Protected');
+ await expect(unlinkAuthWallet({userId} as any,'fixture',{chainKind:'evm',address:'fixture'})).rejects.toThrow('Protected');
 });
-it('verified linking remains usable for wallet login and billing', async () => {
-  await linkAuthWallet({ userId } as any, { chainKind: 'evm', address });
-  expect(await findUserIdByAuthWallet('evm', address)).toBe(userId);
-  expect(await listAuthWallets({ userId } as any)).toHaveLength(1);
-});
-it('does not leave a link after proof provenance persistence fails', async () => {
-  const run = db.client.query.getMockImplementation()!;
-  db.client.query.mockImplementation(async (sql: string) => { if (sql.includes('INSERT INTO audit_log')) throw new Error('audit failed'); return run(sql); });
-  await expect(linkAuthWallet({ userId } as any, { chainKind: 'evm', address })).rejects.toThrow('audit failed');
-  expect(await findUserIdByAuthWallet('evm', address)).toBeNull();
+it('delegates protected writes only with active raw session credential, never user id',async()=>{
+ const store={linkWallet:vi.fn(async()=>({id:'wallet'})),unlinkWallet:vi.fn(async()=>true),resolveSession:vi.fn(async()=>({user:{id:userId}}))};
+ const input={chainKind:'evm' as const,address:'0x'+'1'.repeat(40)};
+ await linkAuthWallet(store as any,'synthetic-session',input);
+ expect(store.linkWallet).toHaveBeenCalledWith('synthetic-session',input);
+ expect(await unlinkAuthWallet(store as any,'synthetic-session',input)).toBe(true);
+ expect(await findUserIdByAuthWallet(store as any,'synthetic-session')).toBe(userId);
 });

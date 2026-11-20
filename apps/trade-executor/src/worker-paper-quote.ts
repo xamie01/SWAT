@@ -1,5 +1,5 @@
-import { exactDecimal, addExactDecimal, compareExactDecimal, divideDecimalText, multiplyDecimalText } from '@swat/db';
-import type { CopyExecutionRecord } from '@swat/db';
+import { exactDecimal, addExactDecimal, compareExactDecimal, divideDecimalText, multiplyDecimalText } from '@swat/db/dist/runtime-exact-decimal.js';
+import type { CopyExecutionRecord } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import type { CanonicalWorkerQuote } from './worker-policy.js';
 
 export interface PaperValuation {

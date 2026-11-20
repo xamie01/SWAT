@@ -1,13 +1,13 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { discoverMigrations } from './migration-discovery.js';
+import { discoverMigrationInventory, discoverMigrations } from './migration-discovery.js';
 
 const sqlDir = resolve(import.meta.dirname, '../sql');
 
 describe('migration discovery', () => {
-  it('discovers all migrations sequentially in packages/db/sql/', async () => {
-    const migrations = await discoverMigrations(sqlDir);
+  it('inspects all migration source sequentially without granting execution selection', async () => {
+    const migrations = await discoverMigrationInventory(sqlDir);
     expect(migrations.length).toBeGreaterThanOrEqual(69);
     expect(migrations.some((m) => m.file === '066_lp_dashboard.sql')).toBe(true);
     expect(migrations.some((m) => m.file === '067_lp_auto_rebalance.sql')).toBe(true);
@@ -15,6 +15,9 @@ describe('migration discovery', () => {
     expect(migrations.some((m) => m.file === '069_lp_copy_trading.sql')).toBe(true);
     expect(migrations.findIndex((m) => m.file === '065_polymarket_perps.sql'))
       .toBeLessThan(migrations.findIndex((m) => m.file === '066_lp_dashboard.sql'));
+  });
+  it('refuses executable discovery of the unreviewed proposal suffix', async () => {
+    await expect(discoverMigrations(sqlDir)).rejects.toThrow();
   });
 });
 

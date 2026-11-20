@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PoolClient } from 'pg';
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock('./client.js', () => ({ query: mocks.query }));
-import * as risk from './risk-policy.js';
+import * as risk from './risk-spend-owned.js';
 
 // Faithful bounded SQL protocol fixture, not a PostgreSQL concurrency claim.
 // Serializes on the policy row as the caller's transaction does; money stays text.

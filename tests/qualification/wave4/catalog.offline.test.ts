@@ -1,11 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Deadline } from './containment.js';
-import { catalog } from './infrastructure.js';
+import { catalog,migratePristine } from './infrastructure.js';
+import {readFileSync} from 'node:fs';
+import {AUTH_MIGRATION_SHA256} from '../../../deploy/postgres/auth-provisioning.js';
 import { hash } from './core.js';
+import { offlineMigrationSource } from './migration-fixture.js';
 
-const mocks = vi.hoisted(()=>({command:vi.fn(),source:vi.fn()}));
+const mocks = vi.hoisted(()=>({command:vi.fn(),source:vi.fn(),install:vi.fn(),validate:vi.fn()}));
+vi.mock('../../../deploy/postgres/auth-installation.js',async()=>{
+ const actual=await vi.importActual<typeof import('../../../deploy/postgres/auth-installation.js')>('../../../deploy/postgres/auth-installation.js');
+ return {...actual,installCommittedAuthentication:mocks.install,validateInstalledAuthentication:mocks.validate};
+});
+vi.mock('../../../packages/db/src/database-role.js',()=>({assertDatabaseRole:vi.fn()}));
 vi.mock('./owned-command.js',()=>({command:mocks.command}));
 vi.mock('../../integration/helpers/schema-guard.js',()=>({canonicalMigrationSource:mocks.source,assertDisposableOwnedInfrastructure:vi.fn()}));
+const installation={target:{database:'wave4',address:'172.18.0.2',port:5432,systemIdentifier:'1234'},dbaRole:'fixture_dba',acquireDba:async()=>{throw new Error('No runtime acquisition in injected catalog contract');}};
 afterEach(()=>vi.resetAllMocks());
 describe('catalog evidence injected contracts; no pg_dump or SQL execution',()=>{
   const journal=[{file:'083_lp_exact_paper_operations.sql',checksum:'a'.repeat(64),installed_checksum:'a'.repeat(64),audit_reference:null}];
@@ -44,6 +53,71 @@ describe('catalog evidence injected contracts; no pg_dump or SQL execution',()=>
       await expect(catalog(fixture(), `postgresql://${credentials}@127.0.0.1:15432/wave4`, deadline)).rejects.toThrow(URIError);
       expect(mocks.command).not.toHaveBeenCalled();
     } finally { deadline.dispose(); }
+  });
+  it('checks actual installed-variant hashes and audit identity against the reviewed plan', async () => {
+    const source = await offlineMigrationSource();
+    const plan = source.plan!;
+    const rows = plan.migrations.map(m => ({ file: m.file, checksum: m.checksum,
+      installed_checksum: m.installedChecksum, audit_reference: m.auditReference }));
+    fixture();
+    mocks.source.mockResolvedValue(source);
+    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [{ catalog: { roles: [] } }] }).mockResolvedValueOnce({ rows }) };
+    const deadline = new Deadline(1000);
+    try {
+      const evidence = await catalog(client, 'postgresql://swat_migrator:synthetic@127.0.0.1:15432/wave4', deadline,undefined,installation);
+      expect(evidence.journal).toEqual(rows);
+      expect(rows.filter(r => r.installed_checksum !== r.checksum)).toHaveLength(2);
+    } finally { deadline.dispose(); }
+  });
+  it.each(['installed_checksum', 'audit_reference'])('refuses forged reviewed-plan %s', async field => {
+    const source = await offlineMigrationSource();
+    const rows = source.plan!.migrations.map(m => ({ file: m.file, checksum: m.checksum,
+      installed_checksum: m.installedChecksum, audit_reference: m.auditReference }));
+    const index = rows.findIndex(row => row.installed_checksum !== row.checksum);
+    rows[index] = { ...rows[index]!, [field]: field === 'installed_checksum' ? rows[index]!.checksum : 'unrelated-audit' };
+    fixture();
+    mocks.source.mockResolvedValue(source);
+    const client = { query: vi.fn().mockResolvedValueOnce({ rows: [{ catalog: { roles: [] } }] }).mockResolvedValueOnce({ rows }) };
+    const deadline = new Deadline(1000);
+    try { await expect(catalog(client, 'postgresql://swat_migrator:synthetic@127.0.0.1:15432/wave4', deadline,undefined,installation)).rejects.toThrow('Migration journal mismatch'); }
+    finally { deadline.dispose(); }
+  });
+  it('087 absent capability refuses before migration/catalog effects; inert COMMIT precedes external handoff',async()=>{
+    const source=await offlineMigrationSource();
+    const sql=source.files.at(-1)!.sql;
+    mocks.source.mockResolvedValue(source);
+    const order:string[]=[];
+    const client={query:vi.fn(async(s:string)=>{order.push(s);return {
+      rows:s===source.plan.handoff.validationSql?[{exact:true,namespace_oid:9000,function_oids:[9001,9002]}]:s.includes('AS dirty')?[{dirty:false}]:[],
+      command:s==='BEGIN'||s==='COMMIT'?s:undefined};})};
+    mocks.install.mockImplementation(async()=>{order.push('external-handoff');});
+    const deadline=new Deadline(1000);
+    try{
+      await expect(migratePristine(client,deadline)).rejects.toThrow('capability');
+      await expect(catalog(client,'postgresql://swat_migrator:synthetic@127.0.0.1:15432/wave4',deadline)).rejects.toThrow('capability');
+      expect(client.query).not.toHaveBeenCalled();expect(mocks.command).not.toHaveBeenCalled();
+      await migratePristine(client,deadline,undefined,installation);
+      expect(order.indexOf(source.plan.handoff.cleanupSql)).toBeLessThan(order.indexOf('COMMIT'));
+      expect(order.indexOf('COMMIT')).toBeLessThan(order.indexOf('external-handoff'));
+      expect(mocks.install).toHaveBeenCalledWith(installation,sql);
+    }finally{deadline.dispose();}
+  });
+  it('migration uncertain COMMIT never acquires privileged handoff or publishes installation',async()=>{
+    const sql=readFileSync(new URL('../../../packages/db/sql/087_wave4_protected_authentication.sql',import.meta.url),'utf8');
+    mocks.source.mockResolvedValue({files:[{file:'087_wave4_protected_authentication.sql',checksum:AUTH_MIGRATION_SHA256,sql}],digest:'b'.repeat(64)});
+    const client={query:vi.fn(async(s:string)=>({rows:s.includes('AS dirty')?[{dirty:false}]:[],command:s==='BEGIN'?'BEGIN':s==='COMMIT'?'ROLLBACK':undefined}))};
+    const deadline=new Deadline(1000);
+    try{await expect(migratePristine(client,deadline,undefined,installation)).rejects.toThrow('COMMIT uncertain');expect(mocks.install).not.toHaveBeenCalled();}
+    finally{deadline.dispose();}
+  });
+  it('candidate catalog runs fresh disabled validation only and refuses failed validation before pg_dump',async()=>{
+    const source=await offlineMigrationSource();mocks.source.mockResolvedValue(source);
+    mocks.validate.mockRejectedValue(new Error('fresh disabled catalog drift'));
+    const deadline=new Deadline(1000);
+    try{await expect(catalog({query:vi.fn()},'postgresql://swat_migrator:synthetic@127.0.0.1:15432/wave4',deadline,undefined,installation)).rejects.toThrow('fresh disabled');
+      expect(mocks.validate).toHaveBeenCalledWith(installation,source.files.at(-1)!.sql,'disabled');
+      expect(mocks.install).not.toHaveBeenCalled();expect(mocks.command).not.toHaveBeenCalled();}
+    finally{deadline.dispose();}
   });
   it.each(['checksum','installed_checksum','audit_reference'])('refuses mismatched journal %s before returning evidence',async field=>{
     const client=fixture();client.query.mockReset().mockResolvedValueOnce({rows:[{catalog:{roles:[]}}]}).mockResolvedValueOnce({rows:[{...journal[0],[field]:'wrong'}]});

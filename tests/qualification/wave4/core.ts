@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Deadline } from './containment.js';
+import type { ReviewedMigrationSelection } from '../../../packages/db/src/migration-selection.js';
 import { validatePackage28IsolationDeclarations } from '../../integration/helpers/package28-isolation.js';
 
 export const gates = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8'] as const;
@@ -23,6 +24,7 @@ export interface QualificationConfig {
   readonly pooledRuntimeUrl: string;
   readonly authorization: 'SEPARATELY_AUTHORIZED_DISPOSABLE_WAVE4';
   readonly maxDurationMs: number;
+  readonly migrationSelection?: ReviewedMigrationSelection;
 }
 export interface Assertion { readonly name: string; readonly passed: boolean }
 export interface GateResult {
@@ -138,17 +140,20 @@ export interface SqlClient {
 }
 export async function transaction<T>(client: SqlClient, userId: string | null, action: (client: SqlClient) => Promise<T>): Promise<T> {
   requireCheck(userId === null || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(userId), 'Canonical synthetic tenant required');
-  await client.query('BEGIN');
+  const begin=await client.query('BEGIN');
+  requireCheck(begin.command==='BEGIN','Transaction BEGIN refused');
+  let committing=false;
   try {
     await client.query("SET LOCAL statement_timeout = '10s'");
     await client.query("SET LOCAL lock_timeout = '2s'");
     await client.query("SET LOCAL app.bypass_rls = 'off'");
     await client.query("SELECT set_config('app.current_user_id',$1,true)", [userId ?? '']);
     const value = await action(client);
-    requireCheck((await client.query('COMMIT')).command === 'COMMIT', 'Transaction did not commit');
+    committing=true;
+    requireCheck((await client.query('COMMIT')).command === 'COMMIT', 'Transaction COMMIT uncertain');
     return value;
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    if(!committing)await client.query('ROLLBACK').catch(() => {});
     throw error;
   }
 }

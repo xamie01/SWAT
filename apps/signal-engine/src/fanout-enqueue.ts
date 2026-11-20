@@ -1,14 +1,15 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { classifyFanoutRefusal, requireStableFanoutExclusions } from './fanout-canonical.js';
 import { tradeQueueForChain, chainFromTokenMint, resolveChainAddress } from '@swat/shared';
-import type { PoolClient } from '@swat/db';
+import type { PoolClient } from 'pg';
 import {
   ensureFanoutEnumeration, getFanoutBatch, claimFanoutEnumeration, failFanoutEnumeration,
   completeFanoutEnumeration, listFanoutDeliveries, prepareFanoutDeliveryQueueWithClient,
   markFanoutDeliveryQueued,
   type FanoutRecipient, type FanoutExclusion, type FanoutDeliveryIdentity
-} from '@swat/db';
-import type { FanoutExclusionCode, FanoutPlan, MirrorEligibility } from '@swat/db';
+} from '@swat/db/dist/package13-fanout-delivery.js';
+import type { FanoutExclusionCode, FanoutPlan } from '@swat/db/dist/fanout-eligibility.js';
+import type { MirrorEligibility } from '@swat/db/dist/subscription-state.js';
 
 /**
  * One BullMQ trade job per `(signal, user)` — `S4-14`.

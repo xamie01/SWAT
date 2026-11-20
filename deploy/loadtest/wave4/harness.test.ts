@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { base58, plan, sampleIndices, stages, validateConfig } from './core.mjs';
 import { evaluate, requiredThresholds } from './report.mjs';
@@ -89,5 +92,44 @@ describe('Wave4 offline load harness contracts',() => {
   it('rejects a VU without a unique sampled identity',()=>{const w=workload();w.context.exec.vu.idInTest=2;expect(()=>w.pick(1)).toThrow('Unique VU identity pool exhausted');});
   it('binds fixture source identity to observed canonical columns',()=>{expect(source('runtime.mjs')).toContain('source_event_type,source_event_id,confirmation_state');expect(source('runtime.mjs')).toContain("'transaction',$1,'observed'");});
   it('requires pilot auth and reviewed global reads before bulk seeding',()=>{expect(source('runtime.mjs')).toContain('only ten users retained, bulk seeding refused');expect(source('runtime.mjs')).toContain('Reviewed runtime global-read capability is missing; refuse before seeding');});
+  it('validates reviewed source selection before connections and exact installed identities before seeding',()=>{
+    const runtime = source('runtime.mjs');
+    expect(runtime.indexOf('reviewedLoadMigrationSource(c.migrationSelection)')).toBeLessThan(runtime.indexOf("await db(c.monitorDb"));
+    expect(runtime).toContain('assertInstallationHistory(history, source.plan)');
+    expect(runtime).not.toContain('history.length === 83');
+    expect(JSON.parse(source('config.example.json')).migrationSelection).toBeNull();
+    expect(source('README.md')).toContain('`migrationSelection`');
+  });
+  it('loads the real MJS-to-TypeScript preflight without constructing database clients', async () => {
+    const script = `
+      import { createRequire } from 'node:module';
+      const require = createRequire(import.meta.url);
+      require('./packages/db/package.json');
+      const pg = require(require.resolve('pg', { paths: ['./packages/db'] }));
+      pg.Client = class { constructor() { throw new Error('Database construction forbidden'); } };
+      pg.Pool = class { constructor() { throw new Error('Pool construction forbidden'); } };
+      const { reviewedLoadMigrationSource } = await import('./deploy/loadtest/wave4/runtime.mjs');
+      const { tsImport } = await import('tsx/esm/api');
+      const { discoverMigrationInventory } = await tsImport('./packages/db/src/migration-discovery.ts', import.meta.url);
+      const { createMigrationSelectionProposal, reviewMigrationSelection } = await tsImport('./packages/db/src/migration-selection.ts', import.meta.url);
+      const inventory = await discoverMigrationInventory('./packages/db/sql');
+      const selection = reviewMigrationSelection(createMigrationSelectionProposal(inventory), 'offline-loader-not-runtime-authorization');
+      const { source, assertInstallationHistory } = await reviewedLoadMigrationSource(selection);
+      const journal = source.plan.migrations.map(m => ({ file: m.file, checksum: m.checksum, installed_checksum: m.installedChecksum, audit_reference: m.auditReference }));
+      assertInstallationHistory(journal, source.plan);
+      let refused = false;
+      try { await reviewedLoadMigrationSource({ ...selection, manifestChecksum: '0'.repeat(64) }); } catch { refused = true; }
+      if (!refused) throw new Error('Selection drift accepted');
+      console.log(JSON.stringify({ migrations: source.files.length, digest: source.digest, refused, connections: 0 }));
+    `;
+    const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: process.env
+    });
+    const result = JSON.parse(stdout.trim());
+    expect(result.migrations).toBeGreaterThanOrEqual(85);
+    expect(result).toMatchObject({ refused: true, connections: 0 });
+    expect(result.digest).toMatch(/^[a-f0-9]{64}$/);
+  });
   it('sanitizes all Node commands and aborts stale telemetry',()=>{expect(source('run.sh')).toContain('node() { env -i');expect(source('run.sh')).toContain('|| ! telemetry_fresh');expect(source('run.sh')).not.toMatch(/\b(?:pkill|flushall|docker compose down)\b/i);});
 });

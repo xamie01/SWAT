@@ -62,6 +62,13 @@ describe('package28 limiter', () => {
     expect(authRoutes).toHaveLength(1);
     expect(authRoutes[0]!.arguments[0]!.getText(source)).toBe('scope');
     expect(registration.getStart(source)).toBeLessThan(authRoutes[0]!.getStart(source));
+    const authRuntime=named('loadExternalAuthRuntime');
+    expect(authRuntime).toHaveLength(1);
+    expect(authRuntime[0]!.arguments[0]!.getText(source)).toBe('process.env.SWAT_API_AUTH_COMPOSITION_MODULE');
+    expect(authRuntime[0]!.getStart(source)).toBeLessThan(constructor.getStart(source));
+    const authOptions=named('registerAuth')[0]!.arguments[1]!.getText(source);
+    expect(authOptions).toContain('resolveSession: authStore.resolveSession');
+    expect(authRoutes[0]!.arguments[1]!.getText(source)).toContain('store: authStore');
   });
   it('validates environment in the first-imported limiter before eager database dependencies can evaluate', () => {
     const source = ts.createSourceFile('package28-limiter.ts', readFileSync(new URL('./package28-limiter.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);

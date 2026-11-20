@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { loadConfig, requireValue, sampleIndices, base58, digest, writeNewJson, plan } from './core.mjs';
 
@@ -21,7 +21,18 @@ export function redis(endpoint) {
   return client;
 }
 
+export async function reviewedLoadMigrationSource(selection) {
+  requireValue(selection, 'Explicit reviewed migration selection required before load');
+  const { tsImport } = await import('tsx/esm/api');
+  const { canonicalMigrationSource } = await tsImport(`${root}/packages/db/src/canonical-migration-source.ts`, import.meta.url);
+  const { assertInstallationHistory } = await tsImport(`${root}/packages/db/src/installation-plan.ts`, import.meta.url);
+  const source = await canonicalMigrationSource(selection);
+  requireValue(source.plan, 'Require exact reviewed installation plan before connections');
+  return { source, assertInstallationHistory };
+}
+
 export async function qualify(c, out) {
+  const { source, assertInstallationHistory } = await reviewedLoadMigrationSource(c.migrationSelection);
   const clients = [];
   let r;
   try {
@@ -50,12 +61,8 @@ export async function qualify(c, out) {
     requireValue(empty.rows[0].count === 0, 'Unscoped runtime can see user rows');
     await runtime.query('ROLLBACK');
     const history = (await observer.query('SELECT file, checksum, installed_checksum, audit_reference FROM swat_schema_migrations ORDER BY file')).rows;
-    const names = (await readdir(`${root}/packages/db/sql`)).filter(f => /^\d{3}_[a-z0-9_]+\.sql$/.test(f)).sort();
-    requireValue(history.length === names.length && names.at(-1) === '083_lp_exact_paper_operations.sql', 'Require exact current migration journal through 083');
-    for (let i = 0; i < names.length; i++) {
-      const checksum = digest(await readFile(`${root}/packages/db/sql/${names[i]}`));
-      requireValue(history[i].file === names[i] && history[i].checksum === checksum && /^[a-f0-9]{64}$/.test(history[i].installed_checksum) && (history[i].installed_checksum === checksum || history[i].audit_reference?.trim()), 'Migration journal/source mismatch');
-    }
+    requireValue(history.length === source.plan.migrations.length, 'Require exact reviewed installation plan journal');
+    assertInstallationHistory(history, source.plan);
     const requiredReads = ['wallets','transactions','wallet_clusters','cluster_memberships','signals','source_trades'];
     const reads = (await observer.query("SELECT name, has_table_privilege('swat_app',name,'SELECT') AS permitted FROM unnest($1::text[]) name", [requiredReads])).rows;
     requireValue(reads.length === requiredReads.length && reads.every(row => row.permitted), 'Reviewed runtime global-read capability is missing; refuse before seeding');

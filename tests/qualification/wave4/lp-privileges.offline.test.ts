@@ -194,7 +194,9 @@ describe('S2 canonical LP privilege source proposal; static/offline only', () =>
   it('keeps authentication, role enablement and real runtime acceptance unresolved and disabled', () => {
     expect(sql).toContain('SOURCE-ONLY PROPOSAL. NOT APPLIED.');
     expect(sql).toContain('NOLOGIN/auth/global-read remain separate unresolved decisions.');
-    expect(roles).toContain('ALTER ROLE swat_app NOLOGIN PASSWORD NULL NOSUPERUSER NOBYPASSRLS NOINHERIT');
+    expect(roles).toContain("roles text[]:=ARRAY['swat_app'");
+    expect(roles).toContain("FOREACH role_name IN ARRAY roles LOOP");
+    expect(roles).toContain("format('ALTER ROLE %I NOLOGIN PASSWORD NULL NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION',role_name)");
     expect(roleAssertion).toContain("role?.role_name !== name || role?.session_role !== name");
     expect(roleAssertion).toContain("denied.push('owns_objects', 'can_create')");
     expect(cli).toMatch(/export async function runQualification\([^)]*\) \{\s*await privateConfig\(configPath\);\s*throw new Error\('Wave4 real execution is unavailable/);

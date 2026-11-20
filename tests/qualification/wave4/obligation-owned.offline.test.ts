@@ -50,7 +50,7 @@ describe('pool-free owned obligation capability, injected SQL only', () => {
     expect(await tx(async () => 'first')).toBe('first');
     expect(await tx(async () => 'second')).toBe('second');
     expect(h.calls.filter(c => c.sql.includes('swat_claim_runtime_capability'))).toHaveLength(2);
-    expect(h.calls.filter(c => c.sql.includes("set_config('app.current_user_id',$1")).map(c => c.values)).toEqual([[user], [user]]);
+    expect(h.calls.filter(c => c.sql.includes("set_config('app.current_user_id', $1")).map(c => c.values)).toEqual([[user], [user]]);
     expect(JSON.stringify(h.calls)).not.toContain('foreign');
   });
   it.each(['role_name', 'session_role', 'row_security', 'rolsuper', 'rolbypassrls', 'has_memberships', 'owns_objects', 'can_create'])('refuses unsafe %s before protected lookup', async key => {

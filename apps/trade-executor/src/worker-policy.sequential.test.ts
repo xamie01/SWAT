@@ -1,21 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-type PoolClient = Parameters<Parameters<typeof import('@swat/db').withTransaction>[0]>[0];
+import type { PoolClient } from 'pg';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), current: vi.fn(), captured: vi.fn(), claim: vi.fn(),
   prepare: vi.fn(), dispatch: vi.fn(), reserve: vi.fn(), update: vi.fn(), settle: vi.fn(), uncertain: vi.fn(), delivery: vi.fn(), descriptor: vi.fn() }));
-vi.mock('@swat/db', async () => {
-  // Import pure identity checks only through the reviewed package. No SDK/service
-  // startup or pool connects; the guard prevents external effects in any event.
-  const actual = await vi.importActual<typeof import('@swat/db')>('@swat/db');
-  return { ...actual, readWorkerExecutionContextWithClient: mocks.read, readCurrentWorkerPolicyWithClient: mocks.current,
-    readCapturedWorkerPolicyWithClient: mocks.captured, claimLotExitExecutionWithClient: mocks.claim,
-    prepareWorkerAttemptWithClient: mocks.prepare, markWorkerAttemptDispatchedWithClient: mocks.dispatch,
-    reserveRiskSpend: mocks.reserve, updateRiskSpendReservation: mocks.update,
-    settleWorkerFillWithClient: mocks.settle, retainWorkerUncertaintyWithClient: mocks.uncertain,
-    claimFanoutDelivery: mocks.delivery, assertCanonicalFanoutDescriptor: mocks.descriptor };
-});
+vi.mock('@swat/db/dist/copy-trade-lifecycle-owned.js', async () => ({
+  ...(await vi.importActual<typeof import('@swat/db/dist/copy-trade-lifecycle-owned.js')>('@swat/db/dist/copy-trade-lifecycle-owned.js')),
+  claimLotExitExecutionWithClient: mocks.claim
+}));
+vi.mock('@swat/db/dist/worker-execution.js', () => ({ readWorkerExecutionContextWithClient: mocks.read,
+  prepareWorkerAttemptWithClient: mocks.prepare, markWorkerAttemptDispatchedWithClient: mocks.dispatch }));
+vi.mock('@swat/db/dist/worker-policy.js', () => ({ readCurrentWorkerPolicyWithClient: mocks.current,
+  readCapturedWorkerPolicyWithClient: mocks.captured }));
+vi.mock('@swat/db/dist/risk-spend-owned.js', () => ({ reserveRiskSpend: mocks.reserve, updateRiskSpendReservation: mocks.update }));
+vi.mock('@swat/db/dist/worker-settlement.js', () => ({ settleWorkerFillWithClient: mocks.settle, retainWorkerUncertaintyWithClient: mocks.uncertain }));
+vi.mock('@swat/db/dist/package13-fanout-delivery.js', async () => ({
+  ...(await vi.importActual<typeof import('@swat/db/dist/package13-fanout-delivery.js')>('@swat/db/dist/package13-fanout-delivery.js')),
+  claimFanoutDelivery: mocks.delivery
+}));
+vi.mock('@swat/db/dist/fanout-worker-descriptor.js', () => ({ assertCanonicalFanoutDescriptor: mocks.descriptor }));
 import { runCanonicalWorkerJob, type CanonicalWorkerPorts } from './worker-policy.js';
 import { createExactPaperExitQuote } from './worker-paper-quote.js';
-import type { CopyExecutionRecord } from '@swat/db';
+import type { CopyExecutionRecord } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 const userId = '11111111-1111-1111-1111-111111111111';
 const execution: CopyExecutionRecord = { id: '22222222-2222-2222-2222-222222222222', userId,
   signalId: '33333333-3333-3333-3333-333333333333', sourceTradeId: null, exitLotId: '44444444-4444-4444-4444-444444444444', exitTrigger: 'close-all',

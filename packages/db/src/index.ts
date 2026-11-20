@@ -70,6 +70,12 @@ export * from './execution-grants.js';
 export * from './tracking-difference.js';
 export * from './credentials.js';
 export * from './tenancy.js';
+export { createCheckedAuthTransaction, createOwnedAuthStore, assertAuthIdentity,
+  AuthCommitUncertainError, AuthSessionRequiredError, AUTH_IDENTITY_SQL, AUTH_RESET_SQL, AUTH_POOL_RESET_SQL } from './auth-owned.js';
+export type { AuthQueryClient, AuthClientLease, OwnedAuthTransaction, OwnedAuthStore,
+  AuthAdmission, AuthRequestContext } from './auth-owned.js';
+// Legacy users authentication exports are @deprecated under 087. Production
+// consumers must inject the checked direct-auth leaf above; no ACL restoration.
 export * from './users.js';
 export * from './auth-wallets.js';
 export * from './audit-log.js';

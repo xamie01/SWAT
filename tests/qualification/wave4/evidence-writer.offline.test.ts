@@ -34,6 +34,16 @@ describe('private nonsecret evidence writer; local files only', () => {
       await expect(createEvidenceWriter(directory)).rejects.toThrow();
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+  it('seals new captures while joining writes already admitted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'swat-evidence-sealed-'));
+    try {
+      const writer = await createEvidenceWriter(join(root, 'run'));
+      const admitted = writer.write('partial.json', { pending: true });
+      writer.seal();
+      expect(() => writer.write('late.json', {})).toThrow('sealed');
+      expect(await writer.settle()).toEqual([await admitted]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it('retains failed write evidence and still permits a later cleanup write to settle', async () => {
     const root = await mkdtemp(join(tmpdir(), 'swat-evidence-failure-'));
     try {
