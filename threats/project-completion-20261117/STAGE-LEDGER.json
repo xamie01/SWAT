@@ -57,7 +57,7 @@
     {
       "id": 4,
       "name": "genuine isolated paper acceptance",
-      "status": "source-implementation-in-progress-runtime-requires-separate-authorization",
+      "status": "source-batch-paused-provider-credit-blocked-runtime-requires-separate-authorization",
       "qualificationPlan": "WAVE4-QUALIFICATION.md",
       "requiredGates": [
         "I1-environment-migrations",
@@ -133,8 +133,9 @@
       "lpProtectedAdmissionSourceReview": "WAVE4-LP-PROTECTED-REPAIR-ACCEPTANCE.md",
       "migrationInstallationSourceReview": "WAVE4-MIGRATION-REPAIR-ACCEPTANCE.md",
       "migrationInstallationSourceStatus": "repaired-bounded-source-accepted-runtime-unexecuted",
-      "mainCurrentCodeInputStatus": "Ten final P4b fanout checks share unchanged complete consumed-input inventory; fresh DB emit verified separately; bounded independent fanout review recorded; report-only updates excluded",
-      "activeImplementationPackage": null,
+      "mainCurrentCodeInputStatus": "Accepted P4b fanout epoch retained as historical; remaining source batch paused after provider insufficient-credit failures; partial files unverified; global freeze not established",
+      "parallelBatchPause": "WAVE4-PARALLEL-PAUSED.md",
+      "activeImplementationPackage": "Wave4-parallel-remaining-source-batch01",
       "sourceComplete": false,
       "historicalOffline23Counts": {
         "mainNewOfflineAssertionsPassed": 351,
@@ -182,7 +183,8 @@
       "p4bFanoutSourceReview": "WAVE4-P4B-FANOUT-OWNED-REVIEW.md",
       "p4bFanoutIndependentVerdict": "ACCEPT",
       "p4bFanoutSourceCheckpoint": "WAVE4-P4B-FANOUT-OWNED-CHECKPOINT.md",
-      "p4bSourceStatus": "owned-candidate-current-admission-cohort-bounded-source-accepted-protected-backing-sizing-provisioning-outstanding"
+      "p4bSourceStatus": "owned-candidate-current-admission-cohort-bounded-source-accepted-protected-backing-sizing-provisioning-outstanding",
+      "parallelCompletionMap": "WAVE4-PARALLEL-COMPLETION.md"
     },
     {
       "id": 5,

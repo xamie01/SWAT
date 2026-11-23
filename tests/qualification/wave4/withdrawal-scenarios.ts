@@ -1,15 +1,15 @@
 import {
   createWithdrawalService, withdrawalBudgets,
   type WithdrawalServicePorts, type SubmitWithdrawal
-} from '../../../packages/db/src/withdrawal-service.js';
-import { createReducingService, type ReducingServicePorts } from '../../../packages/db/src/reducing-service.js';
-import { reducingBudgets, type ReducingIntent, type ReducingRequest } from '../../../packages/db/src/reducing-contract.js';
+} from '@swat/db/dist/withdrawal-service.js';
+import { createReducingService, type ReducingServicePorts } from '@swat/db/dist/reducing-service.js';
+import { reducingBudgets, type ReducingIntent, type ReducingRequest } from '@swat/db/dist/reducing-contract.js';
 import {
   financialBudgetKey, financialHash, WithdrawalProtocolError,
   type FinancialBudget, type FinancialReceipt, type FinancialRecord, type WithdrawalIntent,
   type WithdrawalRequest, type WithdrawalTransaction
-} from '../../../packages/db/src/withdrawal-contract.js';
-import { withdrawalSqlStore } from '../../../packages/db/src/withdrawal-store.js';
+} from '@swat/db/dist/withdrawal-contract.js';
+import { withdrawalSqlStore } from '@swat/db/dist/withdrawal-store.js';
 
 /** Source contracts only. Nothing opens a connection, captures a code, admits evidence or starts a runner. */
 export const withdrawalSourceBoundary = Object.freeze({
@@ -255,17 +255,23 @@ export async function qualifyUnadmittedReceipt(transaction: WithdrawalTransactio
 /** These are dependencies, not supported scenarios or successful acceptance assertions. */
 export function blockedWithdrawalCapabilities(): readonly WithdrawalSourceResult[] {
   return [
-    blocked('protected-otp-capture-and-delivery', ['production-protected-one-use-otp-issue-digest-delivery-and-principal-capture-path-unavailable',
+    blocked('protected-otp-capture-and-delivery', ['protected-existing-otp-key-verified-recipient-and-principal-channel-backing-not-approved',
+      'concrete-source-otp-and-capture-do-not-establish-deployed-authority',
       'source-will-not-log-capture-or-return-otp-secrets']),
-    blocked('outbox-dispatch-uncertain-reconciliation', ['keyless-direct-import-executor-runner-seam-unavailable',
+    blocked('outbox-dispatch-uncertain-reconciliation', ['pool-free-owned-runner-source-does-not-authorize-runtime-execution',
       'provider-authenticated-attempt-bound-atomic-deadline-transfer-authority-unavailable',
       'authenticated-receipt-verifier-and-independent-restricted-admission-writer-unavailable',
       'permanent-provider-no-future-acceptance-tombstone-required-for-terminal-zero-fill',
       'no-crash-worker-queue-or-provider-execution-authorized']),
-    blocked('reducing-exact-receipt-accounting-collateral', ['keyless-direct-import-reducing-accounting-adapter-seam-unavailable',
-      'canonical-spot-lot-evidence-and-ledger-settlement-adapter-unavailable',
+    blocked('reducing-exact-receipt-accounting-collateral', ['pool-free-canonical-perps-settler-source-does-not-establish-deployed-role-function-backing',
+      'immutable-financial-intent-attempt-to-canonical-spot-lot-execution-receipt-linkage-source-gap',
+      'canonical-withdrawal-and-spot-independent-ledger-admission-writer-source-backing-gap',
       'independent-deployed-perps-collateral-denomination-account-mapping-unavailable',
       'canonical-every-fill-realized-pnl-collateral-margin-and-fee-journal-unavailable',
       'same-client-receipt-accounting-application-and-deferred-commit-acceptance-unobserved'])
   ];
 }
+
+/** Joined owned source APIs are separate from public/domain catalogue acceptance. */
+export { createWithdrawalOwnedComposition, withdrawalOwnedBoundary } from './withdrawal-owned-composition.js';
+export { createReducingOwnedComposition, reducingOwnedBoundary } from './reducing-owned-composition.js';

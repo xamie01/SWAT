@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createCustodyEnrollment } from '../../../packages/db/src/custody-enrollment.js';
 import { createCustodyExecutionAccess } from '../../../packages/db/src/custody-execution.js';
@@ -9,7 +9,8 @@ import { custodySqlStores, qualifyCustodyBinding, type CustodyEnrollmentPorts, t
 const scope = { userId: 'wave4-synthetic-user' } as UserScope;
 const grantId = '11111111-1111-4111-8111-111111111111';
 function fixture() {
-  const key = randomBytes(32), source = Uint8Array.from([17, 33, 65, 129]);
+  // Fixed inert test bytes, not provider/key generation or deployed material.
+  const key = Buffer.alloc(32, 7), source = Uint8Array.from([17, 33, 65, 129]);
   let now = new Date('2026-11-18T12:00:00.000Z'), snapshot: CustodyGrantSnapshot | null = null;
   let failCommit = false, beforeOpen = () => {}, opens = 0, seals = 0;
   let providerBytes: Uint8Array | undefined, wrappedBytes: Uint8Array | undefined;
@@ -20,7 +21,7 @@ function fixture() {
     allocateGrantId: async () => grantId, now: () => now,
     wrap: { wrapperId: 'local-synthetic-aead', keyVersion: 1, seal: async ({ plaintext, binding }) => {
       seals++; wrappedBytes = plaintext;
-      const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, nonce);
+      const nonce = Buffer.alloc(12, seals), cipher = createCipheriv('aes-256-gcm', key, nonce);
       const aad = Buffer.from(custodyBindingAad(binding)); cipher.setAAD(aad);
       const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
       return ['v2', 'local-synthetic-aead', '1', aad.toString('base64'), nonce.toString('base64'),

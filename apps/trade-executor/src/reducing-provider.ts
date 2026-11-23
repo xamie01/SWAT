@@ -2,8 +2,8 @@ import {
   type FinancialRecord, type FinancialAttempt, type FinancialReceipt, type FinancialEffectPorts,
   type WithdrawalSqlClient, type FinancialAuthorization, financialText, requireFinancial,
   financialTime, validateFinancialAuthorization, validateNoFutureAcceptance
-} from '@swat/db';
-import { rawToDecimal, reducingRemainder, type ReducingIntent } from '@swat/db';
+} from '@swat/db/dist/withdrawal-contract.js';
+import { rawToDecimal, reducingRemainder, type ReducingIntent } from '@swat/db/dist/reducing-contract.js';
 
 export interface ReduceOnlyProviderExposure {
   readonly userId: string; readonly chain: string; readonly network: string; readonly venue: string;

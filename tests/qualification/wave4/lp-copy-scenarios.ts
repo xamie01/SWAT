@@ -1,7 +1,10 @@
 import { createLpPaperService, type LpPaperServiceDeps } from '../../../packages/db/src/lp-paper-service.js';
 import { createLpPaperSqlStore, type LpTenantTransaction } from '../../../packages/db/src/lp-paper-store.js';
 import { lpAcquisitionHash, lpExactHash, lpSnapshot, type LpExactPosition, type LpExactSubscription,
-  type LpMasterMintEvidence, type LpRawAmount } from '../../../packages/db/src/lp-exact.js';
+  type LpMasterMintEvidence, type LpRawAmount, type LpExactAcquisitionRequest, type LpExactPlan,
+  type LpPaperQuote, type LpPaperReceipt } from '../../../packages/db/src/lp-exact.js';
+import type { LpDurableHistoryObserver, LpDurableHistoryObservation } from './lp-durable-history-observer.js';
+import type { LpPaperService } from '../../../packages/db/src/lp-paper-service.js';
 import type { UserScope } from '../../../packages/db/src/tenancy.js';
 
 export const lpCopyBoundary = Object.freeze({ sourceImplemented: true, runtimeAccepted: false,
@@ -147,4 +150,182 @@ export async function qualifyLpCopyLifecycle(deps: LpPaperServiceDeps, observe: 
   return { scenario: 'lp-copy-exact-lifecycle', boundary: lpCopyBoundary, blocked: [...lpCopyBlockers],
     evidence: { positionId: acquired.id, operationId: admission.operation.id, deposit: acquired.deposit,
       depositMicroUsd: acquired.depositMicroUsd, realizedMicroUsd: realized, journalHash: lpExactHash(after) } };
+}
+
+export interface LpCompleteEconomicsExpectation {
+  readonly rebalance: { readonly operationKey: string; readonly quote: LpPaperQuote;
+    readonly plan: LpExactPlan; readonly receipt: LpPaperReceipt };
+  readonly close: { readonly operationKey: string; readonly quote: LpPaperQuote; readonly receipt: LpPaperReceipt };
+}
+export type LpCompleteService = Pick<LpPaperService, 'acquire' | 'copyMint' | 'requestOperation' | 'process' | 'recover' | 'position' | 'operation'>;
+function journalContent(observation: LpDurableHistoryObservation) {
+  const { observedAt: _clock, ...content } = observation; return content;
+}
+/** Independent exact receipt folding: deliberately does not call production lpResultAfterReceipt,
+ * lpEconomics, lpValueMicro or lpRecenterStrategy to certify the production answer. */
+export function requireLpCompleteEconomics(observation: LpDurableHistoryObservation, acquired: LpExactPosition,
+  expectedInput: LpCompleteEconomicsExpectation, completed: 0 | 1 | 2, pending = false): void {
+  const expected = lpSnapshot(expectedInput);
+  same(observation.acquisition, acquired, 'complete immutable acquisition');
+  check(observation.operations.length === completed + (pending ? 1 : 0)
+    && observation.receipts.length === completed && observation.history.length === 2 + completed,
+    'complete operation/receipt cardinality');
+  check(new Set(observation.operations.map(o => o.data.id)).size === observation.operations.length
+    && new Set(observation.receipts.map(r => r.operationId)).size === observation.receipts.length,
+  'complete unique operation and receipt identities');
+  let position = lpSnapshot(acquired), fees = 0n, costs = 0n;
+  const steps = [expected.rebalance, expected.close] as const;
+  for (let i = 0; i < completed + (pending ? 1 : 0); i++) {
+    const step = steps[i]!, operation = observation.operations[i]!.data;
+    const action = i === 0 ? 'rebalance' : 'close';
+    check(operation.userId === acquired.userId && operation.positionId === acquired.id && operation.action === action
+      && operation.operationKey === step.operationKey && operation.positionRevision === i.toString(), 'complete operation scope/revision');
+    const intent = lpExactHash({ positionId: acquired.id, action, revision: i.toString(), amountBefore: position.currentAmount,
+      chain: acquired.chain, poolAddress: acquired.poolAddress, depositAsset: acquired.depositAsset });
+    check(operation.fingerprint === intent && operation.receiptKey === `lp-receipt-${lpExactHash([acquired.userId, step.operationKey, intent])}`,
+      'complete operation/receipt intent');
+    same(operation.quote, step.quote, 'independently expected full operation quote');
+    same(operation.plan, i === 0 ? expected.rebalance.plan : null, 'independently expected replacement plan');
+    same(operation.amountBefore, position.currentAmount, 'complete operation inventory');
+    const chronology = observation.operations[i]!;
+    const timestamp = (text: string) => {
+      const value = Date.parse(text); check(Number.isFinite(value) && new Date(value).toISOString() === text,
+        'complete canonical chronology required'); return value;
+    };
+    check(timestamp(chronology.createdAt) >= timestamp(step.quote.observedAt)
+      && timestamp(chronology.createdAt) < timestamp(step.quote.expiresAt)
+      && timestamp(chronology.createdAt) <= timestamp(observation.observedAt), 'complete operation admission chronology');
+    const q = step.quote;
+    const valuation = raw(position.currentAmount.raw) * raw(q.unitPriceUsd.raw) * 1_000_000n
+      / 10n ** BigInt(position.currentAmount.scale + q.unitPriceUsd.scale);
+    check(q.userId === acquired.userId && q.action === action && q.intentHash === intent && q.mode === 'paper'
+      && q.providerId === acquired.acquisitionQuote.providerId && q.pool.chain === acquired.chain
+      && q.pool.networkId === acquired.acquisitionQuote.pool.networkId && q.pool.protocol === acquired.protocol
+      && q.pool.poolAddress === acquired.poolAddress && q.pool.depositAsset === acquired.depositAsset
+      && q.valueMicroUsd === valuation.toString(), 'complete independent quote scope/value');
+    same(q.deposit, position.currentAmount, 'complete quoted before inventory');
+    if (i === 0) {
+      const e = q.economics;
+      check(e && e.basis === 'incremental-rebalance', 'complete incremental economics required');
+      const net = raw(e.extraFeesMicroUsd) + BigInt(e.inventoryChangeMicroUsd) - raw(e.impermanentLossMicroUsd)
+        - raw(e.gasMicroUsd) - raw(e.repositionMicroUsd);
+      check(net > 0n, 'independently positive rebalance economics required');
+      same(q.amountAfter, position.currentAmount, 'rebalance cannot substitute inventory');
+      check(q.proceedsMicroUsd === '0', 'rebalance cannot realize quoted fees');
+      const allocations = expected.rebalance.plan.rungs.reduce((sum, rung) => sum + raw(rung.allocation.raw), 0n);
+      check(allocations === raw(position.currentAmount.raw)
+        && expected.rebalance.plan.rungs.every(rung => rung.allocation.scale === position.currentAmount.scale), 'replacement plan exact conservation');
+      const beforeStrategy = position.plan.strategy, afterStrategy = expected.rebalance.plan.strategy;
+      const relative = (a: number, b: number) => Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b), 1) * 1e-12;
+      check(afterStrategy.distribution === beforeStrategy.distribution && afterStrategy.rungCount === beforeStrategy.rungCount
+        && relative(afterStrategy.rangeUpper / afterStrategy.rangeLower, beforeStrategy.rangeUpper / beforeStrategy.rangeLower)
+        && relative(Math.sqrt(afterStrategy.rangeUpper * afterStrategy.rangeLower), q.pool.currentPrice),
+      'independent geometric recenter preserves strategy width');
+    } else {
+      same(q.amountAfter, { raw: '0', scale: acquired.deposit.scale }, 'complete close zero inventory');
+      check(q.proceedsMicroUsd === valuation.toString(), 'independent close proceeds value');
+    }
+    if (i >= completed) {
+      check(operation.status === 'pending' && operation.receipt === null && observation.operations[i]!.completedAt === null,
+        'pending admission is not completion'); continue;
+    }
+    const receipt = step.receipt, stored = observation.receipts.find(r => r.operationId === operation.id);
+    check(operation.status === 'completed' && stored && stored.hash === lpExactHash(receipt), 'complete independently hashed receipt');
+    same(operation.receipt, receipt, 'complete operation receipt'); same(stored.data, receipt, 'complete stored receipt body');
+    check(chronology.completedAt !== null && timestamp(receipt.settledAt) >= timestamp(chronology.createdAt)
+      && timestamp(stored.acceptedAt) >= timestamp(receipt.settledAt)
+      && timestamp(chronology.completedAt) >= timestamp(stored.acceptedAt)
+      && timestamp(chronology.completedAt) <= timestamp(observation.observedAt), 'complete receipt/completion chronology');
+    check(receipt.providerId === q.providerId && receipt.userId === acquired.userId && receipt.positionId === acquired.id
+      && receipt.positionRevision === i.toString() && receipt.action === action && receipt.mode === 'paper'
+      && receipt.finality === 'paper-settled' && receipt.networkId === q.pool.networkId && receipt.chain === acquired.chain
+      && receipt.protocol === acquired.protocol && receipt.poolAddress === acquired.poolAddress && receipt.depositAsset === acquired.depositAsset
+      && receipt.receiptKey === operation.receiptKey && receipt.quoteId === q.quoteId && receipt.quoteHash === lpExactHash(q)
+      && receipt.proceedsMicroUsd === q.proceedsMicroUsd, 'complete receipt context and actual economics');
+    same(receipt.amountBefore, position.currentAmount, 'complete receipt before inventory');
+    same(receipt.amountAfter, q.amountAfter, 'complete receipt after inventory');
+    fees += raw(receipt.collectedFeesMicroUsd); costs += raw(receipt.executionCostsMicroUsd);
+    position = { ...position, currentAmount: receipt.amountAfter, plan: i === 0 ? expected.rebalance.plan : position.plan,
+      revision: (i + 1).toString(), state: i === 0 ? 'active' : 'closed', cumulativeFeesMicroUsd: fees.toString(),
+      cumulativeCostsMicroUsd: costs.toString(), realizedMicroUsd: i === 0 ? null
+        : (raw(receipt.proceedsMicroUsd) + fees - costs - raw(acquired.depositMicroUsd)).toString(), lastReceiptKey: receipt.receiptKey };
+    check(observation.history.filter(h => h.reason.includes(receipt.receiptKey)).length === 1,
+      'one economic state history entry per exact receipt');
+  }
+  same(observation.position, position, 'complete independent position economic fold');
+  check(observation.history.filter(h => h.fromState === null && h.toState === 'building').length === 1
+    && observation.history.filter(h => h.fromState === 'building' && h.toState === 'active').length === 1,
+  'complete acquisition state history');
+  check(observation.copies.length === (acquired.copyOrigin ? 1 : 0), 'complete copy execution linkage');
+  if (acquired.copyOrigin) {
+    const copy = observation.copies[0]!, origin = acquired.copyOrigin;
+    check(copy.subscriptionId === origin.subscriptionId && copy.masterPositionId === origin.masterPositionId
+      && copy.chain === acquired.chain && copy.action === 'mint' && copy.status === 'executed'
+      && copy.masterMicroUsd === origin.masterDepositMicroUsd && copy.followerMicroUsd === acquired.depositMicroUsd,
+    'complete independently observed copy linkage economics');
+  }
+}
+
+/** Complete production acquisition/copy + rebalance + close + restart recovery. Recovery is a
+ * queue hint only, processing may remain pending. No callback return grants completion and
+ * the independently observed journals must remain unchanged on every replay. */
+export async function qualifyLpCompleteLifecycle(service: LpCompleteService, observe: LpDurableHistoryObserver,
+  scope: UserScope, acquisitionInput: { kind: 'copy'; expected: LpCopyExpectation }
+    | { kind: 'acquisition'; request: LpExactAcquisitionRequest; quote: LpPaperQuote; plan: LpExactPlan },
+  expectedInput: LpCompleteEconomicsExpectation) {
+  const acquisition = lpSnapshot(acquisitionInput), expected = lpSnapshot(expectedInput);
+  const acquire = () => acquisition.kind === 'copy'
+    ? service.copyMint(scope, { subscriptionId: acquisition.expected.subscription.id, eventId: acquisition.expected.event.eventId,
+      assetScale: acquisition.expected.assetScale }) : service.acquire(scope, acquisition.request);
+  const acquired = await acquire();
+  if (acquisition.kind === 'copy') requireAcquisition(acquired, scope, acquisition.expected);
+  else {
+    const r = acquisition.request, q = acquisition.quote;
+    same(acquired.acquisitionQuote, q, 'independent direct acquisition quote'); same(acquired.plan, acquisition.plan, 'direct acquisition plan');
+    same(acquired.deposit, r.deposit, 'direct raw acquisition'); same(acquired.currentAmount, r.deposit, 'direct initial inventory');
+    same(q.deposit, r.deposit, 'direct acquisition quoted inventory'); same(q.amountAfter, r.deposit, 'direct acquisition quoted result');
+    same(acquisition.plan.strategy, r.strategy, 'direct acquisition strategy');
+    check(acquisition.plan.rungs.reduce((sum, rung) => sum + raw(rung.allocation.raw), 0n) === raw(r.deposit.raw)
+      && acquisition.plan.rungs.every(rung => rung.allocation.scale === r.deposit.scale), 'direct plan independent raw conservation');
+    const value = raw(r.deposit.raw) * raw(q.unitPriceUsd.raw) * 1_000_000n / 10n ** BigInt(r.deposit.scale + q.unitPriceUsd.scale);
+    check(acquired.userId === scope.userId && acquired.chain === r.chain && acquired.poolAddress === r.poolAddress
+      && acquired.depositAsset === r.depositAsset && acquired.acquisitionKey === r.operationKey
+      && acquired.acquisitionFingerprint === lpAcquisitionHash(r) && acquired.depositMicroUsd === value.toString()
+      && acquired.protocol === q.pool.protocol && acquired.mode === 'paper' && acquired.autoRebalance === (r.autoRebalance === true)
+      && q.userId === scope.userId && q.intentHash === acquired.acquisitionFingerprint && q.action === 'acquire' && q.mode === 'paper'
+      && q.pool.chain === r.chain && q.pool.poolAddress === r.poolAddress && q.pool.depositAsset === r.depositAsset
+      && q.pool.depositScale === r.deposit.scale && q.valueMicroUsd === value.toString() && q.proceedsMicroUsd === '0'
+      && acquired.copyOrigin === null && acquired.state === 'active' && acquired.revision === '0'
+      && acquired.cumulativeFeesMicroUsd === '0' && acquired.cumulativeCostsMicroUsd === '0'
+      && acquired.lastReceiptKey === null && acquired.realizedMicroUsd === null, 'complete direct acquisition identity/economics');
+  }
+  const initial = await observe(scope, acquired.id); requireLpCompleteEconomics(initial, acquired, expected, 0);
+  same(await acquire(), acquired, 'complete immutable acquisition replay');
+  same(journalContent(await observe(scope, acquired.id)), journalContent(initial), 'complete acquisition journal replay');
+  const steps = [expected.rebalance, expected.close] as const;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]!, action = i === 0 ? 'rebalance' : 'close';
+    const admitted = await service.requestOperation(scope, { positionId: acquired.id, operationKey: step.operationKey, action });
+    check(!admitted.broadcast && admitted.operation.status === 'pending' && admitted.operation.receipt === null, 'complete receiptless admission');
+    const before = await observe(scope, acquired.id); requireLpCompleteEconomics(before, acquired, expected, i as 0 | 1, true);
+    const recovery = await service.recover(scope, 100);
+    check(Number.isInteger(recovery.queued) && Number.isInteger(recovery.deferred) && recovery.queued + recovery.deferred >= 1,
+      'complete pending operation recovery observation');
+    same(journalContent(await observe(scope, acquired.id)), journalContent(before), 'recovery cannot mutate economic journals');
+    const done = await service.process(scope, { operationId: admitted.operation.id, chain: acquired.chain });
+    check(done.operation.status === 'completed' && !done.receiptPending && !done.broadcast, 'complete independent receipt required');
+    const after = await observe(scope, acquired.id); requireLpCompleteEconomics(after, acquired, expected, (i + 1) as 1 | 2);
+    await service.process(scope, { operationId: admitted.operation.id, chain: acquired.chain });
+    await service.requestOperation(scope, { positionId: acquired.id, operationKey: step.operationKey, action });
+    same(journalContent(await observe(scope, acquired.id)), journalContent(after), 'complete durable operation replay');
+  }
+  const final = await observe(scope, acquired.id);
+  same(await acquire(), acquired, 'complete replay cannot reopen capital');
+  same(journalContent(await observe(scope, acquired.id)), journalContent(final), 'complete closed acquisition replay journal');
+  return { scenario: acquisition.kind === 'copy' ? 'lp-copy-complete-durable-lifecycle' : 'lp-acquisition-complete-durable-lifecycle',
+    boundary: lpCopyBoundary, blocked: [...lpCopyBlockers], evidence: { positionId: acquired.id,
+      deposit: acquired.deposit, depositMicroUsd: acquired.depositMicroUsd, revision: final.position.revision,
+      cumulativeFeesMicroUsd: final.position.cumulativeFeesMicroUsd, cumulativeCostsMicroUsd: final.position.cumulativeCostsMicroUsd,
+      realizedMicroUsd: final.position.realizedMicroUsd, operations: final.operations.length,
+      receipts: final.receipts.length, historyHash: lpExactHash(journalContent(final)) } };
 }

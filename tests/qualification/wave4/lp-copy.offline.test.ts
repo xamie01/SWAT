@@ -3,7 +3,9 @@ import { createLpPaperService } from '../../../packages/db/src/lp-paper-service.
 import { lpPaperFixture } from '../../../packages/db/src/lp-paper-fixture.js';
 import { lpExactHash, lpSnapshot, type LpExactPlan } from '../../../packages/db/src/lp-exact.js';
 import type { UserScope } from '../../../packages/db/src/tenancy.js';
-import { lpCopySqlService, qualifyLpCopyLifecycle, type LpCopyExpectation, type LpCopyObserver } from './lp-copy-scenarios.js';
+import { lpCopySqlService, qualifyLpCopyLifecycle, qualifyLpCompleteLifecycle, requireLpCompleteEconomics,
+  type LpCompleteEconomicsExpectation, type LpCopyExpectation, type LpCopyObserver } from './lp-copy-scenarios.js';
+import type { LpDurableHistoryObserver } from './lp-durable-history-observer.js';
 
 const scope = { userId: 'alice' } as UserScope;
 const foreign = { userId: 'bob' } as UserScope;
@@ -145,5 +147,91 @@ describe('LP copy production service contracts with inert fixture transactions o
     expect(lpExactHash(f.state)).toBe(before); f.fault.settle = false;
     await createLpPaperService(f.deps).process(scope, { operationId: admission.operation.id, chain: 'solana' });
     expect(f.state.commits.filter(c => c === 'receipt+position+operation')).toHaveLength(1);
+  });
+});
+
+/** Expected quotes/receipts are captured on a separate inert oracle fixture before the
+ * actual scenario. No scenario result is used to manufacture the expected economics. */
+async function completeFixture(kind: 'copy' | 'acquisition') {
+  const oracle = fixture(), actual = fixture();
+  oracle.f.receipts.available = true; actual.f.receipts.available = true;
+  const direct = { operationKey: 'direct-complete', chain: 'solana' as const, poolAddress: 'solana:pool',
+    depositAsset: 'solana:mint', deposit: { raw: '900719925474099312345', scale: 18 },
+    strategy: oracle.expected.event.strategy, autoRebalance: false };
+  const acquired = kind === 'copy' ? await oracle.f.service.copyMint(scope, request) : await oracle.f.service.acquire(scope, direct);
+  const rebalance = await oracle.f.service.requestOperation(scope, { positionId: acquired.id, operationKey: 'rebalance-complete', action: 'rebalance' });
+  const rebalanced = await oracle.f.service.process(scope, { operationId: rebalance.operation.id, chain: 'solana' });
+  const close = await oracle.f.service.requestOperation(scope, { positionId: acquired.id, operationKey: 'close-complete', action: 'close' });
+  const closed = await oracle.f.service.process(scope, { operationId: close.operation.id, chain: 'solana' });
+  const expected: LpCompleteEconomicsExpectation = { rebalance: { operationKey: 'rebalance-complete', quote: lpSnapshot(rebalance.operation.quote),
+    plan: lpSnapshot(rebalance.operation.plan!), receipt: lpSnapshot(rebalanced.operation.receipt!) }, close: { operationKey: 'close-complete',
+    quote: lpSnapshot(close.operation.quote), receipt: lpSnapshot(closed.operation.receipt!) } };
+  const observe: LpDurableHistoryObserver = async (s, id) => {
+    const p = actual.f.state.positions[id], acquisition = actual.f.state.acquisitions[id];
+    if (!p || !acquisition || p.userId !== s.userId) throw new Error('foreign fixture history');
+    const operations = Object.values(actual.f.state.operations).filter(o => o.positionId === id && o.userId === s.userId);
+    return lpSnapshot({ acquisition, position: p, observedAt: actual.f.time.now.toISOString(),
+      operations: operations.map(data => ({ data, createdAt: actual.f.time.now.toISOString(),
+        completedAt: data.status === 'completed' ? actual.f.time.now.toISOString() : null })),
+      receipts: operations.filter(o => o.receipt).map(o => ({ operationId: o.id, data: o.receipt!, hash: lpExactHash(o.receipt), acceptedAt: actual.f.time.now.toISOString() })),
+      history: [{ id: '1', fromState: null, toState: 'building' as const, reason: 'acquisition', changedAt: actual.f.time.now.toISOString() },
+        { id: '2', fromState: 'building' as const, toState: 'active' as const, reason: 'plan', changedAt: actual.f.time.now.toISOString() },
+        ...operations.filter(o => o.receipt).map((o, i) => ({ id: String(i + 3), fromState: 'active' as const,
+          toState: o.action === 'close' ? 'closed' as const : 'active' as const, reason: `receipt ${o.receiptKey}: exact`, changedAt: actual.f.time.now.toISOString() }))],
+      copies: acquisition.copyOrigin ? [{ id: 'copy-fixture', subscriptionId: acquisition.copyOrigin.subscriptionId,
+        masterPositionId: acquisition.copyOrigin.masterPositionId, chain: acquisition.chain, action: 'mint', status: 'executed',
+        masterMicroUsd: acquisition.copyOrigin.masterDepositMicroUsd, followerMicroUsd: acquisition.depositMicroUsd }] : [] });
+  };
+  const acquisition = kind === 'copy' ? { kind: 'copy' as const, expected: actual.expected }
+    : { kind: 'acquisition' as const, request: direct, quote: acquired.acquisitionQuote, plan: acquired.plan };
+  return { ...actual, expectedComplete: expected, acquisition, observeComplete: observe };
+}
+
+describe('complete production LP durable operation lifecycle with inert IO only', () => {
+  it.each(['copy', 'acquisition'] as const)('%s independently joins acquisition rebalance close history and recovery replay', async kind => {
+    const t = await completeFixture(kind);
+    const result = await qualifyLpCompleteLifecycle(t.f.service, t.observeComplete, scope, t.acquisition, t.expectedComplete);
+    expect(result.evidence).toMatchObject({ revision: '2', operations: 2, receipts: 2,
+      cumulativeFeesMicroUsd: '200000', cumulativeCostsMicroUsd: '100000', realizedMicroUsd: '100000' });
+    expect(result.boundary.runtimeAccepted).toBe(false);
+    expect(t.f.state.commits).toEqual([kind === 'copy' ? 'acquisition+copy' : 'acquisition',
+      'operation', 'receipt+position+operation', 'operation', 'receipt+position+operation']);
+    expect(t.f.seen.queue.length).toBeGreaterThanOrEqual(4);
+  });
+  it('missing provider receipt refuses full lifecycle without accepting recovery/processor success', async () => {
+    const t = await completeFixture('copy'); t.f.receipts.available = false;
+    await expect(qualifyLpCompleteLifecycle(t.f.service, t.observeComplete, scope, t.acquisition, t.expectedComplete)).rejects.toThrow('independent receipt required');
+    const p = Object.values(t.f.state.positions)[0]!;
+    expect(p.revision).toBe('0'); expect(p.cumulativeCostsMicroUsd).toBe('0');
+  });
+  it.each(['fees', 'costs', 'price', 'net', 'inventory'] as const)('independent %s expectations cannot be laundered by matching fixture snapshots', async field => {
+    const t = await completeFixture('copy'), original = t.expectedComplete;
+    const e: LpCompleteEconomicsExpectation = {
+      rebalance: { ...original.rebalance, ...(field === 'fees' ? { receipt: { ...original.rebalance.receipt, collectedFeesMicroUsd: '999999' } }
+        : field === 'net' ? { quote: { ...original.rebalance.quote, economics: { ...original.rebalance.quote.economics!, gasMicroUsd: '99999999999' } } } : {}) },
+      close: { ...original.close, ...(field === 'costs' ? { receipt: { ...original.close.receipt, executionCostsMicroUsd: '0' } }
+        : field === 'price' ? { quote: { ...original.close.quote, unitPriceUsd: { raw: '1234568', scale: 6 } } }
+        : field === 'inventory' ? { receipt: { ...original.close.receipt, amountAfter: { raw: '1', scale: 18 } } } : {}) }
+    };
+    await expect(qualifyLpCompleteLifecycle(t.f.service, t.observeComplete, scope, t.acquisition, e)).rejects.toThrow();
+  });
+  it('additional observed operation/history economics refuse despite exact one-close fixtures staying accepted', async () => {
+    const t = await completeFixture('copy');
+    const hostile: LpDurableHistoryObserver = async (s, id) => {
+      const row = await t.observeComplete(s, id);
+      return row.operations.length ? { ...row, operations: [...row.operations, row.operations[0]!] } : row;
+    };
+    await expect(qualifyLpCompleteLifecycle(t.f.service, hostile, scope, t.acquisition, t.expectedComplete)).rejects.toThrow('cardinality');
+  });
+  it('failed settlement then a restarted canonical service commits exactly one complete economic receipt', async () => {
+    const t = await completeFixture('copy'); const acquired = await t.f.service.copyMint(scope, request);
+    const op = await t.f.service.requestOperation(scope, { positionId: acquired.id, operationKey: 'rebalance-complete', action: 'rebalance' });
+    t.f.fault.settle = true; const before = lpExactHash(t.f.state);
+    await expect(t.f.service.process(scope, { operationId: op.operation.id, chain: 'solana' })).rejects.toThrow('transaction failure');
+    expect(lpExactHash(t.f.state)).toBe(before); t.f.fault.settle = false;
+    const restart = createLpPaperService(t.f.deps); await restart.recover(scope);
+    await restart.process(scope, { operationId: op.operation.id, chain: 'solana' });
+    requireLpCompleteEconomics(await t.observeComplete(scope, acquired.id), acquired, t.expectedComplete, 1);
+    expect(t.f.state.commits.filter(c => c === 'receipt+position+operation')).toHaveLength(1);
   });
 });

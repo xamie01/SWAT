@@ -12844,7 +12844,7 @@
   "sourceRepairReview": "threats/project-completion-20261117/WAVE4-REVIEW-REPAIRS.md",
   "unresolvedHighFindings": [],
   "lpPrivilegeProposalStatus": "084-refused-preserved-085-and086-bounded-source-accepted-087-bounded-source-accepted-not-applied",
-  "currentCodeInputsMatchManifest": true,
+  "currentCodeInputsMatchManifest": false,
   "currentWorkspaceInputManifestSha256": "770ccc9feb5dd1cce3800f97fc159bd24eecda9a9f7d118290361c2915ab8edf",
   "supersededExpandedChecks": [
     "build-w4-main-offline-16",
@@ -13044,7 +13044,8 @@
   },
   "loadOfflineTestsPassed": 46,
   "loadLiteralFiles": 1,
-  "currentCodeInputStatus": "Ten final P4b fanout checks share unchanged complete consumed-input inventory; fresh DB emit verified separately; bounded independent fanout review recorded; report-only updates excluded",
+  "currentCodeInputStatus": "Accepted P4b fanout epoch retained as historical; remaining source batch paused after provider insufficient-credit failures; partial files unverified; global freeze not established",
+  "parallelBatchPause": "threats/project-completion-20261117/WAVE4-PARALLEL-PAUSED.md",
   "protectedAdmissionOfflineAssertionsPassed": 59,
   "protectedAdmissionSourceReview": "threats/project-completion-20261117/WAVE4-LP-PROTECTED-REPAIR-ACCEPTANCE.md",
   "protectedAdmissionIndependentReviewer": "agent_da2d27f3-8cf5-4032-81a2-0b6323c8d9ab",
@@ -13054,7 +13055,7 @@
   "historicalUnresolvedHighFindingsAtOffline23": [
     "SQL083 lacked protected quote/receipt/economic admission; source repair now adds085 and production checks, runtime unexecuted"
   ],
-  "activeImplementationPackage": null,
+  "activeImplementationPackage": "Wave4-parallel-remaining-source-batch01",
   "remainingImplementationPackages": [
     "P0-runner-independent-review",
     "P4b-protected-pipeline-backing",
@@ -13131,7 +13132,9 @@
   "authenticationSourceStatus": "P1-P3-bounded-source-accepted-P4-P8-incomplete",
   "authenticationSourceAccepted": true,
   "unresolvedMediumFindings": [],
-  "postCheckpointUnverifiedChanges": [],
+  "postCheckpointUnverifiedChanges": [
+    "User-requested maximum-six parallel source assignments for remaining P4b/P4c/P5/P6/P7/P8 work; new complete freeze, guarded verification and independent review required"
+  ],
   "reportSha256HistoricalP2": {
     "tests/qualification/wave4/.gitignore": "85eff96f5e59f9cda896e12c420f3d6f1960e66ac6e576cd0e9cd8f03d5eb7f9",
     "tests/qualification/wave4/README.md": "1ec31fcbb3d1df44e373965f00d2dc0aca25e3eb79fd3b6f50aed75dc48983bd",
@@ -13729,5 +13732,6 @@
     "Provider/intake/capability/risk/receipt/valuation/correction backing and full protected provisioning remain outside this slice",
     "P4c executed scenario and independent durable observer remain incomplete",
     "Actual PostgreSQL/RLS/ACL/locking/COMMIT/BullMQ/provider/financial/load/process containment remains unqualified"
-  ]
+  ],
+  "parallelCompletionMap": "threats/project-completion-20261117/WAVE4-PARALLEL-COMPLETION.md"
 }

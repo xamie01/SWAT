@@ -481,6 +481,9 @@ describe('S5 reducing admission and fail-closed collateral dependencies; no cano
   it('canonical receipt/accounting/collateral capabilities remain explicit dependencies, not injected success flags', () => {
     const results = blockedWithdrawalCapabilities();
     expect(results).toHaveLength(3);
+    expect(results[0]?.blocked).toContain('concrete-source-otp-and-capture-do-not-establish-deployed-authority');
+    expect(results[2]?.blocked).toContain('immutable-financial-intent-attempt-to-canonical-spot-lot-execution-receipt-linkage-source-gap');
+    expect(results[2]?.blocked).toContain('canonical-withdrawal-and-spot-independent-ledger-admission-writer-source-backing-gap');
     for (const result of results) {
       requireSourceOnly(result); expect(result.state).toBe('blocked-on-external-capability'); expect(result.assertions).toHaveLength(0);
     }

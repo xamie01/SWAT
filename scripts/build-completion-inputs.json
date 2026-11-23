@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "sourceRoots": ["apps", "packages", "programs", "pattern-ml", "pda-test-ui", "tests", "scripts", "deploy", "docs", ".woodpecker", "threats"],
+  "sourceRule": "All noncredential files, regardless of extension, including executable configuration, shell, fixtures, SQL source and source-read documentation. Nondot root files and .woodpecker.yaml are included; client dotfiles are demonstrably not execution inputs.",
+  "generatedDirectoryNames": [".git", ".next", ".turbo", "__pycache__", ".venv", "venv", ".pytest_cache"],
+  "generatedWorkspacePrefixes": ["threats/runtime/build", "threats/runtime/build-fresh", "threats/runtime/web-snapshot", "threats/sequential-fixes/cache", "threats/sequential-fixes/reviewtmp", "threats/post-fix-8905505/cache", "threats/build-completion-20261116-sequential/tmp", "threats/build-completion-20261116-sequential/attempts", "threats/project-completion-20261117/tmp", "threats/project-completion-20261117/attempts", "programs/target", "programs/target-sequential"],
+  "generatedEvidenceDirectories": ["threats/build-completion-20261116-sequential", "threats/project-completion-20261117"],
+  "generatedEvidenceRule": "Only direct build-* .json/.log files in generatedEvidenceDirectories are runner outputs; identically named fixtures elsewhere, reviewed configs, proposals, inventories and documentation remain inputs. Emit excludes its own dist, separately reconciled before publication. Other dist files remain inputs.",
+  "dependencyRule": "Discover visible installed packages at every source importer node_modules; recursively follow actual Node ancestor resolution of dependencies, optionalDependencies and peerDependencies. Hash ALL files of each reached package (including package.json, runtime JS, TS declarations/lib chains, native/data assets), not every .pnpm package. Record all resolution probes and confined symlink identities. Development dependencies are already covered when installed at workspace importers; package-private development-only dependency trees are not execution inputs.",
+  "installedMetadata": ["node_modules/.modules.yaml", "node_modules/.pnpm/lock.yaml"],
+  "runtimePaths": ["/usr/bin/node", "/usr/bin/python3"],
+  "credentialRule": "Never read .env*, .npmrc, .netrc, pgpass, userlist.txt, private-key/keypair/wallet/credential filenames or .pem/.key files. The separately approved env check hashes only the public .env.example via its existing assignment-name contract. The selected Node guard is not a native sandbox.",
+  "limits": "A conservative installed package-resolution closure, not a proof against undeclared dynamic imports, native filesystem reads or concurrent noncooperating writers. Coordinator must freeze writers and review the actual imported closure before approval. Unsupported/escaping/dangling filesystem entries fail closed."
+}

@@ -1,5 +1,7 @@
 import type { PoolClient } from 'pg';
 import { query } from './client.js';
+import { recordAuditEventStrictWithClient, type AuditEventInput } from './audit-log-owned.js';
+export type { AuditActorType, AuditEventInput } from './audit-log-owned.js';
 
 /**
  * Append-only audit log (D10/D13).
@@ -15,36 +17,10 @@ import { query } from './client.js';
  *     for a nonexistent email has no user to point at.
  */
 
-export type AuditActorType = 'user' | 'admin' | 'service' | 'anonymous';
-
-export interface AuditEventInput {
-  readonly actorType: AuditActorType;
-  readonly actorId?: string | null;
-  readonly event: string;
-  readonly targetType?: string | null;
-  readonly targetId?: string | null;
-  readonly ip?: string | null;
-  readonly userAgent?: string | null;
-  readonly metadata?: Record<string, unknown>;
-}
-
 async function insert(input: AuditEventInput, client?: PoolClient): Promise<void> {
-  const execute = client ? (sql: string, values: unknown[]) => client.query(sql, values) : query;
-  await execute(
-    `INSERT INTO audit_log
-       (actor_type, actor_id, event, target_type, target_id, ip, user_agent, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [
-      input.actorType,
-      input.actorId ?? null,
-      input.event,
-      input.targetType ?? null,
-      input.targetId ?? null,
-      input.ip ?? null,
-      input.userAgent?.slice(0, 256) ?? null,
-      JSON.stringify(input.metadata ?? {})
-    ]
-  );
+  // Compatibility facade alone may use ambient acquisition. Owned callers import
+  // the mandatory-client leaf, so both execute one canonical strict insert body.
+  await recordAuditEventStrictWithClient(input, client ?? { query });
 }
 
 /**

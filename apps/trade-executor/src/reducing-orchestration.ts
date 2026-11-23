@@ -3,9 +3,10 @@ import {
   type FinancialAttempt, type FinancialEffectPorts, type FinancialReceipt,
   financialText, financialTime, financialUser, exactRaw, requireFinancial,
   type FinancialAuthorization, validateFinancialAuthorization, validateNoFutureAcceptance
-} from '@swat/db';
-import { withdrawalSqlStore, type WithdrawalSqlStore, type StoredFinancialIntent,
-  reducingBudgets, reducingRemainder, type ReducingIntent, type ReducingAccountingPort, withdrawalBudgets } from '@swat/db';
+} from '@swat/db/dist/withdrawal-contract.js';
+import { withdrawalSqlStore, type WithdrawalSqlStore, type StoredFinancialIntent } from '@swat/db/dist/withdrawal-store.js';
+import { reducingBudgets, reducingRemainder, type ReducingIntent, type ReducingAccountingPort } from '@swat/db/dist/reducing-contract.js';
+import { withdrawalBudgets } from '@swat/db/dist/withdrawal-service.js';
 
 type Intent = WithdrawalIntent | ReducingIntent;
 export interface DurableFinancialRunnerPorts<I extends Intent> {
