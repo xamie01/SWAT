@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
+export type { PoolClient } from 'pg';
 import {
   canTransitionCopyExecution,
   canTransitionSourceConfirmation,
@@ -2922,7 +2923,11 @@ export function prepareListSourceTradeSignalCandidates(input: Parameters<typeof 
 
 /** Validate before acquisition and capture the same terms used by the owned body. */
 export function prepareInsertSourceTradeSignal(input: Parameters<typeof insertSourceTradeSignalWithClient>[1]) {
-  const captured = { ...input, triggerData: { ...input.triggerData },
+  const triggerData = JSON.parse(JSON.stringify({ ...input.triggerData })) as unknown;
+  if (triggerData === null || typeof triggerData !== 'object' || Array.isArray(triggerData)) {
+    throw new Error('triggerData must serialize to a JSON object');
+  }
+  const captured = { ...input, triggerData: triggerData as Record<string, unknown>,
     safetyFlags: input.safetyFlags ? [...input.safetyFlags] : undefined,
     safetyWarnings: input.safetyWarnings ? [...input.safetyWarnings] : undefined };
   const prepared = prepareInsertSourceTradeSignalTerms(captured);

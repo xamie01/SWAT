@@ -77,11 +77,27 @@ function updates(): string[] {
 }
 
 function routeClient(stubs: Stub[]): void {
-  mocks.clientQuery.mockImplementation(async (text: string) => {
-    if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(text)) return { rows: [] };
+  mocks.clientQuery.mockImplementation(async (text: string, values: unknown[] = []) => {
+    const control = /^\s*(BEGIN|COMMIT|ROLLBACK)(?: ISOLATION LEVEL (?:READ COMMITTED|REPEATABLE READ|SERIALIZABLE))?\s*$/i.exec(text);
+    if (control) return { rows: [], rowCount: null, command: control[1]!.toUpperCase() };
+    // The real tenancy helper validates the checked-out runtime backend before
+    // setting tenant scope. Reply to those exact probes, not arbitrary SELECTs.
+    if (text.includes('FROM pg_catalog.pg_roles r WHERE rolname = current_user')) {
+      return { rows: [{ role_name: 'swat_app', session_role: 'swat_app', row_security: 'on',
+        rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false,
+        rolreplication: false, rolinherit: false, has_memberships: false,
+        owns_objects: false, can_create: false }], rowCount: 1, command: 'SELECT' };
+    }
+    if (text === "SET LOCAL app.bypass_rls = 'off'") {
+      return { rows: [], rowCount: null, command: 'SET' };
+    }
+    if (text === "SELECT set_config('app.current_user_id', $1, true)") {
+      return { rows: [{ set_config: values[0] }], rowCount: 1, command: 'SELECT' };
+    }
     const hit = stubs.find((stub) => stub.match.test(text));
     if (!hit) throw new Error(`unstubbed statement: ${text}`);
-    return { rows: hit.rows ?? [] };
+    const rows = hit.rows ?? [];
+    return { rows, rowCount: rows.length };
   });
 }
 

@@ -1,6 +1,6 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { capabilitiesFor, effectiveTier, tierAllowsChain, type UserTier } from '@swat/shared';
-import { evaluateForwardOnlyMirror, type ForwardOnlySkipCode } from './forward-only.js';
+import { evaluateForwardOnlyMirror, type ForwardOnlySkipCode } from './forward-only-state.js';
 import { mirrorEligibilityForState, type MirrorEligibility } from './subscription-state.js';
 
 /**

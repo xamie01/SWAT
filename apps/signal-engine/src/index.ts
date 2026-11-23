@@ -1,34 +1,23 @@
-import type { PoolClient } from '@swat/db';
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
 import {
   createExactFollowerEntryRequest,
-  crossTenantScope,
-  hasAcceptedSourceVerificationWithClient,
   claimSourceSignalForCopyExecutionWithClient,
   readWorkerExecutionContextWithClient,
   readCapturedWorkerPolicyWithClient,
-  readFanoutRecipientScopeWithClient,
   listFanoutEnumerationRepairs,
   listFanoutDeliveryRepairs,
   getFanoutBatch,
   withTransaction,
-  type FanoutRecipient,
-  type FanoutExclusion,
   getPolymarketOutcomeContext,
   insertSignalWithDedupe,
   insertSourceTradeSignal,
-  listFanoutCandidates,
   listSourceTradeSignalCandidates,
   markSourceTradeSignalDispatched,
-  planFanout,
   query,
   resolveChainMode,
   type ChainModeResolution,
-  type FanoutPlan,
-  type FanoutPlatformInputs,
-  type FanoutSignal,
   type SourceTradeSignalCandidate
 } from '@swat/db';
 import {
@@ -42,13 +31,10 @@ import {
   resolveChainAddress,
   tradeQueueForChain
 } from '@swat/shared';
-import type { Chain, ExecutionMode } from '@swat/shared';
+import type { Chain } from '@swat/shared';
 import { checkTokenSafety } from './safety.js';
-import {
-  capacityAppliesToDirection,
-  projectCohortNotionalUsd,
-  resolveFanoutCapacity
-} from './capacity-inputs.js';
+import { resolveFanoutCapacity } from './capacity-inputs.js';
+import { createOwnedFanoutPolicy } from './fanout-policy-owned.js';
 import { createPolymarketBookLiquidityReader } from './polymarket-book-reader.js';
 import {
   isPlaceholderOrUnstableOutcome,
@@ -57,15 +43,11 @@ import {
 import { evaluateSignalTradeEligibility } from './trade-eligibility.js';
 import {
   createDurableFanoutDelivery,
-  fanoutDescriptorIdentity,
   enqueueFanoutTradeJobs,
   type FanoutJobPlan,
-  type FanoutJobDescriptor,
-  planFanoutTradeJobs,
-  summariseFanout
+  planFanoutTradeJobs
 } from './fanout-enqueue.js';
-import { createCanonicalFanoutPreparation, unavailableExactFanoutEntryRequest,
-  createVerifiedFanoutAdmission, requireStableFanoutExclusions } from './fanout-canonical.js';
+import { createCanonicalFanoutPreparation } from './fanout-canonical.js';
 import {
   evaluateMirrorableActivity,
   resolveMinimumMirrorableNotionalUsd
@@ -236,102 +218,6 @@ async function resolveFanoutChainMode(chain: Chain): Promise<ChainModeResolution
   }
 }
 
-interface SignalFanout {
-  readonly plan: FanoutPlan;
-  /**
-   * The chain's clamped mode, carried so the capacity ledger records the mode the
-   * cohort actually runs in. Re-resolving it after the fact is how a `paper`
-   * verdict gets recorded as `live` flow.
-   */
-  readonly effectiveMode: ExecutionMode;
-}
-
-/**
- * Enumerates and decides one signal's fan-out, or `null` if enumeration failed.
- *
- * `null` means "no per-user jobs", not "no jobs": the operator job is emitted
- * either way, so an enumeration fault degrades to exactly the pre-fan-out
- * behaviour instead of stopping the trade path. It is logged as an error because
- * silently copying for nobody is the failure mode this whole item is guarding
- * against.
- */
-async function planSignalFanout(
-  sourceTrade: SourceTradeSignalCandidate,
-  chain: Chain,
-  tokenMint: string,
-  score: number,
-  poolTvlUsd: number | null
-): Promise<SignalFanout | null> {
-  try {
-    const [candidates, chainMode] = await Promise.all([
-      listFanoutCandidates(
-        crossTenantScope('fan-out enumeration for a source-trade signal'),
-        { masterWalletAddress: sourceTrade.walletAddress, chain }
-      ),
-      resolveFanoutChainMode(chain)
-    ]);
-
-    const signal: FanoutSignal = {
-      chain,
-      masterWalletAddress: sourceTrade.walletAddress,
-      tokenMint,
-      direction: sourceTrade.side,
-      score,
-      eventAt: sourceTrade.eventAt
-    };
-    const platformWithoutCapacity = {
-      chainMode,
-      minimumBalanceUsd: FANOUT_MIN_BALANCE_USD
-    };
-
-    // Capacity is decided before fan-out and sized after it, so the cohort figure
-    // is an upper bound over the users who would be admitted but for capacity.
-    // See `projectCohortNotionalUsd` for why erring high is the safe direction.
-    const projection = projectCohortNotionalUsd(candidates, signal, platformWithoutCapacity);
-
-    let capacity: FanoutPlatformInputs['capacity'];
-    if (!capacityAppliesToDirection(sourceTrade.side)) {
-      // A sell is admitted without assessment: refusing one strands an open
-      // position with no exit, and a sell's notional is bounded by holdings this
-      // path cannot see. Argued in full in `capacityAppliesToDirection`.
-      capacity = { outcome: 'admit' };
-      console.log(
-        `[signal-engine] capacity not assessed for a sell mirror on ${chain} `
-          + `(${sourceTrade.walletAddress}): the cap is buy-side, and the cohort's sells are `
-          + 'bounded by buys it already gated'
-      );
-    } else {
-      const resolved = await resolveFanoutCapacity({
-        masterWalletAddress: sourceTrade.walletAddress,
-        chain,
-        tokenMint,
-        poolTvlUsd,
-        projection,
-        // Read inside `resolveFanoutCapacity`, after it resolves the cap in
-        // force, because the published reserve is calibrated to that exact cap.
-        readPolymarketBook: async (request) =>
-          (await polymarketBookReader.read(request)).liquidity,
-        cohortDirection: 'buy',
-        now: new Date()
-      });
-      capacity = resolved.capacity;
-      console.log(`[signal-engine] ${resolved.logLine}`);
-    }
-
-    return {
-      plan: planFanout(candidates, signal, { ...platformWithoutCapacity, capacity }),
-      effectiveMode: chainMode?.effectiveMode ?? 'off'
-    };
-  } catch (error) {
-    console.error(
-      `[signal-engine] fan-out enumeration failed for ${sourceTrade.walletAddress}; `
-        + 'no user jobs will be queued for this signal:',
-      error instanceof Error ? error.message : error
-    );
-    return null;
-  }
-}
-
 // Paper settlement identity must match the executor's existing synthetic account.
 // An override selects identity only; it cannot enable source readiness or live authority.
 function paperFanoutTarget(chain: Chain): string {
@@ -343,60 +229,28 @@ function paperFanoutTarget(chain: Chain): string {
 
 const fanoutOwner = `signal-engine-${randomUUID()}`;
 
-async function currentFanoutPolicyAdmission(client: PoolClient, descriptor: FanoutJobDescriptor): Promise<{ allowed: boolean; reason?: string }> {
-  const identity = fanoutDescriptorIdentity(descriptor);
-  const source = await client.query<{ wallet_address: string; direction: 'buy' | 'sell'; token_mint: string;
-    chain: Chain; event_at: Date; confirmation_state: string }>(
-    `SELECT source.wallet_address, source.direction, source.token_mint, source.chain, source.event_at, source.confirmation_state
-     FROM signals signal JOIN source_trades source ON source.id = signal.source_trade_id
-     WHERE signal.id = $1 AND source.id = $2 FOR SHARE OF source`,
-    [identity.signalId, descriptor.data.sourceTradeId]
-  );
-  const row = source.rows[0];
-  if (!row || row.chain !== descriptor.chain || row.token_mint !== descriptor.data.tokenMint
-    || row.direction !== descriptor.data.direction || !['confirmed', 'finalized'].includes(row.confirmation_state)
-    || !(row.event_at instanceof Date) || !Number.isFinite(row.event_at.getTime())
-    || row.event_at.getTime() > Date.now() || Date.now() - row.event_at.getTime() > SOURCE_COPY_MAX_EVENT_AGE_MS) {
-    return { allowed: false, reason: 'source-identity-confirmation-or-freshness-unavailable' };
-  }
-  // Explicit blacklist remains a stop for reducing candidates; unreadable state
-  // refuses instead of treating an outage as an empty blacklist.
-  const blacklist = await client.query<{ value: unknown }>(`SELECT value FROM config WHERE key = 'blacklist'`);
-  const value = blacklist.rows[0]?.value;
-  if (value !== undefined && (!Array.isArray(value) || value.some(entry => typeof entry !== 'string'))) {
-    return { allowed: false, reason: 'blacklist-unreadable' };
-  }
-  if (Array.isArray(value) && value.some(entry => stripChainPrefix(entry) === stripChainPrefix(row.token_mint))) {
-    return { allowed: false, reason: 'token-blacklisted' };
-  }
-  if (identity.userId === null && process.env.AUTO_EXECUTE !== 'true') return { allowed: false, reason: 'operator-auto-execute-off' };
-  const mode = await resolveFanoutChainMode(descriptor.chain);
-  if (!mode) return { allowed: false, reason: 'chain-mode-unknown' };
-  const scope = await readFanoutRecipientScopeWithClient(client, {
-    userId: identity.userId, chain: descriptor.chain, tokenMint: row.token_mint,
-    masterWalletAddress: row.wallet_address, direction: row.direction,
-    platformMode: mode?.effectiveMode ?? 'off', paperTargetAccount: paperFanoutTarget(descriptor.chain), now: new Date()
-  });
-  if (scope.reason || scope.executionMode !== identity.executionMode || scope.targetAccount !== identity.targetAccount) {
-    return { allowed: false, reason: scope.reason ?? 'immutable-recipient-scope-changed' };
-  }
-  if (row.direction === 'buy') {
-    const safety = await checkTokenSafety(row.token_mint);
-    const verdict = evaluateSignalTradeEligibility('source_trade', { direction: 'buy', score: descriptor.data.score,
-      minimumScore: Math.max(80, MIN_SIGNAL_SCORE), safety, suppressTrade: false });
-    if (!verdict.allowed) return verdict;
-  }
-  return { allowed: true };
-}
-
-const currentFanoutAdmission = createVerifiedFanoutAdmission({
-  accepted: hasAcceptedSourceVerificationWithClient, current: currentFanoutPolicyAdmission, now: () => new Date()
+// Source-only shared composition. These ambient adapters do NOT provision the
+// missing reviewed swat_fanout protected backing or manufacture tenant authority.
+const fanoutPolicy = createOwnedFanoutPolicy({
+  transaction: withTransaction,
+  mode: resolveFanoutChainMode,
+  safety: checkTokenSafety,
+  capacity: input => resolveFanoutCapacity({ ...input, readPolymarketBook: async request =>
+    (await polymarketBookReader.read(request)).liquidity }),
+  operatorAutoExecute: () => process.env.AUTO_EXECUTE === 'true',
+  paperTargetAccount: paperFanoutTarget,
+  now: () => new Date(),
+  minimumBalanceUsd: FANOUT_MIN_BALANCE_USD,
+  minimumSignalScore: MIN_SIGNAL_SCORE,
+  maximumSourceEventAgeMs: SOURCE_COPY_MAX_EVENT_AGE_MS,
+  log: message => console.log(message), warn: message => console.warn(message),
+  error: (message, error) => console.error(message, error)
 });
 
 function durableSignalFanout(source: SourceTradeSignalCandidate, eligibility: ReturnType<typeof evaluateSignalTradeEligibility>,
   poolTvlUsd: number | null) {
   return createDurableFanoutDelivery({
-    transaction: withTransaction, owner: fanoutOwner, now: () => new Date(), admission: currentFanoutAdmission,
+    transaction: withTransaction, owner: fanoutOwner, now: () => new Date(), admission: fanoutPolicy.admission,
     canonicalPrepare: createCanonicalFanoutPreparation({
       claim: claimSourceSignalForCopyExecutionWithClient,
       context: readWorkerExecutionContextWithClient,
@@ -406,45 +260,7 @@ function durableSignalFanout(source: SourceTradeSignalCandidate, eligibility: Re
       maxPositionEvidenceAgeMs: SOURCE_COPY_POSITION_EVIDENCE_MAX_AGE_MS,
       now: () => new Date()
     }),
-    async enumerate(jobPlan) {
-      const accepted = await withTransaction(client => hasAcceptedSourceVerificationWithClient(client,
-        source.sourceTradeId, new Date()));
-      if (!accepted) throw new Error('accepted-source-verification-unavailable');
-      const fanout = await planSignalFanout(source, jobPlan.chain, jobPlan.operator.data.tokenMint,
-        jobPlan.operator.data.score, poolTvlUsd);
-      if (!fanout) throw new Error('Fanout recipient enumeration unavailable');
-      if (fanout.plan.eligible.length + fanout.plan.excluded.length > 1000) throw new Error('Fanout cohort exceeds bounded snapshot');
-      const summary = summariseFanout(fanout.plan);
-      console.log(`[signal-engine] fan-out ${jobPlan.operator.data.signalId}: ${summary.line}`);
-      if (summary.warning) console.warn(`[signal-engine] ${summary.warning}`);
-      const descriptors = planFanoutTradeJobs({
-        ...jobPlan.operator.data, tokenMint: source.tokenMint, sourceTrade: { sourceTradeId: source.sourceTradeId, direction: source.side },
-        plan: fanout.plan
-      });
-      const recipients: FanoutRecipient[] = [];
-      const exclusions: FanoutExclusion[] = [...fanout.plan.excluded.map(row => ({ userId: row.userId, code: row.code }))];
-      requireStableFanoutExclusions(exclusions);
-      for (const descriptor of [descriptors.operator, ...descriptors.users]) {
-        const userId = descriptor.data.userId ?? null;
-        if (!eligibility.allowed) { exclusions.push({ userId, code: eligibility.reason }); continue; }
-        if (userId === null && process.env.AUTO_EXECUTE !== 'true') {
-          exclusions.push({ userId, code: 'operator-auto-execute-off' }); continue;
-        }
-        const scope = await withTransaction(client => readFanoutRecipientScopeWithClient(client, {
-          userId, chain: jobPlan.chain, tokenMint: source.tokenMint, masterWalletAddress: source.walletAddress,
-          direction: source.side, platformMode: fanout.effectiveMode, paperTargetAccount: paperFanoutTarget(jobPlan.chain), now: new Date()
-        }));
-        if (scope.reason || !scope.executionMode || !scope.targetAccount) {
-          exclusions.push({ userId, code: (scope.reason ?? 'recipient-scope-unavailable').slice(0, 128) }); continue;
-        }
-        const scoped: FanoutJobDescriptor = { ...descriptor, data: { ...descriptor.data,
-          userId, executionMode: scope.executionMode, targetAccount: scope.targetAccount } };
-        recipients.push({ ...fanoutDescriptorIdentity(scoped), jobId: scoped.options.jobId!,
-          descriptor: scoped as unknown as Record<string, unknown> });
-      }
-      requireStableFanoutExclusions(exclusions);
-      return { recipients, exclusions };
-    }
+    enumerate: fanoutPolicy.prepareEnumeration(source, eligibility, poolTvlUsd)
   });
 }
 

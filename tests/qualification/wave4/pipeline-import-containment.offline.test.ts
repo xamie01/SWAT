@@ -53,11 +53,12 @@ describe('P4a actual source pipeline import containment', () => {
         const paths = [...loaded];
         const required = roots.map(([path]) => resolve(path)).concat([
           resolve('packages/db/src/worker-execution.ts'), resolve('packages/db/src/worker-settlement.ts'),
-          resolve('packages/db/src/subscription-state.ts'), resolve('packages/db/src/package13-fanout-delivery.ts'),
+          resolve('packages/db/src/subscription-state.ts'), resolve('packages/db/src/forward-only-state.ts'),
+          resolve('packages/db/src/package13-fanout-delivery.ts'),
           resolve('packages/db/src/runtime-exact-decimal.ts'), resolve('packages/db/src/source-verification-store.ts')
         ]);
         for (const path of required) if (!loaded.has(path)) throw new Error('Source loader missed ' + path);
-        const forbiddenPaths = ['index.ts','client.ts','transaction.ts','tenancy.ts','subscriptions.ts',
+        const forbiddenPaths = ['index.ts','client.ts','transaction.ts','tenancy.ts','subscriptions.ts','forward-only.ts',
           'copy-trade-lifecycle.ts','trades.ts','risk-policy.ts','obligation-runtime-capability.ts']
           .map(file => resolve('packages/db/src', file));
         if (paths.some(path => path.startsWith(resolve('packages/db/dist') + '/')
@@ -78,7 +79,7 @@ describe('P4a actual source pipeline import containment', () => {
       timeout: 30_000,
       maxBuffer: 1024 * 1024
     });
-    expect(JSON.parse(stdout.trim())).toEqual({ roots: 9, sourceModules: 15,
+    expect(JSON.parse(stdout.trim())).toEqual({ roots: 9, sourceModules: 16,
       ownedConstructors: 0, controlRefused: true, runtimeAccepted: false });
   }, 35_000);
 });

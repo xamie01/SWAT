@@ -687,8 +687,8 @@ describe('resolveFanoutCapacity', () => {
     expect(resolved.decision?.unassessed.map((entry) => entry.reason)).toContain(
       'copy-notional-partial'
     );
-    // Still an admit — a lower-bound pass, flagged rather than smoothed away.
-    expect(resolved.decision?.outcome).toBe('admit');
+    // A lower bound cannot establish available capacity for the unpriced legs.
+    expect(resolved.decision?.outcome).toBe('skip');
   });
 
   it('feeds an unknown follower count through as unassessed rather than as zero', async () => {

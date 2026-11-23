@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg';
+import type { PoolClient } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { claimLotExitExecutionWithClient, normalizeTenantId,
   type CopyExecutionRecord, type RecordCopyExecutionEvidenceInput } from '@swat/db/dist/copy-trade-lifecycle-owned.js';

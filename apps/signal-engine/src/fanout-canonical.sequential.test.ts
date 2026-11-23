@@ -24,7 +24,7 @@ import { createCanonicalFanoutPreparation, unavailableExactFanoutEntryRequest, c
 // compilation pull another app's source into this package's production program.
 const workerModule = '../../trade-executor/src/worker-policy.js';
 const { parseCanonicalWorkerJob, runCanonicalWorkerJob } = await import(workerModule);
-import type { PoolClient } from 'pg';
+import type { PoolClient } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import type { CopyExecutionRecord } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import type { FanoutRecipient, FanoutExclusion } from '@swat/db/dist/package13-fanout-delivery.js';
 const SIGNAL = '11111111-1111-4111-8111-111111111111', SOURCE = '22222222-2222-4222-8222-222222222222';

@@ -4,7 +4,7 @@
 
 The requested outcome is to finish every original and added Wave4 task, assign subagents to every task, skip nothing and advance the dependent Wave5 runtime stage only after genuine Wave4 acceptance. Success requires I1–I8 actual evidence, independently reviewed repairs, affected bounded reruns and reconciled financial/resource/cleanup records. A map, owner assignment, green source tests or evidence manifest alone cannot satisfy this objective.
 
-Current source status2026-11-20: P1 protected LP admission, P2 migration installation and P3 authentication received bounded independent source acceptance. The last reconciled freeze passed948 main tests/36 files,46 separate load contracts and five noEmit checks; earlier422/15 and load44 are historical. Protected receipt/writer/store/SQL admission source is repaired and narrowly accepted; actual PostgreSQL behavior is unqualified. P4a owned production pipeline foundations has begun, with verification deferred until source freeze. P4b/P4c,P5–P8 implementation and P9 audit remain; see [remaining-work map](WAVE4-REMAINING-WORK.md). SQL083 is preserved,084 refused and085–087 unapplied. No actual infrastructure, migrations, SQL/Redis/BullMQ/fault/load acceptance exists. Public runtime/pipeline/Package28 refusals remain. **Full closeout is not achieved. Wave5 dependent runtime remains blocked.**
+Current source status2026-11-23: P1 protected LP admission, P2 migration installation, P3 authentication, P4a owned production pipeline foundations and the bounded P4b candidate/current-admission/cohort slice have **independent source acceptance within their stated scopes**. The current reconciled P4b freeze passed 757 affected tests/28 files, 948 main tests/36 files, 46 separate load contracts and seven noEmit checks, with fresh DB emit04 recorded separately. All 118 retained raw check records were validated, including the three P4b failed commands. Historical epochs are retained, never summed into runtime coverage. Full P4b, P4, Wave4 source completion and runtime/live/production acceptance remain false. The P4a original REJECT/[repair ACCEPT](WAVE4-P4A-OWNED-REPAIR-REVIEW.md) and [bounded P4b ACCEPT](WAVE4-P4B-FANOUT-OWNED-REVIEW.md) are distinct source reviews. P0 review, remaining P4b backing/sizing/provisioning, P4c,P5–P8 implementation and P9 audit remain; see [remaining-work map](WAVE4-REMAINING-WORK.md). SQL083 is preserved,084 refused and085–087 unapplied. No actual infrastructure/migrations/SQL/Redis/BullMQ/fault/load acceptance exists. Public runtime/pipeline/Package28 refusals remain. **Full closeout is not achieved; dependent Wave5 runtime remains blocked.**
 
 ## Authority and execution constraints
 
@@ -109,13 +109,15 @@ Assignments are execution order, not completion claims: S1 → S2 → S3 → S5 
 ## Evidence anchors and final audit disposition
 
 - WAVE4-QUALIFICATION.md retains original I1–I8 requirements and added load specifics.
-- WAVE4-MAIN-CHECKPOINT.md / WAVE4-MAIN-EVIDENCE.json: last reconciled948/36 main,46/1 load and five noEmit checks; P4 changes require a fresh manifest/check epoch. Earlier422/15 is historical.
+- WAVE4-MAIN-CHECKPOINT.md / WAVE4-MAIN-EVIDENCE.json: current757/28 affected,948/36 main,46/1 load, seven noEmit checks and separate fresh P4b DB emit04; complete manifest and118 retained raw records reconciled. Historical epochs do not cover later source changes.
+- WAVE4-P4B-FANOUT-OWNED-CHECKPOINT.md / WAVE4-P4B-FANOUT-OWNED-REVIEW.md: bounded candidate/current-admission/cohort source ACCEPT; full P4b backing/sizing/provisioning and P4c remain incomplete.
+- WAVE4-P4A-OWNED-CHECKPOINT.md / WAVE4-P4A-OWNED-REPAIR-REVIEW.md: bounded P4a source ACCEPT after two immutable-capture repairs; original REJECT retained, no full pipeline/runtime acceptance.
 - WAVE4-LP-COPY-OBSERVER-REVIEW.md: repaired ONE-CLOSE source seam narrowly accepted; authenticated runtime transaction/lock/COMMIT behavior remains unproven.
 - WAVE4-LP-PROTECTED-REPAIR-ACCEPTANCE.md: SQL085 admission writer/store/guard repairs bounded source-accepted, actual SQL unexecuted.
 - WAVE4-MIGRATION-REPAIR-ACCEPTANCE.md and WAVE4-AUTHENTICATION-FK-CLOSURE-REVIEW.md: P2/P3 bounded source acceptance, not deployment proof.
 - WAVE4-QUEUE-SOURCE-REVIEW.md: affected queue source accepted only.
 - WAVE4-LOAD-SOURCE-ACCEPTANCE.md / later evidence: separate46 offline contracts; accepted schedule retained, real load and durable economics unqualified.
-- WAVE4-REMAINING-WORK.md: active P4a and all remaining source/runtime/transition gates.
+- WAVE4-REMAINING-WORK.md: P4a and bounded P4b fanout accepted; P0/remaining P4b/P4c/P5–P9 and all I1–I8 runtime/transition gates remain.
 - STAGE-LEDGER.json:Wave4 runtime acceptance false, dependent Wave5 runtime blocked; sealed Waves1–3 scope unchanged.
 
 Missing exact environment authorization, provisioned reviewed narrow capabilities and genuine raw runtime/financial/load/cleanup artifacts prevent full closure. These are explicit missing requirements, not skipped tasks. No whole-Wave4 acceptance or goal completion is declared by this map.

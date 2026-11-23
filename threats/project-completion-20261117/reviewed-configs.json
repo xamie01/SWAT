@@ -13,6 +13,8 @@
     "threats/project-completion-20261117/w3-g.config.ts": "8e1351e2ad89afecdd527687d9b64885c60bcbe48b8554b0183f038a44b73d82",
     "threats/project-completion-20261117/w3-h.config.ts": "1caf7fa58be55bf4923b3ca4e50219b331af240fec6caea0c6f134b1017313a1",
     "threats/project-completion-20261117/w4-main.config.ts": "e884d87fe41cbce907af4d2bfa7e1135e9983f473826ec81c7e6043a3a18e611",
-    "threats/project-completion-20261117/w4-load.config.ts": "2adbfa9d60d2206fc26f71fc17d19edd0fd731f30061ca7f21f46d55e5b9ebec"
+    "threats/project-completion-20261117/w4-load.config.ts": "2adbfa9d60d2206fc26f71fc17d19edd0fd731f30061ca7f21f46d55e5b9ebec",
+    "threats/project-completion-20261117/w4-p4-owned.config.ts": "27958c8ddb434318c1d752cf9713b7eb6ff72ae1e91212debd8f271c3f395945",
+    "threats/project-completion-20261117/w4-p4b-fanout.config.ts": "5444170ba5ed4b875ba392b6dac5ed01ce7a059fc657ed80a83b7e810343b90e"
   }
 }

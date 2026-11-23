@@ -1,17 +1,20 @@
-# Wave 4 remaining work and Wave 5 transition — 2026-11-20
+# Wave 4 remaining work and Wave 5 transition — 2026-11-23
 
 ## Outcome and current boundary
 
-P1 protected LP admission, P2 migration installation and P3 authentication have **bounded independent source acceptance**. Wave4 is not source-complete or runtime-accepted. The last reconciled source freeze passed948 main tests/36 files,46 separate load contracts and five noEmit checks; it becomes historical when P4 changes consumed source. Existing accepted source and raw epochs remain retained.
+P1 protected LP admission, P2 migration installation, P3 authentication, P4a owned production pipeline foundations and the bounded P4b candidate/current-admission/cohort slice have **independent source acceptance within their stated scopes**. The current reconciled P4b freeze passed 757 affected tests/28 files, 948 main tests/36 files, 46 separate load contracts and seven noEmit checks, with fresh DB emit04 recorded separately. All 118 retained raw check records were validated, including the three P4b failed commands. Historical epochs are retained, never summed into runtime coverage. Full P4b, P4, Wave4 source completion and runtime/live/production acceptance remain false.
 
-**P4a implementation has begun.** The current slice makes actual production lifecycle, trade, risk, fanout and worker code accessible through explicit owned transaction/client leaves. It does not create another qualification-only pipeline, activate services, allocate SQL or loosen grants.
+**P4a is accepted within its bounded source scope.** Actual production lifecycle, trade, risk, fanout and worker code is accessible through explicit owned transaction/client leaves. The initial independent REJECT identified nested signal JSON and trade timestamp aliases; both were repaired and independently [accepted on re-review](WAVE4-P4A-OWNED-REPAIR-REVIEW.md). The [P4a checkpoint](WAVE4-P4A-OWNED-CHECKPOINT.md) records the final immutable epoch and actual fresh-source import containment. This does not create another qualification-only pipeline, activate services, allocate SQL or loosen grants.
+
+## Accepted bounded P4b fanout slice — 2026-11-23
+
+Canonical fanout candidate SQL/mapping now resides in a shared mandatory-client leaf; the ambient facade delegates and both SELECTs use one caller transaction. Current-recipient admission/cohort composition is shared in a pool-free factory and production boot delegates with mandatory mode/safety/capacity/transaction ports. Exact source/job/descriptor capture, protected accepted-source lookup, current policy/mode/blacklist, reducing owned-inventory scope, stable/retryable refusal and the 1000-member bound are preserved. Independent [bounded source review](WAVE4-P4B-FANOUT-OWNED-REVIEW.md) returned ACCEPT; the [checkpoint](WAVE4-P4B-FANOUT-OWNED-CHECKPOINT.md) records verification and limits. No schema/grant changes were made. Protected cross-tenant fanout authorization, exact follower sizing, provider/capability/receipt/valuation backing and full P4b provisioning remain incomplete. The P4a complete manifest is historical for these later inputs; its bounded source acceptance is preserved.
 
 ## Remaining source packages, in execution order
 
 | Package | Concrete deliverable | Completion gate |
 | --- | --- | --- |
 | P0 coordinator | Finish independent runner review; maintain literal inventories, immutable commands/results/manifests and report consistency. | Reviewed runner behavior and reconciled affected epochs. |
-| P4a pipeline foundations — active | Shared pool-free lifecycle/intake/signal/trade/risk implementations; direct fanout/worker/quote imports; shared mirror state; production reuse of owned obligation scope. | Actual fresh source-import containment and joined injected contracts; affected production regressions/typechecks; independent source review. |
 | P4b protected backing | Owned source/provider intake, current recipient admission/cohort enumeration, exact sizing, capability registration/lookup, risk, independent paper receipts and valuation/correction writers. | Strict callable production adapters and reviewed provisioning/validation source, with missing approved identities explicitly refused. |
 | P4c executed scenario and observer | Buy, source sell, verified reversal, immutable value/fee correction and replay through production intake, verification, fanout and worker; independently observed durable journals after checked COMMIT. | Exact source/obligation/execution/attempt/receipt/position/lot/risk/capacity identity and economic conservation; rollback/uncertain-COMMIT refusal; independent source review. |
 | P5a custody | Owned wrapping, enrollment, execution unwrapping and delegation using distinct protected secret admissions; lifecycle/revocation/expiry/ABA scenarios. | Joined production scenarios and precise capability/rollback evidence contracts. |
@@ -24,15 +27,15 @@ P1 protected LP admission, P2 migration installation and P3 authentication have 
 
 Reviews and verification occur **between each bounded owner**, not only at the end. One implementation or review subagent is active at a time, and no checks run while consumed source is changing.
 
-### P4a reserved implementation
+### P4a completed bounded source scope
 
-- Move canonical lifecycle bodies/types/SQL into `copy-trade-lifecycle-owned.ts`; ambient compatibility facades delegate shared code. Add actual `recordSourceTradeEventWithClient`, `insertSourceTradeSignalWithClient` and candidate/lookup seams. Preserve validation-before-acquisition, public confirmation refusal, exact replay/quarantine, accepted-provider lookup, policy/lot capture and lock ordering.
-- Share `trades-owned.ts` and `risk-spend-owned.ts` with legacy wrappers. Preserve exact money, cumulative evidence/epochs, conservative unknown liability and correction replay.
-- Correct `fanout-enqueue`, canonical worker, worker execution/settlement and paper quote imports to explicit leaves. Share mirror-state logic outside ambient subscriptions.
-- Reuse `obligation-runtime-owned.ts` for production adapter composition, preserving stronger validations and protected lookup on every transaction. No third capability implementation.
-- Add actual fresh source-loader child containment and joined injected production intake/signal contracts, then rerun affected lifecycle/source/sell/lot/trade/risk/settlement/correction/fanout/subscription/worker/obligation regressions.
+- Canonical lifecycle bodies/types/SQL reside in `copy-trade-lifecycle-owned.ts`; ambient compatibility facades delegate shared code. Actual owned intake, signal and candidate/lookup seams preserve validation-before-acquisition, public confirmation refusal, exact replay/quarantine, accepted-provider lookup, policy/lot capture and lock ordering.
+- `trades-owned.ts` and `risk-spend-owned.ts` are shared with legacy wrappers, preserving exact money, cumulative evidence/epochs, conservative unknown liability and correction replay.
+- Fanout, canonical worker, execution/settlement and paper quote imports use explicit leaves; mirror/forward-only state is shared outside ambient subscriptions.
+- Production adapter composition reuses `obligation-runtime-owned.ts`, with protected persisted lookup on every transaction. No third capability implementation was introduced.
+- Actual fresh source-loader containment, joined injected intake/signal contracts and affected production regressions/typechecks passed. Signal JSON and trade timestamp preparation detach mutable caller values; seven new regression cases cover the accepted review repairs.
 
-P4b must still supply ambient candidate enumeration and boot-private current admission through owned composition. SQL077/079 and the capability matrix expose real missing provisioning/validation source: source-provider/capability/valuation capabilities and `swat_fanout` must be explicitly represented. These are not merely missing passwords. Any new suffix is centrally allocated after inspection; the seven-transfer broker and application authority remain unchanged.
+The bounded P4b candidate/current-admission/cohort extraction is accepted; it does not supply protected backing or exact sizing. SQL077/079 and the capability matrix still expose missing provisioning/validation source: source-provider/capability/valuation capabilities and `swat_fanout` must be explicitly represented. These are not merely missing passwords. Any new suffix is centrally allocated after inspection; the seven-transfer broker and application authority remain unchanged.
 
 ## Runtime qualification still required for full Wave 4
 

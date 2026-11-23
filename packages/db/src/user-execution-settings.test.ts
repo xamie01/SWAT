@@ -111,7 +111,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.query.mockResolvedValue([settingsRow()]);
   mocks.clientQuery.mockImplementation(async (sql: string) => {
-    if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(sql)) return { rows: [] };
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(sql)) return { rows: [], command: sql.trim().toUpperCase() };
     if (sql.includes('user_chain_execution_settings')) {
       return { rows: sql.includes('RETURNING') ? [chainRow()] : [] };
     }

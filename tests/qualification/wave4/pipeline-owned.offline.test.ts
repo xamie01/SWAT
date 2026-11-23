@@ -1,7 +1,8 @@
-import type { PoolClient } from 'pg';
+import type { PoolClient } from '../../../packages/db/src/copy-trade-lifecycle-owned.js';
 import { describe, expect, it, vi } from 'vitest';
 import { advanceSourceTradeConfirmation, buildCopyExecutionClientOrderId, claimSourceSignalForCopyExecutionWithClient,
   insertSourceTradeSignalWithClient, listSourceTradeSignalCandidatesWithClient, prepareRecordSourceTradeEvent,
+  prepareInsertSourceTradeSignal,
   recordSourceTradeEventWithClient, verifySourceTradeWithClient, type SourceTradeEventInput
 } from '../../../packages/db/src/copy-trade-lifecycle-owned.js';
 import { sourceBindingDigest, sourceContentDigest, type SourceVerificationBinding,
@@ -115,6 +116,38 @@ describe('P4a actual owned intake/verified signal/exact claim seams', () => {
     expect(values[0]).toBe('solana'); expect(values[4]).toBe('buy'); expect(values[9]).toBe('observed');
     expect(values[13]).toEqual(new Date(binding.eventAt)); expect(values[14]).toEqual(now);
     expect(f.calls.find(call => call.sql.includes('INSERT INTO source_trade_confirmation_history'))!.values[1]).toBe('observed');
+  });
+  it('captures nested signal payload and serialization hooks before acquisition', async () => {
+    const f = fixture(); await f.intake(); await f.verify();
+    const serialized = { value: 'captured' };
+    const toJSON = vi.fn(() => ({ value: serialized.value }));
+    const triggerData = { nested: { values: ['captured'], at: new Date(now) },
+      hook: { toJSON }, sourceTradeId: 'caller-overwrite' };
+    const derive = prepareInsertSourceTradeSignal({ sourceTradeId: SOURCE, confidence: 90,
+      signalScore: 90, triggerData, maxEventAgeMs: 1000, maxPositionEvidenceAgeMs: 1000, now });
+    expect(toJSON).toHaveBeenCalledTimes(1);
+    triggerData.nested.values[0] = 'changed'; triggerData.nested.at.setTime(0);
+    serialized.value = 'changed';
+    await derive(f.client);
+    const trigger = JSON.parse(f.calls.find(call => call.sql.includes('INSERT INTO signals'))!.values[5] as string);
+    expect(trigger.nested).toEqual({ values: ['captured'], at: now.toISOString() });
+    expect(trigger.hook).toEqual({ value: 'captured' });
+    expect(trigger.sourceTradeId).toBe(SOURCE);
+    expect(toJSON).toHaveBeenCalledTimes(1);
+  });
+  it.each(['cycle', 'bigint', 'throwing-hook'] as const)('rejects %s signal payload before acquisition', async kind => {
+    const f = fixture();
+    const triggerData: Record<string, unknown> = {};
+    if (kind === 'cycle') triggerData.nested = triggerData;
+    if (kind === 'bigint') triggerData.nested = { value: 1n };
+    if (kind === 'throwing-hook') triggerData.nested = { toJSON() { throw new Error('unserializable'); } };
+    const acquire = vi.fn(f.transaction);
+    expect(() => acquire(prepareInsertSourceTradeSignal({ sourceTradeId: SOURCE, confidence: 90,
+      signalScore: 90, triggerData, maxEventAgeMs: 1000, maxPositionEvidenceAgeMs: 1000, now }))).toThrow();
+    expect(acquire).not.toHaveBeenCalled(); expect(f.client.query).not.toHaveBeenCalled();
+    await expect(insertSourceTradeSignalWithClient(f.client, { sourceTradeId: SOURCE, confidence: 90,
+      signalScore: 90, triggerData, maxEventAgeMs: 1000, maxPositionEvidenceAgeMs: 1000, now })).rejects.toThrow();
+    expect(f.client.query).not.toHaveBeenCalled();
   });
   it('moves exact bound observation through real verification and signal insertion, then exact persisted execution replay', async () => {
     const f = fixture(); expect(await f.intake()).toMatchObject({ inserted: true, eligibleForCopy: false, position: null });

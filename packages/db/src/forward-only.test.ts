@@ -1,17 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-// `forward-only.ts` holds a DB half alongside the pure predicate, so importing it
-// pulls in `client.js`, which demands a URL at import time. The pool never
-// connects here — every case below is pure. Same shim as `stop-loss.test.ts`.
-vi.hoisted(() => {
-  process.env.DATABASE_URL ??= 'postgres://forward-only-unit-test/unused';
-});
+// Exercise the shared pool-free predicate used by eligibility and re-exported
+// by the ambient reader facade; no database URL or pool import is needed.
 
 import {
   DEFAULT_FORWARD_ONLY_CLOCK_SKEW_TOLERANCE_MS,
   evaluateForwardOnlyMirror,
   type ForwardOnlySubscriptionWindow
-} from './forward-only.js';
+} from './forward-only-state.js';
 
 const ACTIVE_SINCE = new Date('2026-08-20T12:00:00.000Z');
 

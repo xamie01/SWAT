@@ -1,7 +1,7 @@
 import type { Chain, ExecutionMode } from '@swat/shared';
 import { classifyFanoutRefusal, requireStableFanoutExclusions } from './fanout-canonical.js';
 import { tradeQueueForChain, chainFromTokenMint, resolveChainAddress } from '@swat/shared';
-import type { PoolClient } from 'pg';
+import type { PoolClient } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import {
   ensureFanoutEnumeration, getFanoutBatch, claimFanoutEnumeration, failFanoutEnumeration,
   completeFanoutEnumeration, listFanoutDeliveries, prepareFanoutDeliveryQueueWithClient,

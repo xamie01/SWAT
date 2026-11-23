@@ -17,6 +17,7 @@ const config = createPackageConfig([
   'packages/db/src/worker-valuation-corrections.sequential.test.ts',
   'packages/db/src/package13-fanout-delivery.test.ts',
   'packages/db/src/fanout-eligibility.test.ts',
+  'packages/db/src/forward-only.test.ts',
   'packages/db/src/subscriptions.test.ts',
   'packages/db/src/obligation-runtime-capability.sequential.test.ts',
   'apps/signal-engine/src/fanout-enqueue.test.ts',

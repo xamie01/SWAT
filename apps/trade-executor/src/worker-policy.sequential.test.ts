@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PoolClient } from 'pg';
+import type { PoolClient } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), current: vi.fn(), captured: vi.fn(), claim: vi.fn(),
   prepare: vi.fn(), dispatch: vi.fn(), reserve: vi.fn(), update: vi.fn(), settle: vi.fn(), uncertain: vi.fn(), delivery: vi.fn(), descriptor: vi.fn() }));
 vi.mock('@swat/db/dist/copy-trade-lifecycle-owned.js', async () => ({

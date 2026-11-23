@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 
 vi.mock('./client.js', () => ({ query: mocks.query }));
+vi.mock('./transaction.js', () => ({ withTransaction: async (operation: (client: unknown) => Promise<unknown>) =>
+  operation({ query: async (sql: string, values: unknown[]) => ({ rows: await mocks.query(sql, values) }) }) }));
 
 import { listFanoutCandidates } from './fanout-candidates.js';
+import { listFanoutCandidatesWithClient, prepareListFanoutCandidates } from './fanout-candidates-owned.js';
+import type { PoolClient } from 'pg';
 import { planFanout, type FanoutPlatformInputs, type FanoutSignal } from './fanout-eligibility.js';
 import { crossTenantScope, forUser } from './tenancy.js';
 import { BALANCE_MAX_STALENESS_MS } from './user-balances.js';
@@ -279,7 +283,7 @@ describe('listFanoutCandidates — balances', () => {
   it('scopes the balance read to the signal chain so one feed outage cannot spread', async () => {
     respondWith([candidateRow()], [balanceRow({ chain: 'polygon' })]);
     await listFanoutCandidates(sweep(), {
-      masterWalletAddress: MASTER,
+      masterWalletAddress: 'polygon:0x1111111111111111111111111111111111111111',
       chain: 'polygon',
       now: NOW
     });
@@ -468,6 +472,50 @@ describe('listFanoutCandidates — tier', () => {
       now: NOW
     });
     expect(candidate!.tierExpiresAt).toBeNull();
+  });
+});
+
+describe('shared mandatory-client canonical candidates', () => {
+  it('uses byte-identical SQL, values and mapping in owned and ambient production paths', async () => {
+    const rows = [candidateRow({ tier: 'unrecognised' }), candidateRow({ user_id: USER_B, auto_execute: null })];
+    const balances = [balanceRow({ usd: '123456789012345678901.55' }), balanceRow({ user_id: USER_B, usd: 0 })];
+    respondWith(rows, balances);
+    const ambient = await listFanoutCandidates(sweep(), { masterWalletAddress: MASTER, chain: 'solana', now: NOW });
+    const ambientCalls = mocks.query.mock.calls.map(call => [...call]);
+    const query = vi.fn().mockResolvedValueOnce({ rows }).mockResolvedValueOnce({ rows: balances });
+    const owned = await listFanoutCandidatesWithClient({ query } as unknown as PoolClient,
+      { masterWalletAddress: MASTER, chain: 'solana', now: NOW });
+    expect(owned).toEqual(ambient);
+    expect(query.mock.calls).toEqual(ambientCalls);
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+  });
+  it('captures master, chain, clock and balance window before acquisition/caller mutation', async () => {
+    const now = new Date(NOW);
+    const input = { masterWalletAddress: MASTER, chain: 'solana' as const, now, balanceMaxAgeMs: 1000 };
+    const read = prepareListFanoutCandidates(input);
+    input.masterWalletAddress = 'solana:Changed'; now.setTime(0); input.balanceMaxAgeMs = 0;
+    const query = vi.fn().mockResolvedValueOnce({ rows: [candidateRow()] })
+      .mockResolvedValueOnce({ rows: [balanceRow({ fetched_at: new Date(NOW.getTime() - 1) })] });
+    expect(mocks.query).not.toHaveBeenCalled();
+    expect((await read({ query } as unknown as PoolClient))[0]!.knownBalanceUsd).toBe(1000);
+    expect(query.mock.calls[0][1]).toEqual([MASTER]);
+  });
+  it.each([
+    { masterWalletAddress: '*', chain: 'solana' },
+    { masterWalletAddress: 'solana:*', chain: 'solana' },
+    { masterWalletAddress: MASTER, chain: 'polygon' },
+    { masterWalletAddress: MASTER, chain: 'solana', now: new Date(NaN) },
+    { masterWalletAddress: MASTER, chain: 'solana', balanceMaxAgeMs: -1 }
+  ])('refuses invalid unbounded/mismatched read input before acquisition', input => {
+    expect(() => prepareListFanoutCandidates(input as Parameters<typeof prepareListFanoutCandidates>[0])).toThrow();
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+  it('propagates caller-client failures without acquiring an ambient fallback', async () => {
+    const query = vi.fn().mockRejectedValue(new Error('reviewed fanout identity unavailable'));
+    await expect(listFanoutCandidatesWithClient({ query } as unknown as PoolClient,
+      { masterWalletAddress: MASTER, chain: 'solana', now: NOW })).rejects.toThrow('reviewed fanout identity unavailable');
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 });
 

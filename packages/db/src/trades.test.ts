@@ -24,6 +24,8 @@ import {
   insertTradeAndMarkSignalExecuted,
   insertTradeAndReleaseSignalClaim
 } from './trades.js';
+import { prepareTradeInsertOperation } from './trades-owned.js';
+import type { PoolClient } from './copy-trade-lifecycle-owned.js';
 
 const baseTrade = {
   signalId: 'signal-1',
@@ -33,6 +35,28 @@ const baseTrade = {
   amountUsd: 10,
   executionMode: 'live'
 };
+
+describe('prepared trade timestamp capture', () => {
+  it('copies both timestamps before caller mutation and query invocation', async () => {
+    const submittedAt = new Date('2026-11-18T00:00:00.000Z');
+    const confirmedAt = new Date('2026-11-18T00:00:01.000Z');
+    const query = vi.fn(async () => ({ rows: [{ id: 'trade-1' }] }));
+    const insert = prepareTradeInsertOperation({ ...baseTrade, submittedAt, confirmedAt });
+    submittedAt.setTime(0); confirmedAt.setTime(0);
+    expect(query).not.toHaveBeenCalled();
+    await expect(insert({ query } as unknown as PoolClient)).resolves.toEqual({ id: 'trade-1' });
+    const values = (query.mock.calls as unknown as [string, unknown[]][])[0]![1];
+    expect(values[25]).toEqual(new Date('2026-11-18T00:00:00.000Z'));
+    expect(values[26]).toEqual(new Date('2026-11-18T00:00:01.000Z'));
+    expect(values[25]).not.toBe(submittedAt); expect(values[26]).not.toBe(confirmedAt);
+  });
+  it.each([null, undefined])('preserves %s timestamp inputs as null', async timestamp => {
+    const query = vi.fn(async () => ({ rows: [{ id: 'trade-1' }] }));
+    await prepareTradeInsertOperation({ ...baseTrade, submittedAt: timestamp, confirmedAt: timestamp })({ query } as unknown as PoolClient);
+    const values = (query.mock.calls as unknown as [string, unknown[]][])[0]![1];
+    expect(values[25]).toBeNull(); expect(values[26]).toBeNull();
+  });
+});
 
 describe('transactional trade state persistence', () => {
   beforeEach(() => {

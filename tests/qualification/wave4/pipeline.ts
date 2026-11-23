@@ -35,9 +35,8 @@ export async function exercisePaperPipeline(_input: unknown): Promise<never> {
 
 /** Static source contracts, not runtime imports, provision status or opt-ins. */
 export const pipelineSourceBlockers = Object.freeze([
-  'fanout-enqueue.ts runtime @swat/db import evaluates db/index.ts -> client.ts/transaction.ts; an owned transaction does not contain module evaluation',
-  'worker-policy.ts runtime @swat/db import and worker-settlement.ts -> copy-trade-lifecycle.ts/trades.ts/risk-policy.ts -> client.ts reach the ambient pool',
-  'obligation-runtime-capability.ts -> tenancy.ts/transaction.ts -> client.ts even with transaction supplied; require a pool-free mandatory-owned-transaction leaf preserving protected lookup on every transaction',
+  'Owned lifecycle/trade/risk/fanout/worker import containment is exercised by the P4a fresh-source child; independent source acceptance and actual process/server containment are separate gates',
+  'Protected current-recipient admission, owned candidate/cohort enumeration and executable production scenario composition remain incomplete',
   'No reviewed protected source intake/provider registry, backend/obligation capability provision, exact follower sizing, independently owned paper receipt or trusted valuation writer is supplied by the CLI',
   'Operator obligation scope is unsupported; durable operator exclusion must be explicit; live/provider-unavailable execution remains refused',
   'Public joined execution remains unavailable pending separate composition, import containment and disposable execution review'
