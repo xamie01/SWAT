@@ -341,39 +341,43 @@ writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 
 chmodSync(configPath, 0o600);
 NODE
 
-node --input-type=module - "$SWAT_DIR" "$CONFIG_PATH" <<'NODE'
+"$SWAT_DIR/node_modules/.bin/tsx" - "$SWAT_DIR" "$CONFIG_PATH" <<'TS'
 const [swatDir, configPath] = process.argv.slice(2);
-const { tsImport } = await import('tsx/esm/api');
-const { privateConfig } = await tsImport(`${swatDir}/tests/qualification/wave4/config.ts`, import.meta.url);
-const { Deadline } = await tsImport(`${swatDir}/tests/qualification/wave4/containment.ts`, import.meta.url);
-const { inspectBoth, OwnedClients, bindPostgres, bindRedis } = await tsImport(`${swatDir}/tests/qualification/wave4/infrastructure.ts`, import.meta.url);
+const { privateConfig } = require(`${swatDir}/tests/qualification/wave4/config.ts`);
+const { Deadline } = require(`${swatDir}/tests/qualification/wave4/containment.ts`);
+const { inspectBoth, OwnedClients, bindPostgres, bindRedis } = require(`${swatDir}/tests/qualification/wave4/infrastructure.ts`);
 
-const cfg = await privateConfig(configPath);
-const deadline = new Deadline(60_000);
-const clients = new OwnedClients(deadline);
-try {
-  const addrs = await inspectBoth(cfg, deadline);
-  const refPg = await clients.postgres(cfg.reference.postgres.url, `check-ref-${cfg.reference.runId}`);
-  const candPg = await clients.postgres(cfg.candidate.postgres.url, `check-cand-${cfg.candidate.runId}`);
-  const refClusterId = await bindPostgres(refPg, cfg.reference, addrs.reference.postgres, deadline);
-  const candClusterId = await bindPostgres(candPg, cfg.candidate, addrs.candidate.postgres, deadline);
-  const refRd = await clients.redis(cfg.reference.redis.url, `check-ref-rd-${cfg.reference.runId}`);
-  const candRd = await clients.redis(cfg.candidate.redis.url, `check-cand-rd-${cfg.candidate.runId}`);
-  const refRdId = await bindRedis(refRd, addrs.reference.redis);
-  const candRdId = await bindRedis(candRd, addrs.candidate.redis);
-  console.log(JSON.stringify({
-    status: 'INFRA_READY',
-    referenceClusterId: refClusterId,
-    candidateClusterId: candClusterId,
-    referenceRedisRunId: refRdId,
-    candidateRedisRunId: candRdId,
-    addresses: addrs
-  }, null, 2));
-} finally {
-  await clients.close(deadline);
-  deadline.dispose();
-}
-NODE
+(async () => {
+  const cfg = await privateConfig(configPath);
+  const deadline = new Deadline(60_000);
+  const clients = new OwnedClients(deadline);
+  try {
+    const addrs = await inspectBoth(cfg, deadline);
+    const refPg = await clients.postgres(cfg.reference.postgres.url, `check-ref-${cfg.reference.runId}`);
+    const candPg = await clients.postgres(cfg.candidate.postgres.url, `check-cand-${cfg.candidate.runId}`);
+    const refClusterId = await bindPostgres(refPg, cfg.reference, addrs.reference.postgres, deadline);
+    const candClusterId = await bindPostgres(candPg, cfg.candidate, addrs.candidate.postgres, deadline);
+    const refRd = await clients.redis(cfg.reference.redis.url, `check-ref-rd-${cfg.reference.runId}`);
+    const candRd = await clients.redis(cfg.candidate.redis.url, `check-cand-rd-${cfg.candidate.runId}`);
+    const refRdId = await bindRedis(refRd, addrs.reference.redis);
+    const candRdId = await bindRedis(candRd, addrs.candidate.redis);
+    console.log(JSON.stringify({
+      status: 'INFRA_READY',
+      referenceClusterId: refClusterId,
+      candidateClusterId: candClusterId,
+      referenceRedisRunId: refRdId,
+      candidateRedisRunId: candRdId,
+      addresses: addrs
+    }, null, 2));
+  } finally {
+    await clients.close(deadline);
+    deadline.dispose();
+  }
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+TS
 
 bash "$SWAT_DIR/deploy/loadtest/wave4/run.sh" --plan
 NODE_OPTIONS="--max-old-space-size=512 --require=$SWAT_DIR/threats/sequential-fixes/offline-guard.cjs" \
