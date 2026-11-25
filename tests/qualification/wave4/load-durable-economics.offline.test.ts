@@ -3,7 +3,7 @@ import type { PoolClient } from '../../../packages/db/src/copy-trade-lifecycle-o
 import { sourceBindingDigest } from '../../../packages/db/src/source-verification.js';
 import { captureLoadFixture, loadAmount, loadDigest, loadFixtureRequest, loadReceiptDigest,
   type LoadFixture } from './load-durable-contract.js';
-import { drainLoadAccounting, loadCaptureKinds, requireLoadFinalAccounting,
+import { assertLoadOriginalQuoteEncoding, drainLoadAccounting, loadCaptureKinds, requireLoadFinalAccounting,
   type LoadFinalAccounting, type LoadDrainPorts } from './load-durable-economics.js';
 import { createLoadDurableSqlObserver } from './load-durable-observer.js';
 
@@ -42,7 +42,7 @@ function journal(): LoadFinalAccounting {
     requestDigest: fixture.requestDigest, outcome: 'admitted' as const, reason: null, sourceTradeId: SOURCE,
     signalId: SIGNAL, executionId: EXECUTION, jobId, admittedAt: at };
   const snapshot = { executionId: EXECUTION, userId: USER, tradeId: TRADE, fence: '1', totals: {
-    base, quote, debit, fee, unknown: '0', quoteUnknown: '0', completes: true, evidenceCount: '1' }, accountingComplete: true };
+    base, quote, debit, fee, unknown: '0', quoteUnknown: '0', completes: true, evidenceCount: '1', invalidCorrections: '0' }, accountingComplete: true };
   return { scope, fixtures: [fixture], attempts: [attempt, { ...attempt, attemptId: REPLAY, status: 200 }],
     admissions: [admission, { ...admission, attemptId: REPLAY, outcome: 'replay' }], durable: {
       scope, sources: [{ id: SOURCE, binding: fixture.binding, bindingDigest: sourceBindingDigest(fixture.binding),
@@ -58,7 +58,7 @@ function journal(): LoadFinalAccounting {
       workerAttempts: [{ executionId: EXECUTION, userId: USER, fence: '1', policyRevision: 'inert-policy', riskEpoch: '1', state: 'settled' }],
       evidence: [{ id: EVIDENCE, executionId: EXECUTION, userId: USER, sourceTradeId: SOURCE, evidenceId: 'inert-original-paper-receipt',
         evidenceType: 'paper_simulation', confirmationState: 'confirmed', completes: true, base, quote, fee,
-        quoteCurrency: 'USD', nativeQuote: null, nativePrice: null, effectiveQuote: quote, effectiveFee: fee,
+        quoteCurrency: 'USD', nativeQuote: quote, nativePrice: '1', effectiveQuote: quote, effectiveFee: fee,
         correctionId: null, applicationActive: true }],
       trades: [{ id: TRADE, executionId: EXECUTION, userId: USER, signalId: SIGNAL, sourceTradeId: SOURCE, tokenMint,
         chain: 'solana', direction: 'buy', executionMode: 'paper', base, quote, fee, status: 'filled' }],
@@ -119,8 +119,15 @@ describe('Wave4 durable load exact source accounting', () => {
     ['missing source application', j => j.durable.sources[0].applicationActive = false],
     ['unknown fee', j => j.durable.evidence[0].fee = null],
     ['unknown effective quote', j => j.durable.evidence[0].effectiveQuote = null],
+    ['valued USD missing nativeQuote', j => j.durable.evidence[0].nativeQuote = null],
+    ['valued USD missing nativePrice', j => j.durable.evidence[0].nativePrice = null],
+    ['valued USD non-USD currency', j => j.durable.evidence[0].quoteCurrency = 'SOL'],
+    ['valued USD non-1 nativePrice', j => j.durable.evidence[0].nativePrice = '2'],
+    ['valued USD mismatched nativeQuote', j => j.durable.evidence[0].nativeQuote = '123.456789012345678900'],
     ['unknown accounting coverage', j => j.durable.executions[0].quoteUnknown = '1'],
     ['false receipt completion', j => j.durable.receipts[0].snapshot.accountingComplete = false],
+    ['missing invalidCorrections in receipt', j => { delete j.durable.receipts[0].snapshot.totals.invalidCorrections; }],
+    ['nonzero invalidCorrections in receipt', j => { j.durable.receipts[0].snapshot.totals.invalidCorrections = '1'; }],
     ['receipt hash differs', j => j.durable.receipts[0].receiptId = 'a'.repeat(64)],
     ['wrong receipt trade', j => j.durable.receipts[0].snapshot.tradeId = LOT],
     ['noncanonical decimal', j => j.durable.trades[0].quote += '0'],
@@ -153,6 +160,17 @@ describe('Wave4 durable load exact source accounting', () => {
       expect(() => captureLoadFixture({ ...fixture, fixtureId })).toThrow();
     }
     expect(() => captureLoadFixture({ ...fixture, label: () => true })).toThrow(/inert JSON/);
+  });
+  it('enforces four NULLs for absent quote and canonical amount/amount/USD/1 for valued USD original', () => {
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: null, quoteCurrency: null, nativeQuote: null, nativePrice: null })).not.toThrow();
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: null, quoteCurrency: 'USD', nativeQuote: null, nativePrice: null })).toThrow(/four NULLs/);
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: null, quoteCurrency: null, nativeQuote: '1', nativePrice: null })).toThrow(/four NULLs/);
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: null, quoteCurrency: null, nativeQuote: null, nativePrice: '1' })).toThrow(/four NULLs/);
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: '123.456789012345678901', quoteCurrency: 'USD', nativeQuote: '123.456789012345678901', nativePrice: '1' })).not.toThrow();
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: '10', quoteCurrency: 'USDC', nativeQuote: '10', nativePrice: '1' })).toThrow(/must be USD/);
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: '10', quoteCurrency: 'USD', nativeQuote: '10', nativePrice: '1.0' })).toThrow(/canonical exact decimal/);
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: '10', quoteCurrency: 'USD', nativeQuote: '10', nativePrice: '2' })).toThrow(/USD\/1 required/);
+    expect(() => assertLoadOriginalQuoteEncoding({ quote: '10', quoteCurrency: 'USD', nativeQuote: '9', nativePrice: '1' })).toThrow(/USD\/1 required/);
   });
 });
 

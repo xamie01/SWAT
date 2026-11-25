@@ -1,4 +1,6 @@
-import type { PoolClient } from 'pg';
+import { performance } from 'node:perf_hooks';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import type { PoolClient, QueryResult } from 'pg';
 import { createCheckedPipelineTransaction, readPipelineBackendApproval, pipelineRequire, pipelineText,
   pipelineTime, pipelineUuid, type PipelineClientLease, type PipelineProtectedRole,
   type PipelineProtectedPurpose } from './wave4-pipeline-source-owned.js';
@@ -96,8 +98,132 @@ export async function requirePipelineApprovedPayload(client: PoolClient, purpose
   pipelineRequire(pipelineSame(approval.terms,candidate),'candidate differs from independent persisted protected approval');
   return approval;
 }
-export function pipelineWriterTransaction(acquire: () => Promise<PipelineClientLease>, purpose: PipelineProtectedPurpose, selector: string) {
-  return createCheckedPipelineTransaction({ acquire,purpose,authorityId: selector });
+/** Snapshot caller time once and advance it by monotonic elapsed time. Database
+ * waits cannot freeze freshness, and mutation of the original Date is irrelevant. */
+export function pipelineElapsedClock(now: Date): () => Date {
+  pipelineRequire(pipelineTime(now),'finite worker clock required');
+  const milliseconds = now.getTime(),started = performance.now();
+  return () => new Date(milliseconds + Math.max(0,performance.now() - started));
+}
+/** Fixed worker-only lifetime wrapper; no new protected purpose or runtime lookup.
+ * A timeout/abort destroys the physical lease before rejecting outstanding work.
+ * The host release(true) MUST synchronously close the backend, not pool it. Broken
+ * clients remain quarantined; cancellation cannot free an active client's identity
+ * for another holder. Late callbacks/results never become transaction success. */
+export const PIPELINE_WORKER_BOUNDS = Object.freeze({ acquisitionMs: 5_000,queryMs: 15_000,transactionMs: 45_000 });
+const workerWriterContext = new AsyncLocalStorage<{ poisoned: boolean; signal: AbortSignal }>();
+const workerWriterClients = new WeakSet<object>();
+export function pipelineWriterTransaction(acquire: () => Promise<PipelineClientLease>, purpose: PipelineProtectedPurpose,
+  selector: string, externalSignal?: AbortSignal) {
+  const transaction = createCheckedPipelineTransaction({ acquire: async () => {
+    const lifetime = workerWriterContext.getStore();
+    const signal = lifetime?.signal ?? externalSignal;
+    pipelineRequire(!signal?.aborted,'worker acquisition cancelled');
+    let abandoned = false;
+    const pending = Promise.resolve().then(() => {
+      pipelineRequire(!signal?.aborted,'worker acquisition cancelled');
+      return acquire();
+    });
+    const lease = await new Promise<PipelineClientLease>((resolve,reject) => {
+      const finish = () => { clearTimeout(timer); signal?.removeEventListener('abort',abort); };
+      const abort = () => { abandoned = true; finish(); reject(new Error('Protected pipeline worker acquisition cancelled')); };
+      const timer = setTimeout(() => { abandoned = true; finish(); reject(new Error('Protected pipeline worker acquisition timed out')); },
+        PIPELINE_WORKER_BOUNDS.acquisitionMs);
+      signal?.addEventListener('abort',abort,{ once: true });
+      if (signal?.aborted) abort();
+      pending.then(value => {
+        if (abandoned) {
+          // An overlapping lease does not own the first holder's physical client.
+          if (value?.client && typeof value.release === 'function' && !workerWriterClients.has(value.client)) {
+            workerWriterClients.add(value.client);
+            try { value.release(true); } catch { /* failed destruction remains quarantined; no success */ }
+          }
+          return;
+        }
+        finish(); resolve(value);
+      },error => { if (!abandoned) { finish(); reject(error); } });
+    });
+    pipelineRequire(lease?.client && typeof lease.release === 'function','owned worker physical lease required');
+    pipelineRequire(!workerWriterClients.has(lease.client),'concurrent/quarantined worker physical lease refused');
+    workerWriterClients.add(lease.client);
+    let released = false,expired = false,pendingQuery = false;
+    const deadline = performance.now() + PIPELINE_WORKER_BOUNDS.transactionMs;
+    const release = (broken: boolean) => {
+      if (released) return;
+      released = true; clearTimeout(transactionTimer); signal?.removeEventListener('abort',cancel);
+      try {
+        lease.release(broken || expired);
+        if (!broken && !expired) workerWriterClients.delete(lease.client);
+      } catch (error) { if (lifetime) lifetime.poisoned = true; throw error; }
+    };
+    const cancel = () => {
+      expired = true;
+      if (lifetime) lifetime.poisoned = true;
+      try { release(true); } catch { /* async cancellation must not throw outside the rejected operation */ }
+    };
+    const transactionTimer = setTimeout(cancel,PIPELINE_WORKER_BOUNDS.transactionMs);
+    signal?.addEventListener('abort',cancel,{ once: true });
+    if (signal?.aborted) cancel();
+    const client = { query: async (sql: string,values?: unknown[]) => {
+      if (released || expired || signal?.aborted || pendingQuery || performance.now() >= deadline) {
+        cancel(); throw new Error('Protected pipeline expired/overlapping worker physical query refused');
+      }
+      pendingQuery = true;
+      try {
+        return await new Promise<QueryResult>((resolve,reject) => {
+          const finish = () => { clearTimeout(timer); signal?.removeEventListener('abort',abort); };
+          const abort = () => { finish(); cancel(); reject(new Error('Protected pipeline worker query cancelled')); };
+          const timer = setTimeout(() => { finish(); cancel(); reject(new Error('Protected pipeline worker query timed out')); },
+            Math.min(PIPELINE_WORKER_BOUNDS.queryMs,Math.max(0,deadline - performance.now())));
+          signal?.addEventListener('abort',abort,{ once: true });
+          if (signal?.aborted) { abort(); return; }
+          Promise.resolve().then(() => {
+            pipelineRequire(!released && !expired && !signal?.aborted && performance.now() < deadline,'worker query lifetime expired');
+            return lease.client.query(sql,values);
+          }).then(result => {
+            finish();
+            if (released || expired || signal?.aborted || performance.now() >= deadline) {
+              cancel(); reject(new Error('Protected pipeline worker query lifetime expired'));
+            } else resolve(result);
+          },error => { finish(); reject(error); });
+        });
+      } finally { pendingQuery = false; }
+    } } as PoolClient;
+    return { client,release };
+  },purpose,authorityId: selector });
+  return async <T>(operation: (client: PoolClient) => Promise<T>): Promise<T> => {
+    const parent = workerWriterContext.getStore();
+    if (parent) { parent.poisoned = true; throw new Error('Nested worker writer transaction refused'); }
+    pipelineRequire(typeof operation === 'function','worker operation required');
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    const deadline = performance.now() + PIPELINE_WORKER_BOUNDS.transactionMs;
+    const timer = setTimeout(cancel,PIPELINE_WORKER_BOUNDS.transactionMs);
+    externalSignal?.addEventListener('abort',cancel,{ once: true });
+    if (externalSignal?.aborted) cancel();
+    const lifetime = { poisoned: false,signal: controller.signal };
+    const pending = workerWriterContext.run(lifetime,() => transaction(async client => {
+      pipelineRequire(!controller.signal.aborted,'worker writer lifetime cancelled');
+      const result = await operation(client);
+      pipelineRequire(!lifetime.poisoned && !controller.signal.aborted && performance.now() < deadline,
+        'worker writer lifetime cancelled/poisoned');
+      return result;
+    }));
+    try {
+      return await new Promise<T>((resolve,reject) => {
+        const abort = () => reject(new Error('Protected pipeline worker transaction cancelled/timed out; recover without resend'));
+        const finish = () => controller.signal.removeEventListener('abort',abort);
+        controller.signal.addEventListener('abort',abort,{ once: true });
+        if (controller.signal.aborted) abort();
+        pending.then(value => {
+          finish();
+          if (controller.signal.aborted || lifetime.poisoned || performance.now() >= deadline) {
+            cancel(); reject(new Error('Protected pipeline worker transaction lifetime expired; recover without resend'));
+          } else resolve(value);
+        },error => { finish(); reject(error); });
+      });
+    } finally { clearTimeout(timer); externalSignal?.removeEventListener('abort',cancel); }
+  };
 }
 export interface PipelineWorkerCapabilityRegistration {
   readonly capabilityId: string; readonly revision: string; readonly executionId: string;
@@ -115,7 +241,7 @@ export function preparePipelineWorkerCapability(candidate: PipelineWorkerCapabil
   pipelineUuid(value.capabilityId); pipelineUuid(value.executionId); pipelineUuid(value.userId); pipelineScope(value);
   pipelineIso(value.validFrom); pipelineIso(value.expiresAt);
   pipelineRequire(value.runtimeRole === 'swat_app' && value.executionMode === 'paper'
-    && ['fanout','lot-exit'].includes(value.obligationKind) && /^[1-9]\d*$/.test(value.databaseOid)
+    && ['fanout','lot-exit'].includes(value.obligationKind) && pipelineText(value.databaseOid,20) && /^[1-9]\d*$/.test(value.databaseOid)
     && pipelineText(value.serverAddress) && Number.isInteger(value.serverPort) && value.serverPort >= 0 && value.serverPort <= 65535
     && [value.revision,value.obligationId,value.policyId,value.policyRevision].every(v => pipelineText(v,128))
     && pipelineText(value.backendIdentity,512) && value.backendIdentity.endsWith('|swat_app')
@@ -134,12 +260,12 @@ export async function registerPipelineWorkerCapabilityWithClient(client: PoolCli
   pipelineRequire(result.rows.length === 1 && pipelineSame(result.rows[0].result,value),'protected canonical registry write/replay refused');
   return value;
 }
-export function createProtectedPipelineWorkerRegistry(input: { acquire: () => Promise<PipelineClientLease> }) {
+export function createProtectedPipelineWorkerRegistry(input: { acquire: () => Promise<PipelineClientLease>; signal?: AbortSignal }) {
   pipelineRequire(typeof input.acquire === 'function','registry physical lease required');
-  const acquire = input.acquire;
+  const { acquire,signal } = input;
   return { register(candidate: PipelineWorkerCapabilityRegistration) {
     const value = preparePipelineWorkerCapability(candidate);
-    return pipelineWriterTransaction(acquire,'worker-register',value.executionId)(client => registerPipelineWorkerCapabilityWithClient(client,value));
+    return pipelineWriterTransaction(acquire,'worker-register',value.executionId,signal)(client => registerPipelineWorkerCapabilityWithClient(client,value));
   } };
 }
 export type { PipelineClientLease, PipelineProtectedRole };

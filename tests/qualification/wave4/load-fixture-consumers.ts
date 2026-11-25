@@ -25,22 +25,8 @@ export interface LoadFixtureInvocation {
   readonly principal: { readonly kind: 'user'; readonly userId: string };
   readonly evidence: SourceVerificationEvidence;
 }
-/** Missing in public load boot today. Implementations must validate separately
- * approved backend/identity/capability on EACH owned client and lock the exact
- * persisted HTTP-attempt/admission correlation. A label, boolean, declaration,
- * fixture manifest or callback return is NOT approval. No registry is written here. */
-export interface LoadProtectedCapturePort {
-  assertInvocationWithClient(client: PoolClient, input: Readonly<{
-    scope: LoadScope; fixture: LoadFixture; attempt: LoadHttpAttempt;
-    principal: LoadFixtureInvocation['principal']; stage: 'source' | 'fanout' | 'worker';
-  }>): Promise<void>;
-  /** Same-client protected durable correlation; commits with canonical obligation.
-   * Replay must reference original identity, never create a new economic effect. */
-  bindCanonicalWithClient(client: PoolClient, input: Readonly<{
-    scope: LoadScope; fixtureId: string; attemptId: string; userId: string;
-    sourceTradeId: string; signalId: string; executionId: string; jobId: string;
-  }>): Promise<void>;
-}
+import type { LoadProtectedCapturePort } from '../../../packages/db/src/wave4-load-contract.js';
+export type { LoadProtectedCapturePort } from '../../../packages/db/src/wave4-load-contract.js';
 export interface LoadFixtureConsumerPorts {
   readonly scope: LoadScope;
   /** Resolves only after COMMIT; owns every pending query and bounded cleanup. */

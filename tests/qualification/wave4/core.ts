@@ -85,6 +85,153 @@ export function gatePassed(r: GateResult): boolean {
   return r.blocked.length === 0 && r.assertions.length > 0 && r.assertions.every(a => a.passed === true)
     && new Set(r.assertions.map(a => a.name)).size === r.assertions.length;
 }
+export class CommitUncertainError extends Error {
+  readonly code = 'COMMIT_UNCERTAIN' as const;
+  readonly uncertainCommit = true as const;
+  constructor(
+    message = 'Transaction COMMIT uncertain; lease quarantined and downstream transitions aborted',
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = 'CommitUncertainError';
+  }
+}
+
+export function isCommitUncertainError(error: unknown): boolean {
+  if (error instanceof CommitUncertainError) return true;
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { name?: unknown; code?: unknown; uncertainCommit?: unknown };
+  return e.uncertainCommit === true
+    || e.code === 'COMMIT_UNCERTAIN'
+    || e.name === 'CommitUncertainError'
+    || e.name === 'ExecutedPipelineCommitUncertainError'
+    || e.name === 'FinancialCommitUncertainError';
+}
+
+const quarantinedClients = new WeakSet<object>();
+export function quarantineClient(client: object): void { quarantinedClients.add(client); }
+export function isClientQuarantined(client: object): boolean { return quarantinedClients.has(client); }
+
+export interface TransactionFenceOptions {
+  readonly deadline?: Deadline;
+  readonly signal?: AbortSignal;
+  readonly onUncertainCommit?: (client: SqlClient) => void | Promise<void>;
+}
+
+export interface CommitFence {
+  readonly tripped: boolean;
+  readonly lastError: unknown;
+  assertClean(stage: string): void;
+  guard<T>(stage: string, fn: () => Promise<T>): Promise<T>;
+}
+
+const SAFE_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const SAFE_CODE = /^(?:[0-9A-Z]{5}|[A-Z][A-Z0-9_]{1,63}|[a-z][a-z0-9-]{1,63})$/;
+
+export function createCommitFence(deadline?: Deadline): CommitFence {
+  let tripped = false;
+  let lastError: unknown = null;
+  return {
+    get tripped() { return tripped; },
+    get lastError() { return lastError; },
+    assertClean(stage: string) {
+      if (tripped) {
+        throw lastError instanceof CommitUncertainError
+          ? lastError
+          : new CommitUncertainError(`Commit fence tripped; downstream ${stage} aborted`, { cause: lastError });
+      }
+      deadline?.check();
+    },
+    async guard<T>(stage: string, fn: () => Promise<T>): Promise<T> {
+      this.assertClean(stage);
+      try {
+        const value = await fn();
+        this.assertClean(stage);
+        return value;
+      } catch (error) {
+        if (isCommitUncertainError(error)) {
+          tripped = true;
+          lastError = error;
+        }
+        throw error;
+      }
+    }
+  };
+}
+
+export function mapUncertainCommitToGateResult(gate: Gate, phase: string, error: unknown): GateResult {
+  const rawName = error instanceof Error ? error.name : 'CommitUncertainError';
+  const errorName = SAFE_NAME.test(rawName) ? rawName : 'CommitUncertainError';
+  return result(
+    gate,
+    [assertion(`${gate.toLowerCase()}-commit-fence-intact`, false)],
+    [`${gate} blocked on ambiguous COMMIT during ${phase}; lease quarantined without rollback or retry`],
+    {
+      phase,
+      errorCode: 'COMMIT_UNCERTAIN',
+      errorName,
+      quarantined: true,
+      retried: false,
+      downstreamAborted: true
+    }
+  );
+}
+
+export async function executeGateWithCommitFence(
+  gate: Gate,
+  phase: string,
+  fence: CommitFence,
+  fn: () => Promise<GateResult>,
+  deadline?: Deadline
+): Promise<GateResult> {
+  try {
+    return await fence.guard(phase, fn);
+  } catch (error) {
+    if (isCommitUncertainError(error)) {
+      if (deadline?.signal.aborted) throw error;
+      return mapUncertainCommitToGateResult(gate, phase, error);
+    }
+    throw error;
+  }
+}
+
+export type QualificationPhase = 'validate' | 'inspect' | 'execute' | 'close' | 'settle';
+export interface SanitizedFailureArtifact {
+  readonly gate: Gate | null;
+  readonly phase: QualificationPhase;
+  readonly errorCode: string;
+  readonly errorName: string;
+  readonly commitUncertain: boolean;
+  readonly timestamp: string;
+}
+
+export function sanitizeFailure(
+  error: unknown,
+  phase: QualificationPhase,
+  gate: Gate | null,
+  deadlineAborted = false
+): SanitizedFailureArtifact {
+  const rawName = error instanceof Error ? error.name : 'UnknownError';
+  const errorName = SAFE_NAME.test(rawName) ? rawName : 'Error';
+  const rawCode = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  const commitUncertain = isCommitUncertainError(error);
+  const errorCode = commitUncertain
+    ? 'COMMIT_UNCERTAIN'
+    : typeof rawCode === 'string' && SAFE_CODE.test(rawCode)
+      ? rawCode
+      : deadlineAborted
+        ? 'DEADLINE_EXCEEDED'
+        : 'QUALIFICATION_ERROR';
+  return {
+    gate,
+    phase,
+    errorCode,
+    errorName,
+    commitUncertain,
+    timestamp: new Date().toISOString()
+  };
+}
+
 export async function qualify(input: QualificationConfig, ports: QualificationPorts) {
   const config = validateConfig(input);
   const started = Date.now();
@@ -106,10 +253,16 @@ export async function qualify(input: QualificationConfig, ports: QualificationPo
   }
   let failure: string | null = null;
   let cleanupComplete = false;
+  let activePhase: QualificationPhase = 'inspect';
+  let activeGate: Gate | null = null;
+  const failureArtifacts: SanitizedFailureArtifact[] = [];
   try {
+    activePhase = 'inspect';
     await bounded(deadline, () => ports.inspect(config, deadline));
     deadline.check();
+    activePhase = 'execute';
     for (const gate of gates) {
+      activeGate = gate;
       deadline.check();
       const r = await bounded(deadline, () => ports.execute(gate, config, deadline));
       deadline.check();
@@ -117,20 +270,33 @@ export async function qualify(input: QualificationConfig, ports: QualificationPo
       results.push(structuredClone(r));
       if (!gatePassed(r)) break;
     }
-  } catch {
-    failure = 'Qualification failed; private operator log required for diagnosis';
+    activeGate = null;
+    activePhase = 'settle';
+  } catch (error) {
+    failureArtifacts.push(sanitizeFailure(error, activePhase, activeGate, deadline.signal.aborted));
+    failure = isCommitUncertainError(error)
+      ? 'Qualification failed on ambiguous COMMIT; lease quarantined and private operator reconciliation required'
+      : 'Qualification failed; private operator log required for diagnosis';
   } finally {
     deadline.abort();
     const shutdown = new Deadline(5000);
+    activePhase = 'close';
     try { await bounded(shutdown, () => ports.close(shutdown)); shutdown.check(); cleanupComplete = true; }
-    catch { failure = 'Owned client shutdown failed'; }
+    catch (closeError) {
+      failureArtifacts.push(sanitizeFailure(closeError, 'close', activeGate, shutdown.signal.aborted));
+      failure = 'Owned client shutdown failed';
+    }
     finally { shutdown.abort(); shutdown.dispose(); deadline.dispose(); }
   }
   const pendingWork = pending.size;
   const containmentComplete = cleanupComplete && pendingWork === 0;
-  if (!containmentComplete && failure === null) failure = 'Owned work did not settle during shutdown';
+  if (!containmentComplete && failure === null) {
+    failureArtifacts.push(sanitizeFailure(new Error('Containment incomplete'), 'settle', null, true));
+    failure = 'Owned work did not settle during shutdown';
+  }
   return { version: 1, runId: config.candidate.runId, results, unexecuted: gates.filter(g => !results.some(r => r.gate === g)),
-    failure, elapsedMs: Date.now() - started, cleanupComplete, pendingWork, containmentComplete,
+    failure, failureArtifact: failureArtifacts[0] ?? null, failureArtifacts,
+    elapsedMs: Date.now() - started, cleanupComplete, pendingWork, containmentComplete,
     observedGatesComplete: containmentComplete && failure === null && results.length === gates.length && results.every(gatePassed),
     runtimeAccepted: false, liveCapabilityAccepted: false, productionReady: false };
 }
@@ -138,22 +304,91 @@ export async function qualify(input: QualificationConfig, ports: QualificationPo
 export interface SqlClient {
   query(sql: string, values?: unknown[]): Promise<{ rows: any[]; command?: string; rowCount?: number | null }>;
 }
-export async function transaction<T>(client: SqlClient, userId: string | null, action: (client: SqlClient) => Promise<T>): Promise<T> {
+export async function transaction<T>(
+  client: SqlClient,
+  userId: string | null,
+  action: (client: SqlClient) => Promise<T>,
+  fence?: TransactionFenceOptions
+): Promise<T> {
   requireCheck(userId === null || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(userId), 'Canonical synthetic tenant required');
-  const begin=await client.query('BEGIN');
-  requireCheck(begin.command==='BEGIN','Transaction BEGIN refused');
-  let committing=false;
+  requireCheck(!isClientQuarantined(client), 'Quarantined SQL client refused; reconcile durable state on a new lease');
+  const assertActive = (stage: string) => {
+    fence?.deadline?.check();
+    requireCheck(!fence?.signal?.aborted, `Transaction aborted before ${stage}`);
+  };
+  assertActive('BEGIN');
+  const begin = await client.query('BEGIN');
+  requireCheck(begin.command === 'BEGIN', 'Transaction BEGIN refused');
+  let committing = false;
+  const txClient: SqlClient = {
+    query: (sql, values) => {
+      assertActive('query');
+      return client.query(sql, values);
+    }
+  };
   try {
-    await client.query("SET LOCAL statement_timeout = '10s'");
-    await client.query("SET LOCAL lock_timeout = '2s'");
-    await client.query("SET LOCAL app.bypass_rls = 'off'");
-    await client.query("SELECT set_config('app.current_user_id',$1,true)", [userId ?? '']);
-    const value = await action(client);
-    committing=true;
-    requireCheck((await client.query('COMMIT')).command === 'COMMIT', 'Transaction COMMIT uncertain');
+    await txClient.query("SET LOCAL statement_timeout = '10s'");
+    await txClient.query("SET LOCAL lock_timeout = '2s'");
+    await txClient.query("SET LOCAL app.bypass_rls = 'off'");
+    await txClient.query("SELECT set_config('app.current_user_id',$1,true)", [userId ?? '']);
+    const value = await action(txClient);
+    assertActive('COMMIT');
+    committing = true;
+    const abortSignals = [fence?.deadline?.signal, fence?.signal].filter((s): s is AbortSignal => Boolean(s));
+    let commitResult: { rows: any[]; command?: string; rowCount?: number | null };
+    if (abortSignals.length === 0) {
+      commitResult = await client.query('COMMIT');
+    } else {
+      const listeners: Array<{ signal: AbortSignal; fn: () => void }> = [];
+      try {
+        commitResult = await new Promise((resolve, reject) => {
+          let settled = false;
+          const onAbort = () => {
+            if (settled) return;
+            settled = true;
+            reject(new CommitUncertainError());
+          };
+          for (const sig of abortSignals) {
+            if (sig.aborted) { onAbort(); return; }
+            sig.addEventListener('abort', onAbort, { once: true });
+            listeners.push({ signal: sig, fn: onAbort });
+          }
+          Promise.resolve(client.query('COMMIT')).then(
+            res => { if (!settled) { settled = true; resolve(res); } },
+            err => { if (!settled) { settled = true; reject(err); } }
+          );
+        });
+      } finally {
+        for (const { signal: sig, fn } of listeners) sig.removeEventListener('abort', fn);
+      }
+    }
+    if (commitResult.command !== 'COMMIT' || abortSignals.some(s => s.aborted)) {
+      throw new CommitUncertainError();
+    }
+    committing = false;
     return value;
   } catch (error) {
-    if(!committing)await client.query('ROLLBACK').catch(() => {});
+    if (committing || isCommitUncertainError(error)) {
+      quarantineClient(client);
+      try {
+        await fence?.onUncertainCommit?.(client);
+      } catch {
+        /* retain quarantine and original uncertainty */
+      }
+      throw error instanceof CommitUncertainError ? error : new CommitUncertainError(undefined, { cause: error });
+    }
+    if (!fence?.deadline?.signal.aborted && !fence?.signal?.aborted) {
+      try {
+        const rb = await client.query('ROLLBACK');
+        if (rb && typeof rb.command === 'string' && rb.command !== 'ROLLBACK') {
+          quarantineClient(client);
+        }
+      } catch {
+        quarantineClient(client);
+      }
+    } else {
+      quarantineClient(client);
+    }
     throw error;
   }
 }

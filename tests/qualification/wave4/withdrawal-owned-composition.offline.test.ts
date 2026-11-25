@@ -25,6 +25,7 @@ function fixture() {
   let fail: string | null = null, role = 'swat_app';
   let selected: FinancialReceipt | null = null, authorization: ReturnType<typeof financialAuthorizationFixture<WithdrawalIntent>> | null = null;
   let code: string | null = null, deliveries = 0, submissions = 0, captures = 0;
+  let destinationVerifiedAt = '2026-11-15T12:00:00.000Z';
   const observedQueries: {marker:string;client:object}[] = [];
   const accounting = new Map<string,string>();
   const wrap = (receiptWriter = false): WithdrawalTransaction => (tenant,operation) => db.transaction(tenant,async base => {
@@ -68,7 +69,7 @@ function fixture() {
   const application = wrap(), observer = wrap(), writer = wrap(true);
   const receipts = createFinancialReceiptAdmission<WithdrawalIntent>({transaction:writer,verify:async(_r,_a,observation)=> observation === selected ? selected : null});
   const composed = createWithdrawalOwnedComposition({application:{transaction:application,
-    lockEligibility:async(_client,intent)=>({...intent,destinationVerifiedAt:'2026-11-15T12:00:00.000Z',availableRaw:'1000',
+    lockEligibility:async(_client,intent)=>({...intent,destinationVerifiedAt,availableRaw:'1000',
       observedAt:db.now,validUntil:new Date(Date.parse(db.now)+60_000).toISOString(),custodyRevision:'inert-r1',balanceProof:'inert-not-authority'}),
     lockFunding:async(_client,tenant,budget)=>financialFundingFixture(tenant,budget,db.now)},observer,
     otpKey:{withKey:async operation=>operation(new Uint8Array(32).fill(19))},
@@ -86,7 +87,8 @@ function fixture() {
   }
   return {db,composed,receipts,observedQueries,receipt,select:(value:FinancialReceipt|null)=>{selected=value;},
     independentAccounting:(id:string)=>accounting.set(id,'inert-independent-ledger:'+id),fault:(marker:string|null)=>{fail=marker;},
-    wrongRole:()=>{role='writer';},counts:()=>({deliveries,submissions,captures})};
+    wrongRole:()=>{role='writer';},counts:()=>({deliveries,submissions,captures}),
+    setDestinationVerifiedAt:(iso:string)=>{destinationVerifiedAt=iso;},currentCode:()=>code};
 }
 
 describe('withdrawal owned P5b source composition; inert IO, no runtime acceptance',()=>{
@@ -163,6 +165,45 @@ describe('withdrawal owned P5b source composition; inert IO, no runtime acceptan
       expect(()=>assertOwnedFinancialConservation(changed)).toThrow();
     }
   });
+  it('enforces 24h cooling-off at requestOtp and on drift before process revalidation',async()=>{
+    const s=fixture();
+    s.setDestinationVerifiedAt(new Date(Date.parse(s.db.now)-86_399_000).toISOString());
+    await expect(s.composed.requestAndConsume(user,request)).rejects.toMatchObject({code:'withdrawal-cooling-off'});
+    expect(s.db.state().intents).toHaveLength(0);
+    expect(s.counts()).toEqual({deliveries:0,submissions:0,captures:0});
+
+    const s2=fixture();
+    const admitted=await s2.composed.requestAndConsume(user,request);
+    s2.setDestinationVerifiedAt(new Date(Date.parse(s2.db.now)-86_399_000).toISOString());
+    await expect(s2.composed.process(user,admitted.record.id)).rejects.toMatchObject({code:'withdrawal-cooling-off'});
+    expect(s2.counts().submissions).toBe(0);
+  });
+  it('increments OTP failures, locks after 5 wrong codes, and rejects wrong OTP after consumption',async()=>{
+    const s=fixture();
+    const issued=await s.composed.application.requestOtp(user,request);
+    expect(issued.delivery).toBe('sent');
+    const validCode=s.currentCode()!;
+    const wrongCode=validCode==='000000'?'000001':'000000';
+    for(let i=0;i<5;i++) {
+      await expect(s.composed.application.submit(user,{intentId:issued.intent.id,authorizationId:issued.authorizationId,otp:wrongCode}))
+        .rejects.toMatchObject({code:'withdrawal-otp-invalid'});
+      expect(s.db.state().auth[0]?.failures).toBe(i+1);
+    }
+    await expect(s.composed.application.submit(user,{intentId:issued.intent.id,authorizationId:issued.authorizationId,otp:validCode}))
+      .rejects.toMatchObject({code:'withdrawal-otp-locked'});
+    expect(s.db.state().outbox).toHaveLength(0);
+    expect(s.db.state().intents[0]?.status).toBe('awaiting-authorization');
+
+    const s2=fixture();
+    const consumed=await s2.composed.requestAndConsume(user,request);
+    const authId=s2.db.state().auth[0]!.id;
+    const validCode2=s2.currentCode()!;
+    const wrongCode2=validCode2==='000000'?'000001':'000000';
+    await expect(s2.composed.application.submit(user,{intentId:consumed.record.id,authorizationId:authId,otp:wrongCode2}))
+      .rejects.toMatchObject({code:'withdrawal-otp-invalid'});
+    await expect(s2.composed.application.submit(user,{intentId:consumed.record.id,authorizationId:authId,otp:validCode2}))
+      .resolves.toMatchObject({id:consumed.record.id,status:'queued'});
+  });
 });
 
 describe('protected OTP body and owned COMMIT contract',()=>{
@@ -180,6 +221,22 @@ describe('protected OTP body and owned COMMIT contract',()=>{
     const otp=make(1),hash='a'.repeat(64);const digest=await otp.digest(hash,'123456');
     expect(digest).toMatch(/^[a-f0-9]{64}$/);expect(await otp.digest(hash,'123456')).toBe(digest);
     expect(await otp.digest('b'.repeat(64),'123456')).not.toBe(digest);expect(await make(2).digest(hash,'123456')).not.toBe(digest);
+  });
+  it('protected OTP delivery refuses unverified, missing, or foreign recipient without invoking deliver',async()=>{
+    const foreign='22222222-2222-4222-8222-222222222222';
+    const intent:WithdrawalIntent={version:1,kind:'withdrawal',userId:user,requestKey:'k',chain:'polygon',network:'offline-137',
+      assetId:'USDC',assetScale:6,sourceWalletId:'source',destination:`0x${'a'.repeat(40)}`,amountRaw:'100',maxFeeRaw:'10',
+      feeAssetId:'MATIC',feeAssetScale:18,feeFundingAccountId:'fee',mode:'paper',expiresAt:'2026-11-17T12:10:00.000Z'};
+    for(const recipient of [null,{userId:user,verified:false as const,recipientHandle:'inert'},{userId:foreign,verified:true as const,recipientHandle:'inert'}]) {
+      let delivered=0;
+      const otp=createProtectedWithdrawalOtp({key:{withKey:async op=>op(new Uint8Array(32).fill(1))},
+        delivery:{resolveVerifiedRecipient:async()=>recipient as any,deliver:async()=>{delivered++;return 'sent';}}});
+      await expect(otp.deliver(user,'123456',intent)).rejects.toMatchObject({code:'withdrawal-verified-recipient-unavailable'});
+      expect(delivered).toBe(0);
+    }
+    const mismatchedOtp=createProtectedWithdrawalOtp({key:{withKey:async op=>op(new Uint8Array(32).fill(1))},
+      delivery:{resolveVerifiedRecipient:async userId=>({userId,verified:true,recipientHandle:'inert'}),deliver:async()=> 'sent'}});
+    await expect(mismatchedOtp.deliver(foreign,'123456',intent)).rejects.toMatchObject({code:'withdrawal-otp-principal-mismatch'});
   });
   it('protected capture cannot complete without consumption, substitute its returned projection or consume twice',async()=>{
     await expect(consumeProtectedWithdrawalOtp({consume:async()=> 'forged' as never},user,'i','a',async()=> 'real'))

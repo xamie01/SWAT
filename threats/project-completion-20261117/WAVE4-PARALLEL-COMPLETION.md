@@ -49,6 +49,24 @@ No current writer has permission to execute verification. Missing protected back
 
 The provider reported insufficient-credit failures for worker and protected load-capture authoring. Remaining writers were instructed to stop and preserve partial source. Executed pipeline authoring acknowledged pause; its three modules are present, but both assigned tests are absent and observer SQL alignment remains unfinished. Runner is frozen with two additional supported repairs still open: generated-evidence exclusion is too broad, and process-group shutdown reaps its leader before later signaling. This is not a global verified freeze or completion. See `WAVE4-PARALLEL-PAUSED.md` for the restart boundary.
 
+## Resumed batch — 2026-11-24
+
+The user requested continued fixes. The paused partial source is now committed at `1232c9e3cc8a16008daa5ab980de8036cba0f324`; the working tree was clean before this resumed batch. Six exclusive writers own: runner's two remaining integrity repairs; worker composition and recovery; SQL088 pipeline schema/provisioning; SQL089 financial backing/provisioning; SQL090 load capture adapter/provisioning; executed pipeline observer/driver/tests. The earlier pause remains historical. No model change or quota bypass is authorized.
+
+Coordinator separately owns metadata-only custody/public grant projection and its tests, plus `copy-trade-lifecycle-owned.ts`/`source-claim.sequential.test.ts` for the supported pre-lock claim-clock defect. Public metadata removes ciphertext SELECT under unchanged SQL047 paired presence; custody SQL081 admission/lifecycle remains incomplete. Claim-time refresh advances supplied wall-clock origins by monotonic elapsed lock/operation time and rechecks accepted-source authority before replay/admission. These edits and tests are unverified.
+
+The runner owner has frozen the two remaining integrity repairs in runner source/tests. Its slot is now a read-only independent source reviewer, maintaining at most six active subagents. No verification execution is permitted while other source owners remain active. New schemas remain unselected/unapplied.
+
+## Current resumed-batch pause
+
+Provider insufficient-credit failures stopped executed-pipeline and SQL088 authoring; remaining worker/load owners and runner reviewer were stopped, and financial owner returned PAUSED. No resumed checks ran or new acceptance was established. Runner/coordinator owner files are frozen but other work is partial. SQL088 has known broken draft predecessor-pin and relation-order hazards. See [the current restart checkpoint](WAVE4-RESUMED-PAUSED-20261124.md) for exact files, missing companions and source blockers. All current input-match/source/runtime/live/production flags remain false.
+
+## Continued source batch from preserved partials
+
+The user requested continuation again. Six exclusive slots now own worker completion; financial provisioning/backing/tests with SQL089 read-only; load capture adapter/provisioning/tests with SQL090 read-only; executed pipeline driver/observer/tests; pipeline provisioning/tests with SQL088 coordinator-owned; and runner review/affected repair. Coordinator restored the exact SQL080 predecessor-body pins and replaced the premature follower rowtype with `record`, then strengthened follower enrollment and lookup locking/freshness/digest validation. No new schemas are selected or applied; no verification runs during mutation.
+
+The runner reviewer retained REJECT for symlink targets whose consumed bytes disappear behind generated-evidence exclusion. Its slot is now a narrow two-file repair writer. Shutdown leader-preservation received no further supported source defect, not actual Linux runtime proof. New/current source tests remain unrun; previous pause checkpoints are historical and all broad completion flags stay false.
+
 ## Honest status
 
 The new source batch is unverified until all writers freeze and a complete new verification/review epoch passes. The prior757/28 affected,948/36 main,46/1 load and seven-typecheck freeze remains historical when inputs change. P0 has an independent REJECT with five supported source findings; repairs are underway. This assignment map is not completion evidence.

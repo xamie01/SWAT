@@ -1,4 +1,101 @@
 import { createHash } from 'node:crypto';
+import { Deadline } from './containment.js';
+import type { CopyExecutionRecord } from '../../../packages/db/src/copy-trade-lifecycle-owned.js';
+import type { PipelinePaperValuationEvidence } from '../../../packages/db/src/wave4-pipeline-valuation-owned.js';
+import type { PipelineWorkerPaperReceipt } from '../../../packages/db/src/wave4-pipeline-receipt-owned.js';
+
+const physicalLeases = new WeakMap<object, object>();
+// Destruction never makes a broken object safe to reissue. Weak identity remains
+// quarantined for as long as the host can return that same physical client.
+const quarantinedPhysicalClients = new WeakSet<object>();
+const MAXIMUM_RELEASE_ATTEMPTS = 2;
+/** Lifetime/transport ownership only, never tenant or capability authorization.
+ * release(true) must synchronously destroy this owned physical connection. A late
+ * acquisition is destroyed, not queried or returned to the pool. */
+export function createPipelineLifetime(maximumMs = 60_000, signal?: AbortSignal) {
+  const deadline = new Deadline(maximumMs);
+  const cleanup = new Set<() => void>();
+  const cancel = () => deadline.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
+  if (signal?.aborted) cancel();
+  const check = () => { pipelineCheck(!signal?.aborted, 'cancelled'); deadline.check(); };
+  async function wait<T>(operation: () => Promise<T>): Promise<T> {
+    check();
+    let abort: () => void = () => {};
+    const cancelled = new Promise<never>((_, reject) => {
+      abort = () => reject(new Error('Executed pipeline owned lifetime cancelled/deadline exceeded'));
+      deadline.signal.addEventListener('abort', abort, { once: true });
+    });
+    try { const result = await Promise.race([Promise.resolve().then(() => { check(); return operation(); }), cancelled]); check(); return result; }
+    finally { deadline.signal.removeEventListener('abort', abort); }
+  }
+  function own<C extends object>(lease: { readonly client: C; release(broken: boolean): void }, enroll: boolean) {
+    pipelineCheck(lease?.client && ['object','function'].includes(typeof lease.client)
+      && typeof lease.release === 'function', 'owned physical lease unavailable');
+    const client = lease.client, physicalRelease = lease.release, owner = {};
+    // This also refuses nested lifetime enrollment of an already-owned raw client.
+    // A wrapper/duplicate lease is not authority to release the existing owner.
+    pipelineCheck(!physicalLeases.has(client), 'concurrent physical lease reuse');
+    pipelineCheck(!quarantinedPhysicalClients.has(client), 'quarantined physical lease reuse');
+    physicalLeases.set(client, owner);
+    let released = false, releasing = false, attempts = 0, failure: unknown, unenroll = () => {};
+    const detach = () => { unenroll(); cleanup.delete(destroy); };
+    const release = (broken: boolean) => {
+      if (released) return;
+      pipelineCheck(physicalLeases.get(client) === owner, 'physical lease ownership changed');
+      // Cancellation/reentrant destruction still poisons the raw identity while
+      // an existing synchronous host release is in progress; never call it twice.
+      if (broken || deadline.signal.aborted) quarantinedPhysicalClients.add(client);
+      if (releasing) return;
+      if (attempts >= MAXIMUM_RELEASE_ATTEMPTS) throw failure;
+      const destroyPhysical = quarantinedPhysicalClients.has(client);
+      attempts++; releasing = true;
+      try {
+        physicalRelease.call(lease, destroyPhysical);
+        // Do not drop ownership or cancellation enrollment before synchronous
+        // release succeeds. Broken/quarantine identity survives even success.
+        released = true; physicalLeases.delete(client); detach();
+      } catch (error) {
+        failure = error; quarantinedPhysicalClients.add(client);
+        if (attempts >= MAXIMUM_RELEASE_ATTEMPTS) detach();
+        throw error;
+      } finally { releasing = false; }
+    };
+    const destroy = () => { try { release(true); } catch { /* retained ownership/quarantine; bounded cleanup only */ } };
+    cleanup.add(destroy);
+    if (enroll) {
+      try { unenroll = deadline.enroll(destroy); check(); }
+      catch (error) { destroy(); throw error; }
+    }
+    return { client, release };
+  }
+  async function acquire<C extends object>(factory: () => Promise<{ readonly client: C; release(broken: boolean): void }>) {
+    check();
+    const pending = Promise.resolve().then(() => { check(); return factory(); });
+    let lease: Awaited<typeof pending>;
+    try { lease = await wait(() => pending); }
+    catch (error) {
+      void pending.then(late => {
+        if (!late?.client || typeof late.release !== 'function'
+          || physicalLeases.has(late.client) || quarantinedPhysicalClients.has(late.client)) return;
+        const owned = own(late, false);
+        // Late resolution can occur after dispose. No timer or indefinite retry
+        // is needed: at most one synchronous cleanup retry, still quarantined.
+        try { owned.release(true); }
+        catch { try { owned.release(true); } catch { /* retained ownership/quarantine */ } }
+      }, () => {}).catch(() => {});
+      throw error;
+    }
+    return own(lease, true);
+  }
+  return Object.freeze({ check, wait, acquire, signal: deadline.signal,
+    dispose() {
+      signal?.removeEventListener('abort', cancel); deadline.dispose();
+      // Deadline.abort is one-shot. Retry its failed owned destruction once, not
+      // forever, and never reinterpret an uncertain release as a healthy return.
+      for (const destroy of [...cleanup]) destroy();
+    } });
+}
 
 /** Independent qualification arithmetic. No production SUM, decimal helper,
  * fixture-certified snapshot, price cache, queue status or runtime authority. */
@@ -19,8 +116,15 @@ export interface ExecutedSource {
 }
 export interface ExecutedExecution {
   readonly id: string; readonly signalId: string | null; readonly sourceTradeId: string | null;
-  readonly userId: string | null; readonly chain: string; readonly targetAccount: string; readonly tokenMint: string;
-  readonly executionMode: string; readonly direction: string; readonly state: string; readonly clientOrderId: string;
+  readonly userId: string | null; readonly chain: CopyExecutionRecord['chain']; readonly targetAccount: string; readonly tokenMint: string;
+  readonly executionMode: CopyExecutionRecord['executionMode']; readonly direction: CopyExecutionRecord['direction'];
+  readonly state: CopyExecutionRecord['state']; readonly clientOrderId: string;
+  readonly exitLotId: NonNullable<CopyExecutionRecord['exitLotId']> | null;
+  readonly exitTrigger: CopyExecutionRecord['exitTrigger'];
+  readonly reservedBase: string; readonly submissionAttempts: number; readonly maxSubmissionAttempts: number;
+  readonly simulationId: string | null; readonly submissionType: CopyExecutionRecord['submissionType']; readonly submissionId: string | null;
+  readonly nextReconciliationAt: string | null; readonly reconciliationClaimId: string | null;
+  readonly reconciliationAttempts: number; readonly maxReconciliationAttempts: number;
   readonly requestedBase: string | null; readonly requestedQuote: string | null;
   readonly confirmedBase: string; readonly confirmedQuote: string | null; readonly quoteUnknown: string;
   readonly sourcePositionBefore: string | null; readonly sourceSellFraction: string | null;
@@ -50,8 +154,8 @@ export interface ExecutedPipelineSnapshot {
   readonly sourcePositions: readonly PipelineSqlRow[]; readonly signals: readonly PipelineSqlRow[];
   readonly batches: readonly PipelineSqlRow[]; readonly deliveries: readonly PipelineSqlRow[];
   readonly policies: readonly PipelineSqlRow[]; readonly attempts: readonly PipelineSqlRow[];
-  readonly capabilities: readonly PipelineSqlRow[]; readonly paperValuations: readonly PipelineSqlRow[];
-  readonly paperReceipts: readonly PipelineSqlRow[]; readonly valuationAuthorities: readonly PipelineSqlRow[];
+  readonly capabilities: readonly PipelineSqlRow[]; readonly paperValuations: readonly PipelinePaperValuationEvidence[];
+  readonly paperReceipts: readonly PipelineWorkerPaperReceipt[]; readonly valuationAuthorities: readonly PipelineSqlRow[];
   readonly trustedValuations: readonly PipelineSqlRow[]; readonly corrections: readonly PipelineSqlRow[];
   readonly financialReceipts: readonly PipelineSqlRow[]; readonly trades: readonly PipelineSqlRow[];
   readonly applications: readonly PipelineSqlRow[]; readonly positions: readonly PipelineSqlRow[];
@@ -69,16 +173,28 @@ export function pipelineCheck(value: unknown, reason: string): asserts value {
   if (!value) throw new Error(`Executed pipeline: ${reason}`);
 }
 export function pipelineCanonical(value: unknown): string {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return JSON.stringify(value);
-  pipelineCheck(value && typeof value === 'object', 'inert exact JSON required');
-  pipelineCheck(Object.getPrototypeOf(value) === Object.prototype || Array.isArray(value), 'plain JSON required');
-  if (Array.isArray(value)) return `[${value.map(pipelineCanonical).join(',')}]`;
-  return `{${Object.keys(value).sort().map(key => {
-    const d = Object.getOwnPropertyDescriptor(value, key)!;
-    pipelineCheck('value' in d && d.value !== undefined, 'accessor/undefined JSON refused');
-    return `${JSON.stringify(key)}:${pipelineCanonical(d.value)}`;
-  }).join(',')}}`;
+  const visiting = new Set<object>();
+  function encode(input: unknown, depth: number): string {
+    pipelineCheck(depth <= 64, 'bounded JSON depth required');
+    if (input === null || typeof input === 'boolean' || typeof input === 'string') return JSON.stringify(input);
+    if (typeof input === 'number' && Number.isFinite(input)) return JSON.stringify(input);
+    pipelineCheck(input && typeof input === 'object', 'inert JSON required');
+    pipelineCheck(Object.getPrototypeOf(input) === Object.prototype || Array.isArray(input), 'plain JSON required');
+    pipelineCheck(!visiting.has(input), 'acyclic JSON required'); visiting.add(input);
+    try {
+      const keys = Array.isArray(input) ? Array.from({ length: input.length }, (_, i) => String(i)) : Object.keys(input).sort();
+      const values = keys.map(key => {
+        const d = Object.getOwnPropertyDescriptor(input, key);
+        pipelineCheck(d && 'value' in d && d.value !== undefined, 'accessor/undefined/sparse JSON refused');
+        const encoded = encode(d.value, depth + 1);
+        return Array.isArray(input) ? encoded : `${JSON.stringify(key)}:${encoded}`;
+      });
+      return Array.isArray(input) ? `[${values.join(',')}]` : `{${values.join(',')}}`;
+    } finally { visiting.delete(input); }
+  }
+  // Scores may be finite fractional numbers. Economics are independently required
+  // to be decimal strings; this serializer must not round or infer those fields.
+  return encode(value, 0);
 }
 export function pipelineEqual(a: unknown, b: unknown, reason: string): void {
   pipelineCheck(pipelineCanonical(a) === pipelineCanonical(b), reason);
@@ -124,6 +240,34 @@ function one<T>(rows: readonly T[], predicate: (r: T) => boolean, reason: string
 function sameDecimal(a: unknown, b: PipelineExact, reason: string): void {
   pipelineCheck(typeof a === 'string' && compare(exactPipelineDecimal(a), b) === 0, reason);
 }
+/** Compare immutable quote storage only; protected terms must never fill NULLs. */
+export function assertPipelineOriginalQuoteEncoding(original: Pick<ExecutedOriginalEvidence,
+  'quote' | 'nativeQuote' | 'quoteCurrency' | 'nativePrice'>): void {
+  if (original.quote === null) {
+    pipelineCheck(original.nativeQuote === null && original.quoteCurrency === null && original.nativePrice === null,
+      'absent original quote must retain four NULLs');
+    return;
+  }
+  pipelineCheck(original.quoteCurrency === 'USD', 'original quote currency must be USD');
+  pipelineCheck(compare(money(original.nativeQuote), money(original.quote)) === 0
+    && compare(money(original.nativePrice), exactPipelineDecimal('1')) === 0, 'original canonical USD amount/amount/USD/1 required');
+}
+function positivePersistedFence(value: unknown, reason: string): void {
+  pipelineCheck(typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value)
+    && BigInt(value) <= 9223372036854775807n, reason);
+}
+/** Independent persisted counters; receipt joins use only the worker fence. */
+export function assertPipelinePersistedExecutionFences(e: Pick<ExecutedExecution,
+  'id' | 'userId' | 'signalId' | 'targetAccount' | 'executionMode'>, delivery: PipelineSqlRow, attempt: PipelineSqlRow): void {
+  pipelineCheck(e.userId !== null && e.signalId !== null && e.executionMode === 'paper'
+    && delivery.execution_id === e.id && delivery.user_id === e.userId && delivery.signal_id === e.signalId
+    && delivery.target_account === e.targetAccount && delivery.execution_mode === e.executionMode && delivery.state === 'completed',
+  'delivery fence/identity mismatch');
+  pipelineCheck(attempt.execution_id === e.id && attempt.user_id === e.userId && attempt.state === 'settled',
+    'worker fence/owner mismatch');
+  positivePersistedFence(delivery.fence, 'positive persisted delivery fence required');
+  positivePersistedFence(attempt.fence, 'positive persisted worker fence required');
+}
 export interface PipelinePaperTerms {
   readonly direction: 'buy' | 'sell'; readonly requestedBase: string | null; readonly requestedQuote: string | null;
   readonly baseDecimals: number; readonly priceUsd: string; readonly simulatedFeeBps: string; readonly simulatedFixedFeeUsd: string;
@@ -156,13 +300,38 @@ export function executedOriginalSnapshot(f: ExecutedOriginalEvidence) {
     priceUsd: f.price === null ? null : pipelineExactText(money(f.price)), feeUsd: f.fee === null ? null : pipelineExactText(money(f.fee)),
     occurredAt: f.occurredAt, completesExecution: f.completes };
 }
-function receiptDigest(snapshot: PipelineSqlRow): string {
-  const totals = snapshot.totals as PipelineSqlRow;
+export interface PipelineRawFinancialTotals {
+  readonly base: string; readonly quote: string | null; readonly debit: string | null; readonly fee: string | null;
+  readonly unknown: string; readonly quoteUnknown: string; readonly completes: boolean; readonly evidenceCount: string;
+  /** SQL080 readWorkerFinancialTotals returns this enumerable column too. */
+  readonly invalidCorrections: string;
+}
+export interface PipelineRawFinancialSnapshot {
+  readonly executionId: string; readonly userId: string | null; readonly tradeId: string; readonly fence: string;
+  readonly totals: PipelineRawFinancialTotals; readonly accountingComplete: boolean;
+}
+/** SQL080 hashes ordered JavaScript JSON, NOT jsonb order/canonical JSON and NOT
+ * decimal-normalized totals. Keep the exact text returned by PostgreSQL. */
+export function pipelineFinancialReceiptDigest(snapshot: PipelineRawFinancialSnapshot): string {
+  pipelineCanonical(snapshot);
+  pipelineEqual(Object.keys(snapshot).sort(),['executionId','userId','tradeId','fence','totals','accountingComplete'].sort(),'receipt snapshot exact fields required');
+  pipelineCheck(typeof snapshot.executionId==='string'&&typeof snapshot.tradeId==='string'
+    && (snapshot.userId===null||typeof snapshot.userId==='string')&&typeof snapshot.fence==='string'
+    && /^[1-9]\d{0,18}$/.test(snapshot.fence)&&BigInt(snapshot.fence)<=9223372036854775807n,'receipt identity/fence required');
+  const totals = snapshot.totals;
   pipelineCheck(totals && typeof totals === 'object', 'receipt exact totals required');
+  pipelineEqual(Object.keys(totals).sort(),['base','quote','debit','fee','unknown','quoteUnknown','completes','evidenceCount','invalidCorrections'].sort(),
+    'receipt totals exact fields required');
+  exactPipelineDecimal(totals.base);
+  for (const value of [totals.quote, totals.debit, totals.fee]) if (value !== null) money(value);
+  for (const value of [totals.unknown, totals.quoteUnknown, totals.evidenceCount, totals.invalidCorrections])
+    pipelineCheck(typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value), 'raw receipt coverage required');
+  pipelineCheck(typeof totals.completes === 'boolean' && typeof snapshot.accountingComplete === 'boolean', 'raw receipt completion required');
   return createHash('sha256').update(JSON.stringify({ executionId: snapshot.executionId, userId: snapshot.userId,
     tradeId: snapshot.tradeId, fence: snapshot.fence, totals: { base: totals.base, quote: totals.quote, debit: totals.debit,
       fee: totals.fee, unknown: totals.unknown, quoteUnknown: totals.quoteUnknown, completes: totals.completes,
-      evidenceCount: totals.evidenceCount }, accountingComplete: snapshot.accountingComplete })).digest('hex');
+      evidenceCount: totals.evidenceCount, invalidCorrections: totals.invalidCorrections },
+    accountingComplete: snapshot.accountingComplete })).digest('hex');
 }
 /** Exactly one acquisition, one partial source sell, source-only reversal, one
  * full immutable acquisition quote+fee correction, idempotent replay. Arbitrary
@@ -224,17 +393,23 @@ export function reconcileExecutedPipelineJournal(journal: ExecutedPipelineJourna
       const original = one(s.originals, r => r.executionId === e.id, 'one immutable original fill');
       const effective = one(s.effective, r => r.id === original.id && r.executionId === e.id, 'one effective fill');
       pipelineCheck(original.userId === e.userId && original.sourceTradeId === e.sourceTradeId && original.evidenceType === 'paper_simulation'
-        && original.completes && original.confirmationState === 'confirmed' && effective.confirmationState === 'confirmed'
-        && original.nativeQuote === null && original.nativePrice === null && original.quoteCurrency === 'USD', 'original receipt scope/coverage');
+        && original.completes && original.confirmationState === 'confirmed' && effective.confirmationState === 'confirmed', 'original receipt scope/coverage');
+      assertPipelineOriginalQuoteEncoding(original);
       const valuation = one(s.paperValuations, r => r.executionId === e.id, 'independent persisted paper valuation required');
       pipelineCheck(valuation.userId === scope.userId && valuation.chain === scope.chain && valuation.tokenMint === scope.tokenMint
+        && valuation.executionMode==='paper'&&valuation.direction===e.direction&&valuation.quoteCurrency==='USD'
+        && valuation.bindingDigest===source.bindingDigest
         && valuation.targetAccount === scope.targetAccount && valuation.sourceTradeId === source.id && valuation.network === scope.network
         && valuation.rawQuantity === source.binding!.rawQuantity && valuation.quantityScale === source.binding!.quantityScale
         && valuation.requestedBase === e.requestedBase && valuation.requestedQuote === e.requestedQuote, 'protected paper valuation/source/sizing mismatch');
-      const expected = foldProtectedPaperTerms(valuation as unknown as PipelinePaperTerms);
-      pipelineEqual([pipelineExactText(exactPipelineDecimal(original.base)), original.quote === null ? null : pipelineExactText(money(original.quote)),
-        original.price === null ? null : pipelineExactText(money(original.price)), original.fee === null ? null : pipelineExactText(money(original.fee))],
-      [expected.base,expected.quote,expected.price,expected.fee], 'original differs from protected raw-scale price/fee fold');
+      const expected = foldProtectedPaperTerms(valuation);
+      // Protected expected economics are comparisons, never replacements for
+      // unknown immutable fields. This bounded complete journal refuses unknown
+      // effective quote/fee later rather than filling either from expected terms.
+      for(const [actual,expectedValue] of [[original.base,expected.base],[original.quote,expected.quote],
+        [original.price,expected.price],[original.fee,expected.fee]] as const) {
+        if(actual!==null)sameDecimal(actual,exactPipelineDecimal(expectedValue),'original differs from protected raw-scale price/fee fold');
+      }
       sameDecimal(e.confirmedBase, exactPipelineDecimal(expected.base), 'confirmed inventory differs from protected fill');
       sameDecimal(effective.base, exactPipelineDecimal(original.base), 'correction changed immutable base');
       if (e.direction === 'buy') pipelineCheck(e.requestedBase === null && e.requestedQuote !== null, 'base-sized buy lie refused');
@@ -254,16 +429,28 @@ export function reconcileExecutedPipelineJournal(journal: ExecutedPipelineJourna
         && batch.exclusion_snapshot.some((x: unknown) => (x as PipelineSqlRow).userId === null
           && (x as PipelineSqlRow).code === 'operator-obligation-domain-unsupported'), 'explicit durable operator exclusion');
       const attempt = one(s.attempts, r => r.execution_id === e.id, 'canonical worker attempt');
-      pipelineCheck(attempt.user_id === scope.userId && attempt.state === 'settled' && attempt.fence === delivery.fence, 'worker fence/owner mismatch');
+      assertPipelinePersistedExecutionFences(e, delivery, attempt);
       const policy = one(s.policies, r => r.execution_id === e.id, 'captured policy');
       pipelineCheck(policy.user_id === scope.userId && policy.chain === scope.chain && policy.target_account === scope.targetAccount
         && policy.token_mint === scope.tokenMint && policy.master_wallet_address === scope.masterWalletAddress && policy.execution_mode === 'paper', 'captured policy scope');
       const capability = one(s.capabilities, r => r.execution_id === e.id, 'persisted runtime capability missing');
       pipelineCheck(capability.runtime_role === 'swat_app' && capability.revoked_at === null, 'capability absent/revoked');
       const paperReceipt = one(s.paperReceipts, r => r.executionId === e.id && r.workerFence === attempt.fence, 'independent protected paper receipt');
-      pipelineCheck(paperReceipt.userId === scope.userId && paperReceipt.paperValuationEvidenceId === valuation.evidenceId
+      pipelineCheck(paperReceipt.userId === scope.userId && paperReceipt.chain===e.chain&&paperReceipt.tokenMint===e.tokenMint
+        && paperReceipt.targetAccount===e.targetAccount&&paperReceipt.executionMode==='paper'&&paperReceipt.executor==='paper-exact-simulated'
+        && paperReceipt.paperValuationEvidenceId === valuation.evidenceId
         && paperReceipt.paperValuationDigest === valuation.evidenceDigest && paperReceipt.policyRevision === attempt.policy_revision
         && paperReceipt.riskEpoch === attempt.risk_epoch, 'paper receipt provenance/fence');
+      const receiptEvidence=paperReceipt.evidence;
+      pipelineCheck(receiptEvidence.executionId===e.id&&receiptEvidence.evidenceId===original.evidenceId
+        && receiptEvidence.evidenceType===original.evidenceType&&receiptEvidence.confirmationState===original.confirmationState
+        && receiptEvidence.completesExecution===original.completes&&receiptEvidence.occurredAt===original.occurredAt,
+      'paper receipt immutable original identity');
+      const nullableExact=(value:string|null)=>value===null?null:pipelineExactText(exactPipelineDecimal(value));
+      pipelineEqual([nullableExact(receiptEvidence.baseQuantity),nullableExact(receiptEvidence.quoteLeg===null?null:receiptEvidence.quoteLeg.amount),
+        receiptEvidence.quoteLeg===null?null:receiptEvidence.quoteLeg.currency,nullableExact(receiptEvidence.priceUsd),nullableExact(receiptEvidence.feeUsd)],
+      [nullableExact(original.base),nullableExact(original.quote),original.quoteCurrency,nullableExact(original.price),nullableExact(original.fee)],
+      'paper receipt immutable original null/economics differ');
       const correction = s.corrections.find(r => r.original_evidence_id === original.id);
       if (correction) {
         pipelineCheck(corrected && e.direction === 'buy' && correction.previous_correction_id === null && correction.authorized === true
@@ -304,13 +491,20 @@ export function reconcileExecutedPipelineJournal(journal: ExecutedPipelineJourna
       pipelineCheck(receipts.length === (correction ? 2 : 1), 'append-only financial receipt coverage');
       for (const receipt of receipts) {
         const snapshot = receipt.snapshot as PipelineSqlRow;
-        pipelineCheck(receipt.receipt_id === receiptDigest(snapshot) && snapshot.executionId === e.id && snapshot.userId === scope.userId
+        pipelineCheck(receipt.receipt_id === pipelineFinancialReceiptDigest(snapshot as unknown as PipelineRawFinancialSnapshot)
+          && receipt.execution_id===e.id&&receipt.user_id===scope.userId&&receipt.trade_id===trade.id&&receipt.worker_fence===attempt.fence
+          && snapshot.executionId === e.id && snapshot.userId === scope.userId
           && snapshot.tradeId === trade.id && snapshot.fence === attempt.fence && snapshot.accountingComplete === true,
         'financial receipt immutable hash/scope/fence');
       }
-      const current = one(receipts, r => pipelineCanonical((r.snapshot as PipelineSqlRow).totals) === pipelineCanonical({ base: pipelineExactText(base),
-        quote: pipelineExactText(quote), debit: pipelineExactText(debit), fee: pipelineExactText(fee), unknown:'0',quoteUnknown:'0',completes:true,evidenceCount:'1' }),
-      'exact current independent financial totals');
+      const current = one(receipts, r => {
+        const totals=(r.snapshot as PipelineRawFinancialSnapshot).totals;
+        return typeof totals.base==='string'&&typeof totals.quote==='string'&&typeof totals.debit==='string'&&typeof totals.fee==='string'
+          && compare(exactPipelineDecimal(totals.base),base)===0&&compare(money(totals.quote),quote)===0
+          && compare(money(totals.debit),debit)===0&&compare(money(totals.fee),fee)===0
+          && totals.unknown==='0'&&totals.quoteUnknown==='0'&&totals.completes===true
+          && totals.evidenceCount==='1'&&totals.invalidCorrections==='0';
+      }, 'exact current independent financial totals');
       pipelineCheck(current.accounting_complete === true,'financial accounting incomplete');
       const capacity = one(s.capacity, r => r.source_trade_id === source.id && r.execution_mode === 'paper', 'master capacity cohort');
       sameDecimal(capacity.notional_usd,quote,'capacity must exclude fee but include effective quote');

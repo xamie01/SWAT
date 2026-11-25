@@ -279,10 +279,8 @@ describe('the public read projection', () => {
   ])('never selects sealed_secret (%s)', async (_name, run) => {
     await run();
     const [sql] = mocks.query.mock.calls[0] as [string];
-    expect(sql).toContain('sealed_secret IS NOT NULL AS has_sealed_secret');
-    // The only occurrence of the bare column name is inside that boolean
-    // projection; the second match is the `has_sealed_secret` alias.
-    expect(sql.match(/(?<!has_)sealed_secret/g)).toHaveLength(1);
+    expect(sql).toContain('key_version IS NOT NULL AS has_sealed_secret');
+    expect(sql).not.toMatch(/\bsealed_secret\b/);
   });
 
   it.each(['solana_vault', 'eip7702', 'session_key_4337'] as const)('returns public metadata for active %s without granting execution authority', async grantKind => {
@@ -293,6 +291,20 @@ describe('the public read projection', () => {
     const [sql] = mocks.query.mock.calls[0] as [string];
     expect(sql).not.toContain('grant_kind NOT IN');
     expect(sql).toContain('expires_at > NOW()');
+  });
+
+  it('projects hasSealedSecret=true with keyVersion for keyed rows and never projects true when key_version is null', async () => {
+    mocks.query.mockResolvedValue([grantRow({ chain: 'polygon', grant_kind: 'polymarket_signer', account_address: EVM_ACCOUNT,
+      has_sealed_secret: true, key_version: 2, sealed_secret: 'inert', secret_binding: { private: true } })]);
+    const active = await findActiveExecutionGrant(scope, 'polygon', 'polymarket_signer');
+    expect(active).toMatchObject({ grantKind: 'polymarket_signer', hasSealedSecret: true, keyVersion: 2 });
+    expect(active).not.toHaveProperty('sealedSecret'); expect(active).not.toHaveProperty('secretBinding');
+
+    mocks.query.mockResolvedValue([grantRow({ chain: 'polygon', grant_kind: 'polymarket_signer', account_address: EVM_ACCOUNT,
+      has_sealed_secret: true, key_version: null })]);
+    const listed = await listExecutionGrants(scope);
+    expect(listed[0]).toMatchObject({ hasSealedSecret: false, keyVersion: null });
+    expect(listed[0]).not.toHaveProperty('sealedSecret'); expect(listed[0]).not.toHaveProperty('secretBinding');
   });
 
   it('scopes every public read by user_id', async () => {

@@ -94,7 +94,8 @@ CREATE TABLE public.wave4_lp_records089 (
  subscription_id uuid,
  PRIMARY KEY(user_id,id), UNIQUE(user_id,account_id,chain,network_id,purpose,selector,revision),
  FOREIGN KEY(user_id,identity_id,authority_revision) REFERENCES public.wave4_authorities089(user_id,identity_id,revision) ON DELETE RESTRICT,
- FOREIGN KEY(subscription_id,user_id) REFERENCES public.lp_copy_subscriptions(id,user_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+ -- Deliberately no subscription FK here: independent approval commits BEFORE
+ -- canonical initialization. The separately persisted closure below owns that FK.
  CHECK(payload_canonical::jsonb=payload AND payload_hash=encode(sha256(convert_to(payload_canonical,'UTF8')),'hex')),
  CHECK((purpose='initialization')=(subscription_id IS NOT NULL))
 );
@@ -102,6 +103,12 @@ CREATE TABLE public.wave4_lp_revocations089 (
  user_id uuid NOT NULL, record_id uuid NOT NULL, revoked_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  reason text NOT NULL CHECK(length(reason) BETWEEN 1 AND 256), PRIMARY KEY(user_id,record_id),
  FOREIGN KEY(user_id,record_id) REFERENCES public.wave4_lp_records089(user_id,id) ON DELETE RESTRICT
+);
+CREATE TABLE public.wave4_lp_initializations089 (
+ user_id uuid NOT NULL, record_id uuid NOT NULL, subscription_id uuid NOT NULL,
+ initialized_at timestamptz NOT NULL DEFAULT clock_timestamp(), PRIMARY KEY(user_id,record_id),
+ FOREIGN KEY(user_id,record_id) REFERENCES public.wave4_lp_records089(user_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(subscription_id,user_id) REFERENCES public.lp_copy_subscriptions(id,user_id) ON DELETE RESTRICT
 );
 -- Exact immutable financial intent/attempt/receipt -> explicit lot-exit execution.
 -- evidence_input is the COMPLETE canonical recordCopyExecutionEvidence input,
@@ -153,6 +160,7 @@ BEGIN
   OR EXISTS(SELECT 1 FROM pg_catalog.pg_database WHERE datdba=r.oid)
   OR has_database_privilege(r.oid,current_database(),'CREATE')
  THEN RAISE EXCEPTION '089 restricted direct role catalog drift'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(tenant::text||':financial089',0));
  RETURN true;
 END $$;
 CREATE FUNCTION public.wave4_authority_current089(tenant uuid,identity uuid,rev bigint) RETURNS boolean LANGUAGE sql SECURITY INVOKER SET search_path=pg_catalog AS $$
@@ -161,23 +169,20 @@ CREATE FUNCTION public.wave4_authority_current089(tenant uuid,identity uuid,rev 
    AND a.admitted_at<=clock_timestamp() AND a.expires_at>clock_timestamp()
    AND NOT EXISTS(SELECT 1 FROM public.wave4_authority_revocations089 v WHERE v.user_id=a.user_id AND v.identity_id=a.identity_id AND v.revision=a.revision)
    AND NOT EXISTS(SELECT 1 FROM public.wave4_authorities089 later WHERE later.user_id=a.user_id AND later.identity_id=a.identity_id AND later.revision>a.revision)
-   AND(a.identity_kind='external' OR EXISTS(SELECT 1 FROM pg_catalog.pg_roles r JOIN pg_catalog.pg_stat_activity b ON b.usename=r.rolname
-    WHERE r.rolname=a.database_role AND r.rolcanlogin AND NOT(r.rolsuper OR r.rolbypassrls OR r.rolinherit OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication)
-     AND b.pid=a.backend_pid AND b.backend_start=a.backend_start AND b.datid=a.database_oid
-     AND a.database_oid=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
-     AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=r.oid OR roleid=r.oid)
-     AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE relowner=r.oid)
-     AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc WHERE proowner=r.oid)
-     AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner=r.oid OR has_schema_privilege(r.oid,oid,'CREATE'))
-     AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_database WHERE datdba=r.oid)
-     AND NOT has_database_privilege(r.oid,current_database(),'CREATE'))))
+   -- No genuine cross-role backend observation seam: database rows fail closed.
+   -- Foreign pg_stat_activity fields or pg_read_all_stats cannot authenticate them.
+   AND a.identity_kind='external')
 $$;
 CREATE FUNCTION public.wave4_registry_guard089() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
 DECLARE a public.wave4_authorities089; t timestamptz:=date_trunc('milliseconds',clock_timestamp()); prior bigint;
 BEGIN
  IF TG_OP<>'INSERT' THEN RAISE EXCEPTION '089 protected revisions append only'; END IF;
- PERFORM public.wave4_direct089('swat_wave4_authority_writer',NEW.user_id);
+  PERFORM public.wave4_direct089('swat_wave4_authority_writer',NEW.user_id);
+ t:=date_trunc('milliseconds',clock_timestamp());
  IF TG_TABLE_NAME='wave4_authorities089' THEN
+  IF NEW.identity_kind='database' THEN
+   RAISE EXCEPTION '089 genuine protected cross-role backend observation strategy unavailable' USING ERRCODE='42501';
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(NEW.user_id::text||':'||NEW.identity_id::text,0));
   SELECT COALESCE(max(revision),0) INTO prior FROM public.wave4_authorities089 WHERE user_id=NEW.user_id AND identity_id=NEW.identity_id;
   IF NEW.revision<>prior+1 OR NEW.authenticated_at>t OR NEW.expires_at<=t
@@ -226,10 +231,13 @@ BEGIN
    OR NOT(NEW.capability=ANY(a.capabilities)) OR NEW.expires_at> a.expires_at OR NEW.expires_at<=t
    OR NEW.request IS DISTINCT FROM jsonb_build_object('capability',NEW.capability,'identity',a.service_identity,'userId',NEW.user_id,
       'grantId',NEW.grant_id,'deploymentId',a.deployment_id,'chain',a.chain,'chainId',a.network_id,'payloadDigest',NEW.payload_digest)
-   OR(a.grant_id IS NOT NULL AND a.grant_id<>NEW.grant_id)
+   OR(a.grant_id IS NOT NULL AND a.grant_id IS DISTINCT FROM NEW.grant_id)
   THEN RAISE EXCEPTION '089 exact authenticated custody request required'; END IF;
   NEW.admitted_at:=t;
- ELSE NEW.revoked_at:=t;
+ ELSE
+  -- The same transaction lock serializes revocation with readers and writers.
+  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.user_id::text||':financial089',0));
+  NEW.revoked_at:=clock_timestamp();
  END IF;
  RETURN NEW;
 END $$;
@@ -261,7 +269,8 @@ CREATE FUNCTION public.wave4_lp_guard089() RETURNS trigger LANGUAGE plpgsql SECU
 DECLARE a public.wave4_authorities089; t timestamptz:=date_trunc('milliseconds',clock_timestamp()); prior bigint; p jsonb:=NEW.payload;
 BEGIN
  IF TG_OP<>'INSERT' THEN RAISE EXCEPTION '089 LP provenance immutable'; END IF;
- PERFORM public.wave4_direct089(CASE WHEN NEW.purpose='initialization' THEN 'swat_lp_initializer' ELSE 'swat_wave4_financial_writer' END,NEW.user_id);
+ PERFORM public.wave4_direct089(CASE WHEN NEW.purpose='initialization' THEN 'swat_wave4_authority_writer' ELSE 'swat_wave4_financial_writer' END,NEW.user_id);
+ t:=date_trunc('milliseconds',clock_timestamp());
  SELECT * INTO a FROM public.wave4_authorities089 WHERE user_id=NEW.user_id AND identity_id=NEW.identity_id AND revision=NEW.authority_revision;
  IF a.domain IS DISTINCT FROM 'lp' OR NOT public.wave4_authority_current089(a.user_id,a.identity_id,a.revision)
   OR NOT(NEW.purpose=ANY(a.capabilities)) OR (a.account_id,a.chain,a.network_id) IS DISTINCT FROM (NEW.account_id,NEW.chain,NEW.network_id)
@@ -333,12 +342,21 @@ BEGIN
  IF tenant IS DISTINCT FROM public.current_app_user_id() OR session_user<>current_user OR current_setting('role')<>'none'
   OR current_setting('row_security')<>'on' OR COALESCE(current_setting('app.bypass_rls',true),'off')<>'off'
  THEN RAISE EXCEPTION '089 LP lookup direct tenant required'; END IF;
+ PERFORM public.wave4_direct089(current_user::text,tenant);
  SELECT * INTO p FROM public.wave4_lp_records089 WHERE user_id=tenant AND account_id=account AND chain=requested_chain AND network_id=network
   AND purpose=requested_purpose AND selector=requested_selector ORDER BY revision DESC LIMIT 1;
- IF p.id IS NULL OR p.admitted_at>clock_timestamp() OR p.expires_at<=clock_timestamp()
+ IF p.id IS NULL OR p.admitted_at>clock_timestamp() OR p.observed_at>p.admitted_at OR p.expires_at<=clock_timestamp()
   OR EXISTS(SELECT 1 FROM public.wave4_lp_revocations089 v WHERE v.user_id=p.user_id AND v.record_id=p.id)
   OR NOT public.wave4_authority_current089(p.user_id,p.identity_id,p.authority_revision) THEN RETURN NULL; END IF;
  SELECT * INTO a FROM public.wave4_authorities089 WHERE user_id=p.user_id AND identity_id=p.identity_id AND revision=p.authority_revision;
+ IF a.domain IS DISTINCT FROM 'lp' OR NOT(p.purpose=ANY(a.capabilities))
+  OR(a.account_id,a.chain,a.network_id) IS DISTINCT FROM(p.account_id,p.chain,p.network_id)
+  OR p.expires_at>a.expires_at THEN RETURN NULL; END IF;
+ -- Runtime/admitter initialization reads require the real canonical closure; an
+ -- approval alone cannot pretend that the initializer performed its writes.
+ IF p.purpose='initialization' AND current_user IN('swat_app','swat_lp_admitter')
+  AND NOT EXISTS(SELECT 1 FROM public.wave4_lp_initializations089 x WHERE x.user_id=p.user_id AND x.record_id=p.id AND x.subscription_id=p.subscription_id)
+ THEN RETURN NULL; END IF;
  RETURN jsonb_build_object('id',p.id,'identityId',p.identity_id,'providerId',a.provider_id,'binding',
   jsonb_build_object('userId',p.user_id,'accountId',p.account_id,'chain',p.chain,'networkId',p.network_id),
   'purpose',p.purpose,'selector',p.selector,'payload',p.payload,'payloadHash',p.payload_hash,
@@ -346,11 +364,12 @@ BEGIN
   'expiresAt',to_char(LEAST(p.expires_at,a.expires_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'revokedAt',NULL);
 END $$;
 CREATE FUNCTION public.wave4_lp_initialize089(tenant uuid,record_id uuid) RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
-DECLARE p public.wave4_lp_records089; s jsonb; budget text; cap text; canonical text; existing public.lp_copy_subscriptions; guardrail public.lp_guardrail_configs;
+DECLARE p public.wave4_lp_records089; selected jsonb; s jsonb; budget text; cap text; canonical text; existing public.lp_copy_subscriptions; guardrail public.lp_guardrail_configs;
 BEGIN
  PERFORM public.wave4_direct089('swat_lp_initializer',tenant);
  SELECT * INTO p FROM public.wave4_lp_records089 WHERE user_id=tenant AND id=record_id AND purpose='initialization';
- IF p.id IS NULL OR public.wave4_lp_lookup089(tenant,p.account_id,p.chain,p.network_id,p.purpose,p.selector) IS NULL THEN
+ selected:=public.wave4_lp_lookup089(tenant,p.account_id,p.chain,p.network_id,p.purpose,p.selector);
+ IF p.id IS NULL OR selected IS NULL OR selected->>'id' IS DISTINCT FROM p.id::text THEN
   RAISE EXCEPTION '089 separately approved initialization required'; END IF;
  s:=p.payload->'subscription';
  budget:=((s->>'budgetMicroUsd')::numeric/1000000)::numeric(78,6)::text;
@@ -372,7 +391,28 @@ BEGIN
  IF(guardrail.max_pool_allocation_pct,guardrail.profit_bank_pct,guardrail.reserve_sub_vault_chain,guardrail.reserve_sub_vault_address,guardrail.updated_at)
   IS DISTINCT FROM((p.payload->>'poolCapBps')::numeric/100,0::numeric,NULL::varchar,NULL::varchar,public.lp085_time(s->'createdAt'))
  THEN RAISE EXCEPTION '089 complete guardrail initialization conflict'; END IF;
+ INSERT INTO public.wave4_lp_initializations089(user_id,record_id,subscription_id) VALUES(tenant,p.id,p.subscription_id) ON CONFLICT DO NOTHING;
  RETURN p.payload;
+END $$;
+CREATE FUNCTION public.wave4_lp_initialization_guard089() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE p public.wave4_lp_records089; s public.lp_copy_subscriptions; g public.lp_guardrail_configs; selected jsonb;
+BEGIN
+ IF TG_OP<>'INSERT' THEN RAISE EXCEPTION '089 initialization closure immutable'; END IF;
+ PERFORM public.wave4_direct089('swat_lp_initializer',NEW.user_id);
+ SELECT * INTO p FROM public.wave4_lp_records089 WHERE user_id=NEW.user_id AND id=NEW.record_id AND purpose='initialization';
+ selected:=public.wave4_lp_lookup089(NEW.user_id,p.account_id,p.chain,p.network_id,p.purpose,p.selector);
+ SELECT * INTO s FROM public.lp_copy_subscriptions WHERE id=NEW.subscription_id AND user_id=NEW.user_id;
+ SELECT * INTO g FROM public.lp_guardrail_configs WHERE user_id=NEW.user_id;
+ IF p.id IS NULL OR selected IS NULL OR selected->>'id' IS DISTINCT FROM p.id::text OR p.subscription_id IS DISTINCT FROM NEW.subscription_id
+  OR s.id IS NULL OR g.user_id IS NULL
+  OR(s.master_wallet_address,s.chain,s.venue,s.allocated_budget_usd,s.max_capital_per_position_usd,s.status,s.created_at,s.updated_at)
+   IS DISTINCT FROM(p.payload->'subscription'->>'masterWalletAddress',p.chain,p.payload->'subscription'->>'venue',
+    (p.payload->'subscription'->>'budgetMicroUsd')::numeric/1000000,(p.payload->'subscription'->>'capMicroUsd')::numeric/1000000,'active',
+    public.lp085_time(p.payload->'subscription'->'createdAt'),public.lp085_time(p.payload->'subscription'->'createdAt'))
+  OR(g.max_pool_allocation_pct,g.profit_bank_pct,g.reserve_sub_vault_chain,g.reserve_sub_vault_address,g.updated_at)
+   IS DISTINCT FROM((p.payload->>'poolCapBps')::numeric/100,0::numeric,NULL::varchar,NULL::varchar,s.created_at)
+ THEN RAISE EXCEPTION '089 exact independently approved canonical initialization closure required'; END IF;
+ NEW.initialized_at:=clock_timestamp(); RETURN NEW;
 END $$;
 
 CREATE FUNCTION public.wave4_spot_guard089() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
@@ -381,6 +421,11 @@ DECLARE i public.withdrawal_reducing_intents; a public.withdrawal_reducing_attem
 BEGIN
  IF TG_OP<>'INSERT' THEN RAISE EXCEPTION '089 exact spot admission immutable'; END IF;
  PERFORM public.wave4_direct089('swat_financial_receipt_writer',NEW.user_id);
+ t:=date_trunc('milliseconds',clock_timestamp());
+ -- Read immutable real chains. The tenant lock serializes 089 admission/revocation;
+ -- canonical financial settlement independently locks its parent/attempt.
+ PERFORM public.lp085_fields(NEW.intent,ARRAY['version','kind','userId','requestKey','chain','network','venue','positionId','accountId','assetId','assetScale','mode','positionSide','side','quantityRaw','maxFeeRaw','limitPriceExact','expectedRevision','expiresAt']);
+ PERFORM public.lp085_fields(NEW.receipt,ARRAY['receiptId','providerIdentity','proof','intentId','intentHash','attemptId','clientOrderId','cumulativeRaw','feeRaw','feeAssetId','feeAssetScale','feeFundingAccountId','terminal','outcome','observedAt']);
  SELECT * INTO i FROM public.withdrawal_reducing_intents WHERE id=NEW.intent_id AND user_id=NEW.user_id;
  SELECT * INTO a FROM public.withdrawal_reducing_attempts WHERE id=NEW.attempt_id AND intent_id=i.id AND user_id=i.user_id;
  SELECT * INTO r FROM public.withdrawal_reducing_receipts WHERE receipt_id=NEW.receipt_id AND attempt_id=a.id AND intent_id=i.id AND user_id=i.user_id;
@@ -394,6 +439,11 @@ BEGIN
   OR i.intent IS DISTINCT FROM NEW.intent OR i.intent_hash IS DISTINCT FROM NEW.intent_hash OR a.intent_hash IS DISTINCT FROM NEW.intent_hash
   OR NEW.attempt_binding IS DISTINCT FROM jsonb_build_object('id',a.id,'intentId',a.intent_id,'userId',a.user_id,'clientOrderId',a.client_order_id,'intentHash',a.intent_hash)
   OR r.receipt IS DISTINCT FROM NEW.receipt OR r.receipt_hash IS DISTINCT FROM NEW.receipt_hash
+  OR authority.provider_id IS DISTINCT FROM r.provider_identity OR r.outcome IS DISTINCT FROM 'fill'
+  OR r.observed_at>t OR r.admitted_at>t OR r.observed_at<a.created_at
+  OR NEW.receipt->>'intentId' IS DISTINCT FROM i.id::text OR NEW.receipt->>'intentHash' IS DISTINCT FROM i.intent_hash
+  OR NEW.receipt->>'attemptId' IS DISTINCT FROM a.id::text OR NEW.receipt->>'clientOrderId' IS DISTINCT FROM a.client_order_id
+  OR NEW.receipt->>'receiptId' IS DISTINCT FROM r.receipt_id
   OR a.terminal OR r.cumulative_raw-a.completed_raw<>NEW.delta_raw OR r.fee_raw-a.completed_fee_raw<>NEW.delta_fee_raw
   OR i.intent->>'positionSide' IS DISTINCT FROM 'LONG' OR i.intent->>'side' IS DISTINCT FROM 'SELL'
   OR(NEW.chain,NEW.network_id,NEW.mode,NEW.account_id,NEW.asset_id,NEW.asset_scale,NEW.fee_asset_id,NEW.fee_asset_scale,NEW.fee_account_id)
@@ -403,6 +453,13 @@ BEGIN
   OR(e.chain,e.target_account,e.execution_mode,e.token_mint,e.direction,e.execution_origin,e.exit_lot_id)
    IS DISTINCT FROM(NEW.chain,NEW.account_id,NEW.mode,NEW.asset_id,'sell','lot_exit',NEW.lot_id)
   OR(lot.chain,lot.token_mint) IS DISTINCT FROM(NEW.chain,NEW.asset_id)
+  OR NOT EXISTS(SELECT 1 FROM public.copy_positions pos WHERE pos.id=lot.position_id AND pos.user_id=NEW.user_id
+    AND(pos.chain,pos.target_account,pos.token_mint)=(NEW.chain,NEW.account_id,NEW.asset_id))
+  OR NOT EXISTS(SELECT 1 FROM public.copy_executions buy JOIN public.copy_execution_evidence fill ON fill.id=lot.acquisition_evidence_id AND fill.execution_id=buy.id
+    JOIN public.copy_position_applications app ON app.evidence_id=fill.id AND app.execution_id=buy.id
+    WHERE buy.id=lot.acquisition_execution_id AND buy.user_id=NEW.user_id AND buy.direction='buy'
+     AND(buy.chain,buy.target_account,buy.token_mint,buy.execution_mode)=(NEW.chain,NEW.account_id,NEW.asset_id,NEW.mode)
+     AND app.user_id=NEW.user_id AND app.position_id=NEW.position_id AND app.active AND fill.confirmation_state IN('confirmed','finalized'))
   OR NEW.evidence_input->>'executionId' IS DISTINCT FROM NEW.execution_id::text
   OR jsonb_typeof(NEW.evidence_input->'baseQuantity') IS DISTINCT FROM 'string'
   OR(NEW.evidence_input->>'baseQuantity')::numeric*power(10::numeric,NEW.asset_scale) IS DISTINCT FROM NEW.delta_raw
@@ -414,8 +471,21 @@ BEGIN
   OR NEW.accounting_reference IS DISTINCT FROM 'spot:'||NEW.execution_id::text||':'||NEW.receipt_id
  THEN RAISE EXCEPTION '089 canonical spot exact persisted scope/delta/evidence required'; END IF;
  PERFORM public.lp085_fields(NEW.evidence_input,ARRAY['executionId','evidenceType','evidenceId','baseQuantity','quoteLeg','priceUsd','feeUsd','confirmationState','completesExecution','occurredAt','observedAt']);
+ PERFORM public.lp085_fields(NEW.evidence_input->'quoteLeg',ARRAY['amount','currency']);
  PERFORM public.lp085_fields(NEW.economics,ARRAY['feeAssetId','feeAssetScale','feeFundingAccountId','feeRaw','feeUnitUsd','feeUsd','quoteAssetId','quoteAssetScale','quoteAccountId','quoteRaw','quoteCurrency']);
- IF NEW.economics->>'feeAssetId' IS DISTINCT FROM NEW.fee_asset_id OR (NEW.economics->>'feeAssetScale')::integer IS DISTINCT FROM NEW.fee_asset_scale
+ IF jsonb_typeof(NEW.evidence_input->'priceUsd') IS DISTINCT FROM 'string' OR (NEW.evidence_input->>'priceUsd') !~ '^[0-9]+(\.[0-9]+)?$'
+  OR (NEW.evidence_input->>'priceUsd')::numeric<=0
+  OR jsonb_typeof(NEW.evidence_input->'feeUsd') IS DISTINCT FROM 'string' OR (NEW.evidence_input->>'feeUsd') !~ '^[0-9]+(\.[0-9]+)?$'
+  OR (NEW.evidence_input->>'feeUsd')::numeric<0
+  OR (NEW.economics->>'feeUnitUsd') !~ '^[0-9]+(\.[0-9]+)?$' OR (NEW.economics->>'feeUnitUsd')::numeric<0
+  OR public.lp085_micro(NEW.economics->'feeRaw') IS DISTINCT FROM NEW.delta_fee_raw
+  OR public.lp085_micro(NEW.economics->'quoteRaw')<=0 OR (NEW.economics->>'quoteAssetScale')::integer NOT BETWEEN 0 AND 36
+  OR NEW.economics->>'quoteAccountId' IS DISTINCT FROM NEW.account_id
+  OR COALESCE(NEW.economics->>'quoteCurrency','') NOT IN('USD','SOL','ETH','BNB')
+  OR (NEW.economics->>'quoteCurrency' IS DISTINCT FROM 'USD' AND (jsonb_typeof(NEW.evidence_input->'quoteLeg'->'nativeUsdPrice') IS DISTINCT FROM 'string'
+    OR COALESCE(NEW.evidence_input->'quoteLeg'->>'nativeUsdPrice','') !~ '^[0-9]+(\.[0-9]+)?$'
+    OR (NEW.evidence_input->'quoteLeg'->>'nativeUsdPrice')::numeric<=0))
+  OR NEW.economics->>'feeAssetId' IS DISTINCT FROM NEW.fee_asset_id OR (NEW.economics->>'feeAssetScale')::integer IS DISTINCT FROM NEW.fee_asset_scale
   OR NEW.economics->>'feeFundingAccountId' IS DISTINCT FROM NEW.fee_account_id OR (NEW.economics->>'feeRaw')::numeric IS DISTINCT FROM NEW.delta_fee_raw
   OR(NEW.economics->>'feeUsd')::numeric IS DISTINCT FROM (NEW.evidence_input->>'feeUsd')::numeric
   OR(NEW.evidence_input->>'feeUsd')::numeric IS DISTINCT FROM NEW.delta_fee_raw/power(10::numeric,NEW.fee_asset_scale)*(NEW.economics->>'feeUnitUsd')::numeric
@@ -441,10 +511,17 @@ BEGIN
  IF p.receipt_id IS NULL OR e.id IS NULL OR NEW.accounting_reference IS DISTINCT FROM p.accounting_reference
   OR NEW.before_raw-NEW.after_raw IS DISTINCT FROM p.delta_raw OR e.evidence_type IS DISTINCT FROM p.evidence_input->>'evidenceType'
   OR e.evidence_id IS DISTINCT FROM p.evidence_input->>'evidenceId' OR e.base_quantity*power(10::numeric,p.asset_scale) IS DISTINCT FROM p.delta_raw
+  OR NOT public.wave4_authority_current089(p.user_id,p.identity_id,p.authority_revision)
+  OR e.price_usd IS DISTINCT FROM(p.evidence_input->>'priceUsd')::numeric
+  OR e.quote_currency IS DISTINCT FROM p.evidence_input->'quoteLeg'->>'currency'
+  OR e.quote_native_quantity IS DISTINCT FROM(p.evidence_input->'quoteLeg'->>'amount')::numeric
+  OR e.quote_native_usd_price IS DISTINCT FROM CASE WHEN p.evidence_input->'quoteLeg'->>'currency'='USD' THEN 1::numeric ELSE (p.evidence_input->'quoteLeg'->>'nativeUsdPrice')::numeric END
+  OR e.quote_quantity IS DISTINCT FROM e.quote_native_quantity*e.quote_native_usd_price
+  OR e.completes_execution IS DISTINCT FROM(p.evidence_input->>'completesExecution')::boolean
   OR e.fee_usd IS DISTINCT FROM(p.evidence_input->>'feeUsd')::numeric OR e.confirmation_state IS DISTINCT FROM 'finalized'
   OR e.occurred_at IS DISTINCT FROM public.lp085_time(p.evidence_input->'occurredAt')
   OR NOT EXISTS(SELECT 1 FROM public.copy_position_applications a WHERE a.evidence_id=e.id AND a.execution_id=p.execution_id
-    AND a.target_account=p.account_id AND a.chain=p.chain AND a.token_mint=p.asset_id AND a.active)
+    AND a.user_id=p.user_id AND a.position_id=p.position_id AND a.target_account=p.account_id AND a.chain=p.chain AND a.token_mint=p.asset_id AND a.active)
   OR NOT EXISTS(SELECT 1 FROM public.copy_position_master_lot_reductions l WHERE l.lot_id=p.lot_id AND l.sell_execution_id=p.execution_id
     AND l.sell_evidence_id=e.id AND l.quantity*power(10::numeric,p.asset_scale)=p.delta_raw)
  THEN RAISE EXCEPTION '089 actual canonical lot/evidence/application closure required'; END IF;
@@ -470,11 +547,11 @@ DO $policies$
 DECLARE tab text;
 BEGIN
  FOREACH tab IN ARRAY ARRAY['wave4_authorities089','wave4_authority_revocations089','wave4_custody_requests089','wave4_custody_revocations089',
-  'wave4_lp_records089','wave4_lp_revocations089','wave4_spot_admissions089','wave4_spot_settlements089'] LOOP
+  'wave4_lp_records089','wave4_lp_revocations089','wave4_lp_initializations089','wave4_spot_admissions089','wave4_spot_settlements089'] LOOP
   EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',tab);
   EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY',tab);
   EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC,swat_app,swat_lp_admitter,swat_custody_writer,swat_financial_receipt_writer,swat_wave4_authority_writer,swat_wave4_financial_writer,swat_lp_initializer,swat_custody_reader,swat_custody_observer',tab);
-  EXECUTE format('CREATE POLICY wave4_tenant089 ON public.%I AS RESTRICTIVE USING(user_id=public.current_app_user_id() AND (session_user=current_user OR (current_user=''swat_migrator'' AND session_user=''swat_custody_observer'')) AND current_setting(''role'')=''none'' AND current_setting(''row_security'')=''on'' AND COALESCE(current_setting(''app.bypass_rls'',true),''off'')=''off'') WITH CHECK(user_id=public.current_app_user_id() AND session_user=current_user AND current_setting(''role'')=''none'' AND current_setting(''row_security'')=''on'' AND COALESCE(current_setting(''app.bypass_rls'',true),''off'')=''off'')',tab);
+  EXECUTE format('CREATE POLICY wave4_tenant089 ON public.%I AS RESTRICTIVE USING(user_id=public.current_app_user_id() AND session_user=current_user AND current_setting(''role'')=''none'' AND current_setting(''row_security'')=''on'' AND COALESCE(current_setting(''app.bypass_rls'',true),''off'')=''off'') WITH CHECK(user_id=public.current_app_user_id() AND session_user=current_user AND current_setting(''role'')=''none'' AND current_setting(''row_security'')=''on'' AND COALESCE(current_setting(''app.bypass_rls'',true),''off'')=''off'')',tab);
  END LOOP;
  FOREACH tab IN ARRAY ARRAY['wave4_authorities089','wave4_authority_revocations089','wave4_custody_requests089','wave4_custody_revocations089'] LOOP
   EXECUTE format('CREATE POLICY wave4_read089 ON public.%I FOR SELECT TO swat_app,swat_lp_admitter,swat_custody_writer,swat_financial_receipt_writer,swat_wave4_authority_writer,swat_wave4_financial_writer,swat_lp_initializer,swat_custody_reader,swat_custody_observer USING(user_id=public.current_app_user_id())',tab);
@@ -486,14 +563,19 @@ BEGIN
 END $policies$;
 CREATE POLICY wave4_read089 ON public.wave4_lp_records089 FOR SELECT TO swat_app,swat_lp_admitter,swat_wave4_financial_writer,swat_lp_initializer
  USING(user_id=public.current_app_user_id());
-CREATE POLICY wave4_insert089 ON public.wave4_lp_records089 FOR INSERT TO swat_wave4_financial_writer,swat_lp_initializer
- WITH CHECK(user_id=public.current_app_user_id() AND ((current_user='swat_lp_initializer' AND purpose='initialization') OR(current_user='swat_wave4_financial_writer' AND purpose<>'initialization')));
+CREATE POLICY wave4_insert089 ON public.wave4_lp_records089 FOR INSERT TO swat_wave4_financial_writer,swat_wave4_authority_writer
+ WITH CHECK(user_id=public.current_app_user_id() AND ((current_user='swat_wave4_authority_writer' AND purpose='initialization') OR(current_user='swat_wave4_financial_writer' AND purpose<>'initialization')));
 CREATE POLICY wave4_read089 ON public.wave4_lp_revocations089 FOR SELECT TO swat_app,swat_lp_admitter,swat_wave4_financial_writer,swat_lp_initializer,swat_wave4_authority_writer USING(user_id=public.current_app_user_id());
 CREATE POLICY wave4_insert089 ON public.wave4_lp_revocations089 FOR INSERT TO swat_wave4_authority_writer WITH CHECK(user_id=public.current_app_user_id());
 GRANT SELECT ON public.wave4_lp_records089 TO swat_app,swat_lp_admitter,swat_wave4_financial_writer,swat_lp_initializer,swat_wave4_authority_writer;
 -- Approver reads LP records only for exact revocation FK target; not mutation.
 CREATE POLICY wave4_approver_read089 ON public.wave4_lp_records089 FOR SELECT TO swat_wave4_authority_writer USING(user_id=public.current_app_user_id());
-GRANT INSERT ON public.wave4_lp_records089 TO swat_wave4_financial_writer,swat_lp_initializer;
+GRANT INSERT ON public.wave4_lp_records089 TO swat_wave4_financial_writer,swat_wave4_authority_writer;
+CREATE POLICY wave4_read089 ON public.wave4_lp_initializations089 FOR SELECT TO swat_app,swat_lp_admitter,swat_lp_initializer USING(user_id=public.current_app_user_id());
+CREATE POLICY wave4_insert089 ON public.wave4_lp_initializations089 FOR INSERT TO swat_lp_initializer WITH CHECK(user_id=public.current_app_user_id());
+GRANT SELECT ON public.wave4_lp_initializations089 TO swat_app,swat_lp_admitter,swat_lp_initializer;
+GRANT INSERT(user_id,record_id,subscription_id) ON public.wave4_lp_initializations089 TO swat_lp_initializer;
+CREATE TRIGGER wave4_lp_initialization089 BEFORE INSERT OR UPDATE OR DELETE ON public.wave4_lp_initializations089 FOR EACH ROW EXECUTE FUNCTION public.wave4_lp_initialization_guard089();
 GRANT SELECT ON public.wave4_lp_revocations089 TO swat_app,swat_lp_admitter,swat_wave4_financial_writer,swat_lp_initializer,swat_wave4_authority_writer;
 GRANT INSERT ON public.wave4_lp_revocations089 TO swat_wave4_authority_writer;
 CREATE TRIGGER wave4_lp089 BEFORE INSERT OR UPDATE OR DELETE ON public.wave4_lp_records089 FOR EACH ROW EXECUTE FUNCTION public.wave4_lp_guard089();
@@ -513,7 +595,10 @@ CREATE POLICY wave4_insert089 ON public.wave4_spot_settlements089 FOR INSERT TO 
 GRANT SELECT ON public.wave4_spot_admissions089,public.wave4_spot_settlements089 TO swat_app,swat_financial_receipt_writer;
 GRANT INSERT ON public.wave4_spot_admissions089 TO swat_financial_receipt_writer;
 GRANT INSERT ON public.wave4_spot_settlements089 TO swat_app;
-GRANT SELECT ON public.copy_executions,public.copy_positions,public.copy_position_master_lots TO swat_financial_receipt_writer;
+GRANT SELECT ON public.copy_executions,public.copy_positions,public.copy_position_master_lots,public.copy_execution_evidence,public.copy_position_applications TO swat_financial_receipt_writer;
+CREATE POLICY wave4_receipt_writer089 ON public.copy_execution_evidence FOR SELECT TO swat_financial_receipt_writer
+ USING(EXISTS(SELECT 1 FROM public.copy_executions e WHERE e.id=execution_id AND e.user_id=public.current_app_user_id()));
+CREATE POLICY wave4_receipt_writer089 ON public.copy_position_applications FOR SELECT TO swat_financial_receipt_writer USING(user_id=public.current_app_user_id());
 CREATE POLICY wave4_receipt_writer089 ON public.copy_executions FOR SELECT TO swat_financial_receipt_writer USING(user_id=public.current_app_user_id());
 CREATE POLICY wave4_receipt_writer089 ON public.copy_positions FOR SELECT TO swat_financial_receipt_writer USING(user_id=public.current_app_user_id());
 CREATE POLICY wave4_receipt_writer089 ON public.copy_position_master_lots FOR SELECT TO swat_financial_receipt_writer USING(user_id=public.current_app_user_id());
@@ -546,21 +631,19 @@ DO $columns$ DECLARE c record; BEGIN
   IF c.attname<>'sealed_secret' THEN EXECUTE format('GRANT SELECT (%I) ON public.%I TO swat_app',c.attname,c.relname); END IF;
  END LOOP;
 END $columns$;
--- Definer VIEW, not a definer helper: grants ONLY the exact approved scope over
--- otherwise unscoped append-only audit. App/observer never get an audit-table ACL.
--- Migration/catalog API pins this view owner, definition, barrier and dependencies.
-CREATE VIEW public.wave4_custody_audit089 WITH(security_barrier=true) AS
+-- SECURITY INVOKER + barrier: neither owner authority nor nested definer RLS.
+-- No underlying audit_log SELECT is granted. Its canonical unscoped/no-RLS store
+-- needs a separately reviewed exact invoker ACL/RLS source strategy; this view and
+-- its adapter remain refused until then. Never broaden global audit architecture.
+CREATE VIEW public.wave4_custody_audit089 WITH(security_invoker=true,security_barrier=true) AS
  SELECT h.id,h.actor_type,h.actor_id,h.event,h.target_type,h.target_id,h.metadata,h.occurred_at
  FROM public.audit_log h WHERE h.target_type='execution_grant'
+  AND h.actor_type='user' AND h.actor_id=public.current_app_user_id()::text
+  AND h.event IN('grant.locally_retired','grant.locally_revoked','grant.locally_compromised','grant.locally_replaced')
   AND EXISTS(SELECT 1 FROM public.wave4_authorities089 a WHERE a.user_id=public.current_app_user_id()
-   AND a.grant_id::text=h.target_id AND a.database_role=session_user AND a.backend_pid=pg_backend_pid()
+   AND a.grant_id::text=h.target_id AND a.database_role=current_user AND a.backend_pid=pg_backend_pid()
    AND a.service_identity='swat_custody_observer' AND a.capabilities=ARRAY['execution-secret-read']
    AND public.wave4_authority_current089(a.user_id,a.identity_id,a.revision));
--- FORCE RLS on registry means view owner needs an explicit scoped SELECT policy.
-CREATE POLICY wave4_audit_view089 ON public.wave4_authorities089 FOR SELECT TO swat_migrator
- USING(user_id=public.current_app_user_id() AND session_user='swat_custody_observer');
-CREATE POLICY wave4_audit_view089 ON public.wave4_authority_revocations089 FOR SELECT TO swat_migrator
- USING(user_id=public.current_app_user_id() AND session_user='swat_custody_observer');
 REVOKE ALL ON public.wave4_custody_audit089 FROM PUBLIC,swat_app,swat_custody_reader,swat_custody_observer;
 GRANT SELECT ON public.wave4_custody_audit089 TO swat_custody_observer;
 

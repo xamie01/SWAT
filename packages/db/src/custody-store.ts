@@ -1,4 +1,5 @@
 import type { ExecutionGrant } from './execution-grants.js';
+import { EXECUTION_GRANT_PUBLIC_COLUMNS as PUBLIC_COLUMNS, projectExecutionGrant as project } from './execution-grant-projection.js';
 import type { UserScope } from './tenancy.js';
 import type { CustodyEnrollmentRecord, CustodyEnrollmentStore } from './custody-enrollment.js';
 import type { CustodyExecutionStore } from './custody-execution.js';
@@ -16,15 +17,6 @@ interface Row {
   secret_binding?: CustodySecretBinding | null; scope_policy: unknown; expires_at: Date | null;
   revoked_at: Date | null; status: ExecutionGrant['status']; created_at: Date;
   lifecycle_revision: string; revocation_tombstone: Date | null;
-}
-const PUBLIC_COLUMNS = `id, user_id, chain, grant_kind, account_address,
-  sealed_secret IS NOT NULL AS has_sealed_secret, key_version, scope_policy,
-  expires_at, revoked_at, status, created_at`;
-function project(row: Row): ExecutionGrant {
-  return { id: row.id, userId: row.user_id, chain: row.chain, grantKind: row.grant_kind,
-    accountAddress: row.account_address, hasSealedSecret: row.has_sealed_secret, keyVersion: row.key_version,
-    scopePolicy: row.scope_policy, expiresAt: row.expires_at, revokedAt: row.revoked_at,
-    status: row.status, createdAt: row.created_at };
 }
 /** Internal builder; callers receive only a role-specific interface below. */
 function custodyGrantStore(transaction: CustodyTenantTransaction): CustodyEnrollmentStore & CustodyExecutionStore {

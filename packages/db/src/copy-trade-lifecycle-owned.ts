@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import type { PoolClient, QueryResultRow } from 'pg';
 export type { PoolClient } from 'pg';
 import {
@@ -1702,7 +1703,14 @@ export async function claimSourceSignalForCopyExecutionWithClient(client: PoolCl
   ) {
     throw new Error('maxReconciliationAttempts must be an integer between 1 and 100');
   }
-  const now = assertDate('now', input.now ?? new Date());
+  const startedAt = performance.now();
+  const claimTimeOrigin = assertDate('now', input.now ?? new Date()).getTime();
+  // A supplied wall-clock origin must still advance while database locks wait.
+  const readClaimTime = (): Date => {
+    const elapsed = performance.now() - startedAt;
+    if (!Number.isFinite(elapsed) || elapsed < 0) throw new Error('Source claim clock is unavailable');
+    return assertDate('now', new Date(claimTimeOrigin + Math.floor(elapsed)));
+  };
 
   const operation = async (): Promise<SourceSignalCopyClaimResult> => {
     // Discover immutable lock dimensions WITHOUT row locks. Workers take the
@@ -1758,7 +1766,7 @@ export async function claimSourceSignalForCopyExecutionWithClient(client: PoolCl
     }
     // Historical labels and replay rows are not authority. Use the exact
     // persisted accepted-evidence/application predicate before returning either.
-    if (!await hasAcceptedSourceVerificationWithClient(client, source.id, now)) {
+    if (!await hasAcceptedSourceVerificationWithClient(client, source.id, readClaimTime())) {
       return {
         execution: null,
         created: false,
@@ -1785,6 +1793,10 @@ export async function claimSourceSignalForCopyExecutionWithClient(client: PoolCl
       [source.id, target.prefixed, input.executionMode, userId]
     );
     const existing = existingResult.rows[0];
+    if (!await hasAcceptedSourceVerificationWithClient(client, source.id, readClaimTime())) {
+      return { execution: null, created: false, claimed: false,
+        reason: 'Source confirmation verifier is unavailable' };
+    }
     if (existing) {
       if (existing.signal_id !== signal.id || existing.chain !== source.chain || existing.token_mint !== source.token_mint
           || existing.direction !== source.direction || existing.target_account !== target.prefixed
@@ -1834,6 +1846,7 @@ export async function claimSourceSignalForCopyExecutionWithClient(client: PoolCl
         reason: `Source trade is ${source.confirmation_state}`
       };
     }
+    const now = readClaimTime();
     if (signal.expires_at && signal.expires_at <= now) {
       await client.query(
         `UPDATE signals SET status = 'expired' WHERE id = $1`,
@@ -1923,6 +1936,21 @@ export async function claimSourceSignalForCopyExecutionWithClient(client: PoolCl
       }
     }
 
+    const authorized = await hasAcceptedSourceVerificationWithClient(client, source.id, readClaimTime());
+    const admittedAt = readClaimTime();
+    if (!authorized) return { execution: null, created: false, claimed: false,
+      reason: 'Source confirmation verifier is unavailable' };
+    if (signal.expires_at && signal.expires_at <= admittedAt) {
+      await client.query(`UPDATE signals SET status = 'expired' WHERE id = $1`, [signal.id]);
+      return { execution: null, created: false, claimed: false,
+        reason: 'Source signal expired before execution claim' };
+    }
+    if (source.direction === 'sell' && signal.source_position_evidence_at
+        && admittedAt.getTime() - signal.source_position_evidence_at.getTime() > maxPositionEvidenceAgeMs) {
+      await client.query(`UPDATE signals SET status = 'expired' WHERE id = $1`, [signal.id]);
+      return { execution: null, created: false, claimed: false, reason: 'Source position evidence is stale' };
+    }
+
     const clientOrderId = buildCopyExecutionClientOrderId({
       sourceTradeId: source.id,
       chain: source.chain,
@@ -1973,7 +2001,7 @@ export async function claimSourceSignalForCopyExecutionWithClient(client: PoolCl
         `UPDATE signals
          SET status = 'executing', claimed_at = COALESCE(claimed_at, $2)
          WHERE id = $1`,
-        [signal.id, now]
+        [signal.id, admittedAt]
       );
     }
     if (execution.direction === 'sell') {

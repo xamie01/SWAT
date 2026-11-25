@@ -16,6 +16,21 @@ function unique<T>(rows: readonly T[], key: (row: T) => string, reason: string):
 function one<T>(rows: readonly T[], predicate: (row: T) => boolean, reason: string): T {
   const found = rows.filter(predicate); loadCheck(found.length === 1, reason); return found[0]!;
 }
+/** Compare immutable quote storage against quote-valuation.ts USD canonical encoding. */
+export function assertLoadOriginalQuoteEncoding(
+  original: Pick<LoadDurableSnapshot['evidence'][number], 'quote' | 'nativeQuote' | 'quoteCurrency' | 'nativePrice'>
+): void {
+  if (original.quote === null) {
+    loadCheck(original.nativeQuote === null && original.quoteCurrency === null && original.nativePrice === null,
+      'absent original quote must retain four NULLs');
+    return;
+  }
+  loadCheck(original.quoteCurrency === 'USD', 'original quote currency must be USD');
+  loadCheck(typeof original.nativeQuote === 'string' && typeof original.nativePrice === 'string'
+    && loadUnits(original.nativeQuote, true) === loadUnits(original.quote, true)
+    && loadUnits(original.nativePrice, true) === loadUnits('1', true),
+  'original canonical USD amount/amount/USD/1 required');
+}
 /** Acquisition-only contained load contract. Every declared HTTP attempt must
  * join exactly once to a protected outcome; every admitted fixture must join
  * actual canonical source, obligation, fence, original fill, receipt, trade,
@@ -130,9 +145,9 @@ export function requireLoadFinalAccounting(input: LoadFinalAccounting) {
     loadCheck(evidence.userId === f.userId && evidence.sourceTradeId === a.sourceTradeId && evidence.evidenceType === 'paper_simulation'
       && ['confirmed', 'finalized'].includes(evidence.confirmationState) && evidence.completes === true
       && evidence.applicationActive === true && evidence.correctionId === null && evidence.base === base
-      && evidence.quote === quote && evidence.fee === fee && evidence.effectiveQuote === quote && evidence.effectiveFee === fee
-      && evidence.quoteCurrency === 'USD' && evidence.nativeQuote === null && evidence.nativePrice === null,
+      && evidence.quote === quote && evidence.fee === fee && evidence.effectiveQuote === quote && evidence.effectiveFee === fee,
     'original/effective fill unknown or non-exact economics');
+    assertLoadOriginalQuoteEncoding(evidence);
     const trade = one(d.trades, r => r.executionId === execution.id, 'one independently persisted trade required');
     loadUuid(trade.id);
     loadEqual(trade, { id: trade.id, executionId: execution.id, userId: f.userId, signalId: a.signalId,
@@ -141,7 +156,7 @@ export function requireLoadFinalAccounting(input: LoadFinalAccounting) {
     const receipt = one(d.receipts, r => r.snapshot.executionId === execution.id, 'one immutable economic receipt required');
     loadCheck(receipt.receiptId === loadReceiptDigest(receipt.snapshot), 'canonical financial snapshot hash mismatch');
     loadEqual(receipt.snapshot, { executionId: execution.id, userId: f.userId, tradeId: trade.id, fence: attempt.fence,
-      totals: { base, quote, debit, fee, unknown: '0', quoteUnknown: '0', completes: true, evidenceCount: '1' },
+      totals: { base, quote, debit, fee, unknown: '0', quoteUnknown: '0', completes: true, evidenceCount: '1', invalidCorrections: '0' },
       accountingComplete: true }, 'financial receipt cannot infer success from non-null fields');
     const application = one(d.applications, r => r.evidenceId === evidence.id, 'one original position application required');
     const position = one(d.positions, r => r.id === application.positionId, 'owned aggregate position required');

@@ -111,8 +111,24 @@ export function createCustodyJournalObserver(ports: CustodyJournalObserverPorts)
         row.tenant === scope.userId && row.bypass === 'off' && row.read_only === 'on' &&
         ['repeatable read','serializable'].includes(row.isolation) && row.admission_write === false && row.grant_write === false &&
         row.observed_at instanceof Date && approved.validUntil > row.observed_at, 'independent snapshot identity/ACL/isolation/expiry');
-      const grant = await createCustodyExecutionStore(async (_s, action) => action(client as CustodySqlClient))
+      const loaded = await createCustodyExecutionStore(async (_s, action) => action(client as CustodySqlClient))
         .load({ userId: scope.userId } as UserScope, scope.grantId);
+      const grant: CustodyGrantSnapshot | null = loaded ? {
+        id: loaded.id,
+        userId: loaded.userId,
+        chain: loaded.chain,
+        grantKind: loaded.grantKind,
+        accountAddress: loaded.accountAddress,
+        status: loaded.status,
+        lifecycleRevision: loaded.lifecycleRevision,
+        revocationTombstone: loaded.revocationTombstone,
+        revokedAt: loaded.revokedAt,
+        expiresAt: loaded.expiresAt,
+        scopePolicy: loaded.scopePolicy,
+        keyVersion: loaded.keyVersion,
+        secretBinding: loaded.secretBinding,
+        sealedSecret: loaded.sealedSecret
+      } : null;
       const versions = await client.query<{ key_version: number }>(`SELECT key_version FROM custody_secret_admissions
         WHERE grant_id=$1::uuid AND user_id=$2::uuid ORDER BY key_version`, [scope.grantId, scope.userId]);
       const admissions: CustodySecretAdmission[] = [];

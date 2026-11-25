@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createCustodyEnrollmentStore, createCustodyExecutionStore } from './custody-store.js';
-import { buildCustodySecretBinding } from './custody-contract.js';
+import { buildCustodySecretBinding, CustodyContractError } from './custody-contract.js';
 import type { UserScope } from './tenancy.js';
 const scope = { userId: '11111111-1111-4111-8111-111111111111' } as UserScope;
 const grantId = '22222222-2222-4222-8222-222222222222';
@@ -25,7 +25,8 @@ describe('custody SQL adapter (injected same-client only, no PG execution)', () 
     const result = await store.record(scope, input);
     expect('sealedSecret' in result).toBe(false); expect('secretBinding' in result).toBe(false);
     const [sql, values] = query.mock.calls[0] as any;
-    expect(sql).toContain('ON CONFLICT (id) DO NOTHING'); expect(sql).toContain('sealed_secret IS NOT NULL AS has_sealed_secret');
+    expect(sql).toContain('ON CONFLICT (id) DO NOTHING'); expect(sql).toContain('key_version IS NOT NULL AS has_sealed_secret');
+    expect(sql.split('RETURNING')[1]).not.toMatch(/\bsealed_secret\b/);
     expect(values[0]).toBe(grantId); expect(values[1]).toBe(scope.userId); expect(JSON.parse(values[7])).toEqual(input.secretBinding);
   });
   it('does not silently replace a bound row on retry or conflict', async () => {
@@ -56,6 +57,24 @@ describe('custody SQL adapter (injected same-client only, no PG execution)', () 
     const transaction = vi.fn(), store = createCustodyEnrollmentStore(transaction);
     await expect(store.record(scope, { ...record(), id: '33333333-3333-4333-8333-333333333333' })).rejects.toThrow();
     expect(transaction).not.toHaveBeenCalled();
+  });
+  it('enforces null keyVersion and hasSealedSecret=false for keyless solana_vault and rejects non-null keyVersion', async () => {
+    const solanaVault = 'So11111111111111111111111111111111111111112';
+    const query = vi.fn(async (..._args: any[]) => ({ rows: [{ id: grantId, user_id: scope.userId, chain: 'solana',
+      grant_kind: 'solana_vault', account_address: solanaVault, has_sealed_secret: false, key_version: null,
+      scope_policy: null, expires_at: null, revoked_at: null, status: 'active', created_at: new Date('2026-11-23T00:00:00.000Z') }] }));
+    const transaction = vi.fn(async (tenant: UserScope, operation: any) => { expect(tenant).toEqual(scope); return operation({ query }); });
+    const store = createCustodyEnrollmentStore(transaction as any);
+    const result = await store.record(scope, { id: grantId, chain: 'solana', grantKind: 'solana_vault',
+      accountAddress: solanaVault, sealedSecret: null, keyVersion: null, secretBinding: null, scopePolicy: null, expiresAt: null });
+    expect(result).toMatchObject({ id: grantId, chain: 'solana', grantKind: 'solana_vault', hasSealedSecret: false, keyVersion: null });
+    expect('sealedSecret' in result).toBe(false);
+    expect('secretBinding' in result).toBe(false);
+    const badTx = vi.fn();
+    await expect(createCustodyEnrollmentStore(badTx).record(scope, { id: grantId, chain: 'solana', grantKind: 'solana_vault',
+      accountAddress: solanaVault, sealedSecret: null, keyVersion: 1, secretBinding: null, scopePolicy: null, expiresAt: null }))
+      .rejects.toThrowError(new CustodyContractError('custody-invalid'));
+    expect(badTx).not.toHaveBeenCalled();
   });
 });
 describe('081 proposal source restrictions, not migrated database acceptance', () => {

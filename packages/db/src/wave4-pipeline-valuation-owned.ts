@@ -7,7 +7,7 @@ import { pipelineRequire, pipelineText, pipelineUuid, pipelineTime, readPipeline
   type PipelineClientLease } from './wave4-pipeline-source-owned.js';
 import { pipelinePayload, pipelineFields, pipelineIso, pipelineDigest, pipelineChain, pipelineScope,
   pipelineSame, requirePipelineApprovedPayload, requirePipelineWorkerRoutine,
-  pipelineWriterTransaction } from './wave4-pipeline-capability-owned.js';
+  pipelineWriterTransaction, pipelineElapsedClock } from './wave4-pipeline-capability-owned.js';
 
 /** Exact SQL080 authority. Existing migrator-only authority/trusted guards need
  * a reviewed FORWARD capability before this writer is usable, not credentials
@@ -55,7 +55,7 @@ export function preparePipelineTrustedWorkerValuation(candidate: PipelineTrusted
   if (value.lineageAcquisitionEvidenceId !== null) pipelineUuid(value.lineageAcquisitionEvidenceId);
   pipelineDigest(value.originalDigest); pipelineDigest(value.providerIdentityDigest); pipelineIso(value.validUntil);
   pipelineRequire([value.valuationId,value.authorityId,value.sourceEvidenceId,value.providerId,value.verifierVersion,
-    value.lineageMasterWalletAddress].every(v => pipelineText(v)) && /^[1-9]\d{0,37}$/.test(value.revision)
+    value.lineageMasterWalletAddress].every(v => pipelineText(v)) && pipelineText(value.revision,38) && /^[1-9]\d{0,37}$/.test(value.revision)
     && (value.quoteUsd !== null || value.feeUsd !== null),'exact independent trusted valuation required');
   if (value.quoteUsd !== null) workerMoney(value.quoteUsd);
   if (value.feeUsd !== null) workerMoney(value.feeUsd);
@@ -136,6 +136,7 @@ export async function readPipelinePaperValuationWithClient(client: PoolClient, e
   pipelineUuid(execution.id);
   pipelineRequire(pipelineTime(now) && Number.isSafeInteger(maximumAgeMs) && maximumAgeMs > 0 && maximumAgeMs <= 60_000,
     'bounded paper valuation clock required');
+  const elapsed = pipelineElapsedClock(now);
   const approval = await requirePipelineApprovedPayloadSelector(client,execution.id);
   await requirePipelineWorkerRoutine(client,'paper');
   const result = await client.query('SELECT public.swat_pipeline_paper_valuation($1::uuid) AS result',[execution.id]);
@@ -145,7 +146,7 @@ export async function readPipelinePaperValuationWithClient(client: PoolClient, e
   assertPipelinePaperExecution(value,execution);
   const clock = await client.query('SELECT statement_timestamp() AS database_now');
   const databaseNow = clock.rows[0]?.database_now;
-  pipelineRequire(clock.rows.length === 1 && pipelineTime(databaseNow) && [now,databaseNow].every(time =>
+  pipelineRequire(clock.rows.length === 1 && pipelineTime(databaseNow) && [elapsed(),databaseNow].every(time =>
     Date.parse(value.observedAt) <= time.getTime() && Date.parse(value.expiresAt) > time.getTime()
     && time.getTime() - Date.parse(value.observedAt) <= maximumAgeMs) && new Date(value.expiresAt) <= approval.expiresAt,
   'protected paper evidence stale/expired/future');
@@ -153,25 +154,29 @@ export async function readPipelinePaperValuationWithClient(client: PoolClient, e
 }
 const requirePipelineApprovedPayloadSelector = (client: PoolClient, id: string) => readPipelineBackendApproval(client,'paper-valuation',id);
 export function createProtectedPipelineValuationBacking(input: { acquire: () => Promise<PipelineClientLease>;
-  now: () => Date; maximumAgeMs: number }) {
+  now: () => Date; maximumAgeMs: number; signal?: AbortSignal }) {
   pipelineRequire(typeof input.acquire === 'function' && typeof input.now === 'function'
     && Number.isSafeInteger(input.maximumAgeMs) && input.maximumAgeMs > 0 && input.maximumAgeMs <= 60_000,
   'valuation lease and bounded clock required');
-  const { acquire,now,maximumAgeMs } = input;
+  const { acquire,now,maximumAgeMs,signal } = input;
   return {
     register(candidate: PipelineValuationAuthority) {
       const value = preparePipelineValuationAuthority(candidate);
-      return pipelineWriterTransaction(acquire,'valuation-register',value.authorityId)(client => registerPipelineValuationAuthorityWithClient(client,value));
+      return pipelineWriterTransaction(acquire,'valuation-register',value.authorityId,signal)(client => registerPipelineValuationAuthorityWithClient(client,value));
     },
     record(candidate: PipelineTrustedWorkerValuation) {
       const value = preparePipelineTrustedWorkerValuation(candidate);
-      return pipelineWriterTransaction(acquire,'valuation-write',value.valuationId)(client => recordPipelineTrustedWorkerValuationWithClient(client,value));
+      return pipelineWriterTransaction(acquire,'valuation-write',value.valuationId,signal)(client => recordPipelineTrustedWorkerValuationWithClient(client,value));
     },
-    read(execution: CopyExecutionRecord) {
+    async read(execution: CopyExecutionRecord) {
       // Capture precisely the used comparison fields; lifecycle may contain Date values.
-      const captured = { ...execution };
-      return pipelineWriterTransaction(acquire,'paper-valuation',captured.id)(client =>
-        readPipelinePaperValuationWithClient(client,captured,now(),maximumAgeMs));
+      const captured = { ...execution },elapsed = pipelineElapsedClock(now());
+      const value = await pipelineWriterTransaction(acquire,'paper-valuation',captured.id,signal)(client =>
+        readPipelinePaperValuationWithClient(client,captured,elapsed(),maximumAgeMs));
+      const time = elapsed().getTime();
+      pipelineRequire(!signal?.aborted && Date.parse(value.observedAt) <= time && Date.parse(value.expiresAt) > time
+        && time - Date.parse(value.observedAt) <= maximumAgeMs,'paper evidence expired during acquisition/checked COMMIT');
+      return value;
     }
   };
 }

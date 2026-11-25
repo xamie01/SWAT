@@ -1,7 +1,8 @@
 import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ transaction: vi.fn(), query: vi.fn(), capture: vi.fn(),
-  persistAllocation: vi.fn(), readAllocation: vi.fn(), availability: vi.fn() }));
+  persistAllocation: vi.fn(), readAllocation: vi.fn(), availability: vi.fn(), monotonic: vi.fn() }));
+vi.mock('node:perf_hooks', () => ({ performance: { now: mocks.monotonic } }));
 vi.mock('./client.js', () => ({ query: mocks.query }));
 vi.mock('./transaction.js', () => ({ withTransaction: mocks.transaction }));
 vi.mock('./worker-policy.js', () => ({ captureWorkerPolicyWithClient: mocks.capture }));
@@ -35,11 +36,14 @@ function execution(overrides: Record<string, unknown> = {}) { return { id: 'exec
   simulation_id: null, submission_type: null, submission_id: null, next_reconciliation_at: null,
   reconciliation_claim_id: null, source_position_before_quantity: null, source_sell_fraction: null, ...overrides }; }
 function fixture(options: { accepted?: boolean; existing?: Record<string, unknown>; status?: string; expired?: boolean;
-  direction?: string; insertFailure?: boolean; replayMatches?: boolean; changedSignal?: boolean; changedSource?: boolean; sellEvidence?: boolean } = {}) {
+  direction?: string; insertFailure?: boolean; replayMatches?: boolean; changedSignal?: boolean; changedSource?: boolean; sellEvidence?: boolean;
+  expiresAt?: Date; acceptedUntil?: Date; onQuery?: (sql: string) => void } = {}) {
   const calls: Array<{ sql: string; values: unknown[] }> = [];
   const client = { query: vi.fn(async (sql: string, values: unknown[] = []) => {
     calls.push({ sql, values });
-    if (sql.includes('AS accepted')) return { rows: [{ accepted: options.accepted !== false }] };
+    options.onQuery?.(sql);
+    if (sql.includes('AS accepted')) return { rows: [{ accepted: options.accepted !== false
+      && (!options.acceptedUntil || (values[1] as Date).getTime() < options.acceptedUntil.getTime()) }] };
     if (sql.includes('source_is_active')) return { rows: [{ before_quantity: '10', source_quantity_fits: true,
       sell_fraction: '0.1', position_evidence_at: input.now, last_event_at: input.now, source_is_active: true }] };
     if (sql.includes('AND $3::numeric = $4::numeric AS matches')) return { rows: [{ matches: true }] };
@@ -48,7 +52,7 @@ function fixture(options: { accepted?: boolean; existing?: Record<string, unknow
       source_trade_id: options.changedSignal && sql.includes('FOR UPDATE') ? 'different' : 'source',
       source_position_before_quantity: options.sellEvidence ? '10' : null,
       source_sell_fraction: options.sellEvidence ? '0.1' : null, source_position_evidence_at: options.sellEvidence ? input.now : null,
-      source_side: options.direction ?? 'buy', expires_at: options.expired ? input.now : null }] };
+      source_side: options.direction ?? 'buy', expires_at: options.expiresAt ?? (options.expired ? input.now : null) }] };
     if (sql.includes('FROM source_trades')) return { rows: [{ ...source, direction: options.direction ?? 'buy',
       token_mint: options.changedSource && sql.includes('FOR SHARE') ? 'solana:different' : source.token_mint }] };
     if (sql.includes('FROM copy_executions') && sql.includes('AS matches')) return { rows: [{ matches: options.replayMatches !== false }] };
@@ -64,7 +68,7 @@ function fixture(options: { accepted?: boolean; existing?: Record<string, unknow
   mocks.transaction.mockImplementation(async operation => operation(client));
   return { client: client as unknown as PoolClient, calls };
 }
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => { vi.resetAllMocks(); mocks.monotonic.mockReturnValue(0); });
 describe('actual same-client source claim for atomic fanout (no DB/runtime approval)', () => {
   it('writes claim/history/captured policy on caller client without own transaction/global query', async () => {
     const f = fixture(); expect(await claimSourceSignalForCopyExecutionWithClient(f.client, input)).toMatchObject({ created: true, claimed: true });
@@ -83,6 +87,69 @@ describe('actual same-client source claim for atomic fanout (no DB/runtime appro
     const locked = f.calls.flatMap(({sql}, index) => /FOR (?:UPDATE|SHARE)/.test(sql) ? [index] : []);
     expect(locked.every(index => index > advisory)).toBe(true);
     expect(f.calls[advisory]?.values).toEqual([JSON.stringify(['solana:target','solana','solana:token',userId])]);
+  });
+  it.each(['advisory', 'signal', 'source', 'execution'] as const)('refreshes expiry after the %s lock wait', async edge => {
+    let elapsed = 0;
+    mocks.monotonic.mockImplementation(() => elapsed);
+    const f = fixture({ expiresAt: new Date(input.now.getTime() + 1000), onQuery: sql => {
+      if ((edge === 'advisory' && sql.includes('pg_advisory_xact_lock'))
+          || (edge === 'signal' && sql.includes('FROM signals') && sql.includes('FOR UPDATE'))
+          || (edge === 'source' && sql.includes('FROM source_trades') && sql.includes('FOR SHARE'))
+          || (edge === 'execution' && sql.includes('FROM copy_executions') && sql.includes('FOR UPDATE'))) elapsed = 1000;
+    } });
+    expect(await claimSourceSignalForCopyExecutionWithClient(f.client, input)).toMatchObject({
+      execution: null, created: false, claimed: false, reason: 'Source signal expired before execution claim'
+    });
+    expect(f.calls.some(({ sql }) => sql.includes('INSERT INTO copy_executions'))).toBe(false);
+    expect(mocks.capture).not.toHaveBeenCalled();
+  });
+  it('rechecks provider expiry after the accepted-source lock wait before returning a replay', async () => {
+    let elapsed = 0;
+    mocks.monotonic.mockImplementation(() => elapsed);
+    const f = fixture({ existing: execution(), acceptedUntil: new Date(input.now.getTime() + 1000),
+      onQuery: sql => { if (sql.includes('AS accepted')) elapsed = 1000; } });
+    expect(await claimSourceSignalForCopyExecutionWithClient(f.client, input)).toMatchObject({
+      execution: null, reason: 'Source confirmation verifier is unavailable'
+    });
+    const checks = f.calls.filter(({ sql }) => sql.includes('AS accepted'));
+    expect(checks).toHaveLength(2);
+    expect(checks[1]!.values[1]).toEqual(new Date(input.now.getTime() + 1000));
+    expect(mocks.capture).not.toHaveBeenCalled();
+  });
+  it.each(['signal', 'evidence', 'provider'] as const)('refuses %s expiry during sell-inventory acquisition before inserting execution', async edge => {
+    let elapsed = 0;
+    mocks.monotonic.mockImplementation(() => elapsed);
+    const f = fixture({ direction: 'sell', sellEvidence: true,
+      ...(edge === 'signal' ? { expiresAt: new Date(input.now.getTime() + 1000) } : {}),
+      ...(edge === 'provider' ? { acceptedUntil: new Date(input.now.getTime() + 1000) } : {}) });
+    mocks.availability.mockImplementation(async () => {
+      elapsed = edge === 'evidence' ? input.maxPositionEvidenceAgeMs + 1 : 1000;
+      return { quantity: input.requestedBaseQuantity };
+    });
+    expect(await claimSourceSignalForCopyExecutionWithClient(f.client, input)).toMatchObject({ execution: null,
+      created: false, claimed: false, reason: edge === 'signal' ? 'Source signal expired before execution claim'
+        : edge === 'evidence' ? 'Source position evidence is stale' : 'Source confirmation verifier is unavailable' });
+    expect(f.calls.some(({ sql }) => sql.includes('INSERT INTO copy_executions'))).toBe(false);
+    expect(mocks.capture).not.toHaveBeenCalled();
+    expect(mocks.persistAllocation).not.toHaveBeenCalled();
+  });
+  it('snapshots the supplied date and records admission time after lock waits', async () => {
+    let elapsed = 0;
+    mocks.monotonic.mockImplementation(() => elapsed);
+    const supplied = new Date(input.now);
+    const f = fixture({ onQuery: sql => {
+      if (sql.includes('pg_advisory_xact_lock')) { supplied.setTime(0); elapsed = 250; }
+    } });
+    expect(await claimSourceSignalForCopyExecutionWithClient(f.client, { ...input, now: supplied })).toMatchObject({ created: true });
+    const claimed = f.calls.find(({ sql }) => sql.includes('claimed_at = COALESCE'));
+    expect(claimed?.values[1]).toEqual(new Date(input.now.getTime() + 250));
+    expect(f.calls.filter(({ sql }) => sql.includes('AS accepted')).every(({ values }) =>
+      (values[1] as Date).getTime() === input.now.getTime() + 250)).toBe(true);
+  });
+  it('rejects an invalid supplied claim date before any query', async () => {
+    const f = fixture();
+    await expect(claimSourceSignalForCopyExecutionWithClient(f.client, { ...input, now: new Date(NaN) })).rejects.toThrow('valid date');
+    expect(f.calls).toEqual([]);
   });
   it.each([{ changedSignal: true }, { changedSource: true }])('revalidates discovered scope before execution mutation %j', async options => {
     const f = fixture(options);

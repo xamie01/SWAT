@@ -22,8 +22,8 @@ export function preparePipelineRiskPolicy(candidate: PipelineRiskPolicyWrite) {
   pipelineUuid(value.executionId); pipelineUuid(value.userId); pipelineScope(value);
   pipelineRequire(value.account === value.userId && value.executionMode === 'paper'
     && pipelineText(value.epoch,19) && /^[1-9]\d{0,18}$/.test(value.epoch) && BigInt(value.epoch) <= 9223372036854775807n
-    && (value.previousEpoch === null || /^[1-9]\d{0,18}$/.test(value.previousEpoch)
-      && BigInt(value.epoch) > BigInt(value.previousEpoch))
+    && (value.previousEpoch === null || pipelineText(value.previousEpoch,19) && /^[1-9]\d{0,18}$/.test(value.previousEpoch)
+      && BigInt(value.previousEpoch) <= 9223372036854775807n && BigInt(value.epoch) > BigInt(value.previousEpoch))
     && typeof value.enabled === 'boolean' && typeof value.accountingReady === 'boolean'
     && (!value.enabled || value.accountingReady) && workerMoney(value.capUsd) !== '0',
   'exact protected risk epoch/coverage/control terms required');
@@ -39,11 +39,11 @@ export async function writePipelineRiskPolicyWithClient(client: PoolClient, cand
     'protected SQL072 risk write/coverage/replay refused');
   return value;
 }
-export function createProtectedPipelineRiskWriter(input: { acquire: () => Promise<PipelineClientLease> }) {
+export function createProtectedPipelineRiskWriter(input: { acquire: () => Promise<PipelineClientLease>; signal?: AbortSignal }) {
   pipelineRequire(typeof input.acquire === 'function','risk physical lease required');
-  const acquire = input.acquire;
+  const { acquire,signal } = input;
   return { write(candidate: PipelineRiskPolicyWrite) {
     const value = preparePipelineRiskPolicy(candidate);
-    return pipelineWriterTransaction(acquire,'risk-write',value.executionId)(client => writePipelineRiskPolicyWithClient(client,value));
+    return pipelineWriterTransaction(acquire,'risk-write',value.executionId,signal)(client => writePipelineRiskPolicyWithClient(client,value));
   } };
 }

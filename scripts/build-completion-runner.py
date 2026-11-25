@@ -152,12 +152,62 @@ def credential_path(path):
                'id_rsa', 'id_ed25519', 'wallet.json', 'keypair.json', 'credentials.json') for part in path.parts) or path.suffix in ('.pem', '.key')
 
 
+def manifest_equal(left, right):
+    """Compare JSON manifest values without bool/int or int/float coercion."""
+    if type(left) is not type(right):
+        return False
+    if type(left) is dict:
+        return (all(type(key) is str for key in left)
+                and all(type(key) is str for key in right)
+                and left.keys() == right.keys()
+                and all(manifest_equal(value, right[key]) for key, value in left.items()))
+    if type(left) is list:
+        return len(left) == len(right) and all(manifest_equal(a, b) for a, b in zip(left, right))
+    return left == right
+
+
+class InputManifest:
+    """Keep historical keys/values, but never let one identity erase another."""
+    SUFFIXES = {'file': '', 'symlink': '', 'directory': '/', 'mode': '#mode',
+                'canonical': '#canonical', 'absent': '#absent'}
+
+    def __init__(self):
+        self.entries = {}
+        self.provenance = {}
+        self.paths = {}
+
+    def claim_path(self, name, kind):
+        # Directories and paths through parent links have no bare digest key;
+        # claim their names too, so they cannot alias previously written metadata.
+        if (name in self.paths and self.paths[name] != kind
+            or name in self.provenance and self.provenance[name] not in
+                ((name, 'file'), (name, 'symlink'))
+            or self.provenance.get(name + '#absent') == (name, 'absent')):
+            raise ValueError('Input manifest collision at path: ' + name)
+        self.paths[name] = kind
+
+    def record(self, name, form, value):
+        # All capture namespaces are constructed and guarded here: bare file /
+        # symlink identity, directory '/', #mode, #canonical, #absent, runtime:.
+        key = 'runtime:' + name if form == 'runtime' else name + self.SUFFIXES[form]
+        provenance = (name, form)
+        if (key in self.paths and form not in ('file', 'symlink')
+            or form == 'absent' and name in self.paths):
+            raise ValueError('Input manifest collision at key: ' + key)
+        if key in self.entries:
+            if self.provenance[key] != provenance or not manifest_equal(self.entries[key], value):
+                raise ValueError('Input manifest collision or conflicting recapture at key: ' + key)
+            return
+        self.entries[key] = value
+        self.provenance[key] = provenance
+
+
 def workspace_inputs(kind='typecheck', target=''):
     """Auditable conservative source + installed package-resolution closure."""
     policy = json.loads(POLICY.read_text())
     if policy.get('schema') != 1:
         raise ValueError('Unsupported workspace input policy')
-    result = {}
+    result = InputManifest()
     importers = set()
     seen_packages = set()
     excluded = [ROOT / name for name in policy['generatedWorkspacePrefixes']]
@@ -169,9 +219,43 @@ def workspace_inputs(kind='typecheck', target=''):
         relative = path.relative_to(ROOT)
         return (credential_path(relative) or any(part in policy['generatedDirectoryNames'] for part in relative.parts)
                 or any(path == item or path.is_relative_to(item) for item in excluded)
-                or ('threats' in relative.parts and path.name.startswith('build-') and path.suffix in ('.json', '.log')))
+                or (path.parent in evidence_directories and path.name.startswith('build-')
+                    and path.suffix in ('.json', '.log') and stat.S_ISREG(path.lstat().st_mode)))
 
-    def capture(path):
+    def symlink_identity(path, chain=frozenset()):
+        info = path.lstat()
+        identity = (info.st_dev, info.st_ino)
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(ROOT)
+        raw_target = os.readlink(path)
+        target_path = Path(raw_target)
+        if not target_path.is_absolute():
+            target_path = path.parent / target_path
+        relative_target = target_path.relative_to(ROOT)
+        if (credential_path(relative_target)
+            or credential_path(resolved.relative_to(ROOT))):
+            raise ValueError('Input symlink targets credential-bearing path')
+        name = str(path.relative_to(ROOT))
+        result.claim_path(name, stat.S_IFMT(info.st_mode))
+        if identity in chain:
+            # A finite target path can revisit a parent alias (alias/../alias).
+            # strict resolve above rejects actual cycles; its identity is bound
+            # by the active caller, so do not recurse through it again.
+            return resolved
+        chain = chain | {identity}
+        # resolve() collapses intermediate links; bind their identities too,
+        # including links in target parents and chains outside ordinary roots.
+        for parent in reversed(target_path.parents):
+            if parent.is_relative_to(ROOT) and parent.is_symlink():
+                symlink_identity(parent, chain)
+        if target_path.is_symlink():
+            symlink_identity(target_path, chain)
+        result.record(name, 'symlink', {'symlink': raw_target, 'target': str(resolved.relative_to(ROOT)),
+                                        'device': info.st_dev, 'inode': info.st_ino})
+        result.record(name, 'mode', stat.S_IMODE(info.st_mode))
+        return resolved
+
+    def capture(path, ancestors=frozenset(), installed=False):
         info = path.lstat()
         # Confine ordinary paths too: a parent directory may itself be a symlink.
         resolved = path.resolve(strict=True)
@@ -179,38 +263,37 @@ def workspace_inputs(kind='typecheck', target=''):
         if credential_path(resolved.relative_to(ROOT)):
             raise ValueError('Input path resolves to credential-bearing path')
         name = str(path.relative_to(ROOT))
-        if stat.S_ISLNK(info.st_mode):
-            resolved = path.resolve(strict=True)
-            resolved.relative_to(ROOT)
-            if credential_path(resolved.relative_to(ROOT)):
-                raise ValueError('Input symlink targets credential-bearing path')
-            result[name] = {'symlink': os.readlink(path), 'target': str(resolved.relative_to(ROOT)),
-                            'device': info.st_dev, 'inode': info.st_ino}
-            return resolved
+        result.claim_path(name, stat.S_IFMT(info.st_mode))
         if resolved != path:
-            # Hash canonical bytes as well as every parent symlink identity.
             for parent in reversed(path.parents):
                 if parent.is_relative_to(ROOT) and parent.is_symlink():
-                    capture(parent)
-            result[name + '#canonical'] = str(resolved.relative_to(ROOT))
-            return resolved
-        if stat.S_ISREG(info.st_mode):
-            result[name] = digest(path)
-            result[name + '#mode'] = stat.S_IMODE(info.st_mode)
+                    symlink_identity(parent)
+        if stat.S_ISLNK(info.st_mode):
+            resolved = symlink_identity(path)
+        elif resolved != path:
+            result.record(name, 'canonical', str(resolved.relative_to(ROOT)))
+        elif stat.S_ISREG(info.st_mode):
+            result.record(name, 'file', digest(path))
+            result.record(name, 'mode', stat.S_IMODE(info.st_mode))
         elif stat.S_ISDIR(info.st_mode):
-            result[name + '/'] = {'directory': True}
+            result.record(name, 'directory', {'directory': True})
+            result.record(name, 'mode', stat.S_IMODE(info.st_mode))
         else:
             raise ValueError('Unsupported input filesystem entry: ' + name)
-        return path
+        if resolved != path:
+            # Every capture caller (including resolution probes) must bind the
+            # complete consumed target, not just its directory/link identity.
+            tree(resolved, ancestors, installed, consumed=True)
+        return resolved
 
-    def tree(path, ancestors=frozenset(), installed=False):
-        if (credential_path(path.relative_to(ROOT))
-            or any(path == item or path.is_relative_to(item) for item in excluded)
-            or (not installed and skipped(path))):
+    def tree(path, ancestors=frozenset(), installed=False, consumed=False):
+        if credential_path(path.relative_to(ROOT)):
             return
-        canonical = capture(path)
+        if not consumed and (any(path == item or path.is_relative_to(item) for item in excluded)
+                             or (not installed and skipped(path))):
+            return
+        canonical = capture(path, ancestors, installed)
         if canonical != path:
-            tree(canonical, ancestors, installed)
             return
         if not canonical.is_dir():
             return
@@ -218,11 +301,11 @@ def workspace_inputs(kind='typecheck', target=''):
             raise ValueError('Input symlink directory cycle')
         ancestors = ancestors | {canonical}
         for item in sorted(canonical.iterdir()):
-            if item.name == 'node_modules':
+            if item.name == 'node_modules' and not consumed:
                 if not installed:
                     importers.add(item)
                 continue
-            tree(item, ancestors, installed)
+            tree(item, ancestors, installed, consumed)
 
     def probe(path):
         if entry_exists(path):
@@ -230,7 +313,7 @@ def workspace_inputs(kind='typecheck', target=''):
             if canonical != path:
                 capture(canonical)
             return canonical
-        result[str(path.relative_to(ROOT)) + '#absent'] = True
+        result.record(str(path.relative_to(ROOT)), 'absent', True)
         return None
 
     def resolve_dependency(base, name):
@@ -285,7 +368,7 @@ def workspace_inputs(kind='typecheck', target=''):
         if entry_exists(path):
             tree(path)
         else:
-            result[name + '#absent'] = True
+            result.record(name, 'absent', True)
     importers.add(ROOT / 'node_modules')
     for importer in sorted(importers):
         canonical = probe(importer)
@@ -313,8 +396,8 @@ def workspace_inputs(kind='typecheck', target=''):
     # Runtime identity is evidence, not permission to execute/read credentials.
     for name in policy['runtimePaths']:
         path = Path(name)
-        result['runtime:' + name] = {'sha256': digest(path), 'target': str(path.resolve(strict=True))}
-    return dict(sorted(result.items()))
+        result.record(name, 'runtime', {'sha256': digest(path), 'target': str(path.resolve(strict=True))})
+    return dict(sorted(result.entries.items()))
 
 
 def literal_test_files(config):
@@ -371,7 +454,7 @@ def validate_approval(kind, target, snapshot):
     root_name = str(inventory_path.relative_to(ROOT))
     closure = {path: value for path, value in snapshot.items()
                if path not in (root_name, root_name + '#mode')}
-    if not isinstance(hashes, dict) or hashes != closure:
+    if not isinstance(hashes, dict) or not manifest_equal(hashes, closure):
         raise ValueError('Reviewed command binding differs from complete input closure')
     required = set(literal) | {name, str(GUARD.relative_to(ROOT)),
         'threats/sequential-fixes/package12-29-harness.ts', 'threats/sequential-fixes/test-safety.ts',
@@ -422,31 +505,132 @@ def verification_lock():
     return LOCK.open('a')
 
 
-def stop_owned_child(child):
-    """Only signal the session/group created by our Popen; tolerate exit races."""
+def observe_owned_child_exit(child, nonblocking=False):
+    """Observe the Linux child without releasing its PID/process-group identity.
+
+    This owner must be the only waiter: never poll(), wait() or set returncode
+    before the final group signal. ECHILD fails closed, rather than signaling a
+    process group whose leader may already have been reaped and reused.
+    """
+    flags = os.WEXITED | os.WNOWAIT | (os.WNOHANG if nonblocking else 0)
+    while True:
+        if child.returncode is not None:
+            raise ChildProcessError('Owned child leader was already reaped')
+        try:
+            observed = os.waitid(os.P_PID, child.pid, flags)
+            break
+        except InterruptedError:
+            continue
+    if observed is None:
+        if nonblocking:
+            return None
+        raise ChildProcessError('Blocking waitid did not observe the owned child')
+    if observed.si_pid != child.pid:
+        raise ChildProcessError('waitid returned a different child identity')
+    if observed.si_code == os.CLD_EXITED:
+        return observed.si_status
+    if observed.si_code in (os.CLD_KILLED, os.CLD_DUMPED):
+        return -observed.si_status
+    raise ChildProcessError('waitid returned a non-exit child status')
+
+
+def live_group_members(pgid, leader_pid):
+    """Return live non-leader PIDs whose Linux process group matches pgid."""
+    members = set()
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == leader_pid:
+            continue
+        try:
+            stat_text = (entry / 'stat').read_bytes().decode('ascii', errors='replace')
+        except OSError:
+            continue
+        rparen = stat_text.rfind(')')
+        if rparen < 0:
+            continue
+        fields = stat_text[rparen + 1:].split()
+        if len(fields) < 3 or fields[0] in ('Z', 'X'):
+            continue
+        try:
+            if int(fields[2]) == pgid:
+                members.add(pid)
+        except ValueError:
+            continue
+    return members
+
+
+def stop_owned_child(child, grace_seconds=5):
+    """Signal the retained owned group, then (and only then) reap its leader."""
+    observe_owned_child_exit(child, nonblocking=True)
+    errors = []
+    term_delivered = False
+    timed_out = True
     try:
         os.killpg(child.pid, signal.SIGTERM)
+        term_delivered = True
     except ProcessLookupError:
         pass
+    except BaseException as error:
+        errors.append(error)
     try:
-        child.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        pass
-    # A reaped leader does not imply its fork workers exited. Finish the owned
-    # group even when wait() returned immediately, then reap the actual child.
+        if grace_seconds > 0:
+            _, timed_out = wait_for_check(child, grace_seconds)
+    except BaseException as error:
+        errors.append(error)
+    if term_delivered and not timed_out and grace_seconds > 0 and live_group_members(child.pid, child.pid):
+        grace_deadline = time.monotonic() + grace_seconds
+        while live_group_members(child.pid, child.pid):
+            remaining = grace_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.05, remaining))
+    # A completed zombie leader still pins the group identity for fork workers.
+    # Reconfirm retention if observation/TERM failed, before the final signal.
+    final_signal_attempted = False
+    kill_delivered = False
     try:
-        os.killpg(child.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    child.wait()
+        observe_owned_child_exit(child, nonblocking=True)
+        final_signal_attempted = True
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+            kill_delivered = True
+        except ProcessLookupError:
+            pass
+    except BaseException as error:
+        errors.append(error)
+    if kill_delivered and live_group_members(child.pid, child.pid):
+        kill_deadline = time.monotonic() + 2
+        while live_group_members(child.pid, child.pid):
+            remaining = kill_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.05, remaining))
+    if final_signal_attempted:
+        try:
+            observed_code = observe_owned_child_exit(child, nonblocking=True)
+            if observed_code is None and not kill_delivered:
+                raise RuntimeError('Owned child still running after failed group shutdown; leader retained')
+            child.wait()
+        except BaseException as error:
+            errors.append(error)
+    # If ownership cannot be confirmed, retain rather than release/reuse it.
+    if errors:
+        raise errors[0]
 
 
 def wait_for_check(child, timeout_seconds):
-    try:
-        return child.wait(timeout=timeout_seconds or None), False
-    except subprocess.TimeoutExpired:
-        stop_owned_child(child)
-        return 124, True
+    """Return an observed exit or synthetic timeout; neither path reaps/signals."""
+    deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
+    while True:
+        code = observe_owned_child_exit(child, nonblocking=deadline is not None)
+        if code is not None:
+            return code, False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return 124, True
+        time.sleep(min(0.05, remaining))
 
 
 def emit_plan(target, command, attempt):
@@ -667,7 +851,7 @@ def execute_attempt(options):
                 fresh_command, fresh_inputs, fresh_heap = command_for(options.kind, options.target)
                 if fresh_command != planned_base or fresh_heap != heap or any(digest(path) != hashes.get(str(path.relative_to(ROOT))) for path in fresh_inputs):
                     raise ValueError('Command inputs drifted during planning')
-                if snapshot != workspace_inputs(options.kind, options.target):
+                if not manifest_equal(snapshot, workspace_inputs(options.kind, options.target)):
                     raise ValueError('Workspace inputs drifted before launch')
                 approval = validate_approval(options.kind, options.target, snapshot)
                 child = subprocess.Popen(command, cwd=ROOT, env=synthetic_environment(options.label, heap, attempt),
@@ -677,15 +861,16 @@ def execute_attempt(options):
             diagnostic(errors, 'planning-or-launch-or-wait', error)
             code = 125
         finally:
-            if child is not None and not timed_out:
+            if child is not None:
                 try:
-                    # A completed leader may leave workers in its owned process group.
+                    # Success, timeout and exceptions all retain the leader until
+                    # owned-group shutdown has finished signaling, then reap once.
                     stop_owned_child(child)
                 except BaseException as error:
                     diagnostic(errors, 'owned-child-shutdown', error)
                     code = 125
             try:
-                unchanged = bool(snapshot) and snapshot == workspace_inputs(options.kind, options.target)
+                unchanged = bool(snapshot) and manifest_equal(snapshot, workspace_inputs(options.kind, options.target))
                 unchanged = unchanged and all(digest(ROOT / name) == value for name, value in hashes.items())
                 if not unchanged:
                     raise ValueError('Workspace/input drift after attempt')

@@ -1,6 +1,8 @@
 import type { Chain } from '@swat/shared';
 import { resolveChainAddress } from '@swat/shared';
 import { recordAuditEventStrict } from './audit-log.js';
+import { EXECUTION_GRANT_PUBLIC_COLUMNS as GRANT_COLUMNS, projectExecutionGrant as toGrant,
+  type ExecutionGrantProjectionRow as GrantRow } from './execution-grant-projection.js';
 import { isCrossTenant, scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
 import { assertCustodyBindingMatches, assertCustodyEnvelope, assertCustodyLifecycle, custodyGrantId, custodyIdentifier, custodyPolicySnapshot,
   type CustodySecretBinding } from './custody-contract.js';
@@ -71,49 +73,6 @@ export interface ExecutionGrant {
   readonly revokedAt: Date | null;
   readonly status: GrantStatus;
   readonly createdAt: Date;
-}
-
-interface GrantRow {
-  id: string;
-  user_id: string;
-  chain: Chain;
-  grant_kind: GrantKind;
-  account_address: string;
-  has_sealed_secret: boolean;
-  key_version: number | null;
-  scope_policy: unknown | null;
-  expires_at: Date | null;
-  revoked_at: Date | null;
-  status: GrantStatus;
-  created_at: Date;
-}
-
-/**
- * The projection every public read uses.
- *
- * `sealed_secret IS NOT NULL AS has_sealed_secret` rather than `sealed_secret`:
- * the column is never selected by these queries at all, so it cannot reach a log
- * line, an error message, or a JSON response by accident.
- */
-const GRANT_COLUMNS = `id, user_id, chain, grant_kind, account_address,
-       sealed_secret IS NOT NULL AS has_sealed_secret,
-       key_version, scope_policy, expires_at, revoked_at, status, created_at`;
-
-function toGrant(row: GrantRow): ExecutionGrant {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    chain: row.chain,
-    grantKind: row.grant_kind,
-    accountAddress: row.account_address,
-    hasSealedSecret: row.has_sealed_secret,
-    keyVersion: row.key_version,
-    scopePolicy: row.scope_policy,
-    expiresAt: row.expires_at,
-    revokedAt: row.revoked_at,
-    status: row.status,
-    createdAt: row.created_at
-  };
 }
 
 /**

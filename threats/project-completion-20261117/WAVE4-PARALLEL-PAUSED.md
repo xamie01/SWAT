@@ -1,4 +1,6 @@
-# Wave 4 parallel source batch — paused checkpoint
+# Wave 4 parallel source batch — historical paused checkpoint
+
+This is the earlier preserved pause. [WAVE4-RESUMED-PAUSED-20261124.md](WAVE4-RESUMED-PAUSED-20261124.md) preserves the second provider-credit interruption. The latest continued-source disposition is [WAVE4-CONTINUED-SOURCE-20261124.md](WAVE4-CONTINUED-SOURCE-20261124.md); source work resumed without verification after the user's subsequent continuation request.
 
 ## Outcome
 

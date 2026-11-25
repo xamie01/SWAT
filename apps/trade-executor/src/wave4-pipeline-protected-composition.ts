@@ -1,5 +1,4 @@
 import type { Chain } from '@swat/shared';
-import type { PoolClient } from '@swat/db/dist/copy-trade-lifecycle-owned.js';
 import type { OwnedObligationTransaction } from '@swat/db/dist/obligation-runtime-owned.js';
 import { pipelineRequire, pipelineText, type PipelineClientLease } from '@swat/db/dist/wave4-pipeline-source-owned.js';
 import { pipelinePayload, pipelineDigest, pipelineSame,
@@ -10,8 +9,8 @@ import { createProtectedPipelineValuationBacking, type PipelinePaperValuationEvi
 import { createProtectedPipelinePaperReceiptWriter, pipelineWorkerReceiptDigest, pipelineReceiptEvidence,
   assertPipelineWorkerPaperReceiptWithClient, reconcilePipelineWorkerPaperFillWithClient,
   reconcilePipelineWorkerPaperValuationWithClient, readPipelineWorkerFinancialReceiptWithClient,
-  type PipelineWorkerPaperReceipt } from '@swat/db/dist/wave4-pipeline-receipt-owned.js';
-import { readWorkerExecutionContextWithClient } from '@swat/db/dist/worker-execution.js';
+  type PipelineWorkerPaperReceipt, type PipelineWorkerRecoverySelector, type PipelineWorkerValuationRecoverySelector,
+  preparePipelineWorkerRecoverySelector } from '@swat/db/dist/wave4-pipeline-receipt-owned.js';
 import type { WorkerFillSettlement, WorkerValuationSettlement } from '@swat/db/dist/worker-settlement.js';
 import { createOwnedExecutorRuntimePorts } from './worker-runtime-owned-adapters.js';
 import { runCanonicalWorkerJob, parseCanonicalWorkerJob, type CanonicalWorkerPorts, type CanonicalWorkerQuote }
@@ -37,6 +36,10 @@ export interface ProtectedPipelineWorkerInput {
   readonly receiptAcquire: () => Promise<PipelineClientLease>;
   readonly provider: PipelinePaperProviderComparison;
   readonly now: () => Date;
+  /** Cancellation is forwarded to independent writer leases. The caller-owned
+   * runtime transaction must separately destroy its physical backend on abort;
+   * a promise race around a callback is NOT a checked runtime COMMIT boundary. */
+  readonly signal?: AbortSignal;
   readonly maximumAgeMs: number;
 }
 export function createProtectedPipelineWorkerComposition(input: ProtectedPipelineWorkerInput) {
@@ -48,12 +51,25 @@ export function createProtectedPipelineWorkerComposition(input: ProtectedPipelin
     && providerComparison.networks && Object.entries(providerComparison.networks).every(([chain,network]) =>
       ['solana','polygon','robinhood-chain'].includes(chain) && pipelineText(network,128)),'provider comparison terms required');
   pipelineDigest(providerComparison.providerIdentity);
-  const { transaction,capabilityAcquire,riskAcquire,valuationAcquire,receiptAcquire,now,maximumAgeMs } = input;
-  const registry = createProtectedPipelineWorkerRegistry({ acquire: capabilityAcquire });
-  const risk = createProtectedPipelineRiskWriter({ acquire: riskAcquire });
-  const valuations = createProtectedPipelineValuationBacking({ acquire: valuationAcquire,now,maximumAgeMs });
-  const receipts = createProtectedPipelinePaperReceiptWriter({ acquire: receiptAcquire });
+  const { transaction,capabilityAcquire,riskAcquire,valuationAcquire,receiptAcquire,now,maximumAgeMs,signal } = input;
+  const checkCancellation = () => pipelineRequire(!signal?.aborted,'worker composition cancelled; recover without resend');
+  const registry = createProtectedPipelineWorkerRegistry({ acquire: capabilityAcquire,signal });
+  const risk = createProtectedPipelineRiskWriter({ acquire: riskAcquire,signal });
+  const valuations = createProtectedPipelineValuationBacking({ acquire: valuationAcquire,now,maximumAgeMs,signal });
+  const receipts = createProtectedPipelinePaperReceiptWriter({ acquire: receiptAcquire,signal });
+  const runtimeTransaction: OwnedObligationTransaction = async operation => {
+    checkCancellation();
+    const result = await transaction(async client => {
+      checkCancellation();
+      const value = await operation(client);
+      checkCancellation();
+      return value;
+    });
+    checkCancellation();
+    return result;
+  };
   function runtime(data: unknown) {
+    checkCancellation();
     const observations = new Map<string,PipelinePaperValuationEvidence>();
     const provider: ReviewedPaperValuationProvider = {
       providerId: providerComparison.providerId,providerIdentity: providerComparison.providerIdentity,
@@ -73,7 +89,7 @@ export function createProtectedPipelineWorkerComposition(input: ProtectedPipelin
           simulatedFeeBps: value.simulatedFeeBps,simulatedFixedFeeUsd: value.simulatedFixedFeeUsd };
       }
     };
-    const owned = createOwnedExecutorRuntimePorts({ transaction,paperValuation: provider,now,maximumAgeMs },unavailableCanonicalQuote);
+    const owned = createOwnedExecutorRuntimePorts({ transaction: runtimeTransaction,paperValuation: provider,now,maximumAgeMs },unavailableCanonicalQuote);
     const scoped = owned.canonicalTransaction(data);
     pipelineRequire(scoped,'canonical worker queue UUID unavailable');
     const job = parseCanonicalWorkerJob(data);
@@ -93,6 +109,7 @@ export function createProtectedPipelineWorkerComposition(input: ProtectedPipelin
       const captured = { ...execution };
       return { requestedDebitUsd: paper.requestedDebitUsd,execute: async intent => {
         // createExactPaperQuote checks intent/sizing/clock BEFORE generating evidence.
+        checkCancellation();
         const outcome = await paper.execute(intent);
         if (outcome.kind !== 'fill') return outcome;
         pipelineRequire(outcome.executor === 'paper-exact-simulated' && intent.execution.id === captured.id
@@ -105,7 +122,10 @@ export function createProtectedPipelineWorkerComposition(input: ProtectedPipelin
           paperValuationEvidenceId: observed.evidenceId,paperValuationDigest: observed.evidenceDigest,
           executor: 'paper-exact-simulated',evidence: pipelineReceiptEvidence(outcome.evidence)
         };
+        // record returns only AFTER the existing checked writer COMMIT. Neither
+        // an INSERT result nor a callback-shaped receipt can reach settlement.
         await receipts.record({ ...body,receiptId: pipelineWorkerReceiptDigest(body) });
+        checkCancellation();
         // The writer callback is NOT receipt ownership. Read exact independently
         // persisted receipt on the canonical runtime client before normal settlement.
         await checkedTransaction(client => assertPipelineWorkerPaperReceiptWithClient(client,intent.attempt,outcome.evidence));
@@ -119,18 +139,6 @@ export function createProtectedPipelineWorkerComposition(input: ProtectedPipelin
       platformMode: async () => 'paper',deliveryOwner: owned.deliveryOwner,now,deliveryLeaseMs: owned.deliveryLeaseMs };
     return { ports,transaction: checkedTransaction,job };
   }
-  async function recoveryContext(client: PoolClient, supplied: WorkerFillSettlement) {
-    const context = await readWorkerExecutionContextWithClient(client,supplied.execution.id);
-    pipelineRequire(context && context.execution.executionMode === 'paper' && context.execution.userId !== null
-      && context.execution.id === supplied.attempt.executionId && context.execution.userId === supplied.attempt.userId,
-    'recovery persisted worker execution unavailable');
-    const a = supplied.execution,b = context.execution;
-    pipelineRequire(pipelineSame([a.id,a.userId,a.signalId,a.sourceTradeId,a.exitLotId,a.chain,a.tokenMint,a.targetAccount,
-      a.executionMode,a.direction,a.requestedBaseQuantity,a.requestedQuoteQuantity],
-    [b.id,b.userId,b.signalId,b.sourceTradeId,b.exitLotId,b.chain,b.tokenMint,b.targetAccount,
-      b.executionMode,b.direction,b.requestedBaseQuantity,b.requestedQuoteQuantity]),'recovery immutable execution differs from persisted scope');
-    return context.execution;
-  }
   return Object.freeze({ status: PIPELINE_WORKER_SOURCE_STATUS,registry,risk,valuations,receipts,
     run(data: unknown) {
       const captured = pipelinePayload(data),owned = runtime(captured);
@@ -140,19 +148,28 @@ export function createProtectedPipelineWorkerComposition(input: ProtectedPipelin
       const captured = pipelinePayload(data),owned = runtime(captured);
       return owned.transaction(client => readPipelineWorkerFinancialReceiptWithClient(client,owned.job.copyExecutionId));
     },
-    reconcileFill(data: unknown, candidate: WorkerFillSettlement) {
+    reconcileFill(data: unknown, candidate: WorkerFillSettlement | PipelineWorkerRecoverySelector) {
       const captured = pipelinePayload(data),owned = runtime(captured);
-      const supplied = captureRecovery(candidate);
-      pipelineRequire(supplied.execution.id === owned.job.copyExecutionId,'recovery queue/canonical execution mismatch');
-      return owned.transaction(async client => reconcilePipelineWorkerPaperFillWithClient(client,
-        { ...supplied,execution: await recoveryContext(client,supplied) }));
+      if ('execution' in candidate) {
+        const supplied = captureRecovery(candidate);
+        pipelineRequire(supplied.execution.id === owned.job.copyExecutionId,'recovery queue/canonical execution mismatch');
+        return owned.transaction(client => reconcilePipelineWorkerPaperFillWithClient(client,supplied,now()));
+      }
+      const supplied = preparePipelineWorkerRecoverySelector(candidate);
+      pipelineRequire(supplied.executionId === owned.job.copyExecutionId,'recovery queue/canonical execution mismatch');
+      return owned.transaction(client => reconcilePipelineWorkerPaperFillWithClient(client,supplied,now()));
     },
-    reconcileValuation(data: unknown, candidate: WorkerValuationSettlement) {
+    reconcileValuation(data: unknown, candidate: WorkerValuationSettlement | PipelineWorkerValuationRecoverySelector) {
       const captured = pipelinePayload(data),owned = runtime(captured);
-      const supplied = captureRecovery(candidate),correction = { ...candidate.correction,now: new Date(candidate.correction.now) };
-      pipelineRequire(supplied.execution.id === owned.job.copyExecutionId,'recovery queue/canonical execution mismatch');
-      return owned.transaction(async client => reconcilePipelineWorkerPaperValuationWithClient(client,
-        { ...supplied,execution: await recoveryContext(client,supplied),correction }));
+      const correction = pipelinePayload({ originalEvidenceId: candidate.correction.originalEvidenceId,
+        correctionId: candidate.correction.correctionId,valuationId: candidate.correction.valuationId,
+        previousCorrectionId: candidate.correction.previousCorrectionId });
+      const supplied = 'execution' in candidate ? { ...captureRecovery(candidate),correction: { ...correction,now: now() } }
+        : { ...preparePipelineWorkerRecoverySelector({ executionId: candidate.executionId,
+          workerFence: candidate.workerFence,evidenceId: candidate.evidenceId }),correction };
+      const executionId = 'execution' in supplied ? supplied.execution.id : supplied.executionId;
+      pipelineRequire(executionId === owned.job.copyExecutionId,'recovery queue/canonical execution mismatch');
+      return owned.transaction(client => reconcilePipelineWorkerPaperValuationWithClient(client,supplied,now()));
     }
   });
 }

@@ -5,11 +5,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createOwnedLpPaperComposition, type LpOwnedCompositionPorts, type LpOwnedProtectedRecord,
   type LpOwnedPurpose, type PoolClient, type UserScope } from '../../../packages/db/src/lp-paper-owned.js';
-import { lpAcquisitionHash, lpExactHash, lpSnapshot, type LpExactPosition, type LpExactOperation,
+import { lpAcquisitionHash, lpExactHash, lpRecenterStrategy, lpSnapshot, type LpExactPosition, type LpExactOperation,
   type LpExactAcquisitionRequest, type LpExactPlan, type LpPaperQuote, type LpPaperReceipt } from '../../../packages/db/src/lp-exact.js';
 import { lpOperationIntent } from '../../../packages/db/src/lp-paper-service.js';
 import { lpAdmissionQuoteInput, lpAdmissionContextKey, type LpQuoteAdmissionContext } from '../../../packages/db/src/lp-paper-admission-contract.js';
 import { lpDurableHistorySqlObserver } from './lp-durable-history-observer.js';
+import { lpCopySqlObserver } from './lp-copy-observer.js';
 
 const userId = '11111111-1111-4111-8111-111111111111', positionId = '22222222-2222-4222-8222-222222222222';
 const operationId = '33333333-3333-4333-8333-333333333333', identityId = '44444444-4444-4444-8444-444444444444';
@@ -73,13 +74,16 @@ function fixture() {
   seed('quote-context', lpAdmissionContextKey(operationContext), operationContext);
   seed('settlement-context', operationId, { operation, position: initial, operationCreatedAt: t });
   const state = { position: null as LpExactPosition | null, acquisition: null as LpExactPosition | null,
-    op: null as LpExactOperation | null, receiptRows: [] as any[], history: [] as any[], quotes: [] as any[], settlements: [] as any[],
+    ops: [] as LpExactOperation[], opTimes: new Map<string, { createdAt: string; completedAt: string | null }>(),
+    opSeq: 0, enqueued: [] as string[], receiptRows: [] as any[], history: [] as any[], quotes: [] as any[], settlements: [] as any[],
+    quotesByIntent: new Map<string, LpPaperQuote>(), receiptsByOpId: new Map<string, LpPaperReceipt>(),
+    plansByStrategyHash: new Map<string, LpExactPlan>(),
     runtimeAllowed: true, admitterAllowed: true, runtimeCommitFailure: false, admissionCommitFailure: false,
     historyOverflow: false, receiptAvailable: true, protectedReads: [] as string[], queries: [] as { role: string; sql: string; values: unknown[] }[],
     mutation: null as (() => void) | null, cap: '100.000000', subscription: subRow };
   const query = (role: 'runtime' | 'admitter') => async (sql: string, values: unknown[] = []) => {
     state.queries.push({ role, sql, values: lpSnapshot(values) });
-    if (sql.includes('lp-owned:runtime-identity') || sql.includes('lp-history:identity')) return { rows: [{ role: state.runtimeAllowed ? 'swat_app' : 'attacker',
+    if (sql.includes('lp-owned:runtime-identity') || sql.includes('lp-history:identity') || sql.includes('public.current_app_user_id()::text AS tenant')) return { rows: [{ role: state.runtimeAllowed ? 'swat_app' : 'attacker',
       session: 'swat_app', row_security: 'on', tenant: userId, bypass: 'off', now: t }] };
     if (sql.includes('lp-admission:restricted')) return { rows: [{ allowed: role === 'admitter' && state.admitterAllowed }] };
     if (sql.includes('lp-admission:clock')) return { rows: [{ now: t }] };
@@ -94,17 +98,24 @@ function fixture() {
       state.quotes.push(row); return { rows: [row] };
     }
     if (sql.includes('lp-admission:quote')) return { rows: state.quotes.filter(r => r.context_key === values[5]) };
-    if (sql.includes('lp-admission:operation-time')) return { rows: state.op ? [{ created_at: t }] : [] };
+    if (sql.includes('lp-admission:operation-time')) {
+      const found = state.ops.find(o => o.userId === values[0] && o.id === values[1] && o.positionId === values[2]);
+      return { rows: found ? [{ created_at: state.opTimes.get(found.id)!.createdAt }] : [] };
+    }
     if (sql.includes('lp-admission:write-settlement')) {
-      const row = { id: admissionId, user_id: userId, quote_admission_id: admissionId, operation_id: operationId,
-        position_id: positionId, position_revision: '0', receipt: JSON.parse(values[5] as string), context: JSON.parse(values[6] as string), admitted_at: t };
+      const row = { id: admissionId, user_id: userId, quote_admission_id: admissionId, operation_id: values[2],
+        position_id: values[3], position_revision: values[4], receipt: JSON.parse(values[5] as string),
+        context: JSON.parse(values[6] as string), admitted_at: t };
       state.settlements.push(row); return { rows: [row] };
     }
-    if (sql.includes('lp-admission:settlement')) return { rows: state.settlements };
-    if (sql.includes('lp-history:operations')) return { rows: state.op ? [{ id: state.op.id, user_id: userId, position_id: positionId,
-      operation_key: state.op.operationKey, receipt_key: state.op.receiptKey, status: state.op.status, data: state.op,
-      created_at: t, completed_at: state.op.status === 'completed' ? t : null }] : [] };
-    if (sql.includes('lp-history:receipts')) return { rows: state.receiptRows };
+    if (sql.includes('lp-admission:settlement')) return { rows: state.settlements.filter(r => r.user_id === values[0] && r.operation_id === values[1]) };
+    if (sql.includes('lp-history:operations')) {
+      return { rows: state.ops.filter(o => o.userId === values[0] && o.positionId === values[1]).map(o => ({
+        id: o.id, user_id: userId, position_id: positionId, operation_key: o.operationKey, receipt_key: o.receiptKey,
+        status: o.status, data: o, created_at: state.opTimes.get(o.id)!.createdAt,
+        completed_at: o.status === 'completed' ? state.opTimes.get(o.id)!.completedAt : null })) };
+    }
+    if (sql.includes('lp-history:receipts') || sql.includes('FROM public.lp_exact_receipts')) return { rows: state.receiptRows };
     if (sql.includes('lp-history:states')) return { rows: state.historyOverflow ? Array.from({ length: 20 }, () => state.history[0]) : state.history };
     if (sql.includes('lp-history:copies')) return { rows: [] };
     if (sql.includes('lp_exact_positions e')) {
@@ -113,18 +124,48 @@ function fixture() {
         state: state.position!.state, auto_rebalance: state.position!.autoRebalance }] : [] };
     }
     if (sql.startsWith('SELECT data FROM lp_exact_operations')) {
-      if (!state.op || sql.includes("status='pending'") && state.op.status !== 'pending') return { rows: [] };
-      return { rows: [{ data: state.op }] };
+      if (sql.includes('WHERE user_id=$1 AND id=$2')) {
+        const o = state.ops.find(x => x.userId === values[0] && x.id === values[1]);
+        return { rows: o ? [{ data: o }] : [] };
+      }
+      if (sql.includes('WHERE user_id=$1 AND operation_key=$2')) {
+        const o = state.ops.find(x => x.userId === values[0] && x.operationKey === values[1]);
+        return { rows: o ? [{ data: o }] : [] };
+      }
+      if (sql.includes("status='pending'") && sql.includes('position_id=$2')) {
+        const o = state.ops.find(x => x.userId === values[0] && x.positionId === values[1] && x.status === 'pending');
+        return { rows: o ? [{ data: o }] : [] };
+      }
+      if (sql.includes("status='pending'") && sql.includes('LIMIT $2')) {
+        return { rows: state.ops.filter(x => x.userId === values[0] && x.status === 'pending').slice(0, Number(values[1])).map(o => ({ data: o })) };
+      }
+      return { rows: [] };
     }
-    if (sql.includes('gen_random_uuid')) return { rows: [{ id: operationId }] };
+    if (sql.includes('gen_random_uuid')) {
+      const seq = ++state.opSeq;
+      const id = seq === 1 ? operationId : `33333333-3333-4333-8333-${String(seq).padStart(12, '0')}`;
+      return { rows: [{ id }] };
+    }
     if (sql.startsWith('INSERT INTO lp_positions')) return { rows: [{ id: positionId }] };
     if (sql.startsWith('INSERT INTO lp_exact_positions')) { state.position = JSON.parse(values[5] as string); state.acquisition = lpSnapshot(state.position); return { rows: [] }; }
-    if (sql.startsWith('INSERT INTO lp_exact_operations')) { state.op = JSON.parse(values[5] as string); return { rows: [] }; }
+    if (sql.startsWith('INSERT INTO lp_exact_operations')) {
+      const op = JSON.parse(values[5] as string) as LpExactOperation;
+      state.ops.push(op); state.opTimes.set(op.id, { createdAt: t, completedAt: null }); return { rows: [] };
+    }
     if (sql.startsWith('INSERT INTO lp_exact_receipts')) {
-      state.receiptRows.push({ user_id: userId, operation_id: operationId, position_id: positionId, receipt_key: values[3],
+      state.receiptRows.push({ user_id: userId, operation_id: values[1], position_id: positionId, receipt_key: values[3],
         provider_id: values[4], receipt_id: values[5], receipt_hash: values[6], data: JSON.parse(values[7] as string), accepted_at: t }); return { rows: [] };
     }
-    if (sql.startsWith('UPDATE lp_exact_operations')) { state.op = JSON.parse(values[2] as string); return { rows: [] }; }
+    if (sql.startsWith('UPDATE lp_exact_operations')) {
+      const updated = JSON.parse(values[2] as string) as LpExactOperation;
+      const idx = state.ops.findIndex(o => o.userId === values[0] && o.id === values[1]);
+      if (idx >= 0) {
+        state.ops[idx] = updated;
+        const tm = state.opTimes.get(updated.id);
+        if (tm) tm.completedAt = t;
+      }
+      return { rows: [] };
+    }
     if (sql.startsWith('UPDATE lp_exact_positions')) { state.position = JSON.parse(values[2] as string); return { rows: [] }; }
     if (sql.startsWith('UPDATE lp_positions')) return { rows: [] };
     if (sql.startsWith('INSERT INTO lp_position_state_history')) {
@@ -135,9 +176,10 @@ function fixture() {
   const runtimeClient = { query: query('runtime') } as unknown as PoolClient;
   const admitterClient = { query: query('admitter') } as unknown as PoolClient;
   const runtime: LpOwnedCompositionPorts['runtimeTransaction'] = async (_s, action) => {
-    const before = lpSnapshot({ position: state.position, acquisition: state.acquisition, op: state.op, receiptRows: state.receiptRows, history: state.history });
+    const before = lpSnapshot({ position: state.position, acquisition: state.acquisition, ops: state.ops, receiptRows: state.receiptRows, history: state.history, opSeq: state.opSeq });
+    const beforeOpTimes = new Map([...state.opTimes.entries()].map(([k, v]) => [k, { ...v }]));
     try { const result = await action(runtimeClient); if (state.runtimeCommitFailure) throw new Error('uncertain runtime COMMIT'); return result; }
-    catch (e) { Object.assign(state, before); throw e; }
+    catch (e) { Object.assign(state, before); state.opTimes = beforeOpTimes; throw e; }
   };
   const admission: LpOwnedCompositionPorts['admissionTransaction'] = async (_s, action) => {
     const before = lpSnapshot({ quotes: state.quotes, settlements: state.settlements });
@@ -149,11 +191,14 @@ function fixture() {
       state.protectedReads.push(`${purpose}:${selector}`); const row = records.get(`${purpose}:${selector}`);
       return row ? lpSnapshot(row) as LpOwnedProtectedRecord<T> : null;
     } },
-    mode: async () => 'paper', plan: async () => { state.mutation?.(); return lpSnapshot(plan); }, enqueue: async () => {},
+    mode: async () => 'paper',
+    plan: async (_quote, strategy) => { state.mutation?.(); return lpSnapshot(state.plansByStrategyHash.get(lpExactHash(strategy)) ?? plan); },
+    enqueue: async ({ operationId: id }) => { state.enqueued.push(id); },
     master: { providerId: 'protected-master', read: async () => null }, copyRisk: { providerId: 'protected-risk', assess: async () => null },
-    protocol: { providerId: q.providerId, networks: { solana: binding.networkId }, quote: async input => lpSnapshot(input.action === 'acquire' ? q : closeQuote),
-      receipt: async () => state.receiptAvailable ? lpSnapshot(receipt) : null } };
-  return { ports, state, records, request, initial, operation, receipt, plan, q, runtime, runtimeClient, seed, subscription,
+    protocol: { providerId: q.providerId, networks: { solana: binding.networkId },
+      quote: async input => lpSnapshot(state.quotesByIntent.get(input.intentHash) ?? (input.action === 'acquire' ? q : closeQuote)),
+      receipt: async input => state.receiptAvailable ? lpSnapshot(state.receiptsByOpId.get(input.operation.id) ?? receipt) : null } };
+  return { ports, state, records, request, initial, operation, receipt, plan, q, now, t, runtime, runtimeClient, seed, subscription,
     service: createOwnedLpPaperComposition(ports), observe: lpDurableHistorySqlObserver(runtime) };
 }
 function runtimeWrites(f: ReturnType<typeof fixture>) { return f.state.queries.filter(q => q.role === 'runtime' && /^(INSERT|UPDATE)/.test(q.sql)); }
@@ -298,6 +343,109 @@ describe('LP strict owned callable factory through actual protected SQL leaves; 
     const accepted = readFileSync(new URL('./lp-copy-observer.ts', import.meta.url), 'utf8');
     expect(accepted).toContain('rows.rows.length <= 1'); expect(accepted).toContain('LIMIT 2');
   });
+  it('completes acquire -> rebalance -> recover -> process -> close -> recover -> process with exact net LP conservation and preserves ONE-CLOSE refusal', async () => {
+    const f = fixture();
+    const acquired = await f.service.acquire(scope, f.request);
+    expect(acquired.revision).toBe('0');
+    expect(acquired.depositMicroUsd).toBe('900719925');
+
+    // Step 2: Rebalance
+    const futureT = new Date(f.now.getTime() + 60_000).toISOString();
+    const rebalanceIntent = lpOperationIntent(acquired, 'rebalance');
+    const rebalanceQuote: LpPaperQuote = { ...f.q, quoteId: 'owned-rebalance-quote', action: 'rebalance',
+      intentHash: rebalanceIntent, amountAfter: acquired.currentAmount, proceedsMicroUsd: '0',
+      pool: { ...f.q.pool, currentPrice: 105 },
+      economics: { basis: 'incremental-rebalance', windowStart: f.t, windowEnd: futureT,
+        extraFeesMicroUsd: '250000', inventoryChangeMicroUsd: '10000', impermanentLossMicroUsd: '20000',
+        gasMicroUsd: '5000', repositionMicroUsd: '15000' } };
+    const rebalanceStrategy = lpRecenterStrategy(f.request.strategy, 105);
+    const rebalancePlan: LpExactPlan = { version: 2, protocol: 'meteora-dlmm', strategy: rebalanceStrategy,
+      poolEvidenceId: f.q.pool.evidenceId,
+      rungs: [{ priceLower: rebalanceStrategy.rangeLower, priceUpper: rebalanceStrategy.rangeUpper,
+        allocation: acquired.currentAmount, binLower: -1, binUpper: 1 }] };
+    const rebalanceOpId = operationId;
+    const rebalanceReceiptKey = `lp-receipt-${lpExactHash([userId, 'owned-rebalance', rebalanceIntent])}`;
+    const rebalanceOp: LpExactOperation = { id: rebalanceOpId, userId, positionId, operationKey: 'owned-rebalance',
+      fingerprint: rebalanceIntent, action: 'rebalance', positionRevision: '0', amountBefore: acquired.currentAmount,
+      quote: rebalanceQuote, plan: rebalancePlan, receiptKey: rebalanceReceiptKey, status: 'pending', receipt: null };
+    const rebalanceOpCtx: LpQuoteAdmissionContext = { kind: 'operation', commit: { position: acquired,
+      operationKey: rebalanceOp.operationKey, fingerprint: rebalanceIntent, action: 'rebalance',
+      quote: rebalanceQuote, plan: rebalancePlan, receiptKey: rebalanceReceiptKey } };
+    const rebalanceReceipt: LpPaperReceipt = { version: 1, providerId: f.q.providerId, receiptId: 'owned-rebalance-receipt',
+      receiptKey: rebalanceReceiptKey, userId, positionId, positionRevision: '0', mode: 'paper', action: 'rebalance',
+      networkId: f.ports.binding.networkId, chain: 'solana', protocol: acquired.protocol, poolAddress: acquired.poolAddress,
+      depositAsset: acquired.depositAsset, quoteId: rebalanceQuote.quoteId, quoteHash: lpExactHash(rebalanceQuote),
+      amountBefore: acquired.currentAmount, amountAfter: rebalanceQuote.amountAfter, proceedsMicroUsd: '0',
+      collectedFeesMicroUsd: '300000', executionCostsMicroUsd: '80000', settledAt: f.t, finality: 'paper-settled' };
+    f.state.quotesByIntent.set(rebalanceIntent, rebalanceQuote);
+    f.state.plansByStrategyHash.set(lpExactHash(rebalanceStrategy), rebalancePlan);
+    f.state.receiptsByOpId.set(rebalanceOpId, rebalanceReceipt);
+    f.seed('quote', rebalanceQuote.quoteId, rebalanceQuote);
+    f.seed('quote-context', lpAdmissionContextKey(rebalanceOpCtx), rebalanceOpCtx);
+    f.seed('receipt', rebalanceReceipt.receiptId, rebalanceReceipt);
+    f.seed('settlement-context', rebalanceOpId, { operation: rebalanceOp, position: acquired, operationCreatedAt: f.t });
+
+    const reqRebalance = await f.service.requestOperation(scope, { positionId, operationKey: 'owned-rebalance', action: 'rebalance' });
+    expect(reqRebalance.operation.status).toBe('pending');
+    expect(reqRebalance.operation.id).toBe(rebalanceOpId);
+    expect(await f.service.recover(scope)).toEqual({ queued: 1, deferred: 0 });
+    expect(f.state.enqueued).toContain(rebalanceOpId);
+    const doneRebalance = await f.service.process(scope, { operationId: rebalanceOpId, chain: 'solana' });
+    expect(doneRebalance.operation.status).toBe('completed');
+    expect(f.state.position).toMatchObject({ revision: '1', state: 'active',
+      cumulativeFeesMicroUsd: '300000', cumulativeCostsMicroUsd: '80000', realizedMicroUsd: null });
+
+    // Step 3: Close after rebalance
+    const rebalanced = lpSnapshot(f.state.position!);
+    const closeIntent = lpOperationIntent(rebalanced, 'close');
+    const closeQuote2: LpPaperQuote = { ...f.q, quoteId: 'owned-close-2-quote', action: 'close', intentHash: closeIntent,
+      amountAfter: { raw: '0', scale: 18 }, proceedsMicroUsd: '950000000' };
+    const closeOpId = '33333333-3333-4333-8333-000000000002';
+    const closeReceiptKey2 = `lp-receipt-${lpExactHash([userId, 'owned-close-2', closeIntent])}`;
+    const closeOp2: LpExactOperation = { id: closeOpId, userId, positionId, operationKey: 'owned-close-2',
+      fingerprint: closeIntent, action: 'close', positionRevision: '1', amountBefore: rebalanced.currentAmount,
+      quote: closeQuote2, plan: null, receiptKey: closeReceiptKey2, status: 'pending', receipt: null };
+    const closeOpCtx2: LpQuoteAdmissionContext = { kind: 'operation', commit: { position: rebalanced,
+      operationKey: closeOp2.operationKey, fingerprint: closeIntent, action: 'close',
+      quote: closeQuote2, plan: null, receiptKey: closeReceiptKey2 } };
+    const closeReceipt2: LpPaperReceipt = { version: 1, providerId: f.q.providerId, receiptId: 'owned-close-2-receipt',
+      receiptKey: closeReceiptKey2, userId, positionId, positionRevision: '1', mode: 'paper', action: 'close',
+      networkId: f.ports.binding.networkId, chain: 'solana', protocol: rebalanced.protocol, poolAddress: rebalanced.poolAddress,
+      depositAsset: rebalanced.depositAsset, quoteId: closeQuote2.quoteId, quoteHash: lpExactHash(closeQuote2),
+      amountBefore: rebalanced.currentAmount, amountAfter: closeQuote2.amountAfter, proceedsMicroUsd: '950000000',
+      collectedFeesMicroUsd: '100001', executionCostsMicroUsd: '50002', settledAt: f.t, finality: 'paper-settled' };
+    f.state.quotesByIntent.set(closeIntent, closeQuote2);
+    f.state.receiptsByOpId.set(closeOpId, closeReceipt2);
+    f.seed('quote', closeQuote2.quoteId, closeQuote2);
+    f.seed('quote-context', lpAdmissionContextKey(closeOpCtx2), closeOpCtx2);
+    f.seed('receipt', closeReceipt2.receiptId, closeReceipt2);
+    f.seed('settlement-context', closeOpId, { operation: closeOp2, position: rebalanced, operationCreatedAt: f.t });
+
+    const reqClose = await f.service.requestOperation(scope, { positionId, operationKey: 'owned-close-2', action: 'close' });
+    expect(reqClose.operation.status).toBe('pending');
+    expect(reqClose.operation.id).toBe(closeOpId);
+    expect(await f.service.recover(scope)).toEqual({ queued: 1, deferred: 0 });
+    expect(f.state.enqueued).toContain(closeOpId);
+    const doneClose = await f.service.process(scope, { operationId: closeOpId, chain: 'solana' });
+    expect(doneClose.operation.status).toBe('completed');
+
+    // Step 4: Post-close recover + durable history observer + conservation + ONE-CLOSE preservation
+    await expect(f.service.recover(scope)).resolves.toEqual({ queued: 0, deferred: 0 });
+    const observed = await f.observe(scope, positionId);
+    expect(observed.acquisition).toEqual(f.initial);
+    expect(observed.operations.map(o => o.data.action)).toEqual(['rebalance', 'close']);
+    expect(observed.operations.every(o => o.data.status === 'completed')).toBe(true);
+    expect(observed.receipts).toHaveLength(2);
+    expect(new Set(observed.receipts.map(r => r.operationId)).size).toBe(2);
+    expect(observed.history.map(h => h.toState)).toEqual(['building', 'active', 'active', 'closed']);
+    expect(observed.position).toMatchObject({ revision: '2', state: 'closed', currentAmount: { raw: '0', scale: 18 } });
+    const totalFees = BigInt('300000') + BigInt('100001');
+    const totalCosts = BigInt('80000') + BigInt('50002');
+    expect(BigInt(observed.position.realizedMicroUsd!)).toBe(
+      BigInt('950000000') + totalFees - totalCosts - BigInt(observed.acquisition.depositMicroUsd)
+    );
+    await expect(lpCopySqlObserver(f.runtime)(scope, positionId)).rejects.toThrow('one-close scenario has additional receipts');
+  });
 });
 
 describe('LP source owned integration graph containment, authored only until coordinator freeze', () => {
@@ -315,11 +463,11 @@ describe('LP source owned integration graph containment, authored only until coo
           '@swat/db/dist/*.js': ['packages/db/src/*.ts'], '@swat/shared': ['packages/shared/src/index.ts'] } } }));
         process.env.TSX_TSCONFIG_PATH = config; const { tsImport } = await import('tsx/esm/api'); const loaded = new Set();
         const load = path => tsImport(path, { parentURL: import.meta.url, tsconfig: config, onImport: url => loaded.add(new URL(url).pathname) });
-        const api = await load('./tests/qualification/wave4/lp-owned-composition.ts');
-        const observer = await load('./tests/qualification/wave4/lp-durable-history-observer.ts');
-        if (typeof api.createOwnedLpPaperComposition !== 'function' || typeof observer.lpDurableHistorySqlObserver !== 'function') throw new Error('Missing actual LP APIs');
+        const api = await load('./packages/db/src/lp-paper-owned.ts');
+        if (typeof api.createOwnedLpPaperComposition !== 'function') throw new Error('Missing actual LP APIs');
         let refused = false; try { api.createOwnedLpPaperComposition({}); } catch (e) { refused = String(e).includes('distinct owned'); }
         if (!refused) throw new Error('Missing owned inputs accepted');
+        await new Promise(resolve => setTimeout(resolve, 25));
         for (const name of ['lp-paper-owned.ts','lp-paper-service.ts','lp-paper-store.ts','lp-paper-admission-store.ts','lp-paper-admission-contract.ts','lp-exact.ts']) {
           if (!loaded.has(resolve('packages/db/src', name))) throw new Error('Actual source leaf missing ' + name);
         }
@@ -335,5 +483,10 @@ describe('LP source owned integration graph containment, authored only until coo
       cwd: fileURLToPath(new URL('../../../', import.meta.url)), timeout: 30000, maxBuffer: 1024 * 1024,
       env: { ...process.env, NODE_ENV: 'test', DATABASE_URL: 'postgres://swat_app:offline@127.0.0.1:1/offline', DATABASE_READ_URL: '' } });
     expect(JSON.parse(stdout.trim())).toEqual({ ownedConstructors: 0, control: true, runtimeAccepted: false });
+    const facade = readFileSync(new URL('./lp-owned-composition.ts', import.meta.url), 'utf8');
+    const observerSrc = readFileSync(new URL('./lp-durable-history-observer.ts', import.meta.url), 'utf8');
+    expect(facade).toContain("'@swat/db/dist/lp-paper-owned.js'");
+    expect(observerSrc).toContain("'@swat/db/dist/lp-exact.js'");
+    expect(`${facade}\n${observerSrc}`).not.toMatch(/from ['"](?:@swat\/db|@swat\/db\/dist\/(?:index|client|transaction|tenancy|lp-copy-trading)\.js)['"]/);
   }, 35000);
 });

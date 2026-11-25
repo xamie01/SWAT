@@ -84,7 +84,7 @@ describe('catalog evidence injected contracts; no pg_dump or SQL execution',()=>
   });
   it('087 absent capability refuses before migration/catalog effects; inert COMMIT precedes external handoff',async()=>{
     const source=await offlineMigrationSource();
-    const sql=source.files.at(-1)!.sql;
+    const sql=source.files.find(m=>m.file==='087_wave4_protected_authentication.sql')!.sql;
     mocks.source.mockResolvedValue(source);
     const order:string[]=[];
     const client={query:vi.fn(async(s:string)=>{order.push(s);return {
@@ -115,7 +115,7 @@ describe('catalog evidence injected contracts; no pg_dump or SQL execution',()=>
     mocks.validate.mockRejectedValue(new Error('fresh disabled catalog drift'));
     const deadline=new Deadline(1000);
     try{await expect(catalog({query:vi.fn()},'postgresql://swat_migrator:synthetic@127.0.0.1:15432/wave4',deadline,undefined,installation)).rejects.toThrow('fresh disabled');
-      expect(mocks.validate).toHaveBeenCalledWith(installation,source.files.at(-1)!.sql,'disabled');
+      expect(mocks.validate).toHaveBeenCalledWith(installation,source.files.find(m=>m.file==='087_wave4_protected_authentication.sql')!.sql,'disabled');
       expect(mocks.install).not.toHaveBeenCalled();expect(mocks.command).not.toHaveBeenCalled();}
     finally{deadline.dispose();}
   });

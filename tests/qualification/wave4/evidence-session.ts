@@ -1,4 +1,4 @@
-import { validateConfig, qualify, requireCheck, type QualificationConfig, type QualificationPorts } from './core.js';
+import { sanitizeFailure, validateConfig, qualify, requireCheck, type QualificationConfig, type QualificationPorts } from './core.js';
 import { createEvidenceWriter, nonsecretEvidence } from './evidence-writer.js';
 
 type CaptureEvidence = Awaited<ReturnType<typeof createEvidenceWriter>>['write'];
@@ -16,6 +16,7 @@ export async function runEvidenceQualification(input: QualificationConfig, direc
   let closeComplete = false;
   let cleanupRecorded = false;
   let reportRecorded = false;
+  let failureRecorded = false;
   let report: Awaited<ReturnType<typeof qualify>> | null = null;
   try {
     await writer.write('run.json', { version: 1, runId: config.candidate.runId, referenceRunId: config.reference.runId,
@@ -54,6 +55,22 @@ export async function runEvidenceQualification(input: QualificationConfig, direc
         }
       }
     });
+    if (report.failure !== null || report.failureArtifacts.length > 0) {
+      failureRecorded = true;
+      await writer.write('failure.json', nonsecretEvidence({
+        failed: true,
+        failure: report.failure,
+        failureArtifact: report.failureArtifact,
+        failureArtifacts: report.failureArtifacts,
+        inspectionComplete,
+        closeStarted,
+        closeComplete,
+        reportRecorded: false,
+        runtimeAccepted: false,
+        liveCapabilityAccepted: false,
+        productionReady: false
+      }));
+    }
     await writer.write('qualification.json', report);
     reportRecorded = true;
     const records = await writer.settle();
@@ -63,10 +80,23 @@ export async function runEvidenceQualification(input: QualificationConfig, direc
     writer.seal();
     await writer.settle();
     return report;
-  } catch {
+  } catch (error) {
     try {
-      await writer.write('failure.json', { failed: true, inspectionComplete, closeStarted, closeComplete,
-        reportRecorded, runtimeAccepted: false, liveCapabilityAccepted: false, productionReady: false });
+      if (!failureRecorded) {
+        const artifact = sanitizeFailure(error, 'settle', null);
+        await writer.write('failure.json', nonsecretEvidence({
+          failed: true,
+          failureArtifact: artifact,
+          failureArtifacts: [artifact],
+          inspectionComplete,
+          closeStarted,
+          closeComplete,
+          reportRecorded,
+          runtimeAccepted: false,
+          liveCapabilityAccepted: false,
+          productionReady: false
+        }));
+      }
     } finally {
       if (!cleanupRecorded) {
         await writer.write('cleanup-final.json', { closeStarted, closeComplete, inspectionComplete });

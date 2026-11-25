@@ -50,7 +50,8 @@ function fixture() {
       if (sql.includes('INSERT INTO user_execution_grants')) {
         if (grant) return reply();
         grant = { id: values[0], user_id: values[1], chain: values[2], grant_kind: values[3], account_address: values[4],
-          sealed_secret: values[5], has_sealed_secret: true, key_version: values[6], secret_binding: JSON.parse(values[7] as string),
+          sealed_secret: values[5], has_sealed_secret: values[6] !== null, key_version: values[6],
+          secret_binding: values[7] ? JSON.parse(values[7] as string) : null,
           scope_policy: JSON.parse(values[8] as string), expires_at: values[9], revoked_at: null, status: 'active',
           created_at: new Date(now), lifecycle_revision: '1', revocation_tombstone: null };
         return reply([grant]);
@@ -155,11 +156,16 @@ describe('P5a owned canonical custody composition; inert IO only, no keys/signin
   });
   it('commits independent admission before enrollment, redacts public grant and zeroes one-use bytes', async () => {
     const f = fixture(), custody = createOwnedCustodyComposition(f.ports);
-    expect(await custody.enroll(scope, f.input)).toMatchObject({ id: GRANT, hasSealedSecret: true });
+    const enrolled = await custody.enroll(scope, f.input);
+    expect(enrolled).toMatchObject({ id: GRANT, hasSealedSecret: true, keyVersion: 1 });
+    expect(enrolled).not.toHaveProperty('sealedSecret');
+    expect(enrolled).not.toHaveProperty('secretBinding');
+    const insertCall = f.calls.find(c => c.sql.includes('INSERT INTO user_execution_grants'))!;
+    expect(insertCall.sql.split('RETURNING')[1]).not.toMatch(/\b(sealed_secret|secret_binding)\b/);
     expect(f.calls.findIndex(c => c.sql.includes('INSERT INTO custody_secret_admissions'))).toBeLessThan(
       f.calls.findIndex(c => c.sql.includes('INSERT INTO user_execution_grants')));
     expect(f.calls.find(c => c.sql.includes('INSERT INTO custody_secret_admissions'))!.identity).toBe('swat_custody_writer');
-    expect(f.calls.find(c => c.sql.includes('INSERT INTO user_execution_grants'))!.identity).toBe('swat_app');
+    expect(insertCall.identity).toBe('swat_app');
     expect(f.wrapped!.every(b => b === 0)).toBe(true); expect([...f.input.secret]).toEqual([17,33,65,129]);
     const session = await custody.session(scope, GRANT, f.input.chain); let held: Uint8Array | undefined;
     await session.use(async bytes => { held = bytes; expect([...bytes]).toEqual([...f.input.secret]); });
@@ -292,5 +298,57 @@ describe('P5a owned canonical custody composition; inert IO only, no keys/signin
     await expect(f.ports.database.admission.transaction(scope, c => prepared(c as any))).resolves.toMatchObject({ outcome: 'committed' });
     await expect(custody.admitReplacement(scope, f.journal().admissions[0]!.record, { ...auth, authenticatedReceipt: 'substitution' })).rejects.toThrow();
     expect(f.admissions).toHaveLength(1);
+  });
+  it('refuses terminal compromised ABA replacement and lifecycle transition while preserving tombstone', async () => {
+    const f = fixture(), custody = createOwnedCustodyComposition(f.ports); await custody.enroll(scope, f.input);
+    const later = new Date(baseTime.getTime() + 1);
+    const next: CustodyEnrollmentRecord = { id: GRANT, chain: f.input.chain, grantKind: f.input.grantKind,
+      accountAddress: ACCOUNT, keyVersion: 2, scopePolicy: { max: '900719925474099312345' }, expiresAt: new Date(f.input.expiresAt),
+      sealedSecret: envelope(2), secretBinding: buildCustodySecretBinding({ deploymentId: 'inert-deployment', chainId: '4663',
+        userId: USER, grantId: GRANT, chain: f.input.chain, grantKind: f.input.grantKind, accountAddress: ACCOUNT,
+        keyVersion: 2, scopePolicy: { max: '900719925474099312345' }, expiresAt: f.input.expiresAt }) };
+    const auth = { wrapperId: 'inert-wrapper', serviceIdentity: 'inert-wrap-service', authenticatedReceipt: 'inert-receipt' };
+    await custody.transition(scope, { grantId: GRANT, chain: f.input.chain, expectedLifecycleRevision: '1', status: 'compromised', now: baseTime });
+    f.setNow(later);
+    await custody.admitReplacement(scope, next, auth);
+    await expect(custody.replace(scope, { expectedLifecycleRevision: '2', record: next, now: later })).rejects.toThrow('custody-stale');
+    await expect(custody.transition(scope, { grantId: GRANT, chain: f.input.chain, expectedLifecycleRevision: '2', status: 'revoked', now: later })).rejects.toThrow('custody-stale');
+    expect(f.snapshot()).toMatchObject({ status: 'compromised', lifecycleRevision: '2', revocationTombstone: baseTime });
+  });
+  it('refuses pre-revocation stale admission ABA when acceptedAt <= revocationTombstone', async () => {
+    const f = fixture(), custody = createOwnedCustodyComposition(f.ports); await custody.enroll(scope, f.input);
+    const later = new Date(baseTime.getTime() + 1);
+    const next: CustodyEnrollmentRecord = { id: GRANT, chain: f.input.chain, grantKind: f.input.grantKind,
+      accountAddress: ACCOUNT, keyVersion: 2, scopePolicy: { max: '900719925474099312345' }, expiresAt: new Date(f.input.expiresAt),
+      sealedSecret: envelope(2), secretBinding: buildCustodySecretBinding({ deploymentId: 'inert-deployment', chainId: '4663',
+        userId: USER, grantId: GRANT, chain: f.input.chain, grantKind: f.input.grantKind, accountAddress: ACCOUNT,
+        keyVersion: 2, scopePolicy: { max: '900719925474099312345' }, expiresAt: f.input.expiresAt }) };
+    const auth = { wrapperId: 'inert-wrapper', serviceIdentity: 'inert-wrap-service', authenticatedReceipt: 'inert-receipt' };
+    await custody.admitReplacement(scope, next, auth);
+    f.setNow(later);
+    await custody.transition(scope, { grantId: GRANT, chain: f.input.chain, expectedLifecycleRevision: '1', status: 'revoked', now: later });
+    await expect(custody.replace(scope, { expectedLifecycleRevision: '2', record: next, now: later })).rejects.toThrow('custody-stale');
+    expect(f.snapshot()).toMatchObject({ status: 'revoked', keyVersion: 1, lifecycleRevision: '2', revocationTombstone: later });
+  });
+  it('refuses a stale authority handle across revocation and replacement', async () => {
+    const f = fixture(), custody = createOwnedCustodyComposition(f.ports); await custody.enroll(scope, f.input);
+    const staleVerdict = await custody.authority(scope, GRANT).authorize(f.request);
+    expect(staleVerdict.kind).toBe('granted');
+    if (staleVerdict.kind !== 'granted') throw new Error('unexpected denial');
+    const later = new Date(baseTime.getTime() + 1);
+    const next: CustodyEnrollmentRecord = { id: GRANT, chain: f.input.chain, grantKind: f.input.grantKind,
+      accountAddress: ACCOUNT, keyVersion: 2, scopePolicy: { max: '900719925474099312345' }, expiresAt: new Date(f.input.expiresAt),
+      sealedSecret: envelope(2), secretBinding: buildCustodySecretBinding({ deploymentId: 'inert-deployment', chainId: '4663',
+        userId: USER, grantId: GRANT, chain: f.input.chain, grantKind: f.input.grantKind, accountAddress: ACCOUNT,
+        keyVersion: 2, scopePolicy: { max: '900719925474099312345' }, expiresAt: f.input.expiresAt }) };
+    const auth = { wrapperId: 'inert-wrapper', serviceIdentity: 'inert-wrap-service', authenticatedReceipt: 'inert-receipt' };
+    await custody.transition(scope, { grantId: GRANT, chain: f.input.chain, expectedLifecycleRevision: '1', status: 'revoked', now: baseTime });
+    await custody.transition(scope, { grantId: GRANT, chain: f.input.chain, expectedLifecycleRevision: '2', status: 'retired', now: baseTime });
+    f.setNow(later);
+    await custody.admitReplacement(scope, next, auth);
+    await custody.replace(scope, { expectedLifecycleRevision: '3', record: next, now: later });
+    expect(f.snapshot()).toMatchObject({ status: 'active', keyVersion: 2, lifecycleRevision: '5' });
+    await expect(staleVerdict.authority.sign(f.payload)).resolves.toMatchObject({ kind: 'refused' });
+    expect(f.executed).toBe(0);
   });
 });
