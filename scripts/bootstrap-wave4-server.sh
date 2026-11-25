@@ -80,9 +80,10 @@ pnpm --version
 pg_dump --version
 k6 version
 
-echo "=== [2/7] Installing Node dependencies & building @swat/db ==="
+echo "=== [2/7] Installing Node dependencies & building @swat/shared and @swat/db ==="
 cd "$SWAT_DIR"
 pnpm install --frozen-lockfile
+pnpm --filter @swat/shared build
 pnpm --filter @swat/db build
 
 echo "=== [3/7] Pulling pinned container images ==="
