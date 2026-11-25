@@ -127,13 +127,15 @@ APP_PASS="$(openssl rand -hex 24)"
 MEM_BYTES=1073741824
 NANO_CPUS=1000000000
 
-echo "=== [5/7] Creating isolated internal Docker networks & hardened containers ==="
-docker network create --internal \
+echo "=== [5/7] Creating isolated Docker bridge networks (no outbound NAT) & hardened containers ==="
+docker network create --driver bridge \
+  --opt "com.docker.network.bridge.enable_ip_masquerade=false" \
   --label "swat.integration.run-id=$REF_RUN_ID" \
   --label "swat.integration.purpose=reference" \
   swat-w4-ref-net >/dev/null
 
-docker network create --internal \
+docker network create --driver bridge \
+  --opt "com.docker.network.bridge.enable_ip_masquerade=false" \
   --label "swat.integration.run-id=$CAND_RUN_ID" \
   --label "swat.integration.purpose=candidate" \
   swat-w4-cand-net >/dev/null

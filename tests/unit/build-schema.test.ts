@@ -96,6 +96,37 @@ describe('schema canonical source and fail-closed qualification', () => {
     await expect(assertDisposableOwnedInfrastructure({...owned,postgresId:'shared;docker stop all'})).rejects.toThrow(/full Docker identity/);
     expect(effects.calls).toEqual([]);
   });
+  it('accepts isolated bridge without IP masquerade (Docker 29+) and rejects unisolated bridge', async () => {
+    const netId = '5'.repeat(64);
+    const labels = { 'swat.integration.run-id': runId, 'swat.integration.purpose': 'reference', 'swat.integration.owned': 'true' };
+    const makeInspect = (masquerade: string) => vi.fn(async (kind: string, id: string) => {
+      if (kind === 'network') {
+        return {
+          Id: netId,
+          Internal: false,
+          Driver: 'bridge',
+          Options: { 'com.docker.network.bridge.enable_ip_masquerade': masquerade },
+          Labels: labels,
+          Containers: { [owned.postgresId]: {}, [owned.redisId]: {} }
+        };
+      }
+      const isPg = id === owned.postgresId;
+      return {
+        Id: id,
+        Image: `sha256:${isPg ? owned.postgresImageId : owned.redisImageId}`,
+        State: { Running: true },
+        Config: { Labels: labels },
+        HostConfig: { Privileged: false, ReadonlyRootfs: true, Binds: [], CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], PidMode: '', IpcMode: '' },
+        Mounts: [{ Type: 'tmpfs', Destination: isPg ? '/var/lib/postgresql/data' : '/data' }],
+        NetworkSettings: {
+          Ports: { [isPg ? '5432/tcp' : '6379/tcp']: [{ HostIp: '127.0.0.1', HostPort: isPg ? '55432' : '56379' }] },
+          Networks: { only: { NetworkID: netId, IPAddress: isPg ? '172.18.0.2' : '172.18.0.3' } }
+        }
+      };
+    });
+    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('false'))).resolves.toEqual({ postgresAddress: '172.18.0.2' });
+    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('true'))).rejects.toThrow(/Disposable network is shared/);
+  });
   it('087 requires separately supplied installation capabilities before reference/candidate inspection',async()=>{
     const inventory=await discoverMigrationInventory(new URL('packages/db/sql/',root).pathname);
     const selection=reviewMigrationSelection(createMigrationSelectionProposal(inventory),'offline-auth-source-review');

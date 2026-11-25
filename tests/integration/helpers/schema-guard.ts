@@ -78,7 +78,10 @@ export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastruc
     }
   }
   const network = await inspectMetadata('network', networkId!);
-  if (network.Id !== networkId || network.Internal !== true
+  const isolatedNetwork = network.Internal === true
+    || (network.Driver === 'bridge'
+      && network.Options?.['com.docker.network.bridge.enable_ip_masquerade'] === 'false');
+  if (network.Id !== networkId || !isolatedNetwork
     || network.Labels?.['swat.integration.run-id'] !== declaration.runId
     || network.Labels?.['swat.integration.purpose'] !== input.purpose
     || Object.keys(network.Containers ?? {}).sort().join(',') !== [input.postgresId,input.redisId].sort().join(',')) {
