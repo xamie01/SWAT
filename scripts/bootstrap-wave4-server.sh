@@ -25,6 +25,7 @@ fi
 
 echo "=== [1/7] Installing OS prerequisites (Docker, Node 22, pnpm, pg_dump 16, PgBouncer, k6) ==="
 export DEBIAN_FRONTEND=noninteractive
+$SUDO rm -f /etc/apt/sources.list.d/k6.list /usr/share/keyrings/k6-archive-keyring.gpg
 $SUDO apt-get update -y
 $SUDO apt-get install -y ca-certificates curl gnupg lsb-release jq openssl uuid-runtime util-linux pgbouncer
 
@@ -63,10 +64,13 @@ if ! command -v pg_dump >/dev/null 2>&1 || ! pg_dump --version | grep -qE '\b16\
 fi
 
 if ! command -v k6 >/dev/null 2>&1; then
-  curl -fsSL https://dl.k6.io/key.gpg | $SUDO gpg --dearmor --yes -o /usr/share/keyrings/k6-archive-keyring.gpg
-  echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | $SUDO tee /etc/apt/sources.list.d/k6.list >/dev/null
-  $SUDO apt-get update -y
-  $SUDO apt-get install -y k6
+  K6_ARCH="$(dpkg --print-architecture)"
+  K6_VER="$(curl -fsSL https://api.github.com/repos/grafana/k6/releases/latest | jq -r '.tag_name')"
+  K6_TMP="$(mktemp -d)"
+  curl -fsSL "https://github.com/grafana/k6/releases/download/${K6_VER}/k6-${K6_VER}-linux-${K6_ARCH}.tar.gz" -o "${K6_TMP}/k6.tar.gz"
+  tar -xzf "${K6_TMP}/k6.tar.gz" -C "${K6_TMP}"
+  $SUDO install -m 0755 "${K6_TMP}/k6-${K6_VER}-linux-${K6_ARCH}/k6" /usr/local/bin/k6
+  rm -rf "${K6_TMP}"
 fi
 
 echo "Tool versions:"
