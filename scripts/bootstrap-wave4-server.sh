@@ -160,8 +160,7 @@ start_pg() {
     -e "POSTGRES_DB=$db" \
     -e "POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256" \
     -e "PGDATA=/var/lib/postgresql/data" \
-    "$PG_IMAGE" \
-    postgres -c unix_socket_directories=/tmp >/dev/null
+    "$PG_IMAGE" >/dev/null
 }
 
 start_redis() {
