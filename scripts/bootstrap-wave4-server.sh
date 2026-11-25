@@ -207,6 +207,22 @@ for port_db in "${REF_PG_PORT}:${REF_DB}" "${CAND_PG_PORT}:${CAND_DB}"; do
   done
   PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$port" -U wave4_dba -d "$db" -v ON_ERROR_STOP=1 -f "$SWAT_DIR/deploy/postgres/roles.sql"
   PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$port" -U wave4_dba -d "$db" -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+DECLARE role_name text;
+  extra_roles text[] := ARRAY[
+    'swat_fanout',
+    'swat_wave4_authority_writer', 'swat_wave4_financial_writer',
+    'swat_lp_initializer', 'swat_custody_reader', 'swat_custody_observer'
+  ];
+BEGIN
+  FOREACH role_name IN ARRAY extra_roles LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = role_name) THEN
+      EXECUTE format('CREATE ROLE %I NOLOGIN PASSWORD NULL NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION', role_name);
+    END IF;
+    EXECUTE format('ALTER ROLE %I SET row_security=on', role_name);
+    EXECUTE format('ALTER ROLE %I SET search_path=pg_catalog', role_name);
+  END LOOP;
+END \$\$;
 ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${MIG_PASS}';
 ALTER ROLE swat_app WITH LOGIN PASSWORD '${APP_PASS}';
 SQL
