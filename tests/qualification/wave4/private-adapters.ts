@@ -16,6 +16,7 @@ import {
   createCommitFence,
   executeGateWithCommitFence,
   gatePassed,
+  normalizeServerAddress,
   quarantineClient,
   requireCheck,
   result,
@@ -289,7 +290,7 @@ export function createPrivateCoordinatorPorts(
             )
           ).rows[0];
           requireCheck(
-            row?.address === activeAddresses.candidate.postgres
+            normalizeServerAddress(row?.address) === activeAddresses.candidate.postgres
               && row.port === 5432
               && row.database === new URL(c.candidate.postgres.url).pathname.slice(1),
             'Runtime/pool connected to uninspected server'

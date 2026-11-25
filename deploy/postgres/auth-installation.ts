@@ -34,7 +34,7 @@ export function assertAuthenticationInstallation(input:AuthenticationInstallatio
 export async function assertAuthenticationTarget(client:AuthQueryClient,expected:AuthInstallationTarget,observeSystem=true):Promise<void> {
  const rows=(await client.query(`SELECT current_database() AS database,inet_server_addr()::text AS address,inet_server_port() AS port${observeSystem?', system_identifier::text AS system_identifier FROM pg_catalog.pg_control_system()':''}`)).rows;
  const a=rows[0];
- if(rows.length!==1||!a||a.database!==expected.database||a.address!==expected.address||a.port!==expected.port||observeSystem&&a.system_identifier!==expected.systemIdentifier)throw new Error('Authentication direct owned lease target differs from inspected cluster');
+ if(rows.length!==1||!a||a.database!==expected.database||(typeof a.address==='string'?a.address.replace(/\/(?:32|128)$/,''):a.address)!==expected.address||a.port!==expected.port||observeSystem&&a.system_identifier!==expected.systemIdentifier)throw new Error('Authentication direct owned lease target differs from inspected cluster');
 }
 function acquisition(input:AuthenticationInstallation):()=>Promise<AuthClientLease> {
  assertAuthenticationInstallation(input);

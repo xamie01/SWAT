@@ -1,4 +1,4 @@
-import { assertion, hash, requireCheck, result, type QualificationConfig, type SqlClient } from './core.js';
+import { assertion, hash, normalizeServerAddress, requireCheck, result, type QualificationConfig, type SqlClient } from './core.js';
 import { Deadline } from './containment.js';
 import { lpRequest, lpService, runtimeTransaction, syntheticDeposit } from './domains.js';
 import { OwnedClients, inspectEnvironment, bindRedisIdentity } from './infrastructure.js';
@@ -17,7 +17,7 @@ export async function qualifyQueueStall(client:SqlClient,config:QualificationCon
     const addresses = await inspectEnvironment(config.candidate,'candidate',deadline);
     await runtimeTransaction(client,null,async c=>{
       const row = (await c.query('SELECT inet_server_addr()::text AS address,inet_server_port() AS port,current_database() AS database')).rows[0];
-      requireCheck(row?.address === addresses.postgres && row.port === 5432
+      requireCheck(normalizeServerAddress(row?.address) === addresses.postgres && row.port === 5432
         && row.database === new URL(config.candidate.postgres.url).pathname.slice(1),'Queue scenario runtime backend mismatch');
     });
     const redis = await clients.redis(config.candidate.redis.url,`wave4-queue-observer-${runId}`);

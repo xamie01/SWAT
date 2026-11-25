@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { privateConfig } from './config.js';
-import { assertion, gates, requireCheck, result, transaction, type Gate } from './core.js';
+import { assertion, gates, normalizeServerAddress, requireCheck, result, transaction, type Gate } from './core.js';
 import { runEvidenceQualification } from './evidence-session.js';
 import { OwnedClients, inspectBoth, bindPostgres, bindRedis, migratePristine, catalog } from './infrastructure.js';
 import { qualifyDomains, qualifyRoles, runtimeTransaction } from './domains.js';
@@ -87,7 +87,7 @@ async function runDraftQualification(configPath: string, output: string,authenti
         // A pooled connection must still reach the candidate, not a server with merely the same database name.
         for (const client of [runtime, pooled, second, observer]) await runtimeTransaction(client, null, async tx => {
           const row = (await tx.query('SELECT inet_server_addr()::text AS address,inet_server_port() AS port,current_database() AS database')).rows[0];
-          requireCheck(row.address === addresses.candidate.postgres && row.port === 5432
+          requireCheck(normalizeServerAddress(row.address) === addresses.candidate.postgres && row.port === 5432
             && row.database === new URL(c.candidate.postgres.url).pathname.slice(1), 'Runtime/pool connected to uninspected server');
         });
         const source=await canonicalMigrationSource(c.migrationSelection);

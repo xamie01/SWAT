@@ -2,7 +2,7 @@ import { Deadline } from './containment.js';
 import { privateConfig } from './config.js';
 import { OwnedClients, inspectEnvironment, bindPostgres, bindRedis } from './infrastructure.js';
 import { lpService, runtimeTransaction } from './domains.js';
-import { transaction, requireCheck } from './core.js';
+import { normalizeServerAddress, transaction, requireCheck } from './core.js';
 import type { WorkerInput } from './faults.js';
 import type { UserScope } from '../../../packages/db/src/tenancy.js';
 
@@ -33,7 +33,7 @@ process.once('message', async (input: WorkerInput) => {
     const client = await clients.postgres(config.runtimeUrl, `wave4-child-runtime-${config.candidate.runId}`);
     await runtimeTransaction(client, null, async c => {
       const row = (await c.query('SELECT inet_server_addr()::text AS address,inet_server_port() AS port,current_database() AS database')).rows[0];
-      requireCheck(row.address === addresses.postgres && row.port === 5432
+      requireCheck(normalizeServerAddress(row.address) === addresses.postgres && row.port === 5432
         && row.database === new URL(config.candidate.postgres.url).pathname.slice(1), 'Child runtime backend differs from inspected candidate');
     });
     const original = client.query.bind(client);

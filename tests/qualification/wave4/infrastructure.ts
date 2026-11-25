@@ -4,7 +4,7 @@ import { assertDatabaseRole } from '../../../packages/db/src/database-role.js';
 import { assertInstallationBootstrap, assertInstallationHistory } from '../../../packages/db/src/installation-plan.js';
 import type { ReviewedMigrationSelection } from '../../../packages/db/src/migration-selection.js';
 import { authenticationInstallationSource,installCommittedAuthentication,validateInstalledAuthentication,type AuthenticationInstallation } from '../../../deploy/postgres/auth-installation.js';
-import { declarations, hash, requireCheck, transaction, type Environment, type QualificationConfig, type SqlClient } from './core.js';
+import { declarations, hash, normalizeServerAddress, requireCheck, transaction, type Environment, type QualificationConfig, type SqlClient } from './core.js';
 
 import { Deadline, tmpfsBytes } from './containment.js';
 import { OwnedClients as BoundedOwnedClients } from './owned-clients.js';
@@ -73,7 +73,7 @@ export async function bindPostgres(client: SqlClient, e: Environment, address: s
   const { stdout } = await command(deadline, 'docker', ['exec', e.postgres.containerId, 'pg_controldata', '/var/lib/postgresql/data']);
   const systemId = /^Database system identifier:\s+(\d+)$/m.exec(stdout)?.[1];
   requireCheck(identity.rows.length === 1 && row.database === new URL(e.postgres.url).pathname.slice(1)
-    && row.address === address && row.port === 5432 && /^16\d{4}$/.test(row.version)
+    && normalizeServerAddress(row.address) === address && row.port === 5432 && /^16\d{4}$/.test(row.version)
     && systemId && row.system_id === systemId, 'Connected PostgreSQL cluster differs from inspected owned identity');
   await assertDatabaseRole(client as any, 'migration');
   return row.system_id as string;

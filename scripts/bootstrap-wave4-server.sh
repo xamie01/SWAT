@@ -106,7 +106,8 @@ done
 for net in swat-w4-ref-net swat-w4-cand-net; do
   docker network rm "$net" >/dev/null 2>&1 || true
 done
-pkill -f "$PRIVATE_DIR/pgbouncer.ini" >/dev/null 2>&1 || true
+$SUDO pkill -f "$PRIVATE_DIR/pgbouncer.ini" >/dev/null 2>&1 || true
+sleep 0.5
 
 REF_RUN_ID="$(uuidgen -r | tr '[:upper:]' '[:lower:]')"
 CAND_RUN_ID="$(uuidgen -r | tr '[:upper:]' '[:lower:]')"

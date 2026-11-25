@@ -40,6 +40,10 @@ export interface QualificationPorts {
 }
 const hex = /^[a-f0-9]{64}$/;
 export const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+/** PostgreSQL inet_server_addr()::text appends /32 (or /128 for IPv6); strip host mask when comparing against Docker bridge IPs. */
+export function normalizeServerAddress(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\/(?:32|128)$/, '') : '';
+}
 export function requireCheck(condition: unknown, reason: string): asserts condition {
   if (!condition) throw new Error(reason);
 }

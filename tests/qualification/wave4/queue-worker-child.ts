@@ -2,7 +2,7 @@ import { Deadline } from './containment.js';
 import { privateConfig } from './config.js';
 import { OwnedClients, inspectEnvironment, bindPostgres, bindRedisIdentity } from './infrastructure.js';
 import { lpService, runtimeTransaction } from './domains.js';
-import { requireCheck } from './core.js';
+import { normalizeServerAddress, requireCheck } from './core.js';
 import { OwnedQueueRuntime } from './queue-runtime.js';
 import { queueIdentity, requireQueueJob, requirePendingJournal, requireCompletedJournal } from './queue-contract.js';
 import { queueJournal } from './queue-journal.js';
@@ -31,7 +31,7 @@ process.once('message',async (input:QueueWorkerInput)=>{
     const client = await clients.postgres(config.runtimeUrl,`wave4-queue-child-runtime-${identity.runId}`);
     await runtimeTransaction(client,null,async c=>{
       const row = (await c.query('SELECT inet_server_addr()::text AS address,inet_server_port() AS port,current_database() AS database')).rows[0];
-      requireCheck(row?.address === addresses.postgres && row.port === 5432
+      requireCheck(normalizeServerAddress(row?.address) === addresses.postgres && row.port === 5432
         && row.database === new URL(config.candidate.postgres.url).pathname.slice(1),'Queue child backend differs from inspected candidate');
     });
     const before = await queueJournal(client,input);
