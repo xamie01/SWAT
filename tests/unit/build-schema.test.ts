@@ -99,7 +99,7 @@ describe('schema canonical source and fail-closed qualification', () => {
   it('accepts isolated bridge without IP masquerade (Docker 29+) and rejects unisolated bridge', async () => {
     const netId = '5'.repeat(64);
     const labels = { 'swat.integration.run-id': runId, 'swat.integration.purpose': 'reference', 'swat.integration.owned': 'true' };
-    const makeInspect = (masquerade: string) => vi.fn(async (kind: string, id: string) => {
+    const makeInspect = (masquerade: string, includeTmpfs = true) => vi.fn(async (kind: string, id: string) => {
       if (kind === 'network') {
         return {
           Id: netId,
@@ -111,21 +111,26 @@ describe('schema canonical source and fail-closed qualification', () => {
         };
       }
       const isPg = id === owned.postgresId;
+      const dest = isPg ? '/var/lib/postgresql/data' : '/data';
       return {
         Id: id,
         Image: `sha256:${isPg ? owned.postgresImageId : owned.redisImageId}`,
         State: { Running: true },
         Config: { Labels: labels },
-        HostConfig: { Privileged: false, ReadonlyRootfs: true, Binds: [], CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], PidMode: '', IpcMode: '' },
-        Mounts: [{ Type: 'tmpfs', Destination: isPg ? '/var/lib/postgresql/data' : '/data' }],
+        HostConfig: {
+          Privileged: false, ReadonlyRootfs: true, Binds: [], CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], PidMode: '', IpcMode: '',
+          Tmpfs: includeTmpfs ? { [dest]: 'rw,noexec,nosuid,size=512m' } : {}
+        },
+        Mounts: [],
         NetworkSettings: {
           Ports: { [isPg ? '5432/tcp' : '6379/tcp']: [{ HostIp: '127.0.0.1', HostPort: isPg ? '55432' : '56379' }] },
           Networks: { only: { NetworkID: netId, IPAddress: isPg ? '172.18.0.2' : '172.18.0.3' } }
         }
       };
     });
-    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('false'))).resolves.toEqual({ postgresAddress: '172.18.0.2' });
-    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('true'))).rejects.toThrow(/Disposable network is shared/);
+    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('false', true))).resolves.toEqual({ postgresAddress: '172.18.0.2' });
+    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('false', false))).rejects.toThrow(/exact disposable-owned/);
+    await expect(assertDisposableOwnedInfrastructure(owned, makeInspect('true', true))).rejects.toThrow(/Disposable network is shared/);
   });
   it('087 requires separately supplied installation capabilities before reference/candidate inspection',async()=>{
     const inventory=await discoverMigrationInventory(new URL('packages/db/sql/',root).pathname);

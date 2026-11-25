@@ -27,7 +27,8 @@ type DockerContainer = {
   Id: string; Image: string; State: { Running: boolean };
   Config: { Labels: Record<string,string> };
   HostConfig: { Privileged: boolean; ReadonlyRootfs: boolean; Binds: unknown[] | null;
-    CapDrop: string[]; SecurityOpt: string[]; PidMode: string; IpcMode: string };
+    CapDrop: string[]; SecurityOpt: string[]; PidMode: string; IpcMode: string;
+    Tmpfs?: Record<string, string> | null };
   Mounts: { Type: string; Destination: string }[];
   NetworkSettings: { Networks: Record<string,{ NetworkID: string; IPAddress: string }>;
     Ports: Record<string, { HostIp: string; HostPort: string }[] | null> };
@@ -57,6 +58,8 @@ export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastruc
     const labels = c.Config.Labels;
     const bindings = c.NetworkSettings.Ports[port!];
     const networks = Object.values(c.NetworkSettings.Networks);
+    const hasTmpfsData = c.Mounts.some(m => m.Type === 'tmpfs' && m.Destination === data)
+      || Object.prototype.hasOwnProperty.call(c.HostConfig.Tmpfs ?? {}, data!);
     if (c.Id !== id || c.Image !== `sha256:${image}` || !c.State.Running
       || labels?.['swat.integration.run-id'] !== declaration.runId
       || labels?.['swat.integration.purpose'] !== input.purpose || labels?.['swat.integration.owned'] !== 'true'
@@ -64,7 +67,7 @@ export async function assertDisposableOwnedInfrastructure(input: OwnedInfrastruc
       || c.HostConfig.Privileged || !c.HostConfig.ReadonlyRootfs || (c.HostConfig.Binds?.length ?? 0) !== 0
       || !c.HostConfig.CapDrop?.includes('ALL') || !c.HostConfig.SecurityOpt?.includes('no-new-privileges')
       || c.HostConfig.PidMode === 'host' || c.HostConfig.IpcMode === 'host'
-      || c.Mounts.some(m => m.Type !== 'tmpfs') || !c.Mounts.some(m => m.Destination === data)
+      || c.Mounts.some(m => m.Type !== 'tmpfs') || !hasTmpfsData
       || !bindings || bindings.length !== 1 || bindings[0]?.HostIp !== '127.0.0.1'
       || bindings[0]?.HostPort !== new URL(endpoint!).port
       || Object.entries(c.NetworkSettings.Ports).some(([key,value]) => key !== port && value !== null)
