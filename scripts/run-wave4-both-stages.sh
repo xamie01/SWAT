@@ -168,12 +168,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'wave4_observer') THEN
     CREATE ROLE wave4_observer LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION;
   END IF;
-  ALTER ROLE wave4_observer WITH PASSWORD '${LOAD_OBS_PASS}' SET row_security=on;
-  GRANT pg_read_all_stats TO wave4_observer;
-  GRANT CONNECT ON DATABASE ${LOAD_DB} TO wave4_observer;
-  GRANT USAGE ON SCHEMA public TO wave4_observer;
 END \$\$;
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+ALTER ROLE wave4_observer WITH PASSWORD '${LOAD_OBS_PASS}';
+ALTER ROLE wave4_observer SET row_security=on;
+GRANT pg_read_all_stats TO wave4_observer;
+GRANT CONNECT ON DATABASE ${LOAD_DB} TO wave4_observer;
+GRANT USAGE ON SCHEMA public TO wave4_observer;
 ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${LOAD_MIG_PASS}';
 ALTER ROLE swat_app WITH LOGIN PASSWORD '${LOAD_APP_PASS}';
 SQL
@@ -242,6 +242,7 @@ const { canonicalMigrationSource } = require(`${swatDir}/packages/db/src/canonic
 TS
 
 PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" -v ON_ERROR_STOP=1 <<SQL
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO wave4_observer;
 REVOKE INSERT, UPDATE, DELETE ON public.users FROM wave4_observer;
 GRANT SELECT ON public.wallets, public.transactions, public.wallet_clusters, public.cluster_memberships, public.signals, public.source_trades TO swat_app;
