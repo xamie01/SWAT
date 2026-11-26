@@ -13,6 +13,41 @@ PRIVATE_DIR="${PRIVATE_DIR:-/tmp/.swat-wave4-private}"
 STAGE_A_CONFIG="$PRIVATE_DIR/private-config.json"
 STAGE_A_CREDS="$PRIVATE_DIR/credentials.env"
 
+needs_stage_a_bootstrap() {
+  [[ -f "$STAGE_A_CONFIG" && -f "$STAGE_A_CREDS" ]] || return 0
+  command -v docker >/dev/null 2>&1 && command -v psql >/dev/null 2>&1 || return 0
+  for name in swat-w4-ref-pg swat-w4-ref-redis swat-w4-cand-pg swat-w4-cand-redis; do
+    [[ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)" == "true" ]] || return 0
+  done
+  [[ -s "$PRIVATE_DIR/pgbouncer.pid" ]] || return 0
+  local pgb_pid
+  pgb_pid="$(cat "$PRIVATE_DIR/pgbouncer.pid" 2>/dev/null || true)"
+  [[ -n "$pgb_pid" ]] && kill -0 "$pgb_pid" 2>/dev/null || return 0
+  for rname in swat-w4-ref-redis swat-w4-cand-redis; do
+    local dbsize
+    dbsize="$(docker exec "$rname" redis-cli dbsize 2>/dev/null | tr -dc '0-9' || true)"
+    [[ "$dbsize" == "0" ]] || return 0
+  done
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$STAGE_A_CREDS"
+    set +a
+    for port_db in "${REF_PG_PORT}:${REF_DB}" "${CAND_PG_PORT}:${CAND_DB}"; do
+      port="${port_db%%:*}"
+      db="${port_db##*:}"
+      has_mig="$(PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$port" -U "$DBA_USER" -d "$db" -At -c "SELECT to_regclass('public.swat_schema_migrations') IS NOT NULL" 2>/dev/null || echo "err")"
+      [[ "$has_mig" == "f" ]] || exit 1
+    done
+  ) || return 0
+  return 1
+}
+
+if needs_stage_a_bootstrap; then
+  echo "=== [0/5] Initializing Wave 4 prerequisites & Stage A isolated containers (PG16 + Redis7 + PgBouncer) ==="
+  SWAT_DIR="$SWAT_DIR" PRIVATE_DIR="$PRIVATE_DIR" AUTHORIZE_WAVE4=yes bash "$SWAT_DIR/scripts/bootstrap-wave4-server.sh"
+fi
+
 [[ -f "$STAGE_A_CONFIG" && -f "$STAGE_A_CREDS" ]] || {
   echo "Missing Stage A config/credentials in $PRIVATE_DIR. Run scripts/bootstrap-wave4-server.sh first." >&2
   exit 1

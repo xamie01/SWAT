@@ -262,6 +262,11 @@ if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
 else
   pgbouncer -d "$PRIVATE_DIR/pgbouncer.ini"
 fi
+for i in $(seq 1 20); do
+  [[ -s "$PRIVATE_DIR/pgbouncer.pid" ]] && break
+  sleep 0.2
+done
+[[ -s "$PRIVATE_DIR/pgbouncer.pid" ]] || { echo "Stage A PgBouncer failed to start" >&2; exit 1; }
 
 echo "=== [7/7] Writing private 0600 Wave 4 configuration & running verification checks ==="
 CONFIG_PATH="$PRIVATE_DIR/private-config.json"
