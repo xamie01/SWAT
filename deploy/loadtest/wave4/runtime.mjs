@@ -136,7 +136,7 @@ export async function seed(c, out) {
           const cluster = randomUUID();
           await client.query("INSERT INTO wallets(address,chain,nickname,status) VALUES($1,'solana','wave4 synthetic observation','active')", [identity.historyWallet]);
           await client.query("INSERT INTO user_wallet_subscriptions(user_id,wallet_address,label,membership_slot) VALUES($1,$2,'wave4 observation',1)", [identity.id, identity.historyWallet]);
-          await client.query("INSERT INTO wallet_clusters(id,name,confidence,wallet_count,chain,status) VALUES($1,'wave4 synthetic',0,1,'solana','inactive')", [cluster]);
+          await client.query("INSERT INTO wallet_clusters(id,name,confidence,wallet_count,chain,status) VALUES($1,$2,0,1,'solana','inactive')", [cluster, `wave4 synthetic ${cluster}`]);
           await client.query('INSERT INTO cluster_memberships(cluster_id,wallet_address,confidence) VALUES($1,$2,0)', [cluster, identity.historyWallet]);
           await client.query(`INSERT INTO signals(cluster_id,pattern_type,confidence,signal_score,trigger_data,status,detected_at)
             VALUES($1,'accumulation',0,0,'{"synthetic":true,"verified":false}','expired',NOW()-interval '1 day')`, [cluster]);

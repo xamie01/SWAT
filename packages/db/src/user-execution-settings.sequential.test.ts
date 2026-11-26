@@ -5,6 +5,16 @@ const mocks = vi.hoisted(() => ({ query: vi.fn(), clientQuery: vi.fn(), release:
 vi.mock('./client.js', () => ({ query: mocks.query, pool: { connect: async () => ({
   query: mocks.clientQuery, release: mocks.release, on: vi.fn(), off: vi.fn()
 }) } }));
+vi.mock('./tenancy.js', async () => {
+  const actual = await vi.importActual<typeof import('./tenancy.js')>('./tenancy.js');
+  const { withTransaction } = await import('./transaction.js');
+  return {
+    ...actual,
+    scopedQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
+    withTenantTransaction: async (_scope: unknown, op: (client: any) => Promise<any>, options?: any) =>
+      withTransaction(op, options)
+  };
+});
 vi.mock('@swat/db', () => ({ forUser: (userId: string) => ({ userId }), findUserById: vi.fn(), resolveSession: vi.fn() }));
 import { upsertUserExecutionSettings, setUserKillSwitch } from './user-execution-settings.js';
 import { registerExecutionSettingsRoutes, type ExecutionSettingsDependencies } from '../../../apps/api/src/routes/execution-settings.js';

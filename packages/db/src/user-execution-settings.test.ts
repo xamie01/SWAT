@@ -33,6 +33,16 @@ vi.mock('./client.js', () => ({
   query: mocks.query,
   pool: { connect: mocks.connect }
 }));
+vi.mock('./tenancy.js', async () => {
+  const actual = await vi.importActual<typeof import('./tenancy.js')>('./tenancy.js');
+  const { withTransaction } = await import('./transaction.js');
+  return {
+    ...actual,
+    scopedQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
+    withTenantTransaction: async (_scope: unknown, op: (client: any) => Promise<any>, options?: any) =>
+      withTransaction(op, options)
+  };
+});
 
 import {
   DEFAULT_MAX_DAILY_WITHDRAWAL_USD,

@@ -11,10 +11,10 @@ export const WAVE4_AUTHENTICATION_FILE = '087_wave4_protected_authentication.sql
 export const WAVE4_PIPELINE_FILE = '088_wave4_protected_pipeline.sql';
 export const WAVE4_FINANCIAL_FILE = '089_wave4_protected_financial.sql';
 export const WAVE4_LOAD_CAPTURE_FILE = '090_wave4_protected_load_capture.sql';
-export const REVIEWED_085_CHECKSUM = '3abc3a000b11051a2b46243a845b7b29e74979d791550160592a7f403513e0d6';
-export const REVIEWED_088_CHECKSUM = '0997d6d2acfc377a197cc10d612201886dac26950b1b556f877f6ce29cb74f5c';
-export const REVIEWED_089_CHECKSUM = 'b0d6407f62eacf78250b138eae76dcadb526896d947d238b5dc64134bce5d9f9';
-export const REVIEWED_090_CHECKSUM = '96fda27acf09c6c55aa1ff0f5ec2cc757a75dae54a21cdaaa76fb31c9b70ad87';
+export const REVIEWED_085_CHECKSUM = '43f5304417e500c0e9738d07dd517e7f7582f1bc497578759d5eeb686d43e02d';
+export const REVIEWED_088_CHECKSUM = '86f467ef7d61329cfd13cfe7591661f54dba80c6c23682c236f57400162faf13';
+export const REVIEWED_089_CHECKSUM = '157b2704a633e79d01271f16c46685b079532fb0d3b57619884ecbc6543a68b2';
+export const REVIEWED_090_CHECKSUM = 'edff459ad1430b7241588db4a33883afaad353348b5cd17460417e3c6e3dd038';
 export type MigrationIdentity = { readonly file: string; readonly checksum: string };
 export type MigrationSelectionProposal = {
   readonly version: 1;

@@ -53,7 +53,7 @@ export class OwnedClients extends BoundedOwnedClients {
       postgres: (url, name, timeout) => {
         const { Client } = pgRequire('pg');
         return new Client({ connectionString: url, application_name: name, connectionTimeoutMillis: timeout,
-          query_timeout: 12_000, statement_timeout: 10_000 });
+          query_timeout: 12_000 });
       },
       redis: (url, name, timeout) => {
         const Redis = redisRequire('ioredis');

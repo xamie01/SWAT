@@ -63,6 +63,22 @@ export async function installCommittedAuthentication(input:AuthenticationInstall
  try{
   const rows=(await lease.client.query(`SELECT n.oid FROM pg_namespace n WHERE n.nspname='swat_migration_handoff'`)).rows;
   if(rows.length)throw new Error('Authentication handoff requires committed retirement of existing installation broker');
+  // Strip default PUBLIC EXECUTE from superuser-owned public schema extension routines
+  // (citext/pgcrypto) that swat_migrator lacks ownership to revoke during migrations,
+  // while preserving public.gen_random_uuid() for 001-086 table defaults under swat_app.
+  await lease.client.query(`DO $$ DECLARE r record; BEGIN
+   FOR r IN SELECT p.oid::regprocedure AS sig FROM pg_proc p JOIN pg_depend d ON d.objid=p.oid
+    AND d.classid='pg_proc'::regclass AND d.deptype='e' JOIN pg_extension e ON e.oid=d.refobjid
+    WHERE p.pronamespace='public'::regnamespace LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', r.sig);
+   END LOOP;
+   IF to_regprocedure('public.gen_random_uuid()') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.gen_random_uuid() TO swat_migrator,swat_app,swat_lp_admitter';
+   END IF;
+   IF to_regprocedure('public.texticlike(public.citext,text)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.texticlike(public.citext,text),public.texticlike(public.citext,public.citext),public.texticnlike(public.citext,text),public.texticnlike(public.citext,public.citext) TO swat_migrator,swat_app';
+   END IF;
+  END $$`);
  }catch(e){broken=true;throw e;}finally{lease.release(broken);}
  await provisionCommittedAuthentication({acquire,dbaRole:input.dbaRole,installedSql});
  // New acquisition and read-only transaction, not the handoff transaction snapshot.

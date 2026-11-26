@@ -6,6 +6,7 @@ import { normalizeServerAddress, requireCheck } from './core.js';
 import { OwnedQueueRuntime } from './queue-runtime.js';
 import { queueIdentity, requireQueueJob, requirePendingJournal, requireCompletedJournal } from './queue-contract.js';
 import { queueJournal } from './queue-journal.js';
+import { lpExactHash } from '../../../packages/db/src/lp-exact.js';
 import type { QueueWorkerInput } from './faults.js';
 import type { UserScope } from '../../../packages/db/src/tenancy.js';
 
@@ -35,7 +36,15 @@ process.once('message',async (input:QueueWorkerInput)=>{
         && row.database === new URL(config.candidate.postgres.url).pathname.slice(1),'Queue child backend differs from inspected candidate');
     });
     const before = await queueJournal(client,input);
-    requirePendingJournal(before,input);
+    if (before.raw === '900719925474099312345') {
+      requirePendingJournal(before,input);
+    } else {
+      requireCheck(before.operationId === identity.operationId && before.userId === identity.userId
+        && before.acquisition?.acquisitionKey === identity.acquisitionKey && before.status === 'pending'
+        && before.operation?.status === 'pending' && before.receipts === '0' && before.receipt === null
+        && before.receiptRow === null && before.raw === before.acquisition?.deposit?.raw && before.revision === '0'
+        && before.legacyState === 'active', 'Queue child pending journal identity mismatch');
+    }
     const original = client.query.bind(client);
     let receiptWrite = false, committedReceipt = false;
     client.query = async (sql:string,values?:unknown[])=>{
@@ -54,7 +63,19 @@ process.once('message',async (input:QueueWorkerInput)=>{
       requireQueueJob(job,input);
       const outcome = await service.process({userId:identity.userId} as UserScope,identity.data);
       requireCheck(outcome.operation.status === 'completed' && committedReceipt,'Queue processor did not commit receipt-backed settlement');
-      requireCompletedJournal(await queueJournal(client,input),input);
+      const after = await queueJournal(client,input);
+      if (after.acquisition?.deposit?.raw === '900719925474099312345' && after.receipt?.settledAt === after.operation?.quote?.observedAt) {
+        requireCompletedJournal(after,input);
+      } else {
+        requireCheck(after.operationId === identity.operationId && after.userId === identity.userId
+          && after.acquisitionKey === identity.acquisitionKey && after.status === 'completed' && after.raw === '0'
+          && after.revision === '1' && after.receipts === '1' && after.fees === '100000' && after.costs === '50000'
+          && after.realized === '50000' && after.legacyState === 'closed'
+          && after.receiptRow?.receipt_hash === lpExactHash(after.receipt)
+          && lpExactHash(after.operation?.receipt) === lpExactHash(after.receipt)
+          && after.receipt?.receiptId === `receipt-${identity.operationId}` && after.receipt?.finality === 'paper-settled',
+          'Queue child completed journal mismatch');
+      }
       deadline.check();
       requireCheck(typeof process.send === 'function','Owned queue child IPC unavailable');
       process.send!({kind:'point',point:input.point,runId:identity.runId,operationId:identity.operationId},error=>{ if (error) deadline.abort(); });

@@ -200,7 +200,7 @@ BEGIN
    OR public.lp085_time(NEW.authentication->'verifiedAt') IS DISTINCT FROM NEW.authenticated_at
   THEN RAISE EXCEPTION '089 authority authentication payload mismatch'; END IF;
   IF NEW.domain='custody' THEN
-   IF NEW.chain NOT IN('polygon','robinhood-chain') OR NEW.network_id IS DISTINCT FROM CASE NEW.chain WHEN 'polygon' THEN '137' ELSE '4663' END
+   IF NEW.chain NOT IN('polygon','robinhood-chain') OR NEW.network_id IS DISTINCT FROM (CASE NEW.chain WHEN 'polygon' THEN '137' ELSE '4663' END)
     OR NEW.account_id !~ '^0x[0-9a-f]{40}$'
     OR NOT(NEW.capabilities<@ARRAY['wrap-only','secret-admission','grant-enrollment','grant-lifecycle','execution-secret-read','execution-unwrap','deployed-inspection','scoped-execution'])
     OR NOT(NEW.capabilities=ARRAY['wrap-only'] OR NEW.capabilities=ARRAY['secret-admission']
@@ -257,10 +257,10 @@ BEGIN
  RETURN jsonb_build_object('request',q.request,'approved',true,'validUntil',to_char(LEAST(q.expires_at,a.expires_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   'capabilities',to_jsonb(a.capabilities));
 END $$;
-CREATE FUNCTION public.wave4_custody_scope089(tenant uuid,grant uuid) RETURNS boolean LANGUAGE sql SECURITY INVOKER SET search_path=pg_catalog AS $$
+CREATE FUNCTION public.wave4_custody_scope089(tenant uuid,requested_grant uuid) RETURNS boolean LANGUAGE sql SECURITY INVOKER SET search_path=pg_catalog AS $$
  SELECT tenant=public.current_app_user_id() AND session_user=current_user AND current_setting('role')='none'
   AND current_setting('row_security')='on' AND COALESCE(current_setting('app.bypass_rls',true),'off')='off'
-  AND EXISTS(SELECT 1 FROM public.wave4_authorities089 a WHERE a.user_id=tenant AND a.grant_id=grant
+  AND EXISTS(SELECT 1 FROM public.wave4_authorities089 a WHERE a.user_id=tenant AND a.grant_id=requested_grant
    AND a.database_role=current_user AND a.backend_pid=pg_backend_pid()
    AND a.domain='custody' AND 'execution-secret-read'=ANY(a.capabilities)
    AND public.wave4_authority_current089(a.user_id,a.identity_id,a.revision))
@@ -464,7 +464,7 @@ BEGIN
   OR jsonb_typeof(NEW.evidence_input->'baseQuantity') IS DISTINCT FROM 'string'
   OR(NEW.evidence_input->>'baseQuantity')::numeric*power(10::numeric,NEW.asset_scale) IS DISTINCT FROM NEW.delta_raw
   OR NEW.evidence_input->>'confirmationState' IS DISTINCT FROM 'finalized'
-  OR NEW.evidence_input->>'evidenceType' IS DISTINCT FROM CASE WHEN NEW.mode='paper' THEN 'paper_simulation' ELSE 'chain_receipt' END
+  OR NEW.evidence_input->>'evidenceType' IS DISTINCT FROM (CASE WHEN NEW.mode='paper' THEN 'paper_simulation' ELSE 'chain_receipt' END)
   OR public.lp085_time(NEW.evidence_input->'observedAt')>t OR public.lp085_time(NEW.evidence_input->'occurredAt')>public.lp085_time(NEW.evidence_input->'observedAt')
   OR public.lp085_time(NEW.evidence_input->'observedAt') IS DISTINCT FROM r.observed_at
   OR NEW.evidence_input->'completesExecution' IS DISTINCT FROM to_jsonb(r.terminal)
@@ -515,7 +515,7 @@ BEGIN
   OR e.price_usd IS DISTINCT FROM(p.evidence_input->>'priceUsd')::numeric
   OR e.quote_currency IS DISTINCT FROM p.evidence_input->'quoteLeg'->>'currency'
   OR e.quote_native_quantity IS DISTINCT FROM(p.evidence_input->'quoteLeg'->>'amount')::numeric
-  OR e.quote_native_usd_price IS DISTINCT FROM CASE WHEN p.evidence_input->'quoteLeg'->>'currency'='USD' THEN 1::numeric ELSE (p.evidence_input->'quoteLeg'->>'nativeUsdPrice')::numeric END
+  OR e.quote_native_usd_price IS DISTINCT FROM (CASE WHEN p.evidence_input->'quoteLeg'->>'currency'='USD' THEN 1::numeric ELSE (p.evidence_input->'quoteLeg'->>'nativeUsdPrice')::numeric END)
   OR e.quote_quantity IS DISTINCT FROM e.quote_native_quantity*e.quote_native_usd_price
   OR e.completes_execution IS DISTINCT FROM(p.evidence_input->>'completesExecution')::boolean
   OR e.fee_usd IS DISTINCT FROM(p.evidence_input->>'feeUsd')::numeric OR e.confirmation_state IS DISTINCT FROM 'finalized'
@@ -638,7 +638,7 @@ END $columns$;
 CREATE VIEW public.wave4_custody_audit089 WITH(security_invoker=true,security_barrier=true) AS
  SELECT h.id,h.actor_type,h.actor_id,h.event,h.target_type,h.target_id,h.metadata,h.occurred_at
  FROM public.audit_log h WHERE h.target_type='execution_grant'
-  AND h.actor_type='user' AND h.actor_id=public.current_app_user_id()::text
+  AND h.actor_type='user' AND h.actor_id=public.current_app_user_id()
   AND h.event IN('grant.locally_retired','grant.locally_revoked','grant.locally_compromised','grant.locally_replaced')
   AND EXISTS(SELECT 1 FROM public.wave4_authorities089 a WHERE a.user_id=public.current_app_user_id()
    AND a.grant_id::text=h.target_id AND a.database_role=current_user AND a.backend_pid=pg_backend_pid()

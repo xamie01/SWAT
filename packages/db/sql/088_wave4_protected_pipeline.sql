@@ -741,7 +741,7 @@ BEGIN
   IF original.base_quantity IS DISTINCT FROM base OR original.quote_quantity IS DISTINCT FROM (terms->'evidence'->'quoteLeg'->>'amount')::numeric
   OR original.quote_currency IS DISTINCT FROM (terms->'evidence'->'quoteLeg'->>'currency')
   OR original.quote_native_quantity IS DISTINCT FROM (terms->'evidence'->'quoteLeg'->>'amount')::numeric
-  OR original.quote_native_usd_price IS DISTINCT FROM CASE WHEN terms->'evidence'->'quoteLeg'='null'::jsonb THEN NULL::numeric ELSE 1::numeric END
+  OR original.quote_native_usd_price IS DISTINCT FROM (CASE WHEN terms->'evidence'->'quoteLeg'='null'::jsonb THEN NULL::numeric ELSE 1::numeric END)
   OR original.price_usd IS DISTINCT FROM (terms->'evidence'->>'priceUsd')::numeric OR original.fee_usd IS DISTINCT FROM (terms->'evidence'->>'feeUsd')::numeric
   OR original.occurred_at IS DISTINCT FROM occurrence OR (original.confirmation_state IN('confirmed','finalized')) IS DISTINCT FROM true
   OR original.completes_execution IS DISTINCT FROM true

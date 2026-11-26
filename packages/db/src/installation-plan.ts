@@ -93,7 +93,9 @@ function functionMetadata(pin: FunctionPin): string {
  AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]`;
 }
 const publicUsageRoles = ['swat_app','swat_custody_writer','swat_financial_receipt_writer','swat_lp_admitter','swat_auth_service',
-  'swat_system_observer','swat_source_provider_writer','swat_risk_writer','swat_capability_writer','swat_valuation_writer','swat_runtime_lookup','swat_financial_settler'];
+  'swat_system_observer','swat_source_provider_writer','swat_risk_writer','swat_capability_writer','swat_valuation_writer','swat_runtime_lookup','swat_financial_settler',
+  'swat_fanout','swat_notification','swat_discovery',
+  'swat_wave4_authority_writer','swat_wave4_financial_writer','swat_lp_initializer','swat_custody_reader','swat_custody_observer'];
 
 /** Source templates only. Ordinary ALTER OWNER needs forbidden membership/CREATE;
  * an independently audited external DBA installs the exact NOLOGIN superuser broker.
@@ -143,7 +145,7 @@ export function createInstallationPlan(selected: readonly MigrationFile[], optio
     return `EXISTS(SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_language l ON l.oid=p.prolang
  WHERE p.oid=pg_catalog.to_regprocedure(${quote(pin.signature)}) AND p.proowner=${roleOid(owner)}
  AND ${functionMetadata(pin)} AND pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc,'UTF8')),'hex')=${quote(pin.bodyHash)}
- AND ${exactAcl('p.proacl', 'f', owner, [[owner,'EXECUTE',false], ...(transferred ? [['swat_migrator','EXECUTE',true] as [string,string,boolean]] : [['PUBLIC','EXECUTE',false] as [string,string,boolean]]), ...(appGrant ? [[ 'swat_app','EXECUTE',false],['swat_app','EXECUTE',false,'swat_migrator']] as [string,string,boolean,string?][] : [])])})`;
+ AND ${exactAcl('p.proacl', 'f', owner, [[owner,'EXECUTE',false], ...(transferred ? [['swat_migrator','EXECUTE',true] as [string,string,boolean]] : []), ...(appGrant ? [[ 'swat_app','EXECUTE',false],['swat_app','EXECUTE',false,'swat_migrator']] as [string,string,boolean,string?][] : [])])})`;
   };
   // A phase is the exact already-completed prefix, not an arbitrary ownership report.
   // pg_shdepend covers ALL owned object classes, including non-table/non-function objects.

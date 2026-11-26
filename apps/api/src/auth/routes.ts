@@ -25,6 +25,9 @@ export interface AuthRouteOptions {
   readonly uri: string;
   readonly allowedOrigins?: readonly string[];
 }
+function isNamedError(error: unknown, ctor: Function, name: string): boolean {
+  return error instanceof ctor || (error instanceof Error && error.name === name);
+}
 function publicUser(u: UserRecord) {
   return { id:u.id,email:u.email,displayName:u.displayName,role:u.role,tier:u.tier,tierExpiresAt:u.tierExpiresAt };
 }
@@ -53,7 +56,7 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
     const p=signup.safeParse(request.body);
     if(!p.success) return reply.code(400).send({error:'Bad Request',message:'Invalid signup payload'});
     try { return admission(reply,await store.signup(p.data,{ip:request.ip,userAgent:request.headers['user-agent']}),201); }
-    catch(e) { if(e instanceof EmailAlreadyRegisteredError) return reply.code(409).send({error:'Email already registered'}); throw e; }
+    catch(e) { if(isNamedError(e,EmailAlreadyRegisteredError,'EmailAlreadyRegisteredError')) return reply.code(409).send({error:'Email already registered'}); throw e; }
   });
   app.post('/v1/auth/login',async(request,reply)=>{
     const p=login.safeParse(request.body);
@@ -71,7 +74,7 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
     const token=request.cookies[SESSION_COOKIE];
     if(!token) return reply.code(401).send({error:'Unauthorized'});
     try { await store.revokeAllSessions(token); }
-    catch(e) { if(e instanceof AuthSessionRequiredError) return reply.code(401).send({error:'Unauthorized'}); throw e; }
+    catch(e) { if(isNamedError(e,AuthSessionRequiredError,'AuthSessionRequiredError')) return reply.code(401).send({error:'Unauthorized'}); throw e; }
     reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
     return reply.send({ok:true});
   });
@@ -81,7 +84,7 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
     if(!p.success) return reply.code(400).send({error:'Bad Request'});
     if(!token) return reply.code(401).send({error:'Unauthorized'});
     try { await store.changePassword(token,p.data.password); }
-    catch(e) { if(e instanceof AuthSessionRequiredError) return reply.code(401).send({error:'Unauthorized'}); throw e; }
+    catch(e) { if(isNamedError(e,AuthSessionRequiredError,'AuthSessionRequiredError')) return reply.code(401).send({error:'Unauthorized'}); throw e; }
     reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
     return reply.send({ok:true});
   });
@@ -140,7 +143,7 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
         const w=await store.linkWallet(token,{chainKind:p.data.chainKind,address},{ip:request.ip});
         return reply.send({wallet:{chainKind:w.chainKind,address:w.address,verifiedAt:w.verifiedAt}});
       } catch(e) {
-        if(e instanceof WalletAlreadyLinkedError) return reply.code(409).send({error:'Wallet already linked to another account'});
+        if(isNamedError(e,WalletAlreadyLinkedError,'WalletAlreadyLinkedError')) return reply.code(409).send({error:'Wallet already linked to another account'});
         if((e as {code?:string}).code==='28000') return reply.code(401).send({error:'Unauthorized'});
         throw e;
       }

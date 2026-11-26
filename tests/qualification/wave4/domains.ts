@@ -91,8 +91,23 @@ export async function qualifyRoles(client: SqlClient, pooled: SqlClient, owners:
   return result('I2', checks, ['Application pre-session authentication and inspected PgBouncer transaction-pool configuration still require dedicated qualification']);
 }
 export function lpService(client: SqlClient, runId: string, enqueue?: (input: { userId: string; operationId: string; chain: any }) => Promise<void>) {
+  const base = syntheticLpProtocol(runId);
+  const protocol: LpInjectedProtocolPort = {
+    providerId: base.providerId,
+    networks: base.networks,
+    quote: base.quote,
+    receipt: async input => {
+      const r = await base.receipt(input);
+      if (!r) return null;
+      const rows = (await runtimeTransaction(client, input.operation.userId, c =>
+        c.query('SELECT created_at FROM public.lp_exact_operations WHERE user_id=$1 AND id=$2', [input.operation.userId, input.operation.id])
+      )).rows;
+      const createdAt = rows[0]?.created_at;
+      return createdAt ? { ...r, settledAt: new Date(createdAt).toISOString() } : r;
+    }
+  };
   return createLpPaperService({ store: createLpPaperSqlStore((scope, action) => runtimeTransaction(client, scope.userId, c => action(c as any))),
-    mode: async () => 'paper', protocol: syntheticLpProtocol(runId), enqueue,
+    mode: async () => 'paper', protocol, enqueue,
     plan: async (quote, strategy) => ({ version: 2, protocol: quote.pool.protocol, strategy, poolEvidenceId: quote.pool.evidenceId,
       rungs: [{ priceLower: strategy.rangeLower, priceUpper: strategy.rangeUpper, allocation: quote.amountAfter, binLower: 1, binUpper: 2 }] }) });
 }

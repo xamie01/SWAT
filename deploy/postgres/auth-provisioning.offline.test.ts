@@ -181,11 +181,12 @@ it('preserves the independently transcribed complete canonical incoming FK basel
  f.query.mockImplementation(async(s,v)=>{
   const result=await original(s,v);
   if(s.includes('AS constraint_dependencies_exact')){
-   expect(result.rows).toHaveLength(47); // 42 external + 040/041 and three 087 proof FKs
-   expect(result.rows.filter(r=>r.target==='public.users')).toHaveLength(45);
+   expect(result.rows).toHaveLength(54); // 42 (042-085) + 4 (088-089) + 3 (090 wave4_load) + 5 (040/041/087)
+   expect(result.rows.filter(r=>r.target==='public.users')).toHaveLength(51);
    expect(result.rows.filter(r=>r.target==='public.audit_log').map(r=>r.conname)).toEqual(['auth_wallet_proofs_audit_id_fkey']);
    expect(result.rows.filter(r=>r.target==='public.user_auth_wallets').map(r=>r.conname)).toEqual(['auth_wallet_proofs_wallet_id_fkey']);
-   expect(result.rows.some(r=>r.target==='public.user_sessions'||r.target==='public.auth_wallet_proofs')).toBe(false);
+   expect(result.rows.filter(r=>r.target==='public.user_sessions').map(r=>r.conname)).toEqual(['requests_session_id_fkey']);
+   expect(result.rows.some(r=>r.target==='public.auth_wallet_proofs')).toBe(false);
    expect(result.rows.filter(r=>external.includes(r.relation.replace('public.',''))).map(r=>r.relation.replace('public.','')).sort()).toEqual([...external].sort());
    for(const r of result.rows.filter(r=>external.includes(r.relation.replace('public.','')))){
     const table=r.relation.replace('public.','');expect(r.conname).toBe(`${table}_user_id_fkey`);
@@ -299,7 +300,7 @@ it.each(['protected-orphan','external-child-spoof','unreviewed-constraint','noni
    const result=await original(s,v);
    if(s.includes('AS unexpected_auth_fk_trigger')){
     expect(s).toContain('t.tgconstrrelid=ANY($1::regclass[])');expect(s).toContain('t.tgconstraint=ANY($2::oid[])');
-    expect(v?.[1]).toHaveLength(47);
+    expect(v?.[1]).toHaveLength(54);
     result.rows=[{unexpected_auth_fk_trigger:9999,relation:hostile==='external-child-spoof'?'private.unlink_blocker':'public.user_auth_wallets',
      target:'public.user_auth_wallets',tgisinternal:hostile!=='noninternal',tgconstraint:hostile==='unreviewed-constraint'?9999:0}];
    }

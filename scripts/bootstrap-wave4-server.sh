@@ -106,7 +106,7 @@ done
 for net in swat-w4-ref-net swat-w4-cand-net; do
   docker network rm "$net" >/dev/null 2>&1 || true
 done
-$SUDO pkill -f "$PRIVATE_DIR/pgbouncer.ini" >/dev/null 2>&1 || true
+$SUDO pkill -f "pgbouncer.ini" >/dev/null 2>&1 || true
 sleep 0.5
 
 REF_RUN_ID="$(uuidgen -r | tr '[:upper:]' '[:lower:]')"
@@ -210,7 +210,7 @@ for port_db in "${REF_PG_PORT}:${REF_DB}" "${CAND_PG_PORT}:${CAND_DB}"; do
 DO \$\$
 DECLARE role_name text;
   extra_roles text[] := ARRAY[
-    'swat_fanout',
+    'swat_fanout', 'swat_notification', 'swat_discovery',
     'swat_wave4_authority_writer', 'swat_wave4_financial_writer',
     'swat_lp_initializer', 'swat_custody_reader', 'swat_custody_observer'
   ];
@@ -231,12 +231,18 @@ done
 
 echo "=== [6/7] Configuring & starting PgBouncer (transaction mode on 127.0.0.1:${PGBOUNCER_PORT}) ==="
 SCRAM_HASH="$(PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$CAND_PG_PORT" -U wave4_dba -d "$CAND_DB" -At -c "SELECT rolpassword FROM pg_authid WHERE rolname='swat_app'")"
-cat > "$PRIVATE_DIR/userlist.txt" <<EOF
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  PGB_DIR="/var/run/postgresql/wave4"
+  install -d -m 0700 -o postgres -g postgres "$PGB_DIR"
+else
+  PGB_DIR="$PRIVATE_DIR"
+fi
+cat > "$PGB_DIR/userlist.txt" <<EOF
 "swat_app" "$SCRAM_HASH"
 EOF
-chmod 600 "$PRIVATE_DIR/userlist.txt"
+chmod 600 "$PGB_DIR/userlist.txt"
 
-cat > "$PRIVATE_DIR/pgbouncer.ini" <<EOF
+cat > "$PGB_DIR/pgbouncer.ini" <<EOF
 [databases]
 ${CAND_DB} = host=127.0.0.1 port=${CAND_PG_PORT} dbname=${CAND_DB}
 
@@ -244,7 +250,7 @@ ${CAND_DB} = host=127.0.0.1 port=${CAND_PG_PORT} dbname=${CAND_DB}
 listen_addr = 127.0.0.1
 listen_port = ${PGBOUNCER_PORT}
 auth_type = scram-sha-256
-auth_file = ${PRIVATE_DIR}/userlist.txt
+auth_file = ${PGB_DIR}/userlist.txt
 admin_users =
 pool_mode = transaction
 max_client_conn = 2000
@@ -254,20 +260,21 @@ reserve_pool_size = 5
 reserve_pool_timeout = 5
 max_db_connections = 50
 ignore_startup_parameters = extra_float_digits,search_path,timezone
-pidfile = ${PRIVATE_DIR}/pgbouncer.pid
-logfile = ${PRIVATE_DIR}/pgbouncer.log
+pidfile = ${PGB_DIR}/pgbouncer.pid
+logfile = ${PGB_DIR}/pgbouncer.log
 EOF
-chmod 600 "$PRIVATE_DIR/pgbouncer.ini"
+chmod 600 "$PGB_DIR/pgbouncer.ini"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-  pgbouncer -u root -d "$PRIVATE_DIR/pgbouncer.ini"
+  chown postgres:postgres "$PGB_DIR/userlist.txt" "$PGB_DIR/pgbouncer.ini"
+  pgbouncer -u postgres -d "$PGB_DIR/pgbouncer.ini"
 else
-  pgbouncer -d "$PRIVATE_DIR/pgbouncer.ini"
+  pgbouncer -d "$PGB_DIR/pgbouncer.ini"
 fi
 for i in $(seq 1 20); do
-  [[ -s "$PRIVATE_DIR/pgbouncer.pid" ]] && break
+  [[ -s "$PGB_DIR/pgbouncer.pid" ]] && break
   sleep 0.2
 done
-[[ -s "$PRIVATE_DIR/pgbouncer.pid" ]] || { echo "Stage A PgBouncer failed to start" >&2; exit 1; }
+[[ -s "$PGB_DIR/pgbouncer.pid" ]] || { echo "Stage A PgBouncer failed to start" >&2; exit 1; }
 
 echo "=== [7/7] Writing private 0600 Wave 4 configuration & running verification checks ==="
 CONFIG_PATH="$PRIVATE_DIR/private-config.json"

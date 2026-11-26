@@ -9,12 +9,10 @@ import {
   type Chain,
   type UserTier
 } from '@swat/shared';
-import { query } from './client.js';
-import { withTransaction } from './transaction.js';
 import {
   clampConcurrentPositionCap
 } from './position-cap.js';
-import type { UserScope } from './tenancy.js';
+import { scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
 import type { UserRole } from './users.js';
 import { recordAuditEventStrict } from './audit-log.js';
 
@@ -315,7 +313,8 @@ function definedOnly<T extends object>(patch: T): Partial<T> {
  */export async function getUserExecutionSettings(
   scope: UserScope
 ): Promise<UserExecutionSettings> {
-  const rows = await query<SettingsRow>(
+  const rows = await scopedQuery<SettingsRow>(
+    scope,
     `SELECT ${SETTINGS_COLUMNS} FROM user_execution_settings WHERE user_id = $1`,
     [scope.userId]
   );
@@ -341,7 +340,7 @@ export async function upsertUserExecutionSettings(
 ): Promise<UserExecutionSettings> {
   assertValidExecutionSettingsPatch(patch);
 
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     await client.query(
       `INSERT INTO user_execution_settings (user_id) VALUES ($1)
        ON CONFLICT (user_id) DO NOTHING`,
@@ -440,7 +439,7 @@ export async function setUserKillSwitch(
   killed: boolean
 ): Promise<UserExecutionSettings> {
   if (typeof killed !== 'boolean') throw new InvalidExecutionSettingsError('killed must be boolean');
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     const updated = await client.query<SettingsRow>(
       `INSERT INTO user_execution_settings (user_id, killed)
        VALUES ($1, $2)
@@ -462,7 +461,8 @@ export async function setUserKillSwitch(
 export async function listUserChainExecutionSettings(
   scope: UserScope
 ): Promise<UserChainExecutionSettings[]> {
-  const rows = await query<ChainSettingsRow>(
+  const rows = await scopedQuery<ChainSettingsRow>(
+    scope,
     `SELECT ${CHAIN_SETTINGS_COLUMNS} FROM user_chain_execution_settings
       WHERE user_id = $1
       ORDER BY chain`,
@@ -476,7 +476,8 @@ export async function getUserChainExecutionSettings(
   scope: UserScope,
   chain: Chain
 ): Promise<UserChainExecutionSettings | null> {
-  const rows = await query<ChainSettingsRow>(
+  const rows = await scopedQuery<ChainSettingsRow>(
+    scope,
     `SELECT ${CHAIN_SETTINGS_COLUMNS} FROM user_chain_execution_settings
       WHERE user_id = $1 AND chain = $2`,
     [scope.userId, chain]
@@ -530,7 +531,7 @@ export async function upsertUserChainExecutionSettings(
     );
   }
 
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     // Same reasoning as `upsertUserExecutionSettings`: the insert names no
     // defaulted column, so `mode`'s 'off' default is stated once, in `049`.
     await client.query(

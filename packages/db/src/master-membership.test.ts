@@ -20,6 +20,16 @@ vi.mock('./client.js', () => ({
   query: mocks.query,
   pool: { connect: mocks.connect }
 }));
+vi.mock('./tenancy.js', async () => {
+  const actual = await vi.importActual<typeof import('./tenancy.js')>('./tenancy.js');
+  const { withTransaction } = await import('./transaction.js');
+  return {
+    ...actual,
+    scopedQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
+    withTenantTransaction: async (_scope: unknown, op: (client: any) => Promise<any>, options?: any) =>
+      withTransaction(op, options)
+  };
+});
 
 import { DEFAULT_FOLLOWER_SOFT_CAP } from './master-capacity.js';
 import { assessFanoutCandidate } from './fanout-eligibility.js';
@@ -503,7 +513,7 @@ function valuesFor(pattern: RegExp): unknown[] {
 
 function routeClient(stubs: Stub[]): void {
   mocks.clientQuery.mockImplementation(async (text: string) => {
-    if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(text)) return { rows: [] };
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(text)) return { rows: [], command: text.trim().split(/\s+/)[0]!.toUpperCase() };
     const hit = stubs.find((stub) => stub.match.test(text));
     if (!hit) throw new Error(`unstubbed statement: ${text}`);
     return { rows: hit.rows ?? [] };

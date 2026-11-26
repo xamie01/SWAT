@@ -52,14 +52,19 @@ const incoming: readonly (readonly [string,'c'|'r'])[] = [
  ['copy_execution_financial_receipts','r'],['custody_secret_admissions','r'],
  ['withdrawal_reducing_intents','r'],['reducing_perps_venue_mappings','r'],
  ['lp_exact_positions','r'],['lp_exact_operations','r'],['lp_exact_receipts','r'],
- ['lp_protected_quote_admissions','r'],['lp_protected_settlement_admissions','r']
+ ['lp_protected_quote_admissions','r'],['lp_protected_settlement_admissions','r'],
+ ['pipeline_exact_follower_evidence','r'],['pipeline_paper_valuation_evidence','r'],['pipeline_worker_paper_receipts','r'],
+ ['wave4_authorities089','r']
 ];
 const fkRows=()=>[
  ...Object.entries(constraints).flatMap(([table,entries])=>entries.filter(e=>e[1]==='f').map(e=>({
   relation:`public.${table}`,conname:String(e[0]),columns:(e[2] as number[]).map(k=>columns(table)[k-1]!.attname),
   target:String(e[3]),target_columns:(e[4] as number[]).map(k=>columns(String(e[3]).replace('public.',''))[k-1]!.attname),confdeltype:String(e[5])
  }))),
- ...incoming.map(([table,confdeltype])=>({relation:`public.${table}`,conname:`${table}_user_id_fkey`,columns:['user_id'],target:'public.users',target_columns:['id'],confdeltype}))
+ ...incoming.map(([table,confdeltype])=>({relation:`public.${table}`,conname:`${table}_user_id_fkey`,columns:['user_id'],target:'public.users',target_columns:['id'],confdeltype})),
+ {relation:'wave4_load.fixtures',conname:'fixtures_user_id_fkey',columns:['user_id'],target:'public.users',target_columns:['id'],confdeltype:'r'},
+ {relation:'wave4_load.requests',conname:'requests_principal_user_id_fkey',columns:['principal_user_id'],target:'public.users',target_columns:['id'],confdeltype:'r'},
+ {relation:'wave4_load.requests',conname:'requests_session_id_fkey',columns:['session_id'],target:'public.user_sessions',target_columns:['id'],confdeltype:'r'}
 ].map((e,i)=>({...e,oid:9500+i,contype:'f',confupdtype:'a',confmatchtype:'s',condeferrable:false,condeferred:false,
  convalidated:true,conislocal:true,coninhcount:0,connoinherit:true,fk_columns_exact:true,fk_equalities:true,metadata_exact:true,constraint_dependencies_exact:true}));
 export function authenticationCatalogRows(sql:string,values:unknown[]=[]):any[]|undefined {
@@ -95,7 +100,7 @@ export function authenticationCatalogRows(sql:string,values:unknown[]=[]):any[]|
   const bypass=String(values[0]).includes('is_rls_bypassed');
   const baseline=source(bypass?'070_runtime_role_boundary.sql':'064_row_level_security.sql');
   const body=bypass?/search_path = pg_catalog AS \$\$([\s\S]*?)\$\$;/.exec(baseline)![1]:/current_app_user_id\(\) RETURNS uuid STABLE AS \$\$([\s\S]*?)\$\$ LANGUAGE plpgsql;/.exec(baseline)![1];
-  const grantees=['swat_app','swat_financial_receipt_writer','swat_financial_settler',...(!bypass?['swat_lp_admitter']:[]),'swat_migrator'];
+  const grantees=['swat_app','swat_financial_receipt_writer','swat_financial_settler',...(!bypass?['swat_custody_observer','swat_custody_reader','swat_lp_admitter','swat_lp_initializer','swat_wave4_authority_writer','swat_wave4_financial_writer']:[]),'swat_migrator'];
   return [{oid:bypass?9101:9102,identity_matches:true,owner:'swat_migrator',lanname:bypass?'sql':'plpgsql',prosrc:body,probin:null,prosqlbody:null,proconfig:bypass?['search_path=pg_catalog']:null,prokind:'f',prosecdef:false,proisstrict:false,proleakproof:false,proretset:false,prosupport:0,provariadic:0,procost:100,prorows:0,provolatile:'s',proparallel:'u',pronargs:0,proargnames:null,proallargtypes:null,proargmodes:null,pronargdefaults:0,proargdefaults:null,type_matches:true,extra_dependency:false,acl:grantees.map(grantee=>({grantee,grantor:'swat_migrator',privilege:'EXECUTE',grantable:false}))}];
  }
  if(sql.includes('Auth unreviewed policy')||sql.includes('JOIN pg_policy p ON'))return [];

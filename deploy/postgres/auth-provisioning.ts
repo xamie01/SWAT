@@ -116,7 +116,7 @@ async function functions(client: AuthQueryClient, expected: Pin[], phase: AuthCa
     const expectedAcl = [owner, ...(phase !== 'inert' && !internal.has(p.name) ? ['swat_auth_service'] : [])].sort();
     if (rows.length !== 1 || !r || r.owner !== owner || r.prosrc !== p.body || r.probin !== null || r.prosqlbody !== null || r.prokind !== 'f'
       || r.prosecdef !== p.definer || r.proisstrict !== false || r.proleakproof !== false || r.proretset !== p.set
-      || Number(r.prosupport) !== 0 || Number(r.provariadic) !== 0 || r.procost !== 100 || r.prorows !== (p.set ? 1000 : 0)
+      || (r.prosupport !== '-' && Number(r.prosupport) !== 0) || Number(r.provariadic) !== 0 || r.procost !== 100 || r.prorows !== (p.set ? 1000 : 0)
       || r.provolatile !== 'v' || r.proparallel !== 'u' || r.lanname !== p.language
       || JSON.stringify(r.proconfig) !== JSON.stringify(['search_path=pg_catalog'])
       || JSON.stringify(r.proargnames) !== JSON.stringify(p.argumentNames)

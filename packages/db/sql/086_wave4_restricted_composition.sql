@@ -28,14 +28,14 @@ BEGIN
  FOR f IN SELECT * FROM (VALUES
   ('lp085_fields(jsonb,text[])','b965deb7b060080ddfbb3449da46f99ee93566a6bcc7fcef54a9f190c70691a4','plpgsql','bool'),
   ('lp085_texts(jsonb,text[])','2327d73bf43b769ba836b22cbb5bdd7bfcce282e91ac1fe31385dec2adbe8345','plpgsql','bool'),
-  ('lp085_micro(jsonb,boolean)','28c86d7e3e917352d1d2c4f9174c5a3b6b095f155b89d83bd24c978d2f69bdc7','plpgsql','numeric'),
+  ('lp085_micro(jsonb,boolean)','b351a39c79504bca002601c46cb0ce935d6a0751e21bc35269ea4e1cc5876e3c','plpgsql','numeric'),
   ('lp085_amount(jsonb,boolean)','719266164aa23bc1a7f56dc7607988eb3680b69bf3a6d5285634b0e9d52393af','plpgsql','numeric'),
   ('lp085_time(jsonb)','55f2a14e18ba578c2dd5aba0b35c8aa17b240225bd10b7e26993b965c8c96cae','plpgsql','timestamptz'),
   ('lp085_quote_valid(jsonb,jsonb,timestamptz)','04d9b340d9505dcd33edfa0e730a5d9cfb46d26d16a5e1d2cf02ee2e58b21897','plpgsql','bool'),
   ('lp085_project_position(jsonb,text,boolean)','d2f2234ef1b95753ddaa9bb62609fa59ed6428072c0de25c8c8960c61fafb443','plpgsql','jsonb'),
   ('lp085_current_position(uuid,uuid)','6ea418e223e6c447a5f5393dd0d106ab6b2ca3933d7e116d57d5566e44f1ad61','sql','jsonb'),
   ('lp085_legacy_rungs(jsonb,jsonb)','6062bc6b040702f3c0e48c3af549c404b2bab79cebfe5202817b106d3509de13','plpgsql','jsonb'),
-  ('lp085_admission_guard()','8cd4aba6d5c4f240d5307e2f0ca993c23501af79feb84db4538b821b49f26cc8','plpgsql','trigger'),
+  ('lp085_admission_guard()','76d6c36e5278d78f4b815bb30a715a5b7f746c434133b1dbc64994c0351c313b','plpgsql','trigger'),
   ('lp085_receipt_valid(jsonb,public.lp_protected_quote_admissions,jsonb,jsonb,timestamptz,timestamptz)','2cbb947de25be54874ec238b7c55ec17b8dbbcda36d3cee046e1fbe230fcd5d0','plpgsql','bool'),
   ('lp085_runtime_quote_guard()','d3fce8ab0a858930af0f1d25093def80f948b8e20630c822b3f0018411741f3a','plpgsql','trigger'),
   ('lp085_runtime_settlement_guard()','b689dbf5726a23101f2e58ea4e4f40a5ab28899f72b1fa7de439e6b102ba58af','plpgsql','trigger'),
@@ -106,7 +106,7 @@ BEGIN
   ('lp_exact_receipts','trg_lp_exact_receipt_immutable','lp_exact_immutable_receipt',27,'53ec3dc4cce7460358cddc5fc2f0f36cfaf9d1ea990ad55e1a7067c9e71dcda1'),
   ('lp_positions','trg_lp_exact_legacy_guard','lp_exact_legacy_financial_guard',19,'88dd478095f94eb172e64a900342dc5bbcae1ae78c989388973dd006111fa145'),
   ('lp_positions','trg_lp_acquisition_immutable','enforce_lp_acquisition_immutable',19,'eadc7ce25888d29f7cd1ef634e03780f0600808e99d8f53967cecaa952f6710e'),
-  ('lp_positions','trg_lp_position_state_transition','enforce_lp_position_state_transition',19,'ef25dd4e3f6f2148187b4cefefd6c25855664f5f14d4054bdadb4da26c29509f')
+  ('lp_positions','trg_lp_position_state_transition','enforce_lp_position_state_transition',19,'24f0f0082964e99a776d1df6c743a4b0b3dd017da2a39b5de563e7891d4e51f1')
  ) AS pins(relation_name,trigger_name,function_name,trigger_type,body_hash) LOOP
   IF NOT EXISTS(SELECT 1 FROM pg_trigger g JOIN pg_proc p ON p.oid=g.tgfoid
    JOIN pg_language l ON l.oid=p.prolang WHERE g.tgrelid=to_regclass('public.'||t.relation_name)
@@ -203,8 +203,8 @@ BEGIN
     THEN RAISE EXCEPTION '086 LP exact tenant/admitter policy drift: %',policy_row.polname; END IF;
    END IF;
   END LOOP;
-  IF (SELECT count(*) FROM pg_policy WHERE polrelid=relation_oid) <> CASE
-   WHEN r.relation_name IN('lp_protected_quote_admissions','lp_protected_settlement_admissions','lp_positions','lp_exact_positions','lp_exact_operations') THEN 2 ELSE 1 END
+  IF (SELECT count(*) FROM pg_policy WHERE polrelid=relation_oid) <> (CASE
+   WHEN r.relation_name IN('lp_protected_quote_admissions','lp_protected_settlement_admissions','lp_positions','lp_exact_positions','lp_exact_operations') THEN 2 ELSE 1 END)
   THEN RAISE EXCEPTION '086 LP missing/extra policy'; END IF;
  END LOOP;
  -- Exact serial history sequence identity/owner before its narrowly scoped USAGE.

@@ -569,7 +569,7 @@ BEGIN
    AND proof.source_trade_id=s.id AND proof.binding_digest=b.binding_digest AND proof.finality=h.confirmation_state
    AND authority.enabled AND authority.provider_id=proof.provider_id AND authority.identity_digest=proof.provider_identity_digest
    AND authority.network=b.network AND authority.chain=s.chain AND authority.verifier_version=proof.verifier_version
-   AND authority.valid_until>CURRENT_TIMESTAMP AND proof.provider_valid_until>CURRENT_TIMESTAMP AND app.active)) ORDER BY s.id)
+   AND authority.valid_until>CURRENT_TIMESTAMP AND proof.provider_valid_until>CURRENT_TIMESTAMP AND app.active) ORDER BY s.id)
   FROM public.source_trades s LEFT JOIN public.source_verification_bindings b ON b.source_trade_id=s.id
   LEFT JOIN public.source_verification_heads h ON h.source_trade_id=s.id LEFT JOIN public.source_verified_evidence proof ON proof.evidence_id=h.evidence_id
   LEFT JOIN public.source_provider_authorities authority ON authority.authority_id=proof.authority_id

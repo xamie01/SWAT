@@ -79,7 +79,7 @@ CREATE FUNCTION public.lp085_micro(j jsonb, signed boolean DEFAULT false) RETURN
 LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
 BEGIN
   IF jsonb_typeof(j) IS DISTINCT FROM 'string' OR
-    (j #>> '{}') !~ CASE WHEN signed THEN '^(0|-?[1-9][0-9]{0,77})$' ELSE '^(0|[1-9][0-9]{0,77})$' END THEN
+    (j #>> '{}') !~ (CASE WHEN signed THEN '^(0|-?[1-9][0-9]{0,77})$' ELSE '^(0|[1-9][0-9]{0,77})$' END) THEN
     RAISE EXCEPTION 'LP protected canonical exact microdollars required';
   END IF;
   RETURN (j #>> '{}')::numeric;
@@ -243,8 +243,8 @@ BEGIN
     PERFORM public.lp085_fields(NEW.context,ARRAY['kind','commit']); c:=NEW.context->'commit';
     PERFORM public.lp085_fields(c,ARRAY['fingerprint','quote']);
     IF NEW.quote IS DISTINCT FROM c->'quote' OR NEW.intent_hash IS DISTINCT FROM c->>'fingerprint'
-      OR NEW.context_key IS DISTINCT FROM (NEW.context->>'kind')||':'||CASE WHEN NEW.context->>'kind'='acquisition'
-        THEN c->'request'->>'operationKey' ELSE c->>'operationKey' END
+      OR NEW.context_key IS DISTINCT FROM (NEW.context->>'kind')||':'||(CASE WHEN NEW.context->>'kind'='acquisition'
+        THEN c->'request'->>'operationKey' ELSE c->>'operationKey' END)
       OR NEW.input->>'userId' IS DISTINCT FROM NEW.user_id::text OR NEW.input->>'intentHash' IS DISTINCT FROM NEW.intent_hash THEN
       RAISE EXCEPTION 'LP admitted quote full context mismatch'; END IF;
     PERFORM public.lp085_quote_valid(NEW.input,NEW.quote,now_time);

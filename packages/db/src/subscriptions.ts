@@ -1,9 +1,7 @@
 import type { PoolClient } from 'pg';
 import { capabilitiesFor, quotaExceeded, type Chain, type UserTier } from '@swat/shared';
-import { query } from './client.js';
 import { claimMasterMembershipSlot, requireGrantedSlot } from './master-membership.js';
-import { withTransaction } from './transaction.js';
-import type { UserScope } from './tenancy.js';
+import { scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
 
 /**
  * Per-user wallet subscriptions and token watches (Stage 2).
@@ -210,7 +208,8 @@ function toSubscription(row: SubscriptionRow): WalletSubscription {
  * wallets in the dashboard and in `GET /v1/me/wallets`.
  */
 export async function listWalletSubscriptions(scope: UserScope): Promise<WalletSubscription[]> {
-  const rows = await query<SubscriptionRow>(
+  const rows = await scopedQuery<SubscriptionRow>(
+    scope,
     `SELECT ${SUBSCRIPTION_COLUMNS}
        FROM user_wallet_subscriptions
       WHERE user_id = $1 AND state <> 'ended'
@@ -228,7 +227,8 @@ export async function listWalletSubscriptions(scope: UserScope): Promise<WalletS
  * working for them. `ended` does not.
  */
 export async function isSubscribed(scope: UserScope, walletAddress: string): Promise<boolean> {
-  const rows = await query<{ one: number }>(
+  const rows = await scopedQuery<{ one: number }>(
+    scope,
     `SELECT 1 AS one FROM user_wallet_subscriptions
       WHERE user_id = $1 AND wallet_address = $2 AND state <> 'ended'`,
     [scope.userId, walletAddress]
@@ -331,7 +331,7 @@ export async function subscribeToWallet(
 ): Promise<SubscribeResult> {
   const capabilities = capabilitiesFor(input.tier, input.tierExpiresAt);
 
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     await lockUserForQuota(client, scope.userId);
 
     const existing = await client.query<SubscriptionRow>(
@@ -492,7 +492,8 @@ export async function unsubscribeFromWallet(
   scope: UserScope,
   walletAddress: string
 ): Promise<boolean> {
-  const rows = await query<{ wallet_address: string }>(
+  const rows = await scopedQuery<{ wallet_address: string }>(
+    scope,
     `DELETE FROM user_wallet_subscriptions
       WHERE user_id = $1 AND wallet_address = $2
       RETURNING wallet_address`,
@@ -516,7 +517,8 @@ export async function getSubscriptionState(
   scope: UserScope,
   walletAddress: string
 ): Promise<WalletSubscription | null> {
-  const rows = await query<SubscriptionRow>(
+  const rows = await scopedQuery<SubscriptionRow>(
+    scope,
     `SELECT ${SUBSCRIPTION_COLUMNS}
        FROM user_wallet_subscriptions
       WHERE user_id = $1 AND wallet_address = $2`,
@@ -544,7 +546,7 @@ async function applyTransition(
   walletAddress: string,
   to: 'winding_down' | 'ended'
 ): Promise<SubscriptionStateChange> {
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     const locked = await client.query<SubscriptionRow>(
       `SELECT ${SUBSCRIPTION_COLUMNS}
          FROM user_wallet_subscriptions
@@ -664,7 +666,7 @@ export async function requestCloseAll(
   scope: UserScope,
   walletAddress: string
 ): Promise<SubscriptionStateChange> {
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     const locked = await client.query<SubscriptionRow>(
       `SELECT ${SUBSCRIPTION_COLUMNS}
          FROM user_wallet_subscriptions
@@ -740,7 +742,8 @@ function toWatch(row: TokenWatchRow): TokenWatch {
 }
 
 export async function listTokenWatches(scope: UserScope): Promise<TokenWatch[]> {
-  const rows = await query<TokenWatchRow>(
+  const rows = await scopedQuery<TokenWatchRow>(
+    scope,
     `SELECT id, chain, token_mint, status, created_at
        FROM user_token_watches
       WHERE user_id = $1
@@ -774,7 +777,7 @@ export async function requestTokenWatch(
 ): Promise<RequestTokenWatchResult> {
   const capabilities = capabilitiesFor(input.tier, input.tierExpiresAt);
 
-  return withTransaction(async (client) => {
+  return withTenantTransaction(scope, async (client) => {
     // Same serialisation as the wallet quota — see `lockUserForQuota`.
     await lockUserForQuota(client, scope.userId);
 

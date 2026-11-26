@@ -138,16 +138,24 @@ const incomingUserFks: readonly (readonly [table:string,deleteAction:'c'|'r'])[]
  ['custody_secret_admissions','r'], // 081
  ['withdrawal_reducing_intents','r'],['reducing_perps_venue_mappings','r'], // 082
  ['lp_exact_positions','r'],['lp_exact_operations','r'],['lp_exact_receipts','r'], // 083
- ['lp_protected_quote_admissions','r'],['lp_protected_settlement_admissions','r'] // 085
+ ['lp_protected_quote_admissions','r'],['lp_protected_settlement_admissions','r'], // 085
+ ['pipeline_exact_follower_evidence','r'],['pipeline_paper_valuation_evidence','r'],['pipeline_worker_paper_receipts','r'], // 088
+ ['wave4_authorities089','r'] // 089
 ];
 type ForeignKeyPin = {relation:string;name:string;columns:string[];target:string;targetColumns:string[];deleteAction:string};
+const loadAuthFks: readonly ForeignKeyPin[] = [
+ {relation:'wave4_load.fixtures',name:'fixtures_user_id_fkey',columns:['user_id'],target:'public.users',targetColumns:['id'],deleteAction:'r'},
+ {relation:'wave4_load.requests',name:'requests_principal_user_id_fkey',columns:['principal_user_id'],target:'public.users',targetColumns:['id'],deleteAction:'r'},
+ {relation:'wave4_load.requests',name:'requests_session_id_fkey',columns:['session_id'],target:'public.user_sessions',targetColumns:['id'],deleteAction:'r'}
+];
 const authForeignKeys: readonly ForeignKeyPin[] = [
  ...Object.entries(AUTH_RELATION_INVENTORY).flatMap(([table,e])=>e.constraints.filter(c=>c[1]==='f').map(c=>({
   relation:`public.${table}`,name:c[0],columns:c[2].map(k=>e.columns[k-1]![0]),target:c[3]!,
   targetColumns:c[4]!.map(k=>AUTH_RELATION_INVENTORY[c[3]!.slice('public.'.length)]!.columns[k-1]![0]),deleteAction:c[5]!
  }))),
  ...incomingUserFks.map(([table,deleteAction])=>({relation:`public.${table}`,name:`${table}_user_id_fkey`,
-  columns:['user_id'],target:'public.users',targetColumns:['id'],deleteAction}))
+  columns:['user_id'],target:'public.users',targetColumns:['id'],deleteAction})),
+ ...loadAuthFks
 ];
 /** One four-path validator for BOTH auth-child and reviewed external-child FKs.
  * Generated trigger names/OIDs are not portable; only validated constraint OIDs
@@ -207,9 +215,9 @@ async function validateAuthForeignKeyClosure(client:AuthQueryClient):Promise<voi
    p.oid=to_regprocedure('pg_catalog.'||quote_ident(p.proname)||'()')
     AND p.pronamespace='pg_catalog'::regnamespace AND l.lanname='internal' AND p.prosrc=p.proname
     AND p.proowner=(SELECT proowner FROM pg_proc WHERE oid='pg_catalog.uuid_eq(uuid,uuid)'::regprocedure)
-    AND p.prokind='f' AND NOT p.prosecdef AND NOT p.proisstrict AND NOT p.proleakproof AND NOT p.proretset
+    AND p.prokind='f' AND NOT p.prosecdef AND p.proisstrict AND NOT p.proleakproof AND NOT p.proretset
     AND p.prorettype='pg_catalog.trigger'::regtype AND p.pronargs=0 AND p.proargtypes::text=''
-    AND p.provariadic=0 AND p.prosupport=0 AND p.procost=1 AND p.prorows=0 AND p.provolatile='v' AND p.proparallel='u'
+    AND p.provariadic=0 AND p.prosupport=0 AND p.procost=1 AND p.prorows=0 AND p.provolatile='v' AND p.proparallel='s'
     AND p.probin IS NULL AND p.prosqlbody IS NULL AND p.proconfig IS NULL
     AND p.proargnames IS NULL AND p.proallargtypes IS NULL AND p.proargmodes IS NULL
     AND p.pronargdefaults=0 AND p.proargdefaults IS NULL AS builtin_exact,
@@ -302,7 +310,7 @@ async function validateCitextClosure(client:AuthQueryClient,phase:'inert'|'disab
  if(family.length!==1||!same(family[0]?.operators,[[1,'<','citext_lt'],[2,'<=','citext_le'],[3,'=','citext_eq'],[4,'>=','citext_ge'],[5,'>','citext_gt']])
   ||Number(family[0]?.operator_count)!==5||Number(family[0]?.support_count)!==1||family[0]?.support_exact!==true)throw new Error('Auth reviewed citext index operator/support closure drift');
 }
-function defaultMatches(text:string|null,expected:string|undefined,ids:Record<string,number>):boolean {
+function defaultMatches(text:string|null,expected:string|undefined,ids:Record<string,number>,typmod=-1):boolean {
  if (!text) return expected===undefined;
  const n=tree(text);
  if (expected==='uuid'||expected==='now') return n.tag==='FUNCEXPR'&&n.funcid===ids[expected]&&same(n.args,null)&&n.funcretset===false;
@@ -311,6 +319,12 @@ function defaultMatches(text:string|null,expected:string|undefined,ids:Record<st
   return n.tag==='FUNCEXPR'&&n.funcid===ids.nextval&&a?.length===1&&a[0]?.tag==='CONST'&&a[0].consttype===2205
     &&bytes(a[0]).readUInt32LE(0)===ids.sequence;
  }
+ if (n.tag==='FUNCEXPR'&&Number.isInteger(ids.varchar_cast)&&ids.varchar_cast>0&&n.funcid===ids.varchar_cast&&n.funcretset===false&&typmod>0&&Array.isArray(n.args)&&n.args.length===3) {
+  const a=n.args as Node[];
+  return a[0]?.tag==='CONST'&&literal(a[0])===expected
+   &&a[1]?.tag==='CONST'&&a[1].constisnull===false&&a[1].constbyval===true&&a[1].consttype===23&&bytes(a[1]).readInt32LE(0)===typmod
+   &&a[2]?.tag==='CONST'&&a[2].constisnull===false&&a[2].constbyval===true&&a[2].consttype===16&&bytes(a[2])[0]===0;
+ }
  return n.tag==='CONST'&&literal(n)===expected;
 }
 export async function validateAuthRelations(client:AuthQueryClient,phase:'inert'|'disabled'|'active'='inert'):Promise<void> {
@@ -318,7 +332,8 @@ export async function validateAuthRelations(client:AuthQueryClient,phase:'inert'
  await validateAuthForeignKeyClosure(client);
  const ids=(await client.query(`SELECT 'pg_catalog.gen_random_uuid()'::regprocedure::oid AS uuid,
   'pg_catalog.now()'::regprocedure::oid AS now,'pg_catalog.nextval(regclass)'::regprocedure::oid AS nextval,
-  'public.audit_log_id_seq'::regclass::oid AS sequence,'pg_catalog.=(text,text)'::regoperator::oid AS text_equal`)).rows[0];
+  'public.audit_log_id_seq'::regclass::oid AS sequence,'pg_catalog.=(text,text)'::regoperator::oid AS text_equal,
+  'pg_catalog.varchar(pg_catalog.varchar,pg_catalog.int4,pg_catalog.bool)'::regprocedure::oid AS varchar_cast`)).rows[0];
  if(!ids)throw new Error('Auth catalog builtin identities missing');
  for(const [table,expected] of Object.entries(AUTH_RELATION_INVENTORY)) {
   const name=`public.${table}`;
@@ -327,7 +342,7 @@ export async function validateAuthRelations(client:AuthQueryClient,phase:'inert'
    d.adbin::text AS default_tree FROM pg_attribute a JOIN pg_type t ON t.oid=a.atttypid JOIN pg_namespace n ON n.oid=t.typnamespace
    LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=to_regclass($1) AND a.attnum>0 ORDER BY a.attnum`,[name])).rows;
   if(columns.length!==expected.columns.length||columns.some((a,i)=>{const e=expected.columns[i]!;return a.attname!==e[0]||a.type!==e[1]||a.atttypmod!==e[2]||a.attnotnull!==e[3]||a.attnum!==i+1
-   ||a.attisdropped!==false||a.attidentity!==''||a.attgenerated!==''||a.attinhcount!==0||a.native_collation!==true||!defaultMatches(a.default_tree,e[4],ids as Record<string,number>);})) throw new Error(`Auth exact columns/default drift: ${name}`);
+   ||a.attisdropped!==false||a.attidentity!==''||a.attgenerated!==''||a.attinhcount!==0||a.native_collation!==true||!defaultMatches(a.default_tree,e[4],ids as Record<string,number>,e[2]);})) throw new Error(`Auth exact columns/default drift: ${name}`);
   const constraints=(await client.query(`SELECT conname,contype,conkey,confrelid::regclass::text AS target,confkey,confdeltype,confupdtype,confmatchtype,
    condeferrable,condeferred,convalidated,conislocal,coninhcount,connoinherit,
    CASE WHEN contype='f' THEN conpfeqop=ARRAY[CASE WHEN confrelid='public.audit_log'::regclass
@@ -368,14 +383,14 @@ export async function validateAuthRelations(client:AuthQueryClient,phase:'inert'
   if(hazards.length)throw new Error(`Auth unexpected rule/storage/executable dependency: ${name}`);
  }
  const sequence=(await client.query(`SELECT s.seqtypid='pg_catalog.int8'::regtype AS type_matches,s.seqstart::text,s.seqincrement::text,s.seqmin::text,s.seqmax::text,s.seqcache::text,s.seqcycle,
-  ARRAY(SELECT d.deptype||':'||n.nspname||'.'||c.relname||':'||a.attname FROM pg_depend d JOIN pg_class c ON c.oid=d.refobjid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=d.refobjsubid WHERE d.classid='pg_class'::regclass AND d.objid=s.seqrelid AND d.refclassid='pg_class'::regclass ORDER BY 1) AS dependencies
+  ARRAY(SELECT d.deptype::text||':'||n.nspname||'.'||c.relname||':'||a.attname FROM pg_depend d JOIN pg_class c ON c.oid=d.refobjid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum=d.refobjsubid WHERE d.classid='pg_class'::regclass AND d.objid=s.seqrelid AND d.refclassid='pg_class'::regclass ORDER BY 1) AS dependencies
   FROM pg_sequence s WHERE s.seqrelid='public.audit_log_id_seq'::regclass`)).rows[0];
  if(!sequence||sequence.type_matches!==true||sequence.seqstart!=='1'||sequence.seqincrement!=='1'||sequence.seqmin!=='1'||sequence.seqmax!=='9223372036854775807'||sequence.seqcache!=='1'||sequence.seqcycle!==false||!same(sequence.dependencies,['a:public.audit_log:id']))throw new Error('Auth exact sequence options/dependencies drift');
 }
 
 const helperPins = [
  {signature:'public.is_rls_bypassed()',body:"\n  SELECT current_user = 'swat_migrator' AND session_user = 'swat_migrator';\n",language:'sql',type:'pg_catalog.bool',config:['search_path=pg_catalog'],grantees:['swat_app','swat_financial_receipt_writer','swat_financial_settler','swat_migrator']},
- {signature:'public.current_app_user_id()',body:"\nBEGIN\n  RETURN NULLIF(current_setting('app.current_user_id', true), '')::uuid;\nEXCEPTION WHEN OTHERS THEN\n  RETURN NULL;\nEND;\n",language:'plpgsql',type:'pg_catalog.uuid',config:null,grantees:['swat_app','swat_financial_receipt_writer','swat_financial_settler','swat_lp_admitter','swat_migrator']}
+ {signature:'public.current_app_user_id()',body:"\nBEGIN\n  RETURN NULLIF(current_setting('app.current_user_id', true), '')::uuid;\nEXCEPTION WHEN OTHERS THEN\n  RETURN NULL;\nEND;\n",language:'plpgsql',type:'pg_catalog.uuid',config:null,grantees:['swat_app','swat_custody_observer','swat_custody_reader','swat_financial_receipt_writer','swat_financial_settler','swat_lp_admitter','swat_lp_initializer','swat_migrator','swat_wave4_authority_writer','swat_wave4_financial_writer']}
 ] as const;
 export async function validateAuthPolicyClosure(client:AuthQueryClient):Promise<void> {
  for(const e of helperPins){
@@ -386,7 +401,7 @@ export async function validateAuthPolicyClosure(client:AuthQueryClient):Promise<
    FROM pg_proc p JOIN pg_roles r ON r.oid=p.proowner JOIN pg_language l ON l.oid=p.prolang WHERE p.oid=to_regprocedure($1)`,[e.signature,e.type])).rows;
   const a=rows[0];
   if(rows.length!==1||!a||!Number.isInteger(a.oid)||a.identity_matches!==true||a.owner!=='swat_migrator'||a.lanname!==e.language||a.prosrc!==e.body||a.probin!==null||a.prosqlbody!==null||!same(a.proconfig,e.config)
-   ||a.prokind!=='f'||a.prosecdef!==false||a.proisstrict!==false||a.proleakproof!==false||a.proretset!==false||Number(a.prosupport)!==0||Number(a.provariadic)!==0||a.procost!==100||a.prorows!==0||a.provolatile!=='s'||a.proparallel!=='u'||a.pronargs!==0||a.proargnames!==null||a.proallargtypes!==null||a.proargmodes!==null||a.pronargdefaults!==0||a.proargdefaults!==null||a.type_matches!==true||a.extra_dependency!==false
+   ||a.prokind!=='f'||a.prosecdef!==false||a.proisstrict!==false||a.proleakproof!==false||a.proretset!==false||(a.prosupport!=='-'&&Number(a.prosupport)!==0)||Number(a.provariadic)!==0||a.procost!==100||a.prorows!==0||a.provolatile!=='s'||a.proparallel!=='u'||a.pronargs!==0||a.proargnames!==null||a.proallargtypes!==null||a.proargmodes!==null||a.pronargdefaults!==0||a.proargdefaults!==null||a.type_matches!==true||a.extra_dependency!==false
    ||!Array.isArray(a.acl)||!same(a.acl.map((g:{grantee:string})=>g.grantee).sort(),[...e.grantees].sort())||a.acl.some((g:{grantor:string;privilege:string;grantable:boolean})=>g.grantor!=='swat_migrator'||g.privilege!=='EXECUTE'||g.grantable!==false))throw new Error(`Auth exact policy helper closure drift: ${e.signature}`);
  }
  const extra=(await client.query(`SELECT d.objid FROM pg_depend d JOIN pg_policy p ON d.classid='pg_policy'::regclass AND d.objid=p.oid JOIN pg_proc f ON d.refclassid='pg_proc'::regclass AND d.refobjid=f.oid JOIN pg_namespace n ON n.oid=f.pronamespace

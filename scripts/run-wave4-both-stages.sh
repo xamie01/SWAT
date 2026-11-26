@@ -12,6 +12,11 @@ SWAT_DIR="${SWAT_DIR:-$(cd -- "$SCRIPT_DIR/.." && pwd -P)}"
 PRIVATE_DIR="${PRIVATE_DIR:-/tmp/.swat-wave4-private}"
 STAGE_A_CONFIG="$PRIVATE_DIR/private-config.json"
 STAGE_A_CREDS="$PRIVATE_DIR/credentials.env"
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  PGB_DIR="/var/run/postgresql/wave4"
+else
+  PGB_DIR="$PRIVATE_DIR"
+fi
 
 needs_stage_a_bootstrap() {
   [[ -f "$STAGE_A_CONFIG" && -f "$STAGE_A_CREDS" ]] || return 0
@@ -19,9 +24,9 @@ needs_stage_a_bootstrap() {
   for name in swat-w4-ref-pg swat-w4-ref-redis swat-w4-cand-pg swat-w4-cand-redis; do
     [[ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)" == "true" ]] || return 0
   done
-  [[ -s "$PRIVATE_DIR/pgbouncer.pid" ]] || return 0
+  [[ -s "$PGB_DIR/pgbouncer.pid" ]] || return 0
   local pgb_pid
-  pgb_pid="$(cat "$PRIVATE_DIR/pgbouncer.pid" 2>/dev/null || true)"
+  pgb_pid="$(cat "$PGB_DIR/pgbouncer.pid" 2>/dev/null || true)"
   [[ -n "$pgb_pid" ]] && kill -0 "$pgb_pid" 2>/dev/null || return 0
   for rname in swat-w4-ref-redis swat-w4-cand-redis; do
     local dbsize
@@ -40,6 +45,18 @@ needs_stage_a_bootstrap() {
       [[ "$has_mig" == "f" ]] || exit 1
     done
   ) || return 0
+  # Re-bootstrap if private-config.json holds stale migration checksums after a git pull.
+  if [[ -x "$SWAT_DIR/node_modules/.bin/tsx" ]]; then
+    node --import "file://$SWAT_DIR/node_modules/tsx/dist/loader.mjs" - "$SWAT_DIR" "$STAGE_A_CONFIG" <<'NODE' || return 0
+import { readFileSync } from 'node:fs';
+const [swatDir, cfgPath] = process.argv.slice(2);
+const { discoverMigrationInventory } = await import(`${swatDir}/packages/db/src/migration-discovery.ts`);
+const { createMigrationSelectionProposal } = await import(`${swatDir}/packages/db/src/migration-selection.ts`);
+const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+const proposal = createMigrationSelectionProposal(await discoverMigrationInventory(`${swatDir}/packages/db/sql`));
+if (cfg?.migrationSelection?.manifestChecksum !== proposal.manifestChecksum) process.exit(1);
+NODE
+  fi
   return 1
 }
 
@@ -116,11 +133,11 @@ cleanup_stage_b_daemons() {
   for p in "$STAGE_A_PID" "$STAGE_B_PID" "$WORKER_PID" "$API_PID" "$TAIL_A_PID" "$TAIL_B_PID"; do
     stop_pid "$p"
   done
-  if [[ -s "$PRIVATE_DIR/load-pgbouncer.pid" ]]; then
+  if [[ -s "$PGB_DIR/load-pgbouncer.pid" ]]; then
     local pgb_pid
-    pgb_pid="$(cat "$PRIVATE_DIR/load-pgbouncer.pid" 2>/dev/null || true)"
+    pgb_pid="$(cat "$PGB_DIR/load-pgbouncer.pid" 2>/dev/null || true)"
     stop_pid "$pgb_pid"
-    rm -f "$PRIVATE_DIR/load-pgbouncer.pid"
+    rm -f "$PGB_DIR/load-pgbouncer.pid"
   fi
 }
 trap cleanup_stage_b_daemons EXIT
@@ -130,7 +147,7 @@ trap 'exit 143' TERM
 echo "=== [2/5] Provisioning dedicated Stage B isolated containers (PG16 + Redis7 + PgBouncer) ==="
 docker rm -f swat-w4-load-pg swat-w4-load-redis >/dev/null 2>&1 || true
 docker network rm swat-w4-load-net >/dev/null 2>&1 || true
-pkill -f "$PRIVATE_DIR/load-pgbouncer.ini" >/dev/null 2>&1 || true
+pkill -f "load-pgbouncer.ini" >/dev/null 2>&1 || true
 sleep 0.5
 
 docker network create --driver bridge \
@@ -216,7 +233,7 @@ PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d
 DO \$\$
 DECLARE role_name text;
   extra_roles text[] := ARRAY[
-    'swat_fanout',
+    'swat_fanout', 'swat_notification', 'swat_discovery',
     'swat_wave4_authority_writer', 'swat_wave4_financial_writer',
     'swat_lp_initializer', 'swat_custody_reader', 'swat_custody_observer'
   ];
@@ -234,7 +251,8 @@ BEGIN
 END \$\$;
 ALTER ROLE wave4_observer WITH PASSWORD '${LOAD_OBS_PASS}';
 ALTER ROLE wave4_observer SET row_security=on;
-GRANT pg_read_all_stats TO wave4_observer;
+GRANT pg_read_all_stats TO wave4_observer WITH INHERIT TRUE;
+GRANT pg_read_all_settings TO wave4_observer WITH INHERIT TRUE;
 GRANT CONNECT ON DATABASE ${LOAD_DB} TO wave4_observer;
 ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${LOAD_MIG_PASS}';
 -- 070_runtime_role_boundary and 086 require swat_app to remain NOLOGIN until migrations commit.
@@ -337,13 +355,16 @@ const serverKey = createHmac('sha256', salted).update('Server Key').digest();
 console.log(`SCRAM-SHA-256$4096:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`);
 NODE
 )"
-cat > "$PRIVATE_DIR/load-userlist.txt" <<EOF
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  install -d -m 0700 -o postgres -g postgres "$PGB_DIR"
+fi
+cat > "$PGB_DIR/load-userlist.txt" <<EOF
 "swat_app" "$LOAD_SCRAM_APP"
 "wave4_pool_observer" "$LOAD_SCRAM_POOL_OBS"
 EOF
-chmod 600 "$PRIVATE_DIR/load-userlist.txt"
+chmod 600 "$PGB_DIR/load-userlist.txt"
 
-cat > "$PRIVATE_DIR/load-pgbouncer.ini" <<EOF
+cat > "$PGB_DIR/load-pgbouncer.ini" <<EOF
 [databases]
 ${LOAD_DB} = host=127.0.0.1 port=${LOAD_PG_PORT} dbname=${LOAD_DB}
 
@@ -351,7 +372,7 @@ ${LOAD_DB} = host=127.0.0.1 port=${LOAD_PG_PORT} dbname=${LOAD_DB}
 listen_addr = 127.0.0.1
 listen_port = ${LOAD_PGB_PORT}
 auth_type = scram-sha-256
-auth_file = ${PRIVATE_DIR}/load-userlist.txt
+auth_file = ${PGB_DIR}/load-userlist.txt
 admin_users = wave4_pool_observer
 stats_users = wave4_pool_observer
 pool_mode = transaction
@@ -362,20 +383,21 @@ reserve_pool_size = 5
 reserve_pool_timeout = 5
 max_db_connections = 50
 ignore_startup_parameters = extra_float_digits,search_path,timezone
-pidfile = ${PRIVATE_DIR}/load-pgbouncer.pid
-logfile = ${PRIVATE_DIR}/load-pgbouncer.log
+pidfile = ${PGB_DIR}/load-pgbouncer.pid
+logfile = ${PGB_DIR}/load-pgbouncer.log
 EOF
-chmod 600 "$PRIVATE_DIR/load-pgbouncer.ini"
+chmod 600 "$PGB_DIR/load-pgbouncer.ini"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-  pgbouncer -u root -d "$PRIVATE_DIR/load-pgbouncer.ini"
+  chown postgres:postgres "$PGB_DIR/load-userlist.txt" "$PGB_DIR/load-pgbouncer.ini"
+  pgbouncer -u postgres -d "$PGB_DIR/load-pgbouncer.ini"
 else
-  pgbouncer -d "$PRIVATE_DIR/load-pgbouncer.ini"
+  pgbouncer -d "$PGB_DIR/load-pgbouncer.ini"
 fi
 for i in $(seq 1 20); do
-  [[ -s "$PRIVATE_DIR/load-pgbouncer.pid" ]] && break
+  [[ -s "$PGB_DIR/load-pgbouncer.pid" ]] && break
   sleep 0.2
 done
-[[ -s "$PRIVATE_DIR/load-pgbouncer.pid" ]] || { echo "Stage B PgBouncer failed to start" >&2; exit 1; }
+[[ -s "$PGB_DIR/load-pgbouncer.pid" ]] || { echo "Stage B PgBouncer failed to start" >&2; exit 1; }
 
 "$SWAT_DIR/node_modules/.bin/tsx" - "$SWAT_DIR" "$LOAD_RD_PORT" "$LOAD_OBS_PASS" <<'TS'
 const { createRequire } = require('node:module');
@@ -461,7 +483,7 @@ done
 
 LOAD_PG_PID="$(docker inspect --format '{{.State.Pid}}' swat-w4-load-pg)"
 LOAD_RD_PID="$(docker inspect --format '{{.State.Pid}}' swat-w4-load-redis)"
-LOAD_PGB_PID="$(cat "$PRIVATE_DIR/load-pgbouncer.pid")"
+LOAD_PGB_PID="$(cat "$PGB_DIR/load-pgbouncer.pid")"
 
 docker inspect swat-w4-load-pg swat-w4-load-redis > "$RUN_OUT/deployment-proof.txt"
 docker network inspect swat-w4-load-net > "$RUN_OUT/egress-proof.txt"

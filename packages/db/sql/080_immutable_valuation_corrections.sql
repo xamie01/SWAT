@@ -243,8 +243,8 @@ BEGIN
  THEN RAISE EXCEPTION 'correction predecessor conflict'; END IF;
  IF prev.correction_id IS NOT NULL AND NOT public.worker_correction_authorized(prev.correction_id)
  THEN RAISE EXCEPTION 'carried quote/fee predecessor acceptance invalidated'; END IF;
- IF NEW.quote_origin_valuation_id IS DISTINCT FROM CASE WHEN v.quote_usd IS NOT NULL THEN v.valuation_id ELSE prev.quote_origin_valuation_id END
- OR NEW.fee_origin_valuation_id IS DISTINCT FROM CASE WHEN v.fee_usd IS NOT NULL THEN v.valuation_id ELSE prev.fee_origin_valuation_id END
+ IF NEW.quote_origin_valuation_id IS DISTINCT FROM (CASE WHEN v.quote_usd IS NOT NULL THEN v.valuation_id ELSE prev.quote_origin_valuation_id END)
+ OR NEW.fee_origin_valuation_id IS DISTINCT FROM (CASE WHEN v.fee_usd IS NOT NULL THEN v.valuation_id ELSE prev.fee_origin_valuation_id END)
  THEN RAISE EXCEPTION 'carried quote/fee field provenance mismatch'; END IF;
  expected_quote:=COALESCE(v.quote_usd,CASE WHEN prev.correction_id IS NOT NULL THEN prev.effective_quote_usd ELSE f.quote_quantity END);
  expected_fee:=COALESCE(v.fee_usd,CASE WHEN prev.correction_id IS NOT NULL THEN prev.effective_fee_usd ELSE f.fee_usd END);
@@ -383,8 +383,8 @@ BEGIN
  OR (NEW.snapshot->'totals'->>'completes')::boolean IS DISTINCT FROM total.completes
  OR (NEW.snapshot->'totals'->>'evidenceCount')::bigint IS DISTINCT FROM total.evidence_count
  OR t.token_amount IS DISTINCT FROM total.base
- OR t.amount_usd IS DISTINCT FROM CASE WHEN total.quote_unknown=0 THEN total.quote ELSE NULL END
- OR t.fee_usd IS DISTINCT FROM CASE WHEN total.unknown=0 THEN total.fee ELSE NULL END
+ OR t.amount_usd IS DISTINCT FROM (CASE WHEN total.quote_unknown=0 THEN total.quote ELSE NULL END)
+ OR t.fee_usd IS DISTINCT FROM (CASE WHEN total.unknown=0 THEN total.fee ELSE NULL END)
  OR (NEW.accounting_complete AND (total.evidence_count=0 OR total.unknown<>0 OR NOT total.completes
  OR e.state<>'confirmed' OR t.status<>'filled'
  OR EXISTS(SELECT 1 FROM public.copy_execution_evidence f WHERE f.execution_id=e.id
