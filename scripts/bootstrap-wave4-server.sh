@@ -224,7 +224,8 @@ BEGIN
   END LOOP;
 END \$\$;
 ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${MIG_PASS}';
-ALTER ROLE swat_app WITH LOGIN PASSWORD '${APP_PASS}';
+-- 070_runtime_role_boundary and 086 require swat_app to remain NOLOGIN until migrations commit.
+ALTER ROLE swat_app NOLOGIN PASSWORD '${APP_PASS}';
 SQL
 done
 

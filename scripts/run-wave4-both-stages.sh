@@ -237,7 +237,8 @@ ALTER ROLE wave4_observer SET row_security=on;
 GRANT pg_read_all_stats TO wave4_observer;
 GRANT CONNECT ON DATABASE ${LOAD_DB} TO wave4_observer;
 ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${LOAD_MIG_PASS}';
-ALTER ROLE swat_app WITH LOGIN PASSWORD '${LOAD_APP_PASS}';
+-- 070_runtime_role_boundary and 086 require swat_app to remain NOLOGIN until migrations commit.
+ALTER ROLE swat_app NOLOGIN PASSWORD NULL;
 SQL
 
 echo "Applying reviewed 001-090 migrations & 087 auth handoff to Stage B PostgreSQL..."
@@ -313,6 +314,7 @@ const { prepareDatabaseForMigratePristine } = require(`${swatDir}/scripts/wave4-
 TS
 
 PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" -v ON_ERROR_STOP=1 <<SQL
+ALTER ROLE swat_app WITH LOGIN PASSWORD '${LOAD_APP_PASS}';
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 GRANT USAGE ON SCHEMA public TO wave4_observer;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO wave4_observer;

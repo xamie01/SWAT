@@ -82,6 +82,9 @@ BEGIN
   END IF;
 END $$`);
     await dbaClient.query(`ALTER ROLE swat_handoff_dba WITH PASSWORD '${handoffPass.replaceAll("'", "''")}'`);
+    // 070_runtime_role_boundary and 086 require swat_app to be NOLOGIN during migrations
+    // (preserving any existing rolpassword hash set for PgBouncer userlist).
+    await dbaClient.query(`ALTER ROLE swat_app NOLOGIN`);
     // Transfer public schema ownership first, then strip ALL existing ACL entries
     // (including PG16 default pg_database_owner and prior superuser grants) so
     // swat_migrator can establish the exact ACL checked by assertInstallationBootstrap.

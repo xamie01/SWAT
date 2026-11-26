@@ -227,6 +227,16 @@ async function main() {
     await writer.write('gate-i1.json', nonsecretEvidence(i1));
     console.log('[STAGE-A] I1:', gatePassed(i1) ? 'PASS' : 'FAIL', JSON.stringify(i1.assertions));
 
+    // Enable swat_app LOGIN only after I1 migrations + catalog parity checks complete.
+    const appLoginLease = await candAuthInstall.acquireDba();
+    try {
+      await appLoginLease.client.query(
+        `ALTER ROLE swat_app WITH LOGIN PASSWORD '${creds.APP_PASS!.replaceAll("'", "''")}'`
+      );
+    } finally {
+      appLoginLease.release(false);
+    }
+
     // Gate I2
     const runtime = await clients.postgres(config.runtimeUrl, `wave4-runtime-${config.candidate.runId}`);
     const pooled = await clients.postgres(config.pooledRuntimeUrl, `wave4-pooled-${config.candidate.runId}`);
