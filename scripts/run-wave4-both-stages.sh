@@ -18,7 +18,7 @@ STAGE_A_CREDS="$PRIVATE_DIR/credentials.env"
   exit 1
 }
 
-for tool in docker node pnpm psql pg_dump k6 jq openssl uuidgen getconf pgbouncer; do
+for tool in docker node pnpm psql pg_dump k6 jq openssl uuidgen getconf pgbouncer curl; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Missing required tool: $tool" >&2; exit 2; }
 done
 [[ -r /proc/meminfo && -r /proc/pressure/memory && -r /proc/pressure/cpu && -r /proc/pressure/io ]] || {
@@ -64,18 +64,33 @@ API_PID=""
 WORKER_PID=""
 STAGE_A_PID=""
 STAGE_B_PID=""
+TAIL_A_PID=""
+TAIL_B_PID=""
+
+stop_pid() {
+  local p="${1:-}"
+  if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; then
+    kill -TERM "$p" 2>/dev/null || true
+    sleep 1
+    kill -KILL "$p" 2>/dev/null || true
+    wait "$p" 2>/dev/null || true
+  fi
+}
 
 cleanup_stage_b_daemons() {
-  for p in "$WORKER_PID" "$API_PID"; do
-    if [[ -n "$p" ]] && kill -0 "$p" 2>/dev/null; then
-      kill -TERM "$p" 2>/dev/null || true
-      sleep 1
-      kill -KILL "$p" 2>/dev/null || true
-      wait "$p" 2>/dev/null || true
-    fi
+  for p in "$STAGE_A_PID" "$STAGE_B_PID" "$WORKER_PID" "$API_PID" "$TAIL_A_PID" "$TAIL_B_PID"; do
+    stop_pid "$p"
   done
+  if [[ -s "$PRIVATE_DIR/load-pgbouncer.pid" ]]; then
+    local pgb_pid
+    pgb_pid="$(cat "$PRIVATE_DIR/load-pgbouncer.pid" 2>/dev/null || true)"
+    stop_pid "$pgb_pid"
+    rm -f "$PRIVATE_DIR/load-pgbouncer.pid"
+  fi
 }
 trap cleanup_stage_b_daemons EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "=== [2/5] Provisioning dedicated Stage B isolated containers (PG16 + Redis7 + PgBouncer) ==="
 docker rm -f swat-w4-load-pg swat-w4-load-redis >/dev/null 2>&1 || true
@@ -141,12 +156,25 @@ LOAD_RD_ID="$(docker inspect --format '{{.Id}}' swat-w4-load-redis)"
 LOAD_PG_ADDR="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' swat-w4-load-pg)"
 
 echo "Waiting for Stage B PostgreSQL 16 ($LOAD_PG_PORT) & Redis 7 ($LOAD_RD_PORT)..."
+pg_ready=0
 for i in $(seq 1 45); do
   if PGPASSWORD="$LOAD_DBA_PASS" pg_isready -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" >/dev/null 2>&1; then
+    pg_ready=1
     break
   fi
   sleep 1
 done
+[[ "$pg_ready" -eq 1 ]] || { echo "Stage B PostgreSQL failed to become ready on 127.0.0.1:${LOAD_PG_PORT}" >&2; exit 1; }
+
+rd_ready=0
+for i in $(seq 1 30); do
+  if [[ "$(docker exec swat-w4-load-redis redis-cli ping 2>/dev/null || true)" == "PONG" ]]; then
+    rd_ready=1
+    break
+  fi
+  sleep 0.5
+done
+[[ "$rd_ready" -eq 1 ]] || { echo "Stage B Redis failed to become ready on 127.0.0.1:${LOAD_RD_PORT}" >&2; exit 1; }
 
 PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" -v ON_ERROR_STOP=1 -f "$SWAT_DIR/deploy/postgres/roles.sql"
 PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" -v ON_ERROR_STOP=1 <<SQL
@@ -173,7 +201,6 @@ ALTER ROLE wave4_observer WITH PASSWORD '${LOAD_OBS_PASS}';
 ALTER ROLE wave4_observer SET row_security=on;
 GRANT pg_read_all_stats TO wave4_observer;
 GRANT CONNECT ON DATABASE ${LOAD_DB} TO wave4_observer;
-GRANT USAGE ON SCHEMA public TO wave4_observer;
 ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${LOAD_MIG_PASS}';
 ALTER ROLE swat_app WITH LOGIN PASSWORD '${LOAD_APP_PASS}';
 SQL
@@ -193,6 +220,7 @@ const { Deadline } = require(`${swatDir}/tests/qualification/wave4/containment.t
 const { migratePristine } = require(`${swatDir}/tests/qualification/wave4/infrastructure.ts`);
 const { activateInstalledAuthentication, authenticationInstallationSource } = require(`${swatDir}/deploy/postgres/auth-installation.ts`);
 const { canonicalMigrationSource } = require(`${swatDir}/packages/db/src/canonical-migration-source.ts`);
+const { prepareDatabaseForMigratePristine } = require(`${swatDir}/scripts/wave4-db-bootstrap.ts`);
 
 (async () => {
   const inventory = await discoverMigrationInventory(`${swatDir}/packages/db/sql`);
@@ -201,6 +229,14 @@ const { canonicalMigrationSource } = require(`${swatDir}/packages/db/src/canonic
 
   const dbaUrl = `postgresql://wave4_dba:${dbaPass}@127.0.0.1:${port}/${db}`;
   const migUrl = `postgresql://swat_migrator:${migPass}@127.0.0.1:${port}/${db}`;
+  await prepareDatabaseForMigratePristine({
+    swatDir,
+    dbaUrl,
+    dbaPass,
+    migratorUrl: migUrl,
+    selection,
+    auditReference: selection.auditReference
+  });
   const readSys = new Client({ connectionString: dbaUrl, connectionTimeoutMillis: 5_000 });
   await readSys.connect();
   const sysId = (await readSys.query('SELECT system_identifier::text AS id FROM pg_catalog.pg_control_system()')).rows[0].id;
@@ -212,7 +248,7 @@ const { canonicalMigrationSource } = require(`${swatDir}/packages/db/src/canonic
     acquireDba: async () => {
       const c = new Client({ connectionString: dbaUrl, connectionTimeoutMillis: 5_000 });
       await c.connect();
-      return { client: c, release: () => { void c.end().catch(() => {}); } };
+      return { client: c, release: (_broken?: boolean) => { void c.end().catch(() => {}); } };
     }
   };
 
@@ -224,13 +260,13 @@ const { canonicalMigrationSource } = require(`${swatDir}/packages/db/src/canonic
     const source = await canonicalMigrationSource(selection);
     const authSql = authenticationInstallationSource(source, authInstall);
     await activateInstalledAuthentication(authInstall, authSql, {
-      expiresAt: new Date(Date.now() + 3600_000),
+      expiresAt: new Date(Date.now() + 7200_000),
       activateExternally: async () => {
         const lease = await authInstall.acquireDba();
         try {
           await lease.client.query(`ALTER ROLE swat_auth_service WITH LOGIN PASSWORD '${authPass}'`);
         } finally {
-          lease.release();
+          lease.release(false);
         }
       }
     });
@@ -243,6 +279,7 @@ TS
 
 PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" -v ON_ERROR_STOP=1 <<SQL
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+GRANT USAGE ON SCHEMA public TO wave4_observer;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO wave4_observer;
 REVOKE INSERT, UPDATE, DELETE ON public.users FROM wave4_observer;
 GRANT SELECT ON public.wallets, public.transactions, public.wallet_clusters, public.cluster_memberships, public.signals, public.source_trades TO swat_app;
@@ -251,9 +288,21 @@ SQL
 
 echo "Starting Stage B PgBouncer (127.0.0.1:${LOAD_PGB_PORT}) and Redis observer ACL..."
 LOAD_SCRAM_APP="$(PGPASSWORD="$LOAD_DBA_PASS" psql -h 127.0.0.1 -p "$LOAD_PG_PORT" -U wave4_dba -d "$LOAD_DB" -At -c "SELECT rolpassword FROM pg_authid WHERE rolname='swat_app'")"
+[[ "$LOAD_SCRAM_APP" == SCRAM-SHA-256\$* ]] || { echo "Missing SCRAM-SHA-256 verifier for swat_app" >&2; exit 1; }
+LOAD_SCRAM_POOL_OBS="$(node --input-type=module - "$LOAD_POOL_OBS_PASS" <<'NODE'
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
+const pass = process.argv[2];
+const salt = randomBytes(16);
+const salted = pbkdf2Sync(pass, salt, 4096, 32, 'sha256');
+const clientKey = createHmac('sha256', salted).update('Client Key').digest();
+const storedKey = createHash('sha256').update(clientKey).digest();
+const serverKey = createHmac('sha256', salted).update('Server Key').digest();
+console.log(`SCRAM-SHA-256$4096:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`);
+NODE
+)"
 cat > "$PRIVATE_DIR/load-userlist.txt" <<EOF
 "swat_app" "$LOAD_SCRAM_APP"
-"wave4_pool_observer" "$LOAD_POOL_OBS_PASS"
+"wave4_pool_observer" "$LOAD_SCRAM_POOL_OBS"
 EOF
 chmod 600 "$PRIVATE_DIR/load-userlist.txt"
 
@@ -298,7 +347,7 @@ const apiRequire = createRequire(`${swatDir}/apps/api/package.json`);
 const Redis = apiRequire('ioredis');
 (async () => {
   const r = new Redis(`redis://127.0.0.1:${port}/0`, { maxRetriesPerRequest: 2 });
-  await r.call('ACL', 'SETUSER', 'wave4_observer', 'on', `>${pass}`, '~*', '&*', '+@read', '+info', '+exists', '+llen', '+lrange', '+zcard', '+zrange', '+hget', '+hgetall', '+get', '+xlen', '+xrevrange', '+ping', '+client', '+quit');
+  await r.call('ACL', 'SETUSER', 'wave4_observer', 'on', `>${pass}`, '~*', '&*', '+@read', '+info', '+exists', '+llen', '+lrange', '+zcard', '+zrange', '+hget', '+hgetall', '+get', '+xlen', '+xrevrange', '+ping', '+select', '+client', '+quit');
   r.disconnect();
 })().catch((e) => { console.error(e); process.exit(1); });
 TS
@@ -325,16 +374,21 @@ export async function acquireDirectAuthLease() {
 EOF
 chmod 600 "$LOAD_AUTH_MOD"
 
+TSX_PREFLIGHT="$SWAT_DIR/node_modules/tsx/dist/preflight.cjs"
+TSX_LOADER="file://$SWAT_DIR/node_modules/tsx/dist/loader.mjs"
+
 WORKER_READY="$RUN_OUT/worker-ready.json"
 rm -f "$WORKER_READY"
 REDIS_URL="redis://127.0.0.1:${LOAD_RD_PORT}/0" \
 WORKER_READY_FILE="$WORKER_READY" \
-  "$SWAT_DIR/node_modules/.bin/tsx" "$SWAT_DIR/scripts/wave4-load-fixture-worker.ts" \
+  node --require "$TSX_PREFLIGHT" --import "$TSX_LOADER" \
+  "$SWAT_DIR/scripts/wave4-load-fixture-worker.ts" \
   >"$RUN_OUT/fixture-worker.log" 2>&1 &
 WORKER_PID=$!
 
 for i in $(seq 1 30); do
   [[ -f "$WORKER_READY" ]] && break
+  kill -0 "$WORKER_PID" 2>/dev/null || { echo "Fixture worker exited prematurely; see $RUN_OUT/fixture-worker.log" >&2; exit 1; }
   sleep 1
 done
 [[ -f "$WORKER_READY" ]] || { echo "Fixture worker failed to start; see $RUN_OUT/fixture-worker.log" >&2; exit 1; }
@@ -342,6 +396,7 @@ done
 NODE_ENV=development \
 PORT="$API_PORT" \
 DATABASE_URL="postgresql://swat_app:${LOAD_APP_PASS}@127.0.0.1:${LOAD_PGB_PORT}/${LOAD_DB}" \
+DB_PGBOUNCER=true \
 DB_POOL_MAX=40 \
 REDIS_URL="redis://127.0.0.1:${LOAD_RD_PORT}/0" \
 SWAT_API_AUTH_COMPOSITION_MODULE="$LOAD_AUTH_MOD" \
@@ -349,11 +404,13 @@ AUTH_DOMAIN="127.0.0.1:${API_PORT}" \
 AUTH_URI="http://127.0.0.1:${API_PORT}" \
 RATE_LIMIT_MAX=10000 \
 DISABLE_BILLING_SWEEPER_DAEMON=true \
-  "$SWAT_DIR/node_modules/.bin/tsx" "$SWAT_DIR/apps/api/src/index.ts" \
+  node --require "$TSX_PREFLIGHT" --import "$TSX_LOADER" \
+  "$SWAT_DIR/apps/api/src/index.ts" \
   >"$RUN_OUT/api.log" 2>&1 &
 API_PID=$!
 
 for i in $(seq 1 45); do
+  kill -0 "$API_PID" 2>/dev/null || { echo "API exited prematurely on :${API_PORT}; see $RUN_OUT/api.log" >&2; exit 1; }
   code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${API_PORT}/v1/auth/me" || true)"
   if [[ "$code" == "401" ]]; then
     break
@@ -463,20 +520,23 @@ bash "$SWAT_DIR/deploy/loadtest/wave4/run.sh" --run "$LOAD_CONFIG" \
   >"$RUN_OUT/stage-b.log" 2>&1 &
 STAGE_B_PID=$!
 
-tail -n +1 -f "$RUN_OUT/stage-a.log" | sed -u 's/^/[STAGE-A] /' &
+tail --pid="$STAGE_A_PID" -n +1 -f "$RUN_OUT/stage-a.log" | sed -u 's/^/[STAGE-A] /' &
 TAIL_A_PID=$!
-tail -n +1 -f "$RUN_OUT/stage-b.log" | sed -u 's/^/[STAGE-B] /' &
+tail --pid="$STAGE_B_PID" -n +1 -f "$RUN_OUT/stage-b.log" | sed -u 's/^/[STAGE-B] /' &
 TAIL_B_PID=$!
 
 set +e
 wait "$STAGE_A_PID"
 STAGE_A_EXIT=$?
+STAGE_A_PID=""
 wait "$STAGE_B_PID"
 STAGE_B_EXIT=$?
+STAGE_B_PID=""
 set -e
 
-kill "$TAIL_A_PID" "$TAIL_B_PID" >/dev/null 2>&1 || true
 wait "$TAIL_A_PID" "$TAIL_B_PID" >/dev/null 2>&1 || true
+TAIL_A_PID=""
+TAIL_B_PID=""
 
 echo "=== [5/5] Stage A + Stage B concurrent execution finished ==="
 echo "Stage A exit code: $STAGE_A_EXIT (evidence: $RUN_OUT/stage-a)"

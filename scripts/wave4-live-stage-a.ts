@@ -23,6 +23,7 @@ const { qualifyQueueStall } = require('../tests/qualification/wave4/queue-scenar
 const { activateInstalledAuthentication, authenticationInstallationSource } =
   require('../deploy/postgres/auth-installation.ts');
 const { canonicalMigrationSource } = require('../packages/db/src/canonical-migration-source.ts');
+const { prepareDatabaseForMigratePristine } = require('./wave4-db-bootstrap.ts');
 
 const dbRequire = createRequire(resolve(__dirname, '../packages/db/package.json'));
 const apiRequire = createRequire(resolve(__dirname, '../apps/api/package.json'));
@@ -110,31 +111,6 @@ function makeRoleUrl(basePgUrl: string, role: string, pass: string): string {
   return u.toString();
 }
 
-async function ensurePrerequisiteRoles(dbaUrl: string) {
-  const client = new Client({ connectionString: dbaUrl, connectionTimeoutMillis: 5_000 });
-  await client.connect();
-  try {
-    await client.query(`DO $$
-DECLARE role_name text;
-  extra_roles text[] := ARRAY[
-    'swat_fanout',
-    'swat_wave4_authority_writer', 'swat_wave4_financial_writer',
-    'swat_lp_initializer', 'swat_custody_reader', 'swat_custody_observer'
-  ];
-BEGIN
-  FOREACH role_name IN ARRAY extra_roles LOOP
-    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = role_name) THEN
-      EXECUTE format('CREATE ROLE %I NOLOGIN PASSWORD NULL NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION', role_name);
-    END IF;
-    EXECUTE format('ALTER ROLE %I SET row_security=on', role_name);
-    EXECUTE format('ALTER ROLE %I SET search_path=pg_catalog', role_name);
-  END LOOP;
-END $$`);
-  } finally {
-    await client.end();
-  }
-}
-
 async function main() {
   const [configPathArg, credsPathArg, outDirArg] = process.argv.slice(2);
   if (!configPathArg || !credsPathArg || !outDirArg) {
@@ -154,8 +130,22 @@ async function main() {
   const candDbaUrl = makeDbaUrl(config.candidate.postgres.url, creds.DBA_USER!, creds.DBA_PASS!);
   const authServicePass = randomBytes(24).toString('hex');
 
-  await ensurePrerequisiteRoles(refDbaUrl);
-  await ensurePrerequisiteRoles(candDbaUrl);
+  await prepareDatabaseForMigratePristine({
+    swatDir: resolve(__dirname, '..'),
+    dbaUrl: refDbaUrl,
+    dbaPass: creds.DBA_PASS!,
+    migratorUrl: config.reference.postgres.url,
+    selection: config.migrationSelection,
+    auditReference: config.migrationSelection.auditReference
+  });
+  await prepareDatabaseForMigratePristine({
+    swatDir: resolve(__dirname, '..'),
+    dbaUrl: candDbaUrl,
+    dbaPass: creds.DBA_PASS!,
+    migratorUrl: config.candidate.postgres.url,
+    selection: config.migrationSelection,
+    auditReference: config.migrationSelection.auditReference
+  });
 
   const writer = await createEvidenceWriter(outDir);
   const deadline = new Deadline(config.maxDurationMs);
@@ -261,6 +251,7 @@ async function main() {
         }
       });
 
+      const syntheticSigner = makeSolanaSyntheticSigner();
       const authResult = await qualifyProtectedAuthentication({
         target: candAuthInstall.target,
         acquireAuth: makeDirectLeaseFactory(candAuthServiceUrl, `wave4-auth-${config.candidate.runId}`),
@@ -271,14 +262,14 @@ async function main() {
           set: (k: string, v: string, mode: 'EX', sec: number) => redisClientForAuth!.set(k, v, mode, sec),
           getdel: (k: string) => redisClientForAuth!.getdel(k)
         },
-        signature: makeSolanaSyntheticSigner(),
+        signature: syntheticSigner,
         overlapObservation: 'postgres-blocking-edge',
         fixture: {
           emailA: `w4a-${config.candidate.runId.slice(0, 8)}@example.invalid`,
           emailB: `w4b-${config.candidate.runId.slice(0, 8)}@example.invalid`,
           password: 'Synthetic-Wave4-Password-123!',
           newPassword: 'Synthetic-Wave4-Password-456!',
-          walletAddress: makeSolanaSyntheticSigner().address
+          walletAddress: syntheticSigner.address
         }
       });
       await writer.write('protected-authentication.json', authResult);
