@@ -12,6 +12,7 @@ SWAT_DIR="${SWAT_DIR:-$(cd -- "$SCRIPT_DIR/.." && pwd -P)}"
 PRIVATE_DIR="${PRIVATE_DIR:-/tmp/.swat-wave4-private}"
 STAGE_A_CONFIG="$PRIVATE_DIR/private-config.json"
 STAGE_A_CREDS="$PRIVATE_DIR/credentials.env"
+[[ -d /usr/lib/postgresql/16/bin ]] && export PATH="/usr/lib/postgresql/16/bin:$PATH"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   PGB_DIR="/var/run/postgresql/wave4"
 else
@@ -20,6 +21,7 @@ fi
 
 needs_stage_a_bootstrap() {
   [[ -f "$STAGE_A_CONFIG" && -f "$STAGE_A_CREDS" ]] || return 0
+  [[ -x "$SWAT_DIR/node_modules/.bin/tsx" ]] || return 0
   command -v docker >/dev/null 2>&1 && command -v psql >/dev/null 2>&1 || return 0
   for name in swat-w4-ref-pg swat-w4-ref-redis swat-w4-cand-pg swat-w4-cand-redis; do
     [[ "$(docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)" == "true" ]] || return 0
@@ -38,16 +40,26 @@ needs_stage_a_bootstrap() {
     # shellcheck disable=SC1090
     source "$STAGE_A_CREDS"
     set +a
+    local ref_sig="" cand_sig=""
     for port_db in "${REF_PG_PORT}:${REF_DB}" "${CAND_PG_PORT}:${CAND_DB}"; do
       port="${port_db%%:*}"
       db="${port_db##*:}"
       has_mig="$(PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$port" -U "$DBA_USER" -d "$db" -At -c "SELECT to_regclass('public.swat_schema_migrations') IS NOT NULL" 2>/dev/null || echo "err")"
       [[ "$has_mig" == "f" ]] || exit 1
+      dirty_roles="$(PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$port" -U "$DBA_USER" -d "$db" -At -c "SELECT count(*) FROM pg_roles WHERE (rolname IN ('swat_app','swat_lp_admitter','swat_auth_service','swat_handoff_dba') AND rolcanlogin) OR rolname = 'swat_worker_receipt_writer'" 2>/dev/null || echo "err")"
+      [[ "$dirty_roles" == "0" ]] || exit 1
+      sig="$(PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$port" -U "$DBA_USER" -d "$db" -At -c "SELECT string_agg(rolname||':'||rolcanlogin||':'||COALESCE(array_to_string(rolconfig,','),''), '|' ORDER BY rolname) FROM pg_roles WHERE rolname LIKE 'swat\\_%' ESCAPE '\\'" 2>/dev/null || echo "err")"
+      [[ "$sig" != "err" && -n "$sig" ]] || exit 1
+      if [[ -z "$ref_sig" ]]; then
+        ref_sig="$sig"
+      else
+        cand_sig="$sig"
+      fi
     done
+    [[ "$ref_sig" == "$cand_sig" ]] || exit 1
   ) || return 0
   # Re-bootstrap if private-config.json holds stale migration checksums after a git pull.
-  if [[ -x "$SWAT_DIR/node_modules/.bin/tsx" ]]; then
-    node --import "file://$SWAT_DIR/node_modules/tsx/dist/loader.mjs" - "$SWAT_DIR" "$STAGE_A_CONFIG" <<'NODE' || return 0
+  node --import "file://$SWAT_DIR/node_modules/tsx/dist/loader.mjs" - "$SWAT_DIR" "$STAGE_A_CONFIG" <<'NODE' || return 0
 import { readFileSync } from 'node:fs';
 const [swatDir, cfgPath] = process.argv.slice(2);
 const { discoverMigrationInventory } = await import(`${swatDir}/packages/db/src/migration-discovery.ts`);
@@ -56,7 +68,6 @@ const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
 const proposal = createMigrationSelectionProposal(await discoverMigrationInventory(`${swatDir}/packages/db/sql`));
 if (cfg?.migrationSelection?.manifestChecksum !== proposal.manifestChecksum) process.exit(1);
 NODE
-  fi
   return 1
 }
 
@@ -147,7 +158,7 @@ trap 'exit 143' TERM
 echo "=== [2/5] Provisioning dedicated Stage B isolated containers (PG16 + Redis7 + PgBouncer) ==="
 docker rm -f swat-w4-load-pg swat-w4-load-redis >/dev/null 2>&1 || true
 docker network rm swat-w4-load-net >/dev/null 2>&1 || true
-pkill -f "load-pgbouncer.ini" >/dev/null 2>&1 || true
+pkill -f '[l]oad-pgbouncer.ini' >/dev/null 2>&1 || true
 sleep 0.5
 
 docker network create --driver bridge \
@@ -579,7 +590,7 @@ bash "$SWAT_DIR/deploy/loadtest/wave4/run.sh" --run "$LOAD_CONFIG" \
   >"$RUN_OUT/stage-b.log" 2>&1 &
 STAGE_B_PID=$!
 
-tail --pid="$STAGE_A_PID" -n +1 -f "$RUN_OUT/stage-a.log" | sed -u 's/^/[STAGE-A] /' &
+tail --pid="$STAGE_A_PID" -n +1 -f "$RUN_OUT/stage-a.log" | sed -u '/^\[STAGE-A\] /!s/^/[STAGE-A] /' &
 TAIL_A_PID=$!
 tail --pid="$STAGE_B_PID" -n +1 -f "$RUN_OUT/stage-b.log" | sed -u 's/^/[STAGE-B] /' &
 TAIL_B_PID=$!

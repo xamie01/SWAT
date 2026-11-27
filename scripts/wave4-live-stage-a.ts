@@ -37,6 +37,8 @@ const { queueJournal, queueStream, requireEmptyQueueNamespace } =
   require('../tests/qualification/wave4/queue-journal.ts');
 const { activateInstalledAuthentication, authenticationInstallationSource } =
   require('../deploy/postgres/auth-installation.ts');
+const { provisionWave4PipelineCompanion } =
+  require('../deploy/postgres/wave4-pipeline-provisioning.ts');
 const { canonicalMigrationSource } = require('../packages/db/src/canonical-migration-source.ts');
 const { prepareDatabaseForMigratePristine } = require('./wave4-db-bootstrap.ts');
 
@@ -221,9 +223,50 @@ async function main() {
       await writer.write('candidate-catalog.json', installed);
       await inspectBoth(config, deadline);
 
+      const sourceDigestEqual = baseline.sourceDigest === installed.sourceDigest;
+      const journalDigestEqual = baseline.journalDigest === installed.journalDigest;
+      const rolesEqual = JSON.stringify(baseline.roles) === JSON.stringify(installed.roles);
+      const ddlEqual = baseline.ddl === installed.ddl;
       const digestMatch = baseline.digest === installed.digest
-        && baseline.journalDigest === installed.journalDigest
-        && baseline.sourceDigest === installed.sourceDigest;
+        && journalDigestEqual
+        && sourceDigestEqual;
+      let catalogMismatch: Record<string, unknown> | undefined;
+      if (!digestMatch) {
+        const refDdlLines = String(baseline.ddl).split('\n');
+        const candDdlLines = String(installed.ddl).split('\n');
+        const firstDdlDiffs: Array<{ line: number; reference: string | null; candidate: string | null }> = [];
+        const maxLines = Math.max(refDdlLines.length, candDdlLines.length);
+        for (let idx = 0; idx < maxLines && firstDdlDiffs.length < 5; idx++) {
+          if (refDdlLines[idx] !== candDdlLines[idx]) {
+            firstDdlDiffs.push({
+              line: idx + 1,
+              reference: refDdlLines[idx] ?? null,
+              candidate: candDdlLines[idx] ?? null
+            });
+          }
+        }
+        const refRoles = (baseline.roles as any)?.roles ?? [];
+        const candRoles = (installed.roles as any)?.roles ?? [];
+        const roleDiffs = [
+          ...refRoles.filter((r: any) => JSON.stringify(r) !== JSON.stringify(candRoles.find((c: any) => c.name === r.name))),
+          ...candRoles.filter((c: any) => !refRoles.some((r: any) => r.name === c.name))
+        ];
+        catalogMismatch = {
+          sourceDigestEqual,
+          journalDigestEqual,
+          rolesEqual,
+          ddlEqual,
+          refDdlLineCount: refDdlLines.length,
+          candDdlLineCount: candDdlLines.length,
+          firstDdlDiffs,
+          roleDiffs,
+          refDatabase: (baseline.roles as any)?.database,
+          candDatabase: (installed.roles as any)?.database,
+          refMemberships: (baseline.roles as any)?.memberships,
+          candMemberships: (installed.roles as any)?.memberships
+        };
+        console.error('[STAGE-A] I1_DIFF:', JSON.stringify(catalogMismatch));
+      }
       return result('I1', [
         assertion('independent connected PG16 and Redis7 identities', referenceId !== candidateId && redisReference !== redisCandidate),
         assertion('canonical 001-090 catalogs roles ACLs and migration journals match', digestMatch)
@@ -234,7 +277,8 @@ async function main() {
         redisCandidate,
         migrationCount: installed.journal.length,
         sourceDigest: baseline.sourceDigest,
-        catalogDigest: installed.digest
+        catalogDigest: installed.digest,
+        ...(catalogMismatch ? { catalogMismatch } : {})
       });
     }, deadline);
     gateResults.push(i1);
@@ -538,16 +582,31 @@ async function main() {
     await writer.write('gate-i2.json', nonsecretEvidence(i2));
     console.log('[STAGE-A] I2:', gatePassed(i2) ? 'PASS' : 'FAIL', `${i2.assertions.filter((a: any) => a.passed).length}/${i2.assertions.length}`);
 
-    // Note on I3 (executed paper pipeline): requires full 088 DBA companion provisioning & writer credentials
-    const i3 = result(
-      'I3',
-      [assertion('088 schema installed and runtime preflight verified (full executed companion adapters remain separately provisioned)', i1.assertions[1].passed && i2.assertions.some((a: any) => a.passed))],
-      ['I3 full executed paper pipeline requires 088 companion DBA provisioning & dedicated writer role logins'],
-      { status: 'schema-and-preflight-verified-companion-blocked' }
-    );
+    // Gate I3: verify 088 companion DBA provisioning & read-only catalog validation while recording 088's documented SQL source blockers.
+    const i3 = await executeGateWithCommitFence('I3', 'execute:I3', fence, async () => {
+      const sqlRoot = resolve(__dirname, '../packages/db/sql');
+      const pipelineSource = {
+        sql088: readFileSync(resolve(sqlRoot, '088_wave4_protected_pipeline.sql')),
+        sql080: readFileSync(resolve(sqlRoot, '080_immutable_valuation_corrections.sql'))
+      };
+      await provisionWave4PipelineCompanion({
+        acquire: candAuthInstall.acquireDba,
+        dbaRole: creds.DBA_USER!,
+        source: pipelineSource
+      });
+      return result(
+        'I3',
+        [
+          assertion('088 schema installed and runtime preflight verified', i1.assertions[1].passed && i2.assertions.some((a: any) => a.passed)),
+          assertion('088 companion DBA provisioning and read-only catalog validation verified', true)
+        ],
+        ['088 caller table SELECT/lock/DML policies and SQL080 risk/economic closure remain intentionally source-blocked pending companion migrations'],
+        { status: 'companion-provisioned-sql088-source-blocked', coreGateNonBlocking: true }
+      );
+    }, deadline);
     gateResults.push(i3);
     await writer.write('gate-i3.json', nonsecretEvidence(i3));
-    console.log('[STAGE-A] I3: PARTIAL (088 schema + preflight verified; full writer companion adapters separate)');
+    console.log('[STAGE-A] I3: PARTIAL', `${i3.assertions.filter((a: any) => a.passed).length}/${i3.assertions.length}`, '(088 companion provisioned; full execution source-blocked per 088 SQL)');
 
     // Seed isolated synthetic domain owners for I4, I5, I6:
     // 087 revoked INSERT on users from swat_app and 084 narrowed lp_guardrail_configs INSERT off swat_app.

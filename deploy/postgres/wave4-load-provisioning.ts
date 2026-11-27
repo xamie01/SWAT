@@ -353,7 +353,7 @@ export async function validateWave4LoadCommittedCatalog(input: {
     owner: string;
     restricted_or_public_create: boolean;
   }>(`SELECT n.nspname, r.rolname AS owner,
-    (has_schema_privilege('PUBLIC', n.oid, 'CREATE')
+    (has_schema_privilege('public', n.oid, 'CREATE')
      OR EXISTS(SELECT 1 FROM pg_catalog.pg_roles x WHERE x.rolname = ANY($1::text[]) AND has_schema_privilege(x.oid, n.oid, 'CREATE'))) AS restricted_or_public_create
     FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles r ON r.oid = n.nspowner
     WHERE n.nspname = 'wave4_load'`, [roleNames]);
@@ -500,10 +500,10 @@ export async function validateWave4LoadCommittedCatalog(input: {
     initially_deferred: boolean;
     validated: boolean;
   }>(`SELECT (ns.nspname || '.' || cl.relname) AS relation,
-    ARRAY(SELECT a.attname FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+    ARRAY(SELECT a.attname::text FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
       JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum ORDER BY k.ord) AS columns,
     (tns.nspname || '.' || tcl.relname) AS target,
-    ARRAY(SELECT a.attname FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+    ARRAY(SELECT a.attname::text FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
       JOIN pg_catalog.pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum ORDER BY k.ord) AS target_columns,
     con.confdeltype::text AS delete_action, con.confupdtype::text AS update_action,
     con.confmatchtype::text AS match_type, con.condeferrable AS deferrable,

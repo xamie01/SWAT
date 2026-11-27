@@ -14,7 +14,8 @@ SWAT_DIR="${SWAT_DIR:-$(cd -- "$SCRIPT_DIR/.." && pwd -P)}"
   exit 1
 }
 
-PRIVATE_DIR="${PRIVATE_DIR:-$HOME/.swat-wave4-private}"
+PRIVATE_DIR="${PRIVATE_DIR:-/tmp/.swat-wave4-private}"
+[[ -d /usr/lib/postgresql/16/bin ]] && export PATH="/usr/lib/postgresql/16/bin:$PATH"
 mkdir -p -m 700 "$PRIVATE_DIR"
 chmod 700 "$PRIVATE_DIR"
 
@@ -61,7 +62,12 @@ if ! command -v pg_dump >/dev/null 2>&1 || ! pg_dump --version | grep -qE '\b16\
   echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list >/dev/null
   $SUDO apt-get update -y
   $SUDO apt-get install -y postgresql-client-16
+  [[ -d /usr/lib/postgresql/16/bin ]] && export PATH="/usr/lib/postgresql/16/bin:$PATH"
 fi
+pg_dump --version | grep -qE '\b16\.' || {
+  echo "PostgreSQL 16 pg_dump is required but resolved to: $(pg_dump --version 2>&1 || true)" >&2
+  exit 1
+}
 
 if ! command -v k6 >/dev/null 2>&1; then
   K6_ARCH="$(dpkg --print-architecture)"
@@ -106,7 +112,7 @@ done
 for net in swat-w4-ref-net swat-w4-cand-net; do
   docker network rm "$net" >/dev/null 2>&1 || true
 done
-$SUDO pkill -f "pgbouncer.ini" >/dev/null 2>&1 || true
+$SUDO pkill -f '[p]gbouncer.ini' >/dev/null 2>&1 || true
 sleep 0.5
 
 REF_RUN_ID="$(uuidgen -r | tr '[:upper:]' '[:lower:]')"
