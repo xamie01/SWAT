@@ -86,7 +86,7 @@ export default function () {
     headers: { Cookie: `swat_session=${identity.token}; swat_csrf=${identity.csrf}`, 'x-csrf-token': identity.csrf, 'Content-Type': 'application/json' },
     tags, redirects: 0, timeout: '10s', responseType: 'text'
   });
-  const ok = response.status === 200 || (lane && response.status === 201);
+  const ok = response.status === 200 || (Boolean(lane) && response.status === 201);
   accepted.add(ok ? 1 : 0, tags);
   refused.add(!ok, tags);
   throttled.add(response.status === 429, tags);

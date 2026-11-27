@@ -9,9 +9,8 @@ export async function assertDatabaseRole(
     SELECT current_user AS role_name, session_user AS session_role,
       r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolinherit,
       EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = r.oid) AS has_memberships,
-      (EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relowner = r.oid)
-        OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner = r.oid)
-        OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc WHERE proowner = r.oid)
+      (EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend d
+         WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o')
         OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba = r.oid)) AS owns_objects,
       (has_schema_privilege(current_user, 'public', 'CREATE')
         OR has_database_privilege(current_user, current_database(), 'CREATE')) AS can_create,

@@ -111,11 +111,12 @@ export function createInstallationPlan(selected: readonly MigrationFile[], optio
   const manifestBody = { version: selection.version, purpose: selection.purpose, inventory: selection.inventory,
     included: selection.included, excluded: selection.excluded };
   if (sourceChecksum(JSON.stringify(manifestBody)) !== selection.manifestChecksum) throw new Error('Installation selection manifest checksum drift');
-  if (selected.some(m => m.file.startsWith('084_')) || selected.length !== 89
-      || selected.at(-4)?.file !== '087_wave4_protected_authentication.sql'
-      || selected.at(-3)?.file !== '088_wave4_protected_pipeline.sql'
-      || selected.at(-2)?.file !== '089_wave4_protected_financial.sql'
-      || selected.at(-1)?.file !== '090_wave4_protected_load_capture.sql') throw new Error('Exact reviewed Wave4 selection required for installation plan');
+  if (selected.some(m => m.file.startsWith('084_')) || selected.length !== 90
+      || selected.at(-5)?.file !== '087_wave4_protected_authentication.sql'
+      || selected.at(-4)?.file !== '088_wave4_protected_pipeline.sql'
+      || selected.at(-3)?.file !== '089_wave4_protected_financial.sql'
+      || selected.at(-2)?.file !== '090_wave4_protected_load_capture.sql'
+      || selected.at(-1)?.file !== '091_wave4_read_indexes.sql') throw new Error('Exact reviewed Wave4 selection required for installation plan');
   const pins = HANDOFF_PINS.map(([file, checksum, name, args, target, bodyHash]): FunctionPin => {
     const migration = selected.find(m => m.file === file);
     if (!migration || migration.checksum !== checksum || sourceChecksum(migration.sql) !== checksum) throw new Error(`Pinned handoff source drift: ${file}`);

@@ -55,6 +55,8 @@ export interface BillingDependencies {
   }) => Promise<{ verified: boolean; payerAddress: string | null; amountUsdc: number }>;
   readonly findPaymentIntentByMemo?: (memo: string) => Promise<{ userId: string; status: string; planId?: string; expiresAt?: Date } | null>;
   readonly listAuthWallets?: (scope: UserScope) => Promise<Array<{ address: string; chainKind: string }>>;
+  readonly onUserTierUpdated?: (userId: string) => Promise<void> | void;
+  readonly onUsersDowngraded?: (userIds: readonly string[]) => Promise<void> | void;
 }
 
 export const DEFAULT_TREASURY_ADDRESSES = {
@@ -291,6 +293,8 @@ const verifyBodySchema = z
     memo: data.memo || data.referenceMemo
   }));
 
+export const defaultBillingDependencies: BillingDependencies = defaultDependencies;
+
 export async function registerBillingRoutes(
   app: FastifyInstance,
   deps: BillingDependencies = defaultDependencies
@@ -459,6 +463,7 @@ export async function registerBillingRoutes(
         treasuryAddress: treasury,
         memo: effectiveMemo
       });
+      await deps.onUserTierUpdated?.(scope.userId);
 
       return reply.code(200).send({
         success: true,
@@ -497,6 +502,9 @@ export async function registerBillingRoutes(
   app.post('/v1/admin/billing/sweep', async (request, reply: FastifyReply) => {
     if (!requireRole(request, reply, 'admin')) return;
     const result = await deps.runTierDowngradeSweep();
+    if (result.downgradedUserIds.length > 0) {
+      await deps.onUsersDowngraded?.(result.downgradedUserIds);
+    }
     return reply.send({
       success: true,
       downgradedCount: result.downgradedCount,

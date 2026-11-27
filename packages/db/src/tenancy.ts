@@ -1,5 +1,7 @@
 import type { PoolClient, QueryResultRow } from 'pg';
-import { withTransaction, type TransactionOptions } from './transaction.js';
+import * as transactionModule from './transaction.js';
+import type { TransactionOptions } from './transaction.js';
+import { isRuntimePoolClient } from './runtime-client-registry.js';
 import { assertDatabaseRole } from './database-role.js';
 
 /**
@@ -74,8 +76,10 @@ export async function setTenantScope(client: PoolClient, scope: UserScope): Prom
   if (isCrossTenant(scope)) {
     throw new Error('Cross-tenant queries require a separately reviewed privileged capability');
   }
-  await assertDatabaseRole(client, 'runtime');
-  await client.query("SET LOCAL app.bypass_rls = 'off'");
+  if (!isRuntimePoolClient(client)) {
+    await assertDatabaseRole(client, 'runtime');
+    await client.query("SET LOCAL app.bypass_rls = 'off'");
+  }
   await client.query("SELECT set_config('app.current_user_id', $1, true)", [scope.userId]);
 }
 
@@ -90,7 +94,26 @@ export async function withTenantTransaction<T>(
   operation: (client: PoolClient) => Promise<T>,
   options: TransactionOptions = {}
 ): Promise<T> {
-  return withTransaction(async (client) => {
+  return transactionModule.withTransaction(async (client) => {
+    await setTenantScope(client, scope);
+    return operation(client);
+  }, options);
+}
+
+/**
+ * Executes a read operation under tenant RLS using `readPool` (falling back to
+ * `writePool` when `DATABASE_READ_URL` is unset).
+ */
+export async function withTenantReadTransaction<T>(
+  scope: UserScope,
+  operation: (client: PoolClient) => Promise<T>,
+  options: TransactionOptions = {}
+): Promise<T> {
+  const runReadTx =
+    'withReadTransaction' in transactionModule && typeof transactionModule.withReadTransaction === 'function'
+      ? transactionModule.withReadTransaction
+      : transactionModule.withTransaction;
+  return runReadTx(async (client) => {
     await setTenantScope(client, scope);
     return operation(client);
   }, options);
@@ -105,6 +128,20 @@ export async function scopedQuery<T extends QueryResultRow = QueryResultRow>(
   values?: unknown[]
 ): Promise<T[]> {
   return withTenantTransaction(scope, async (client) => {
+    const result = await client.query<T>(text, values);
+    return result.rows;
+  });
+}
+
+/**
+ * Runs a single read query under tenant RLS via `withTenantReadTransaction`.
+ */
+export async function scopedReadQuery<T extends QueryResultRow = QueryResultRow>(
+  scope: UserScope,
+  text: string,
+  values?: unknown[]
+): Promise<T[]> {
+  return withTenantReadTransaction(scope, async (client) => {
     const result = await client.query<T>(text, values);
     return result.rows;
   });

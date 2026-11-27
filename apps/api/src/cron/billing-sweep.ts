@@ -10,8 +10,13 @@
  */
 
 import { runTierDowngradeSweep, closePool } from '@swat/db';
+import { Redis } from 'ioredis';
+import { invalidateCachedUserSessions } from '../auth/session-cache.js';
 
-export async function executeBillingSweepJob(now = new Date()): Promise<{
+export async function executeBillingSweepJob(
+  now = new Date(),
+  invalidateUsers?: (userIds: readonly string[]) => Promise<void>
+): Promise<{
   downgradedCount: number;
   downgradedUserIds: string[];
 }> {
@@ -22,6 +27,18 @@ export async function executeBillingSweepJob(now = new Date()): Promise<{
   );
   if (result.downgradedCount > 0) {
     console.log(`[billing-sweep] Downgraded User IDs: ${result.downgradedUserIds.join(', ')}`);
+    if (invalidateUsers) {
+      await invalidateUsers(result.downgradedUserIds);
+    } else if (process.env.REDIS_URL) {
+      const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 2 });
+      try {
+        await Promise.all(
+          result.downgradedUserIds.map((userId) => invalidateCachedUserSessions(redis, userId))
+        );
+      } finally {
+        await redis.quit().catch(() => {});
+      }
+    }
   }
   return result;
 }

@@ -11,10 +11,12 @@ export const WAVE4_AUTHENTICATION_FILE = '087_wave4_protected_authentication.sql
 export const WAVE4_PIPELINE_FILE = '088_wave4_protected_pipeline.sql';
 export const WAVE4_FINANCIAL_FILE = '089_wave4_protected_financial.sql';
 export const WAVE4_LOAD_CAPTURE_FILE = '090_wave4_protected_load_capture.sql';
+export const WAVE4_READ_INDEXES_FILE = '091_wave4_read_indexes.sql';
 export const REVIEWED_085_CHECKSUM = '43f5304417e500c0e9738d07dd517e7f7582f1bc497578759d5eeb686d43e02d';
 export const REVIEWED_088_CHECKSUM = '86f467ef7d61329cfd13cfe7591661f54dba80c6c23682c236f57400162faf13';
 export const REVIEWED_089_CHECKSUM = '157b2704a633e79d01271f16c46685b079532fb0d3b57619884ecbc6543a68b2';
 export const REVIEWED_090_CHECKSUM = 'edff459ad1430b7241588db4a33883afaad353348b5cd17460417e3c6e3dd038';
+export const REVIEWED_091_CHECKSUM = '35ab21412baa5f140f081875d650c9fdaca3d1edcca4bc17e9da8af33356f8fd';
 export type MigrationIdentity = { readonly file: string; readonly checksum: string };
 export type MigrationSelectionProposal = {
   readonly version: 1;
@@ -36,7 +38,7 @@ export function requireAuditReference(value: unknown): asserts value is string {
       || /[\x00-\x1f\x7f]/.test(value)) throw new Error('Explicit bounded external audit reference required');
 }
 function identities(inventory: readonly MigrationFile[]): MigrationIdentity[] {
-  if (inventory.length !== 90) throw new Error('Wave4 selection requires complete 001–090 inventory including refused 084');
+  if (inventory.length !== 91) throw new Error('Wave4 selection requires complete 001–091 inventory including refused 084');
   return inventory.map((migration, index) => {
     if (!new RegExp(`^${String(index + 1).padStart(3, '0')}_[a-z0-9_]+\\.sql$`).test(migration.file)
         || !/^[a-f0-9]{64}$/.test(migration.checksum)
@@ -52,7 +54,8 @@ export function createMigrationSelectionProposal(inventory: readonly MigrationFi
       || all[85]?.file !== WAVE4_COMPOSITION_FILE || all[86]?.file !== WAVE4_AUTHENTICATION_FILE
       || all[87]?.file !== WAVE4_PIPELINE_FILE || all[87]?.checksum !== REVIEWED_088_CHECKSUM
       || all[88]?.file !== WAVE4_FINANCIAL_FILE || all[88]?.checksum !== REVIEWED_089_CHECKSUM
-      || all[89]?.file !== WAVE4_LOAD_CAPTURE_FILE || all[89]?.checksum !== REVIEWED_090_CHECKSUM) throw new Error('Wave4 reviewed/refusal source identity drift');
+      || all[89]?.file !== WAVE4_LOAD_CAPTURE_FILE || all[89]?.checksum !== REVIEWED_090_CHECKSUM
+      || all[90]?.file !== WAVE4_READ_INDEXES_FILE || all[90]?.checksum !== REVIEWED_091_CHECKSUM) throw new Error('Wave4 reviewed/refusal source identity drift');
   const body = { version: 1 as const, purpose: 'wave4-authorized-qualification' as const,
     inventory: all, included: all.filter(row => row.file !== WAVE4_REFUSAL.file), excluded: [{ ...WAVE4_REFUSAL }] };
   return { ...body, manifestChecksum: sourceChecksum(JSON.stringify(body)) };

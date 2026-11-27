@@ -131,5 +131,14 @@ describe('Wave4 offline load harness contracts',() => {
     expect(result).toMatchObject({ refused: true, connections: 0 });
     expect(result.digest).toMatch(/^[a-f0-9]{64}$/);
   });
+  it('records boolean false (never undefined) on fixture_nonempty when read requests fail or time out', () => {
+    const w = workload();
+    w.context.http.request = () => ({ status: 0, timings: { duration: 10000 }, json: () => { throw new Error('timeout'); } });
+    w.pick(1);
+    const obs = w.observations.find(m => m.name === 'fixture_nonempty');
+    expect(obs).toBeDefined();
+    expect(obs?.value).toBe(false);
+    expect(typeof obs?.value).toBe('boolean');
+  });
   it('sanitizes all Node commands and aborts stale telemetry',()=>{expect(source('run.sh')).toContain('node() { env -i');expect(source('run.sh')).toContain('|| ! telemetry_fresh');expect(source('run.sh')).not.toMatch(/\b(?:pkill|flushall|docker compose down)\b/i);});
 });

@@ -1,7 +1,13 @@
 import type { PoolClient } from 'pg';
 import { capabilitiesFor, quotaExceeded, type Chain, type UserTier } from '@swat/shared';
 import { claimMasterMembershipSlot, requireGrantedSlot } from './master-membership.js';
-import { scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
+import {
+  scopedQuery,
+  scopedReadQuery,
+  withTenantReadTransaction,
+  withTenantTransaction,
+  type UserScope
+} from './tenancy.js';
 
 /**
  * Per-user wallet subscriptions and token watches (Stage 2).
@@ -207,16 +213,41 @@ function toSubscription(row: SubscriptionRow): WalletSubscription {
  * not something the user is tracking any more, so listing them would put dead
  * wallets in the dashboard and in `GET /v1/me/wallets`.
  */
-export async function listWalletSubscriptions(scope: UserScope): Promise<WalletSubscription[]> {
-  const rows = await scopedQuery<SubscriptionRow>(
-    scope,
-    `SELECT ${SUBSCRIPTION_COLUMNS}
+const LIST_WALLET_SUBSCRIPTIONS_SQL = `SELECT ${SUBSCRIPTION_COLUMNS}
        FROM user_wallet_subscriptions
       WHERE user_id = $1 AND state <> 'ended'
-      ORDER BY created_at DESC`,
-    [scope.userId]
-  );
+      ORDER BY created_at DESC`;
+
+/**
+ * Shared inside-transaction reader for live (`active` + `winding_down`) subscriptions.
+ */
+export async function listWalletSubscriptionsWithClient(
+  client: PoolClient,
+  scope: UserScope
+): Promise<WalletSubscription[]> {
+  const result = await client.query<SubscriptionRow>(LIST_WALLET_SUBSCRIPTIONS_SQL, [scope.userId]);
+  return result.rows.map(toSubscription);
+}
+
+export async function listWalletSubscriptions(scope: UserScope): Promise<WalletSubscription[]> {
+  const rows = await scopedReadQuery<SubscriptionRow>(scope, LIST_WALLET_SUBSCRIPTIONS_SQL, [scope.userId]);
   return rows.map(toSubscription);
+}
+
+/**
+ * Shared inside-transaction check for whether the user holds a live subscription.
+ */
+export async function isSubscribedWithClient(
+  client: PoolClient,
+  scope: UserScope,
+  walletAddress: string
+): Promise<boolean> {
+  const result = await client.query<{ one: number }>(
+    `SELECT 1 AS one FROM user_wallet_subscriptions
+      WHERE user_id = $1 AND wallet_address = $2 AND state <> 'ended'`,
+    [scope.userId, walletAddress]
+  );
+  return result.rows.length > 0;
 }
 
 /**
@@ -227,7 +258,7 @@ export async function listWalletSubscriptions(scope: UserScope): Promise<WalletS
  * working for them. `ended` does not.
  */
 export async function isSubscribed(scope: UserScope, walletAddress: string): Promise<boolean> {
-  const rows = await scopedQuery<{ one: number }>(
+  const rows = await scopedReadQuery<{ one: number }>(
     scope,
     `SELECT 1 AS one FROM user_wallet_subscriptions
       WHERE user_id = $1 AND wallet_address = $2 AND state <> 'ended'`,

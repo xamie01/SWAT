@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from './client.js';
+import { resolveReadPool, type ConnectablePool } from './runtime-client-registry.js';
 
 /**
  * Transaction helper hardened against the connection dying mid-transaction.
@@ -31,16 +32,21 @@ export interface TransactionOptions {
    * parameter for an isolation level.
    */
   isolationLevel?: 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
+  /** Appends `READ ONLY` to `BEGIN` when true. */
+  readOnly?: boolean;
 }
 
-export async function withTransaction<T>(
+async function runPoolTransaction<T>(
+  targetPool: ConnectablePool,
   operation: (client: PoolClient) => Promise<T>,
   options: TransactionOptions = {}
 ): Promise<T> {
-  const begin = options.isolationLevel
-    ? `BEGIN ISOLATION LEVEL ${options.isolationLevel}`
-    : 'BEGIN';
-  const client = await pool.connect();
+  const isoClause = options.isolationLevel
+    ? ` ISOLATION LEVEL ${options.isolationLevel}`
+    : '';
+  const readOnlyClause = options.readOnly ? ' READ ONLY' : '';
+  const begin = `BEGIN${isoClause}${readOnlyClause}`;
+  const client = await targetPool.connect();
   // Registered before the first statement: the backend can die at any point
   // after checkout, including before BEGIN is acknowledged.
   let sessionError: Error | undefined;
@@ -70,4 +76,26 @@ export async function withTransaction<T>(
     client.off('error', swallowClientError);
     client.release(connectionBroken || sessionError !== undefined);
   }
+}
+
+export async function withTransaction<T>(
+  operation: (client: PoolClient) => Promise<T>,
+  options: TransactionOptions = {}
+): Promise<T> {
+  return runPoolTransaction(pool, operation, options);
+}
+
+/**
+ * Read transaction routed to `readPool` (falling back to `pool` when no read
+ * replica is configured), enforcing `BEGIN READ ONLY` on distinct replicas.
+ */
+export async function withReadTransaction<T>(
+  operation: (client: PoolClient) => Promise<T>,
+  options: TransactionOptions = {}
+): Promise<T> {
+  const { pool: targetPool, isDistinctReplica } = resolveReadPool(pool);
+  return runPoolTransaction(targetPool, operation, {
+    ...options,
+    readOnly: options.readOnly ?? isDistinctReplica
+  });
 }

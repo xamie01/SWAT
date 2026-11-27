@@ -20,6 +20,10 @@ export interface AuthNonceStore {
 export interface AuthRouteOptions {
   readonly store: OwnedAuthStore;
   readonly redis: AuthNonceStore;
+  readonly sessionCache?: {
+    invalidateToken(token: string): Promise<void>;
+    invalidateUser(userId: string): Promise<void>;
+  };
   readonly isProduction: boolean;
   readonly domain: string;
   readonly uri: string;
@@ -65,26 +69,33 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
   });
   app.post('/v1/auth/logout',async(request,reply)=>{
     const token=request.cookies[SESSION_COOKIE];
-    if(token) await store.revokeSession(token,{ip:request.ip});
+    if(token) {
+      await store.revokeSession(token,{ip:request.ip});
+      await options.sessionCache?.invalidateToken(token);
+    }
     reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
     return reply.send({ok:true});
   });
   app.post('/v1/auth/logout-all',async(request,reply)=>{
-    if(!requireUser(request,reply)) return;
+    const scope=requireUser(request,reply);
+    if(!scope) return;
     const token=request.cookies[SESSION_COOKIE];
     if(!token) return reply.code(401).send({error:'Unauthorized'});
     try { await store.revokeAllSessions(token); }
     catch(e) { if(isNamedError(e,AuthSessionRequiredError,'AuthSessionRequiredError')) return reply.code(401).send({error:'Unauthorized'}); throw e; }
+    await options.sessionCache?.invalidateUser(scope.userId);
     reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
     return reply.send({ok:true});
   });
   app.post('/v1/auth/password',async(request,reply)=>{
-    if(!requireUser(request,reply)) return;
+    const scope=requireUser(request,reply);
+    if(!scope) return;
     const p=z.object({password}).safeParse(request.body),token=request.cookies[SESSION_COOKIE];
     if(!p.success) return reply.code(400).send({error:'Bad Request'});
     if(!token) return reply.code(401).send({error:'Unauthorized'});
     try { await store.changePassword(token,p.data.password); }
     catch(e) { if(isNamedError(e,AuthSessionRequiredError,'AuthSessionRequiredError')) return reply.code(401).send({error:'Unauthorized'}); throw e; }
+    await options.sessionCache?.invalidateUser(scope.userId);
     reply.clearCookie(SESSION_COOKIE,{path:'/'}); reply.clearCookie(CSRF_COOKIE,{path:'/'});
     return reply.send({ok:true});
   });
@@ -96,11 +107,16 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
     return reply.send({user:publicUser(p.user),wallets:p.wallets.map(w=>({chainKind:w.chainKind,address:w.address,verifiedAt:w.verifiedAt}))});
   });
   app.delete('/v1/auth/wallet',async(request,reply)=>{
-    if(!requireUser(request,reply)) return;
+    const scope=requireUser(request,reply);
+    if(!scope) return;
     const p=wallet.safeParse(request.body),token=request.cookies[SESSION_COOKIE];
     if(!p.success) return reply.code(400).send({error:'Bad Request'});
     if(!token) return reply.code(401).send({error:'Unauthorized'});
-    try { return reply.send({removed:await store.unlinkWallet(token,{...p.data,address:normaliseAddress(p.data.chainKind,p.data.address)})}); }
+    try {
+      const removed=await store.unlinkWallet(token,{...p.data,address:normaliseAddress(p.data.chainKind,p.data.address)});
+      await options.sessionCache?.invalidateUser(scope.userId);
+      return reply.send({removed});
+    }
     catch(e) { if((e as {code?:string}).code==='28000') return reply.code(401).send({error:'Unauthorized'}); throw e; }
   });
   app.post('/v1/auth/wallet/nonce',async(request,reply)=>{
@@ -141,6 +157,7 @@ export async function registerAuthRoutes(app: FastifyInstance, options: AuthRout
       if(!token) return reply.code(401).send({error:'Unauthorized'});
       try {
         const w=await store.linkWallet(token,{chainKind:p.data.chainKind,address},{ip:request.ip});
+        await options.sessionCache?.invalidateUser(request.principal.user.id);
         return reply.send({wallet:{chainKind:w.chainKind,address:w.address,verifiedAt:w.verifiedAt}});
       } catch(e) {
         if(isNamedError(e,WalletAlreadyLinkedError,'WalletAlreadyLinkedError')) return reply.code(409).send({error:'Wallet already linked to another account'});

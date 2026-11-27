@@ -4,6 +4,13 @@ import {
 } from './client-runtime.js';
 import { assertDatabaseRole } from './database-role.js';
 import { configurePostgresNumericParsers } from './numeric.js';
+import {
+  isRuntimePoolClient,
+  markRuntimePoolClient,
+  registerReadPool
+} from './runtime-client-registry.js';
+
+export { isRuntimePoolClient };
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -29,14 +36,13 @@ function runtimePool(config: PoolConfig) {
       if (sessionError && text !== 'ROLLBACK') throw sessionError;
       if (broken && text !== 'ROLLBACK') throw new Error('Unsafe runtime database role/session cannot execute queries');
       if (typeof text !== 'string') throw new Error('Runtime query must be SQL text');
-      if (/^BEGIN(?: ISOLATION LEVEL (?:READ COMMITTED|REPEATABLE READ|SERIALIZABLE))?$/i.test(text)) {
+      if (/^BEGIN(?: ISOLATION LEVEL (?:READ COMMITTED|REPEATABLE READ|SERIALIZABLE))?(?: READ ONLY)?$/i.test(text)) {
         if (transaction) throw new Error('Nested runtime transaction is not supported');
         try {
           const result = await execute(text);
           transaction = true;
           await assertDatabaseRole({ query: execute }, 'runtime');
-          await execute("SET LOCAL app.bypass_rls = 'off'");
-          await execute("SELECT set_config('app.current_user_id', $1, true)", ['']);
+          await execute("SELECT set_config('app.bypass_rls', 'off', true), set_config('app.current_user_id', $1, true)", ['']);
           return result;
         } catch (error) { broken = true; throw error; }
       }
@@ -45,7 +51,7 @@ function runtimePool(config: PoolConfig) {
       if (text === 'COMMIT' || text === 'ROLLBACK') transaction = false;
       return result;
     };
-    return new Proxy(client, {
+    const wrapped = new Proxy(client, {
       get(target, property) {
         if (property === 'query') return checkedQuery;
         if (property === 'release') return (error?: Error | boolean) => {
@@ -56,6 +62,8 @@ function runtimePool(config: PoolConfig) {
         return typeof value === 'function' ? value.bind(target) : value;
       }
     });
+    markRuntimePoolClient(wrapped);
+    return wrapped;
   }
   return {
     connect,
@@ -82,6 +90,7 @@ export const pool = writePool;
 const readUrl = process.env.DATABASE_READ_URL;
 export const readPool = readUrl && readUrl !== databaseUrl
   ? runtimePool(buildDatabaseRuntimeConfig(readUrl).pool) : writePool;
+registerReadPool(writePool, readPool);
 const closeWritePool = createPoolCloser(writePool);
 const closeReadPool = readPool === writePool ? null : createPoolCloser(readPool);
 export const closePool = async (): Promise<void> => {

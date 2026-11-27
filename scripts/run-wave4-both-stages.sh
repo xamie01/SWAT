@@ -89,10 +89,11 @@ done
   exit 2
 }
 
-echo "=== [1/5] Building workspace dependencies (@swat/shared, @swat/db) ==="
+echo "=== [1/5] Building workspace dependencies (@swat/shared, @swat/db, @swat/api) ==="
 cd "$SWAT_DIR"
 pnpm --filter @swat/shared build
 pnpm --filter @swat/db build
+pnpm --filter @swat/api build
 
 RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_OUT="$PRIVATE_DIR/concurrent-run-$RUN_STAMP"
@@ -167,7 +168,26 @@ docker network create --driver bridge \
   --label "swat.integration.purpose=load" \
   swat-w4-load-net >/dev/null
 
-LOAD_MEM_BYTES=2147483648
+HOST_MEM_KB="$(awk '/MemTotal:/ {print $2}' /proc/meminfo)"
+if [[ "${HOST_MEM_KB:-0}" -ge 12000000 ]]; then
+  LOAD_MEM_BYTES=4294967296
+  LOAD_RD_MEM_BYTES=2147483648
+  LOAD_PG_CPUS=4
+  PG_SHARED_BUFFERS="1536MB"
+  PG_WORK_MEM="8MB"
+  API_MAX_OLD_SPACE=512
+  API_WORKERS_DEFAULT=4
+  API_DB_POOL_MAX=15
+else
+  LOAD_MEM_BYTES=1400m
+  LOAD_RD_MEM_BYTES=512m
+  LOAD_PG_CPUS=4
+  PG_SHARED_BUFFERS="384MB"
+  PG_WORK_MEM="4MB"
+  API_MAX_OLD_SPACE=256
+  API_WORKERS_DEFAULT=2
+  API_DB_POOL_MAX=20
+fi
 docker run -d --name swat-w4-load-pg \
   --network swat-w4-load-net \
   --user "${PG_UID}:${PG_GID}" \
@@ -175,7 +195,8 @@ docker run -d --name swat-w4-load-pg \
   --cap-drop=ALL \
   --security-opt=no-new-privileges \
   --memory="$LOAD_MEM_BYTES" --memory-swap="$LOAD_MEM_BYTES" \
-  --cpus=2 --pids-limit=512 \
+  --shm-size=256m \
+  --cpus="$LOAD_PG_CPUS" --pids-limit=512 \
   --tmpfs "/var/lib/postgresql/data:rw,noexec,nosuid,size=1024m,uid=${PG_UID},gid=${PG_GID},mode=0700" \
   --tmpfs "/tmp:rw,noexec,nosuid,size=256m,uid=${PG_UID},gid=${PG_GID}" \
   --tmpfs "/run:rw,noexec,nosuid,size=64m,uid=${PG_UID},gid=${PG_GID}" \
@@ -195,7 +216,9 @@ docker run -d --name swat-w4-load-pg \
     -c log_lock_waits=on \
     -c deadlock_timeout=1000 \
     -c log_min_duration_statement=200 \
-    -c max_connections=150 >/dev/null
+    -c shared_buffers="$PG_SHARED_BUFFERS" \
+    -c work_mem="$PG_WORK_MEM" \
+    -c max_connections=200 >/dev/null
 
 docker run -d --name swat-w4-load-redis \
   --network swat-w4-load-net \
@@ -203,7 +226,7 @@ docker run -d --name swat-w4-load-redis \
   --read-only \
   --cap-drop=ALL \
   --security-opt=no-new-privileges \
-  --memory="$LOAD_MEM_BYTES" --memory-swap="$LOAD_MEM_BYTES" \
+  --memory="$LOAD_RD_MEM_BYTES" --memory-swap="$LOAD_RD_MEM_BYTES" \
   --cpus=1 --pids-limit=256 \
   --tmpfs "/data:rw,noexec,nosuid,size=512m,uid=${RD_UID},gid=${RD_GID}" \
   --tmpfs "/tmp:rw,noexec,nosuid,size=64m,uid=${RD_UID},gid=${RD_GID}" \
@@ -270,7 +293,7 @@ ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${LOAD_MIG_PASS}';
 ALTER ROLE swat_app NOLOGIN PASSWORD NULL;
 SQL
 
-echo "Applying reviewed 001-090 migrations & 087 auth handoff to Stage B PostgreSQL..."
+echo "Applying reviewed 001-091 migrations & 087 auth handoff to Stage B PostgreSQL..."
 "$SWAT_DIR/node_modules/.bin/tsx" - \
   "$SWAT_DIR" "$LOAD_PG_PORT" "$LOAD_DB" "$LOAD_DBA_PASS" "$LOAD_MIG_PASS" "$LOAD_AUTH_PASS" \
   "$LOAD_PG_ADDR" "$LOAD_RUN_ID" "$PRIVATE_DIR/load-migration-selection.json" <<'TS'
@@ -387,12 +410,12 @@ auth_file = ${PGB_DIR}/load-userlist.txt
 admin_users = wave4_pool_observer
 stats_users = wave4_pool_observer
 pool_mode = transaction
-max_client_conn = 2000
-default_pool_size = 25
-min_pool_size = 5
-reserve_pool_size = 5
-reserve_pool_timeout = 5
-max_db_connections = 50
+max_client_conn = 4000
+default_pool_size = 40
+min_pool_size = 10
+reserve_pool_size = 10
+reserve_pool_timeout = 3
+max_db_connections = 80
 ignore_startup_parameters = extra_float_digits,search_path,timezone
 pidfile = ${PGB_DIR}/load-pgbouncer.pid
 logfile = ${PGB_DIR}/load-pgbouncer.log
@@ -430,15 +453,21 @@ const dbRequire = createRequire('${SWAT_DIR}/packages/db/package.json');
 const { Pool } = dbRequire('pg');
 const authPool = new Pool({
   connectionString: 'postgresql://swat_auth_service:${LOAD_AUTH_PASS}@127.0.0.1:${LOAD_PG_PORT}/${LOAD_DB}',
-  max: 25,
+  max: 15,
   connectionTimeoutMillis: 5000,
   statement_timeout: 15000
 });
+authPool.on('error', () => {});
 export async function acquireDirectAuthLease() {
   const client = await authPool.connect();
+  const swallowError = () => {};
+  client.on('error', swallowError);
   return {
     client,
-    release: (broken) => client.release(Boolean(broken))
+    release: (broken) => {
+      client.off('error', swallowError);
+      client.release(Boolean(broken));
+    }
   };
 }
 EOF
@@ -464,18 +493,23 @@ done
 [[ -f "$WORKER_READY" ]] || { echo "Fixture worker failed to start; see $RUN_OUT/fixture-worker.log" >&2; exit 1; }
 
 NODE_ENV=development \
+NODE_OPTIONS="--max-old-space-size=${API_MAX_OLD_SPACE}" \
 PORT="$API_PORT" \
+API_WORKERS="${API_WORKERS:-$API_WORKERS_DEFAULT}" \
 DATABASE_URL="postgresql://swat_app:${LOAD_APP_PASS}@127.0.0.1:${LOAD_PGB_PORT}/${LOAD_DB}" \
 DB_PGBOUNCER=true \
-DB_POOL_MAX=40 \
+DB_POOL_MAX="${DB_POOL_MAX:-$API_DB_POOL_MAX}" \
 REDIS_URL="redis://127.0.0.1:${LOAD_RD_PORT}/0" \
+AUTH_SESSION_CACHE_TTL_SECONDS=30 \
+SHARED_READ_CACHE_TTL_SECONDS=12 \
+DISABLE_REQUEST_LOGGING=true \
+LOG_LEVEL=warn \
 SWAT_API_AUTH_COMPOSITION_MODULE="$LOAD_AUTH_MOD" \
 AUTH_DOMAIN="127.0.0.1:${API_PORT}" \
 AUTH_URI="http://127.0.0.1:${API_PORT}" \
 RATE_LIMIT_MAX=10000 \
 DISABLE_BILLING_SWEEPER_DAEMON=true \
-  node --require "$TSX_PREFLIGHT" --import "$TSX_LOADER" \
-  "$SWAT_DIR/apps/api/src/index.ts" \
+  node "$SWAT_DIR/apps/api/dist/cluster.js" \
   >"$RUN_OUT/api.log" 2>&1 &
 API_PID=$!
 

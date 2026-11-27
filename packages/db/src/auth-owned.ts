@@ -19,9 +19,8 @@ export const AUTH_IDENTITY_SQL = `SELECT current_user AS role_name, session_user
   current_setting('role') AS role_setting, current_setting('row_security') AS row_security,
   r.rolcanlogin, r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolinherit,
   EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member = r.oid OR roleid = r.oid) AS has_memberships,
-  (EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relowner = r.oid)
-   OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner = r.oid)
-   OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc WHERE proowner = r.oid)
+  (EXISTS (SELECT 1 FROM pg_catalog.pg_shdepend d
+    WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = r.oid AND d.deptype = 'o')
    OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba = r.oid)) AS owns_objects,
   (EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE has_schema_privilege(r.oid, oid, 'CREATE'))
    OR has_database_privilege(r.oid, current_database(), 'CREATE')) AS can_create,
@@ -59,11 +58,13 @@ export async function assertAuthIdentity(client: AuthQueryClient, requireCleanLe
 export class AuthCommitUncertainError extends Error {
   constructor() { super('Authentication COMMIT outcome uncertain; discard lease'); this.name = 'AuthCommitUncertainError'; }
 }
+const checkedAuthTransactions = new WeakSet<OwnedAuthTransaction>();
+
 export function createCheckedAuthTransaction(acquire: () => Promise<AuthClientLease>): OwnedAuthTransaction {
   if (typeof acquire !== 'function') throw new Error('Owned auth client acquisition required');
   const activeClients = new WeakSet<object>();
   const context = new AsyncLocalStorage<{ poisoned: boolean }>();
-  return async operation => {
+  const checkedTx: OwnedAuthTransaction = async operation => {
     const parent = context.getStore();
     if (parent) { parent.poisoned = true; throw new Error('Nested auth transaction refused'); }
     const lifetime = { poisoned: false };
@@ -135,6 +136,8 @@ export function createCheckedAuthTransaction(acquire: () => Promise<AuthClientLe
       lease.release(broken || open || poisoned || lifetime.poisoned);
     }
   };
+  checkedAuthTransactions.add(checkedTx);
+  return checkedTx;
 }
 
 export class EmailAlreadyRegisteredError extends Error {
@@ -203,15 +206,17 @@ function passwordInput(password: string): void {
  * login. Only this distinct trusted DB capability can call the fixed admission routines. */
 export function createOwnedAuthStore(transaction: OwnedAuthTransaction): OwnedAuthStore {
   if (typeof transaction !== 'function') throw new Error('Owned auth transaction required; app fallback prohibited');
-  const tx: OwnedAuthTransaction = operation => transaction(async client => {
-    const backend = await assertAuthIdentity(client);
-    await client.query(AUTH_RESET_SQL);
-    try { return await operation(client); }
-    finally {
-      await client.query(AUTH_RESET_SQL);
-      if (await assertAuthIdentity(client) !== backend) throw new Error('Owned auth backend changed');
-    }
-  });
+  const tx: OwnedAuthTransaction = checkedAuthTransactions.has(transaction)
+    ? transaction
+    : operation => transaction(async client => {
+        const backend = await assertAuthIdentity(client);
+        await client.query(AUTH_RESET_SQL);
+        try { return await operation(client); }
+        finally {
+          await client.query(AUTH_RESET_SQL);
+          if (await assertAuthIdentity(client) !== backend) throw new Error('Owned auth backend changed');
+        }
+      });
   async function principal(client: AuthQueryClient, sql: string, values: unknown[]): Promise<UserRow | null> {
     const { rows } = await client.query<{ principal: UserRow | null }>(sql, values);
     if (rows.length !== 1) throw new Error('Malformed protected principal result');

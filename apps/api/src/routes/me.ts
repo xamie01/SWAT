@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Queue } from 'bullmq';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import * as swatDb from '@swat/db';
 import {
   isSubscribed,
   listTokenWatches,
@@ -36,6 +37,69 @@ import {
 import { requireUser } from '../auth/plugin.js';
 import { registerMeFinancialRoutes, requestMeReduction, financialCapability, type MeFinancialPorts } from './me-financial.js';
 import { registerMeCustodyRoutes, enrollmentCapability, type MeCustodyPorts } from './me-custody.js';
+import type { GlobalMasterRow, GlobalWalletStatRow, SharedReadCache } from './shared-cache.js';
+
+const dbExt = swatDb as Record<string, unknown>;
+type ScopedRowQuery = <T extends Record<string, unknown> = Record<string, unknown>>(
+  text: string,
+  values?: unknown[]
+) => Promise<T[]>;
+
+function optionalDbFn(name: string): ((...args: any[]) => any) | null {
+  try {
+    if (name in dbExt && typeof dbExt[name] === 'function') {
+      return dbExt[name] as (...args: any[]) => any;
+    }
+  } catch {
+    // Partial test mocks of `@swat/db` throw on unmocked export reads.
+  }
+  return null;
+}
+
+async function runScopedRead<T extends Record<string, unknown> = Record<string, unknown>>(
+  scope: UserScope,
+  text: string,
+  values?: unknown[]
+): Promise<T[]> {
+  const reader = (optionalDbFn('scopedReadQuery') ?? scopedQuery) as <R extends Record<string, unknown>>(
+    s: UserScope,
+    sql: string,
+    params?: unknown[]
+  ) => Promise<R[]>;
+  return reader<T>(scope, text, values);
+}
+
+async function runSharedGlobalRead<T extends Record<string, unknown> = Record<string, unknown>>(
+  scope: UserScope,
+  text: string,
+  values?: unknown[]
+): Promise<T[]> {
+  const reader = optionalDbFn('readQuery') as (<R extends Record<string, unknown>>(
+    sql: string,
+    params?: unknown[]
+  ) => Promise<R[]>) | null;
+  return reader ? reader<T>(text, values) : runScopedRead<T>(scope, text, values);
+}
+
+async function inTenantReadTx<T>(
+  scope: UserScope,
+  operation: (txQuery: ScopedRowQuery) => Promise<T>
+): Promise<T> {
+  const withReadTx = optionalDbFn('withTenantReadTransaction') as (<X>(
+    s: UserScope,
+    op: (client: { query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }> }) => Promise<X>
+  ) => Promise<X>) | null;
+  if (withReadTx) {
+    return withReadTx(scope, (client) =>
+      operation(async <R extends Record<string, unknown>>(text: string, values?: unknown[]) =>
+        (await client.query(text, values)).rows as R[]
+      )
+    );
+  }
+  return operation(<R extends Record<string, unknown>>(text: string, values?: unknown[]) =>
+    runScopedRead<R>(scope, text, values)
+  );
+}
 const spotReducingCapability = () => ({
   state: 'blocked-on-external-capability', supported: false,
   unavailableReasons: ['authorized-reducing-handoff-unavailable', 'provider-receipt-reconciliation-unavailable']
@@ -78,6 +142,7 @@ export interface MeRouteOptions {
   /** Compatibility only; never durable authority. */
   readonly otpStore?: Map<string, StoredWithdrawalOtp>;
   readonly sendWithdrawalOtpEmail?: (email: string, code: string) => Promise<boolean>;
+  readonly sharedCache?: SharedReadCache;
 }
 
 export const DEFAULT_WITHDRAWAL_COOLING_OFF_MS = 24 * 60 * 60 * 1000; // 24 hours (S4-12)
@@ -141,19 +206,57 @@ export async function registerMeRoutes(
       tierExpiresAt: principal.user.tierExpiresAt
     };
 
-    const balanceRows = await scopedQuery<{
-      chain: string;
-      asset: string;
-      amount: string;
-      usd: string | null;
-      fetched_at: Date;
-    }>(scope,
-      `SELECT chain, asset, amount, usd, fetched_at
-         FROM user_balances
-        WHERE user_id = $1
-        ORDER BY chain, asset`,
-      [scope.userId]
-    );
+    const { balanceRows, subscriptions, settingsRows } = await inTenantReadTx(scope, async (txQuery) => {
+      const balanceRows = await txQuery<{
+        chain: string;
+        asset: string;
+        amount: string;
+        usd: string | null;
+        fetched_at: Date;
+      }>(
+        `SELECT chain, asset, amount, usd, fetched_at
+           FROM user_balances
+          WHERE user_id = $1
+          ORDER BY chain, asset`,
+        [scope.userId]
+      );
+
+      const subscriptions = await txQuery<{
+        wallet_address: string;
+        chain: string | null;
+        label: string | null;
+        state: string;
+        membership_slot: number | null;
+        composite_score: number | null;
+        tier: string | null;
+        win_rate: number | null;
+        realized_roi: number | null;
+        total_trades: number | null;
+      }>(
+        `SELECT uws.wallet_address, COALESCE(w.chain, 'solana') AS chain,
+                uws.label, uws.state, uws.membership_slot,
+                w.composite_score, w.tier, w.win_rate, w.realized_roi, w.total_trades
+           FROM user_wallet_subscriptions uws
+           LEFT JOIN wallets w ON w.address = uws.wallet_address
+          WHERE uws.user_id = $1 AND uws.state = 'active'
+          ORDER BY uws.created_at DESC`,
+        [scope.userId]
+      );
+
+      const settingsRows = await txQuery<{
+        killed: boolean;
+        max_slippage_bps: number;
+        max_position_pct: number;
+      }>(
+        `SELECT ues.killed, ues.max_position_pct,
+                COALESCE((SELECT uces.max_slippage_bps FROM user_chain_execution_settings uces WHERE uces.user_id = ues.user_id LIMIT 1), 100) AS max_slippage_bps
+           FROM user_execution_settings ues
+          WHERE ues.user_id = $1`,
+        [scope.userId]
+      );
+
+      return { balanceRows, subscriptions, settingsRows };
+    });
 
     const balances = balanceRows.map((b) => ({
       chain: b.chain,
@@ -165,39 +268,7 @@ export async function registerMeRoutes(
       updatedAt: b.fetched_at ? new Date(b.fetched_at).toISOString() : null
     }));
 
-    const subscriptions = await scopedQuery<{
-      wallet_address: string;
-      chain: string | null;
-      label: string | null;
-      state: string;
-      membership_slot: number | null;
-      composite_score: number | null;
-      tier: string | null;
-      win_rate: number | null;
-      realized_roi: number | null;
-      total_trades: number | null;
-    }>(scope,
-      `SELECT uws.wallet_address, COALESCE(w.chain, 'solana') AS chain,
-              uws.label, uws.state, uws.membership_slot,
-              w.composite_score, w.tier, w.win_rate, w.realized_roi, w.total_trades
-         FROM user_wallet_subscriptions uws
-         LEFT JOIN wallets w ON w.address = uws.wallet_address
-        WHERE uws.user_id = $1 AND uws.state = 'active'
-        ORDER BY uws.created_at DESC`,
-      [scope.userId]
-    );
-
-    const [settingsRow] = await scopedQuery<{
-      killed: boolean;
-      max_slippage_bps: number;
-      max_position_pct: number;
-    }>(scope,
-      `SELECT ues.killed, ues.max_position_pct,
-              COALESCE((SELECT uces.max_slippage_bps FROM user_chain_execution_settings uces WHERE uces.user_id = ues.user_id LIMIT 1), 100) AS max_slippage_bps
-         FROM user_execution_settings ues
-        WHERE ues.user_id = $1`,
-      [scope.userId]
-    );
+    const [settingsRow] = settingsRows;
 
     return reply.send({
       user,
@@ -227,7 +298,7 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
 
-    const positions = await scopedQuery<{
+    const positions = await runScopedRead<{
       id: string;
       chain: string;
       token_mint: string;
@@ -325,7 +396,7 @@ export async function registerMeRoutes(
     const authWallets = await listAuthWallets(scope);
     const now = new Date();
 
-    const grants = await scopedQuery<{
+    const grants = await runScopedRead<{
       chain: string;
       grant_kind: string;
       account_address: string;
@@ -487,41 +558,53 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
 
-    const rows = await scopedQuery<{
-      address: string;
-      chain: string;
+    const loadGlobalMasters = () =>
+      runSharedGlobalRead<GlobalMasterRow & Record<string, unknown>>(
+        scope,
+        `SELECT w.address, COALESCE(w.chain, 'solana') AS chain,
+                w.nickname, w.composite_score, w.tier, w.win_rate, w.realized_roi
+           FROM wallets w
+          WHERE w.status = 'active'
+          ORDER BY w.composite_score DESC NULLS LAST, w.address ASC
+          LIMIT 20`
+      );
+
+    const globalMasters = options.sharedCache
+      ? await options.sharedCache.getMastersTop20(loadGlobalMasters)
+      : await loadGlobalMasters();
+
+    if (globalMasters.length === 0) {
+      return reply.send({ masters: [] });
+    }
+
+    const userOverrides = await runScopedRead<{
+      wallet_address: string;
       label: string | null;
-      composite_score: number | null;
-      tier: string | null;
-      win_rate: number | null;
-      realized_roi: number | null;
-      follower_count: string;
-    }>(scope,
-      `SELECT w.address, COALESCE(w.chain, 'solana') AS chain,
-              COALESCE((SELECT uws.label FROM user_wallet_subscriptions uws WHERE uws.wallet_address = w.address AND uws.user_id = $1 LIMIT 1), w.nickname) AS label,
-              w.composite_score, w.tier, w.win_rate, w.realized_roi,
-              COUNT(DISTINCT uws.user_id) FILTER (WHERE uws.state = 'active') AS follower_count
-         FROM wallets w
-         LEFT JOIN user_wallet_subscriptions uws ON uws.wallet_address = w.address
-        WHERE w.status = 'active'
-        GROUP BY w.address, w.chain, w.nickname, w.composite_score, w.tier, w.win_rate, w.realized_roi
-        ORDER BY w.composite_score DESC NULLS LAST, follower_count DESC
-        LIMIT 20`,
-      [scope.userId]
+      state: string;
+    }>(
+      scope,
+      `SELECT wallet_address, label, state
+         FROM user_wallet_subscriptions
+        WHERE user_id = $1 AND wallet_address = ANY($2)`,
+      [scope.userId, globalMasters.map((m) => m.address)]
     );
+    const overrideByAddress = new Map(userOverrides.map((u) => [u.wallet_address, u]));
 
     return reply.send({
-      masters: rows.map((r) => ({
-        masterWalletAddress: r.address,
-        chain: r.chain,
-        label: r.label,
-        compositeScore: r.composite_score,
-        tier: r.tier || 'pro',
-        winRate: r.win_rate != null ? Number((r.win_rate * 100).toFixed(1)) : null,
-        realizedRoi: r.realized_roi != null ? Number((r.realized_roi * 100).toFixed(1)) : null,
-        followerCount: Number(r.follower_count || 0),
-        followerCap: 50
-      }))
+      masters: globalMasters.map((r) => {
+        const sub = overrideByAddress.get(r.address);
+        return {
+          masterWalletAddress: r.address,
+          chain: r.chain,
+          label: sub?.label ?? r.nickname,
+          compositeScore: r.composite_score,
+          tier: r.tier || 'pro',
+          winRate: r.win_rate != null ? Number((r.win_rate * 100).toFixed(1)) : null,
+          realizedRoi: r.realized_roi != null ? Number((r.realized_roi * 100).toFixed(1)) : null,
+          followerCount: sub?.state === 'active' ? 1 : 0,
+          followerCap: 50
+        };
+      })
     });
   });
 
@@ -531,24 +614,19 @@ export async function registerMeRoutes(
     const subscriptions = await listWalletSubscriptions(scope);
     if (subscriptions.length === 0) return reply.send({ wallets: [] });
 
-    // Subscriptions are per-user; the wallet's stats are global. Joined here
-    // rather than duplicated per user — that is the whole point of the
-    // global-dedup model (D9).
-    const rows = await scopedQuery<{
-      address: string;
-      chain: Chain;
-      status: string;
-      composite_score: number | null;
-      tier: string | null;
-      win_rate: number | null;
-      realized_roi: number | null;
-      total_trades: number | null;
-      last_active: Date | null;
-    }>(scope,
-      `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
-         FROM wallets WHERE address = ANY($1)`,
-      [subscriptions.map((s) => s.walletAddress)]
-    );
+    // Subscriptions are per-user (Postgres RLS); global wallet stats come from
+    // the shared short-TTL cache or read replica with zero tenant mixing.
+    const loadMissingWallets = (addresses: string[]) =>
+      runSharedGlobalRead<GlobalWalletStatRow & Record<string, unknown>>(
+        scope,
+        `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
+           FROM wallets WHERE address = ANY($1)`,
+        [addresses]
+      );
+    const addresses = subscriptions.map((s) => s.walletAddress);
+    const rows = options.sharedCache
+      ? await options.sharedCache.getWalletStats(addresses, loadMissingWallets)
+      : await loadMissingWallets(addresses);
     const byAddress = new Map(rows.map((row) => [row.address, row]));
 
     return reply.send({
@@ -580,7 +658,7 @@ export async function registerMeRoutes(
       return reply.code(400).send({ error: 'Missing address parameter' });
     }
     const resolved = resolveChainAddress(q.address, (q.chain as Chain) || 'solana');
-    const rows = await scopedQuery<{
+    const rows = await runSharedGlobalRead<{
       address: string;
       chain: Chain;
       status: string;
@@ -789,7 +867,7 @@ export async function registerMeRoutes(
     const gate = await requireSubscription(request, reply);
     if (!gate) return;
     // `transactions` carries in/out amounts, not a single `amount_usd`.
-    const rows = await scopedQuery(gate.scope,
+    const rows = await runScopedRead(gate.scope,
       `SELECT signature, chain, direction, target_token, token_in, token_out,
               amount_in_usd, amount_out_usd, timestamp
          FROM transactions
@@ -806,7 +884,7 @@ export async function registerMeRoutes(
     if (!gate) return;
     // A numeric stored subtotal is not a complete acquisition basis. Missing
     // verified provenance or any unvalued acquisition must remain unassessed.
-    const rows = await scopedQuery(gate.scope,
+    const rows = await runScopedRead(gate.scope,
       `SELECT position.token_mint, position.chain, position.balance,
               CASE WHEN scope.unvalued_acquisition_count = 0 THEN position.cost_basis_usd ELSE NULL END AS cost_basis_usd,
               CASE WHEN scope.wallet_address IS NOT NULL THEN position.cost_basis_usd ELSE NULL END AS known_cost_basis_subtotal_usd,
@@ -904,7 +982,7 @@ export async function registerMeRoutes(
     // is never sent to the client in the first place.
     // Column names verified against the live schema — `signals` uses
     // `pattern_type`/`signal_score`, not `pattern`/`score`.
-    const rows = await scopedQuery(scope,
+    const rows = await runScopedRead(scope,
       `SELECT DISTINCT s.id, s.pattern_type, s.chain, s.token_mint, s.token_symbol,
               s.signal_score, s.confidence, s.status, s.detected_at
          FROM signals s
@@ -931,7 +1009,7 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
     // `source_trades` uses `direction`/`token_amount`, not `side`/`quantity`.
-    const rows = await scopedQuery(scope,
+    const rows = await runScopedRead(scope,
       `SELECT st.id, st.chain, st.wallet_address, st.token_mint, st.direction,
               st.token_amount, st.amount_usd, st.price_usd, st.event_at
          FROM source_trades st

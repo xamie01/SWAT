@@ -44,6 +44,12 @@ const PUBLIC_PATHS = new Set([
 
 export interface AuthPluginOptions {
   readonly resolveSession: (token: string) => Promise<ResolvedSession | null>;
+  readonly sessionCache?: {
+    resolve(
+      token: string,
+      dbResolve: (token: string) => Promise<ResolvedSession | null>
+    ): Promise<ResolvedSession | null>;
+  };
   /** SHA-256 digest of the legacy shared key. */
   readonly legacyKeyHash: Buffer;
   readonly isProduction: boolean;
@@ -139,7 +145,9 @@ export async function registerAuth(app: FastifyInstance, options: AuthPluginOpti
 
     const sessionToken = (request.cookies as Record<string, string | undefined>)[SESSION_COOKIE];
     if (sessionToken) {
-      const resolved = await options.resolveSession(sessionToken);
+      const resolved = await (options.sessionCache
+        ? options.sessionCache.resolve(sessionToken, options.resolveSession)
+        : options.resolveSession(sessionToken));
       if (resolved && resolved.user.status === 'active') {
         // State-changing cookie requests must carry the double-submit token.
         // Applies on public paths too: `POST /v1/auth/wallet/verify` links a

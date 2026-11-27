@@ -12,7 +12,7 @@ import {
 import {
   clampConcurrentPositionCap
 } from './position-cap.js';
-import { scopedQuery, withTenantTransaction, type UserScope } from './tenancy.js';
+import { scopedQuery, scopedReadQuery, withTenantTransaction, type UserScope } from './tenancy.js';
 import type { UserRole } from './users.js';
 import { recordAuditEventStrict } from './audit-log.js';
 
@@ -313,7 +313,7 @@ function definedOnly<T extends object>(patch: T): Partial<T> {
  */export async function getUserExecutionSettings(
   scope: UserScope
 ): Promise<UserExecutionSettings> {
-  const rows = await scopedQuery<SettingsRow>(
+  const rows = await scopedReadQuery<SettingsRow>(
     scope,
     `SELECT ${SETTINGS_COLUMNS} FROM user_execution_settings WHERE user_id = $1`,
     [scope.userId]
@@ -461,7 +461,7 @@ export async function setUserKillSwitch(
 export async function listUserChainExecutionSettings(
   scope: UserScope
 ): Promise<UserChainExecutionSettings[]> {
-  const rows = await scopedQuery<ChainSettingsRow>(
+  const rows = await scopedReadQuery<ChainSettingsRow>(
     scope,
     `SELECT ${CHAIN_SETTINGS_COLUMNS} FROM user_chain_execution_settings
       WHERE user_id = $1
@@ -476,7 +476,7 @@ export async function getUserChainExecutionSettings(
   scope: UserScope,
   chain: Chain
 ): Promise<UserChainExecutionSettings | null> {
-  const rows = await scopedQuery<ChainSettingsRow>(
+  const rows = await scopedReadQuery<ChainSettingsRow>(
     scope,
     `SELECT ${CHAIN_SETTINGS_COLUMNS} FROM user_chain_execution_settings
       WHERE user_id = $1 AND chain = $2`,

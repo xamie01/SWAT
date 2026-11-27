@@ -11,6 +11,7 @@ vi.mock('./tenancy.js', async () => {
   return {
     ...actual,
     scopedQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
+    scopedReadQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
     withTenantTransaction: async (_scope: unknown, op: (client: any) => Promise<any>, options?: any) =>
       withTransaction(op, options)
   };

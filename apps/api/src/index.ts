@@ -45,9 +45,11 @@ import { registerAttributionRoutes } from './attribution-routes.js';
 import { registerAuth, registerAdminOnlyGlobals, requireRole } from './auth/plugin.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { loadExternalAuthRuntime } from './auth/auth-runtime.js';
+import { createRedisSessionCache } from './auth/session-cache.js';
 import { registerMeRoutes } from './routes/me.js';
+import { createSharedReadCache } from './routes/shared-cache.js';
 import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
-import { registerBillingRoutes } from './routes/billing.js';
+import { defaultBillingDependencies, registerBillingRoutes } from './routes/billing.js';
 import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
 
 // Fail before Redis/queues/provider startup if the separately supplied direct auth
@@ -57,17 +59,24 @@ const limiterConfig = loadPackage28LimiterConfig(process.env);
 
 initLogger('api');
 
-const app = Fastify({ trustProxy: package28TrustProxy(limiterConfig), logger: {
-  redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]', 'req.headers["x-csrf-token"]'],
-  serializers: {
-    req: request => ({ id: request.id, method: request.method, url: request.url?.split('?')[0] }),
-    err: () => ({ type: 'Error', message: 'Request failed', stack: '' })
-  },
-  hooks: { logMethod(args, method) { method.apply(this, args.map(value => redactLogValue(value)) as Parameters<typeof method>); } }
-} });
+const app = Fastify({
+  trustProxy: package28TrustProxy(limiterConfig),
+  disableRequestLogging: process.env.DISABLE_REQUEST_LOGGING === 'true',
+  logger: {
+    level: process.env.LOG_LEVEL ?? 'info',
+    redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]', 'req.headers["x-csrf-token"]'],
+    serializers: {
+      req: request => ({ id: request.id, method: request.method, url: request.url?.split('?')[0] }),
+      err: () => ({ type: 'Error', message: 'Request failed', stack: '' })
+    },
+    hooks: { logMethod(args, method) { method.apply(this, args.map(value => redactLogValue(value)) as Parameters<typeof method>); } }
+  }
+});
 app.addHook('onRequest', async (_request, reply) => { reply.header('Cache-Control', 'no-store'); });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const sessionCache = createRedisSessionCache(redis);
+const sharedReadCache = createSharedReadCache(redis);
 const tradeQueueConnection = new Redis(redisUrl, { maxRetriesPerRequest: null });
 // One trade queue per chain (D6 / S3-25). Manual executions route by the
 // signal's own chain-prefixed mint, using the same derivation the executor
@@ -154,6 +163,7 @@ await registerPackage28Limiters(app, limiterConfig);
 // treat an authenticated link request as an anonymous wallet-only login.
 await registerAuth(app, {
   resolveSession: authStore.resolveSession,
+  sessionCache,
   legacyKeyHash: API_KEY_HASH,
   isProduction: process.env.NODE_ENV === 'production',
   // `del` returns the number of keys removed, so a ticket can only ever be
@@ -168,6 +178,7 @@ await app.register(async (scope) => {
   await registerAuthRoutes(scope, {
     store: authStore,
     redis,
+    sessionCache,
     isProduction: process.env.NODE_ENV === 'production',
     domain: process.env.AUTH_DOMAIN ?? 'localhost:3000',
     uri: process.env.AUTH_URI ?? 'http://localhost:3000',
@@ -222,9 +233,13 @@ app.post('/v1/auth/ticket', async (request, reply) => {
   return reply.code(410).send({ error: 'SSE tickets removed; use the authenticated same-origin stream.' });
 });
 
-await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue });
+await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue, sharedCache: sharedReadCache });
 await registerExecutionSettingsRoutes(app);
-await registerBillingRoutes(app);
+await registerBillingRoutes(app, {
+  ...defaultBillingDependencies,
+  onUserTierUpdated: (userId) => sessionCache.invalidateUser(userId),
+  onUsersDowngraded: (userIds) => sessionCache.invalidateUsers(userIds)
+});
 registerAdminPortfolioRoutes(app);
 
 // ─── Query-param coercion helpers ───────────────────────────────────────────
@@ -330,7 +345,7 @@ const disableSweeper = process.env.DISABLE_BILLING_SWEEPER_DAEMON === 'true';
 if (!disableSweeper && process.env.NODE_ENV !== 'test') {
   const sweepIntervalMs = Number(process.env.BILLING_SWEEP_INTERVAL_MS ?? 3600_000);
   const timer = setInterval(() => {
-    executeBillingSweepJob().catch((err) => {
+    executeBillingSweepJob(new Date(), (userIds) => sessionCache.invalidateUsers(userIds)).catch((err) => {
       app.log.error(err, '[cron] background billing sweep failed');
     });
   }, sweepIntervalMs);
