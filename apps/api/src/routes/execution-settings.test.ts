@@ -21,6 +21,7 @@ import {
   type StoredChainExecutionSettings,
   type StoredExecutionSettings
 } from './execution-settings.js';
+import { createUserReadCache } from './user-read-cache.js';
 
 /**
  * Route tests for the per-user execution-settings surface.
@@ -707,6 +708,120 @@ describe('unwired deployment', () => {
     });
     expect(authenticated.statusCode).toBe(503);
     expect(authenticated.json().message).toContain('packages/db/src/index.ts');
+    await app.close();
+  });
+});
+
+describe('Wave 4b userReadCache integration', () => {
+  it('caches GET /v1/me/execution-settings and invalidates synchronously on PATCH, kill-switch, and chain updates', async () => {
+    const store = new Map<string, string>();
+    const cache = createUserReadCache(
+      {
+        get: async (k) => store.get(k) ?? null,
+        set: async (k, v) => {
+          store.set(k, v);
+          return 'OK';
+        },
+        del: async (...keys) => {
+          let count = 0;
+          for (const k of keys) if (store.delete(k)) count += 1;
+          return count;
+        }
+      },
+      { defaultTtls: { exec_settings: 15 } }
+    );
+    const publishUserEvent = vi.fn();
+
+    let currentPosPct = 5;
+    const getUserExecutionSnapshot = vi.fn(async () => ({
+      settings: storedSettings({ maxPositionPct: currentPosPct }),
+      chains: [chainRow],
+      balances: [{ chain: 'polygon' as const, usd: 100, fetchedAt: new Date() }]
+    }));
+
+    const app = Fastify();
+    app.decorateRequest('principal', undefined);
+    app.addHook('onRequest', async (request) => {
+      const userId = request.headers['x-test-user'] as string | undefined;
+      if (!userId) return;
+      request.principal = {
+        kind: 'user',
+        sessionId: 'session-1',
+        user: { id: userId, tier: 'operator', tierExpiresAt: null, role: 'user', status: 'active' }
+      } as never;
+    });
+
+    await registerExecutionSettingsRoutes(
+      app,
+      {
+        getUserExecutionSettings: vi.fn(async () => storedSettings({ maxPositionPct: currentPosPct })),
+        upsertUserExecutionSettings: vi.fn(async (_scope, patch) => {
+          if (patch.maxPositionPct !== undefined) currentPosPct = patch.maxPositionPct;
+          return storedSettings({ maxPositionPct: currentPosPct });
+        }),
+        setUserKillSwitch: vi.fn(async (_scope, killed: boolean) => storedSettings({ killed })),
+        listUserChainExecutionSettings: vi.fn(async () => [chainRow]),
+        upsertUserChainExecutionSettings: vi.fn(async (_scope, input) => ({
+          ...chainRow,
+          chain: input.chain,
+          mode: input.mode ?? chainRow.mode
+        })),
+        listUserBalances: vi.fn(async () => []),
+        resolveKnownBalanceUsd: () => 100,
+        assessPositionCap: ({ requestedCap }: { requestedCap: number }) => ({
+          requestedCap,
+          effectiveCap: requestedCap,
+          clampedByCeiling: false,
+          clampedByFloor: false,
+          ceiling: 50,
+          warnings: [],
+          unassessed: []
+        }),
+        getUserExecutionSnapshot
+      },
+      { userCache: cache, publishUserEvent }
+    );
+
+    // 1. Two GETs -> only 1 DB snapshot read
+    const g1 = await app.inject({ method: 'GET', url: '/v1/me/execution-settings', headers: { 'x-test-user': USER_A } });
+    const g2 = await app.inject({ method: 'GET', url: '/v1/me/execution-settings', headers: { 'x-test-user': USER_A } });
+    expect(g1.statusCode).toBe(200);
+    expect(g2.statusCode).toBe(200);
+    expect(getUserExecutionSnapshot).toHaveBeenCalledTimes(1);
+
+    // 2. PATCH -> synchronous invalidation before response -> next GET sees new value immediately
+    const p1 = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/execution-settings',
+      headers: { 'x-test-user': USER_A },
+      payload: { maxPositionPct: 12 }
+    });
+    expect(p1.statusCode).toBe(200);
+    expect(publishUserEvent).toHaveBeenCalledWith(USER_A, { type: 'settings_changed' });
+
+    const g3 = await app.inject({ method: 'GET', url: '/v1/me/execution-settings', headers: { 'x-test-user': USER_A } });
+    expect(g3.json().settings.maxPositionPct).toBe(12);
+    expect(getUserExecutionSnapshot).toHaveBeenCalledTimes(2);
+
+    // 3. Kill switch + chain PATCH also invalidate cached exec_settings
+    await app.inject({
+      method: 'PUT',
+      url: '/v1/me/execution-settings/kill-switch',
+      headers: { 'x-test-user': USER_A },
+      payload: { killed: true }
+    });
+    await app.inject({ method: 'GET', url: '/v1/me/execution-settings', headers: { 'x-test-user': USER_A } });
+    expect(getUserExecutionSnapshot).toHaveBeenCalledTimes(3);
+
+    await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/execution-settings/chains/solana',
+      headers: { 'x-test-user': USER_A },
+      payload: { mode: 'paper' }
+    });
+    await app.inject({ method: 'GET', url: '/v1/me/execution-settings', headers: { 'x-test-user': USER_A } });
+    expect(getUserExecutionSnapshot).toHaveBeenCalledTimes(4);
+
     await app.close();
   });
 });

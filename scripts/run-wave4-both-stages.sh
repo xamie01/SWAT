@@ -157,7 +157,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "=== [2/5] Provisioning dedicated Stage B isolated containers (PG16 + Redis7 + PgBouncer) ==="
-docker rm -f swat-w4-load-pg swat-w4-load-redis >/dev/null 2>&1 || true
+docker rm -f swat-w4-load-pg swat-w4-load-redis swat-w4-load-cache-redis >/dev/null 2>&1 || true
 docker network rm swat-w4-load-net >/dev/null 2>&1 || true
 pkill -f '[l]oad-pgbouncer.ini' >/dev/null 2>&1 || true
 sleep 0.5
@@ -237,6 +237,30 @@ docker run -d --name swat-w4-load-redis \
   "$RD_IMAGE" \
   redis-server --port 6379 --bind 0.0.0.0 --protected-mode no --save "" --appendonly no >/dev/null
 
+SPLIT_CACHE_REDIS="${SPLIT_CACHE_REDIS:-false}"
+LOAD_CACHE_RD_PORT="${LOAD_CACHE_RD_PORT:-16382}"
+LOAD_CACHE_REDIS_URL=""
+if [[ "$SPLIT_CACHE_REDIS" == "true" ]]; then
+  docker run -d --name swat-w4-load-cache-redis \
+    --network swat-w4-load-net \
+    --user "${RD_UID}:${RD_GID}" \
+    --read-only \
+    --cap-drop=ALL \
+    --security-opt=no-new-privileges \
+    --memory=536870912 --memory-swap=536870912 \
+    --cpus=1 --pids-limit=256 \
+    --tmpfs "/data:rw,noexec,nosuid,size=128m,uid=${RD_UID},gid=${RD_GID}" \
+    --tmpfs "/tmp:rw,noexec,nosuid,size=64m,uid=${RD_UID},gid=${RD_GID}" \
+    -p "127.0.0.1:${LOAD_CACHE_RD_PORT}:6379" \
+    --label "swat.integration.run-id=$LOAD_UUID" \
+    --label "swat.integration.purpose=load" \
+    --label "swat.integration.owned=true" \
+    "$RD_IMAGE" \
+    redis-server --port 6379 --bind 0.0.0.0 --protected-mode no --save "" --appendonly no \
+      --maxmemory 384mb --maxmemory-policy allkeys-lru >/dev/null
+  LOAD_CACHE_REDIS_URL="redis://127.0.0.1:${LOAD_CACHE_RD_PORT}/0"
+fi
+
 LOAD_PG_ID="$(docker inspect --format '{{.Id}}' swat-w4-load-pg)"
 LOAD_RD_ID="$(docker inspect --format '{{.Id}}' swat-w4-load-redis)"
 LOAD_PG_ADDR="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' swat-w4-load-pg)"
@@ -293,7 +317,7 @@ ALTER ROLE swat_migrator WITH LOGIN PASSWORD '${LOAD_MIG_PASS}';
 ALTER ROLE swat_app NOLOGIN PASSWORD NULL;
 SQL
 
-echo "Applying reviewed 001-091 migrations & 087 auth handoff to Stage B PostgreSQL..."
+echo "Applying reviewed 001-092 migrations & 087 auth handoff to Stage B PostgreSQL..."
 "$SWAT_DIR/node_modules/.bin/tsx" - \
   "$SWAT_DIR" "$LOAD_PG_PORT" "$LOAD_DB" "$LOAD_DBA_PASS" "$LOAD_MIG_PASS" "$LOAD_AUTH_PASS" \
   "$LOAD_PG_ADDR" "$LOAD_RUN_ID" "$PRIVATE_DIR/load-migration-selection.json" <<'TS'
@@ -497,11 +521,14 @@ NODE_OPTIONS="--max-old-space-size=${API_MAX_OLD_SPACE}" \
 PORT="$API_PORT" \
 API_WORKERS="${API_WORKERS:-$API_WORKERS_DEFAULT}" \
 DATABASE_URL="postgresql://swat_app:${LOAD_APP_PASS}@127.0.0.1:${LOAD_PGB_PORT}/${LOAD_DB}" \
+DATABASE_READ_URL="${DATABASE_READ_URL:-}" \
 DB_PGBOUNCER=true \
 DB_POOL_MAX="${DB_POOL_MAX:-$API_DB_POOL_MAX}" \
 REDIS_URL="redis://127.0.0.1:${LOAD_RD_PORT}/0" \
-AUTH_SESSION_CACHE_TTL_SECONDS=30 \
-SHARED_READ_CACHE_TTL_SECONDS=12 \
+REDIS_CACHE_URL="$LOAD_CACHE_REDIS_URL" \
+RATE_LIMIT_USE_REDIS="${RATE_LIMIT_USE_REDIS:-false}" \
+AUTH_SESSION_CACHE_TTL_SECONDS="${AUTH_SESSION_CACHE_TTL_SECONDS:-120}" \
+SHARED_READ_CACHE_TTL_SECONDS="${SHARED_READ_CACHE_TTL_SECONDS:-12}" \
 DISABLE_REQUEST_LOGGING=true \
 LOG_LEVEL=warn \
 SWAT_API_AUTH_COMPOSITION_MODULE="$LOAD_AUTH_MOD" \

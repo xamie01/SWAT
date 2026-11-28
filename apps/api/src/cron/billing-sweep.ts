@@ -29,8 +29,8 @@ export async function executeBillingSweepJob(
     console.log(`[billing-sweep] Downgraded User IDs: ${result.downgradedUserIds.join(', ')}`);
     if (invalidateUsers) {
       await invalidateUsers(result.downgradedUserIds);
-    } else if (process.env.REDIS_URL) {
-      const redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 2 });
+    } else if (process.env.REDIS_CACHE_URL || process.env.REDIS_URL) {
+      const redis = new Redis((process.env.REDIS_CACHE_URL || process.env.REDIS_URL)!, { maxRetriesPerRequest: 2 });
       try {
         await Promise.all(
           result.downgradedUserIds.map((userId) => invalidateCachedUserSessions(redis, userId))

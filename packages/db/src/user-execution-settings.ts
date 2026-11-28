@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { DEFAULT_USER_EXECUTION_SETTINGS, type UserExecutionSettings } from './user-execution-defaults.js';
 import {
   MAX_SLIPPAGE_BPS,
@@ -12,9 +13,10 @@ import {
 import {
   clampConcurrentPositionCap
 } from './position-cap.js';
-import { scopedQuery, scopedReadQuery, withTenantTransaction, type UserScope } from './tenancy.js';
+import { scopedQuery, scopedReadQuery, withTenantReadTransaction, withTenantTransaction, type UserScope } from './tenancy.js';
 import type { UserRole } from './users.js';
 import { recordAuditEventStrict } from './audit-log.js';
+import { listUserBalancesWithClient, type UserBalance } from './user-balances.js';
 
 /**
  * Per-user risk and execution preferences (`S4-9`, migration `049`).
@@ -310,7 +312,67 @@ function definedOnly<T extends object>(patch: T): Partial<T> {
  *
  * Never null. See the module note: a nullable return would put `?? defaults` at
  * every call site and the one that forgot would size against `undefined`.
- */export async function getUserExecutionSettings(
+ */export async function getUserExecutionSettingsWithClient(
+  client: Pick<PoolClient, 'query'>,
+  scope: UserScope
+): Promise<UserExecutionSettings> {
+  const result = await client.query<SettingsRow>(
+    `SELECT ${SETTINGS_COLUMNS} FROM user_execution_settings WHERE user_id = $1`,
+    [scope.userId]
+  );
+  return result.rows[0] ? toSettings(result.rows[0]) : DEFAULT_USER_EXECUTION_SETTINGS;
+}
+
+export async function listUserChainExecutionSettingsWithClient(
+  client: Pick<PoolClient, 'query'>,
+  scope: UserScope
+): Promise<UserChainExecutionSettings[]> {
+  const result = await client.query<ChainSettingsRow>(
+    `SELECT ${CHAIN_SETTINGS_COLUMNS} FROM user_chain_execution_settings
+      WHERE user_id = $1
+      ORDER BY chain`,
+    [scope.userId]
+  );
+  return result.rows.map(toChainSettings);
+}
+
+export interface UserExecutionSnapshot {
+  readonly settings: UserExecutionSettings;
+  readonly chains: readonly UserChainExecutionSettings[];
+  /** `null` only when reading the advisory balance cache failed (see `assessStoredCap`). */
+  readonly balances: readonly UserBalance[] | null;
+}
+
+/**
+ * Consolidates the 3 `GET /v1/me/execution-settings` reads (global settings,
+ * per-chain rows, advisory balances) onto one scoped read transaction.
+ */
+export async function getUserExecutionSnapshot(
+  scope: UserScope
+): Promise<UserExecutionSnapshot> {
+  return withTenantReadTransaction(scope, async (client) => {
+    const settings = await getUserExecutionSettingsWithClient(client, scope);
+    const chains = await listUserChainExecutionSettingsWithClient(client, scope);
+    let balances: readonly UserBalance[] | null = null;
+    try {
+      await client.query('SAVEPOINT balances_read');
+      balances = await listUserBalancesWithClient(client, scope);
+      await client.query('RELEASE SAVEPOINT balances_read');
+    } catch {
+      await client.query('ROLLBACK TO SAVEPOINT balances_read').catch(() => undefined);
+      balances = null;
+    }
+    return { settings, chains, balances };
+  });
+}
+
+/**
+ * One user's settings, or the defaults when no row exists.
+ *
+ * Never null. See the module note: a nullable return would put `?? defaults` at
+ * every call site and the one that forgot would size against `undefined`.
+ */
+export async function getUserExecutionSettings(
   scope: UserScope
 ): Promise<UserExecutionSettings> {
   const rows = await scopedReadQuery<SettingsRow>(
@@ -341,9 +403,10 @@ export async function upsertUserExecutionSettings(
   assertValidExecutionSettingsPatch(patch);
 
   return withTenantTransaction(scope, async (client) => {
-    await client.query(
+    const inserted = await client.query(
       `INSERT INTO user_execution_settings (user_id) VALUES ($1)
-       ON CONFLICT (user_id) DO NOTHING`,
+       ON CONFLICT (user_id) DO NOTHING
+       RETURNING 1`,
       [scope.userId]
     );
     const current = await client.query<SettingsRow>(
@@ -376,6 +439,24 @@ export async function upsertUserExecutionSettings(
       );
     }
 
+    const clampedCap = clampConcurrentPositionCap(merged.maxConcurrentPositions).cap;
+    const isUnchangedExistingRow =
+      inserted.rows.length === 0
+      && patch.killed === undefined
+      && merged.autoExecute === previous.autoExecute
+      && merged.minSignalScore === previous.minSignalScore
+      && merged.maxPositionPct === previous.maxPositionPct
+      && merged.maxDailyExposurePct === previous.maxDailyExposurePct
+      && merged.stopLossPct === previous.stopLossPct
+      && merged.rebuyCooldownSeconds === previous.rebuyCooldownSeconds
+      && merged.maxDailyWithdrawalUsd === previous.maxDailyWithdrawalUsd
+      && clampedCap === previous.maxConcurrentPositions
+      && merged.killed === previous.killed;
+
+    if (isUnchangedExistingRow) {
+      return previous;
+    }
+
     const updated = await client.query<SettingsRow>(
       `UPDATE user_execution_settings
           SET auto_execute             = $2,
@@ -402,7 +483,7 @@ export async function upsertUserExecutionSettings(
         // Clamped here, not merely validated: the platform ceiling is a platform
         // decision, so a caller that skips the clamp helper still cannot store a
         // value past it. `049` mirrors this with a CHECK, making it two layers.
-        clampConcurrentPositionCap(merged.maxConcurrentPositions).cap,
+        clampedCap,
         merged.killed
       ]
     );

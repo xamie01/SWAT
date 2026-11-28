@@ -183,4 +183,10 @@ describe('package28 limiter', () => {
       expect((await app.inject('/v1/auth/me?q=4')).statusCode).toBe(429);
     } finally { await app.close(); }
   });
+  it('supports opt-in Redis store configuration without breaking fail-closed semantics when unset', async () => {
+    const source = readFileSync(new URL('./package28-limiter.ts', import.meta.url), 'utf8');
+    expect(source).toContain("process.env.RATE_LIMIT_USE_REDIS === 'true' && process.env.REDIS_URL");
+    expect(source).toContain("await import('ioredis')");
+    expect(source).toContain('skipOnError: false');
+  });
 });

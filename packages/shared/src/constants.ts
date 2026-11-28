@@ -11,7 +11,8 @@ export const REDIS_CHANNELS = {
   // channel names can't drift.
   discoveryRun: 'swat:discovery:run',
   clusterRefresh: 'swat:cluster:refresh',
-  scorerRun: 'swat:scorer:run'
+  scorerRun: 'swat:scorer:run',
+  userEvent: 'swat:user:event'
 } as const;
 
 // BullMQ queue names shared between producers and consumers.

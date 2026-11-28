@@ -1,10 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { SaaSNav } from '../../components/SaaSNav.js';
 import { ChainBadge, TierBadge, LoadingSkeleton, ErrorBanner, EmptyCard } from '../../components/UIPrimitives.js';
 import { api } from '../../lib/api.js';
+import {
+  createRealtimeController,
+  createStaleWhileReconnectingCache,
+  resolveWsUrl,
+  type RealtimeStatus
+} from '../../lib/realtime.js';
 
 interface AccountData {
   user: {
@@ -69,6 +75,19 @@ export default function DashboardPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('connecting');
+  const [showingCachedSnapshot, setShowingCachedSnapshot] = useState(false);
+
+  const snapshotCacheRef = useRef<ReturnType<
+    typeof createStaleWhileReconnectingCache<{ account: AccountData; suggestedMasters: MasterSuggestion[] }>
+  > | null>(null);
+  if (!snapshotCacheRef.current) {
+    snapshotCacheRef.current = createStaleWhileReconnectingCache({
+      key: 'swat:dashboard:snapshot:v1',
+      storage: typeof window !== 'undefined' ? window.localStorage : null,
+      maxAgeMs: 10 * 60_000
+    });
+  }
 
   // Custom Master Tracking & Review Modal State
   const [showTrackModal, setShowTrackModal] = useState(false);
@@ -127,12 +146,48 @@ export default function DashboardPage() {
   }, [showTrackModal, modalStep, customAddress, customChain]);
 
   useEffect(() => {
-    fetchDashboard();
-    // Continually refresh dashboard and custom whale wallet list in real time
-    const interval = setInterval(() => {
-      fetchDashboard(true);
-    }, 4000);
-    return () => clearInterval(interval);
+    const cached = snapshotCacheRef.current?.read();
+    if (cached) {
+      setData(cached.data.account);
+      setSuggestedMasters(cached.data.suggestedMasters);
+      setShowingCachedSnapshot(true);
+      setLoading(false);
+    }
+
+    void fetchDashboard(Boolean(cached));
+
+    let lastPulseRefreshAt = 0;
+    const controller = createRealtimeController({
+      url: resolveWsUrl('/v1/me/ws'),
+      onStatusChange: (nextStatus) => setRealtimeStatus(nextStatus),
+      onEvent: (event) => {
+        if (
+          event.type === 'wallets_changed'
+          || event.type === 'positions_changed'
+          || event.type === 'settings_changed'
+        ) {
+          void fetchDashboard(true);
+          return;
+        }
+        if (event.type === 'activity_pulse') {
+          const now = Date.now();
+          if (now - lastPulseRefreshAt >= 4000) {
+            lastPulseRefreshAt = now;
+            void fetchDashboard(true);
+          }
+        }
+      },
+      onReconnectSync: () => {
+        void fetchDashboard(true);
+      },
+      onFallbackPoll: () => {
+        void fetchDashboard(true);
+      },
+      fallbackPollMs: 15_000
+    });
+
+    controller.start();
+    return () => controller.destroy();
   }, []);
 
   const fetchDashboard = async (silent = false) => {
@@ -145,11 +200,22 @@ export default function DashboardPage() {
         api.get<any>('/v1/me/masters').catch(() => ({ masters: [] })),
       ]);
 
+      if (!acc) {
+        const cached = snapshotCacheRef.current?.read();
+        if (cached) {
+          setData(cached.data.account);
+          setSuggestedMasters(cached.data.suggestedMasters);
+          setShowingCachedSnapshot(true);
+          return;
+        }
+      }
+
+      const nextMasters = mastersRes?.masters ?? [];
       if (mastersRes?.masters) {
         setSuggestedMasters(mastersRes.masters);
       }
 
-      setData({
+      const nextAccount: AccountData = {
         user: acc?.user || {
           id: 'user-id',
           email: 'user@example.com',
@@ -168,9 +234,24 @@ export default function DashboardPage() {
           maxSlippageBps: 100,
           maxPositionPct: 10,
         },
-      });
+      };
+      setData(nextAccount);
+      setShowingCachedSnapshot(false);
+      if (acc) {
+        snapshotCacheRef.current?.write({
+          account: nextAccount,
+          suggestedMasters: nextMasters
+        });
+      }
     } catch (err: any) {
-      if (!silent) setError(err.message || 'Failed to load dashboard data');
+      const cached = snapshotCacheRef.current?.read();
+      if (cached) {
+        setData(cached.data.account);
+        setSuggestedMasters(cached.data.suggestedMasters);
+        setShowingCachedSnapshot(true);
+      } else if (!silent) {
+        setError(err.message || 'Failed to load dashboard data');
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -308,6 +389,24 @@ export default function DashboardPage() {
                 Trading Portfolio
               </h1>
               {data && <TierBadge tier={data.user.tier} />}
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                  realtimeStatus === 'connected'
+                    ? 'bg-status-success/10 text-status-success border-status-success/30'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    realtimeStatus === 'connected' ? 'bg-status-success' : 'bg-amber-400 animate-pulse'
+                  }`}
+                />
+                {realtimeStatus === 'connected'
+                  ? 'Live stream'
+                  : showingCachedSnapshot
+                    ? 'Cached · Reconnecting...'
+                    : 'Reconnecting...'}
+              </span>
             </div>
             <p className="text-body-sm text-on-surface-variant">
               Cross-chain execution status, automated mirror allocations, and liquidity reserves.

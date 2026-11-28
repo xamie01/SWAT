@@ -41,6 +41,8 @@ vi.mock('./tenancy.js', async () => {
     scopedQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
     scopedReadQuery: async (_scope: unknown, text: string, values?: unknown[]) => mocks.query(text, values),
     withTenantTransaction: async (_scope: unknown, op: (client: any) => Promise<any>, options?: any) =>
+      withTransaction(op, options),
+    withTenantReadTransaction: async (_scope: unknown, op: (client: any) => Promise<any>, options?: any) =>
       withTransaction(op, options)
   };
 });
@@ -56,6 +58,7 @@ import {
   assertValidExecutionSettingsPatch,
   getUserChainExecutionSettings,
   getUserExecutionSettings,
+  getUserExecutionSnapshot,
   listUserChainExecutionSettings,
   requestedUserChainMode,
   resolveUserSlippageBps,
@@ -560,5 +563,74 @@ describe('049 DDL contract', () => {
 
   it('replays safely, because migrate.ts has no applied-migrations table', () => {
     expect(nonIdempotentStatements(sql)).toEqual([]);
+  });
+});
+
+describe('Wave 4b execution settings optimizations', () => {
+  it('skips UPDATE when existing row matches merged and clamped values with killed omitted', async () => {
+    const result = await upsertUserExecutionSettings(scope, { maxPositionPct: 5 });
+    expect(result.maxPositionPct).toBe(5);
+    const updateCalls = mocks.clientQuery.mock.calls.filter(
+      ([sql]) => typeof sql === 'string' && sql.includes('UPDATE user_execution_settings')
+    );
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('still issues UPDATE when the row was freshly inserted on first write (D13)', async () => {
+    mocks.clientQuery.mockImplementation(async (sql: string) => {
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)/i.test(sql)) return { rows: [], command: sql.trim().toUpperCase() };
+      if (sql.includes('INSERT INTO user_execution_settings (user_id)')) return { rows: [{ '?column?': 1 }] };
+      return { rows: [settingsRow()] };
+    });
+    await upsertUserExecutionSettings(scope, { maxPositionPct: 5 });
+    const updateCalls = mocks.clientQuery.mock.calls.filter(
+      ([sql]) => typeof sql === 'string' && sql.includes('UPDATE user_execution_settings')
+    );
+    expect(updateCalls).toHaveLength(1);
+  });
+
+  it('still updates and audits when patch explicitly sets killed even if unchanged', async () => {
+    await upsertUserExecutionSettings(scope, { killed: false });
+    const updateCalls = mocks.clientQuery.mock.calls.filter(
+      ([sql]) => typeof sql === 'string' && sql.includes('UPDATE user_execution_settings')
+    );
+    const auditCalls = mocks.clientQuery.mock.calls.filter(
+      ([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO audit_log')
+    );
+    expect(updateCalls).toHaveLength(1);
+    expect(auditCalls).toHaveLength(1);
+  });
+
+  it('loads settings, chains, and advisory balances in a single read transaction', async () => {
+    mocks.clientQuery.mockImplementation(async (sql: string) => {
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)/i.test(sql)) {
+        return { rows: [], command: sql.trim().split(/\s+/)[0]!.toUpperCase() };
+      }
+      if (sql.includes('FROM user_chain_execution_settings')) return { rows: [chainRow()] };
+      if (sql.includes('FROM user_balances')) {
+        return {
+          rows: [
+            {
+              user_id: scope.userId,
+              chain: 'solana',
+              asset: 'SOL',
+              amount: '2',
+              decimals: 9,
+              usd: '250',
+              usd_priced_at: new Date('2026-08-18T12:00:00.000Z'),
+              fetched_at: new Date('2026-08-18T12:00:00.000Z'),
+              source: 'poller'
+            }
+          ]
+        };
+      }
+      return { rows: [settingsRow()] };
+    });
+
+    const snapshot = await getUserExecutionSnapshot(scope);
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(snapshot.settings.maxPositionPct).toBe(5);
+    expect(snapshot.chains).toHaveLength(1);
+    expect(snapshot.balances).toHaveLength(1);
   });
 });

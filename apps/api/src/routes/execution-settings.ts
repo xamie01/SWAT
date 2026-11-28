@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { chainSchema, type Chain } from '@swat/shared';
 import { requireUser } from '../auth/plugin.js';
+import type { UserReadCache } from './user-read-cache.js';
 
 /**
  * Per-user execution settings over HTTP (`S4-M4`, `S6-24`, `S6-25`).
@@ -138,6 +139,11 @@ export interface ExecutionSettingsDependencies {
     scope: ScopeLike,
     input: ChainExecutionSettingsInput
   ) => Promise<StoredChainExecutionSettings>;
+  readonly getUserExecutionSnapshot?: (scope: ScopeLike) => Promise<{
+    readonly settings: StoredExecutionSettings;
+    readonly chains: readonly StoredChainExecutionSettings[];
+    readonly balances: readonly StoredBalance[] | null;
+  }>;
   readonly listUserBalances: (scope: ScopeLike) => Promise<readonly StoredBalance[]>;
   readonly resolveKnownBalanceUsd: (balances: readonly StoredBalance[]) => number | null;
   readonly assessPositionCap: (input: {
@@ -385,9 +391,15 @@ async function assessStoredCap(
   }
 }
 
+export interface ExecutionSettingsRuntimeOptions {
+  readonly userCache?: UserReadCache;
+  readonly publishUserEvent?: (userId: string, event: { type: string; data?: unknown }) => Promise<void> | void;
+}
+
 export async function registerExecutionSettingsRoutes(
   app: FastifyInstance,
-  wiring?: ExecutionSettingsWiring
+  wiring?: ExecutionSettingsWiring,
+  runtimeOptions?: ExecutionSettingsRuntimeOptions
 ): Promise<void> {
   const resolved = wiring
     ? normaliseWiring(wiring)
@@ -423,18 +435,42 @@ export async function registerExecutionSettingsRoutes(
     if (!scope) return;
     const wired = available(reply);
     if (!wired) return;
-    const [settings, chains] = await Promise.all([
-      wired.getUserExecutionSettings(scope),
-      wired.listUserChainExecutionSettings(scope)
-    ]);
-    const positionCap = await assessStoredCap(
-      wired,
-      scope,
-      settings,
-      settings.maxConcurrentPositions,
-      request.log
-    );
-    return reply.send({ settings, chains, positionCap });
+
+    const loadExecutionSettings = async () => {
+      let settings: StoredExecutionSettings;
+      let chains: readonly StoredChainExecutionSettings[];
+      let positionCap: PositionCapAssessmentLike | null;
+      if (wired.getUserExecutionSnapshot) {
+        const snapshot = await wired.getUserExecutionSnapshot(scope);
+        settings = snapshot.settings;
+        chains = snapshot.chains;
+        positionCap = snapshot.balances === null
+          ? null
+          : wired.assessPositionCap({
+              requestedCap: settings.maxConcurrentPositions,
+              balancesUsd: balancesUsdByChain(wired, snapshot.balances),
+              maxPositionPct: settings.maxPositionPct
+            });
+      } else {
+        [settings, chains] = await Promise.all([
+          wired.getUserExecutionSettings(scope),
+          wired.listUserChainExecutionSettings(scope)
+        ]);
+        positionCap = await assessStoredCap(
+          wired,
+          scope,
+          settings,
+          settings.maxConcurrentPositions,
+          request.log
+        );
+      }
+      return { settings, chains, positionCap };
+    };
+
+    const payload = runtimeOptions?.userCache
+      ? await runtimeOptions.userCache.getOrLoad(scope, 'exec_settings', loadExecutionSettings)
+      : await loadExecutionSettings();
+    return reply.send(payload);
   });
 
   /**
@@ -490,6 +526,9 @@ export async function registerExecutionSettingsRoutes(
       return sendSettingsError(reply, error);
     }
 
+    await runtimeOptions?.userCache?.invalidateUser(scope.userId, ['exec_settings']);
+    await runtimeOptions?.publishUserEvent?.(scope.userId, { type: 'settings_changed' });
+
     const positionCap = await assessStoredCap(
       wired,
       scope,
@@ -533,6 +572,11 @@ export async function registerExecutionSettingsRoutes(
     }
     try {
       const settings = await wired.setUserKillSwitch(scope, parsed.data.killed);
+      await runtimeOptions?.userCache?.invalidateUser(scope.userId, ['exec_settings']);
+      await runtimeOptions?.publishUserEvent?.(scope.userId, {
+        type: 'settings_changed',
+        data: { killed: settings.killed }
+      });
       return reply.send({ settings });
     } catch (error) {
       return sendSettingsError(reply, error);
@@ -606,6 +650,11 @@ export async function registerExecutionSettingsRoutes(
 
     try {
       const chain = await wired.upsertUserChainExecutionSettings(scope, input);
+      await runtimeOptions?.userCache?.invalidateUser(scope.userId, ['exec_settings']);
+      await runtimeOptions?.publishUserEvent?.(scope.userId, {
+        type: 'settings_changed',
+        data: { chain: chain.chain }
+      });
       return reply.send({ chain });
     } catch (error) {
       return sendSettingsError(reply, error);

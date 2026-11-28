@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import type { Chain } from '@swat/shared';
 import { BALANCE_MAX_STALENESS_MS, toBalance, type BalanceRow, type BalanceSource, type UserBalance } from './user-balance-state.js';
 export { BALANCE_MAX_STALENESS_MS, isBalanceStale, resolveKnownBalanceUsd } from './user-balance-state.js';
@@ -24,6 +25,30 @@ import { isCrossTenant, type UserScope } from './tenancy.js';
 
 const BALANCE_COLUMNS =
   'user_id, chain, asset, amount, decimals, usd, usd_priced_at, fetched_at, source';
+
+export async function listUserBalancesWithClient(
+  client: Pick<PoolClient, 'query'>,
+  scope: UserScope,
+  chain?: Chain
+): Promise<UserBalance[]> {
+  if (isCrossTenant(scope)) {
+    throw new Error('listUserBalancesWithClient requires a single-user scope');
+  }
+  const result = chain
+    ? await client.query<BalanceRow>(
+        `SELECT ${BALANCE_COLUMNS} FROM user_balances
+          WHERE user_id = $1 AND chain = $2
+          ORDER BY chain, asset`,
+        [scope.userId, chain]
+      )
+    : await client.query<BalanceRow>(
+        `SELECT ${BALANCE_COLUMNS} FROM user_balances
+          WHERE user_id = $1
+          ORDER BY chain, asset`,
+        [scope.userId]
+      );
+  return result.rows.map(toBalance);
+}
 
 export async function listUserBalances(
   scope: UserScope,

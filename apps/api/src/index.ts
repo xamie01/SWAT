@@ -48,9 +48,11 @@ import { loadExternalAuthRuntime } from './auth/auth-runtime.js';
 import { createRedisSessionCache } from './auth/session-cache.js';
 import { registerMeRoutes } from './routes/me.js';
 import { createSharedReadCache } from './routes/shared-cache.js';
+import { createUserReadCache } from './routes/user-read-cache.js';
 import { registerExecutionSettingsRoutes } from './routes/execution-settings.js';
 import { defaultBillingDependencies, registerBillingRoutes } from './routes/billing.js';
 import { registerAdminPortfolioRoutes } from './routes/admin-portfolio.js';
+import { registerUserWebSocketStream } from './ws/stream.js';
 
 // Fail before Redis/queues/provider startup if the separately supplied direct auth
 // lease composition is missing. No swat_app/default URL fallback.
@@ -75,8 +77,21 @@ const app = Fastify({
 app.addHook('onRequest', async (_request, reply) => { reply.header('Cache-Control', 'no-store'); });
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
-const sessionCache = createRedisSessionCache(redis);
-const sharedReadCache = createSharedReadCache(redis);
+// Dual-mode cache Redis (Wave 4b D3): optional REDIS_CACHE_URL (e.g. dedicated allkeys-lru
+// cache instance) falls back automatically to primary REDIS_URL when unset or identical.
+const cacheRedisUrl = process.env.REDIS_CACHE_URL?.trim();
+const hasSeparateCacheRedis = Boolean(cacheRedisUrl && cacheRedisUrl !== redisUrl);
+const cacheRedis = hasSeparateCacheRedis
+  ? new Redis(cacheRedisUrl!, { maxRetriesPerRequest: null })
+  : redis;
+if (hasSeparateCacheRedis) {
+  app.addHook('onClose', async () => {
+    await cacheRedis.quit().catch(() => undefined);
+  });
+}
+const sessionCache = createRedisSessionCache(cacheRedis);
+const sharedReadCache = createSharedReadCache(cacheRedis);
+const userReadCache = createUserReadCache(cacheRedis);
 const tradeQueueConnection = new Redis(redisUrl, { maxRetriesPerRequest: null });
 // One trade queue per chain (D6 / S3-25). Manual executions route by the
 // signal's own chain-prefixed mint, using the same derivation the executor
@@ -233,12 +248,42 @@ app.post('/v1/auth/ticket', async (request, reply) => {
   return reply.code(410).send({ error: 'SSE tickets removed; use the authenticated same-origin stream.' });
 });
 
-await registerMeRoutes(app, { backfillQueue, tokenDiscoveryQueue, sharedCache: sharedReadCache });
-await registerExecutionSettingsRoutes(app);
+const wsSubscriber = new Redis(redisUrl, { maxRetriesPerRequest: null });
+const wsAllowedOrigins = corsOrigin
+  ? corsOrigin.split(',').map((o) => o.trim()).filter(Boolean)
+  : [process.env.AUTH_URI ?? 'http://localhost:3000'];
+const userWs = await registerUserWebSocketStream(app, {
+  subscriber: wsSubscriber,
+  publisher: redis,
+  allowedOrigins: wsAllowedOrigins,
+  isProduction: process.env.NODE_ENV === 'production'
+});
+
+await registerMeRoutes(app, {
+  backfillQueue,
+  tokenDiscoveryQueue,
+  sharedCache: sharedReadCache,
+  userCache: userReadCache,
+  publishUserEvent: (userId, event) => userWs.publishUserEvent(userId, event)
+});
+await registerExecutionSettingsRoutes(app, undefined, {
+  userCache: userReadCache,
+  publishUserEvent: (userId, event) => userWs.publishUserEvent(userId, event)
+});
 await registerBillingRoutes(app, {
   ...defaultBillingDependencies,
-  onUserTierUpdated: (userId) => sessionCache.invalidateUser(userId),
-  onUsersDowngraded: (userIds) => sessionCache.invalidateUsers(userIds)
+  onUserTierUpdated: async (userId) => {
+    await Promise.all([
+      sessionCache.invalidateUser(userId),
+      userReadCache.invalidateUser(userId, ['signals', 'exec_settings'])
+    ]);
+  },
+  onUsersDowngraded: async (userIds) => {
+    await Promise.all([
+      sessionCache.invalidateUsers(userIds),
+      userReadCache.invalidateUsers(userIds, ['signals', 'exec_settings'])
+    ]);
+  }
 });
 registerAdminPortfolioRoutes(app);
 
@@ -345,7 +390,12 @@ const disableSweeper = process.env.DISABLE_BILLING_SWEEPER_DAEMON === 'true';
 if (!disableSweeper && process.env.NODE_ENV !== 'test') {
   const sweepIntervalMs = Number(process.env.BILLING_SWEEP_INTERVAL_MS ?? 3600_000);
   const timer = setInterval(() => {
-    executeBillingSweepJob(new Date(), (userIds) => sessionCache.invalidateUsers(userIds)).catch((err) => {
+    executeBillingSweepJob(new Date(), async (userIds) => {
+      await Promise.all([
+        sessionCache.invalidateUsers(userIds),
+        userReadCache.invalidateUsers(userIds, ['signals', 'exec_settings'])
+      ]);
+    }).catch((err) => {
       app.log.error(err, '[cron] background billing sweep failed');
     });
   }, sweepIntervalMs);

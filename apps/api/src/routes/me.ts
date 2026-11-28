@@ -38,6 +38,7 @@ import { requireUser } from '../auth/plugin.js';
 import { registerMeFinancialRoutes, requestMeReduction, financialCapability, type MeFinancialPorts } from './me-financial.js';
 import { registerMeCustodyRoutes, enrollmentCapability, type MeCustodyPorts } from './me-custody.js';
 import type { GlobalMasterRow, GlobalWalletStatRow, SharedReadCache } from './shared-cache.js';
+import type { UserReadCache } from './user-read-cache.js';
 
 const dbExt = swatDb as Record<string, unknown>;
 type ScopedRowQuery = <T extends Record<string, unknown> = Record<string, unknown>>(
@@ -143,6 +144,8 @@ export interface MeRouteOptions {
   readonly otpStore?: Map<string, StoredWithdrawalOtp>;
   readonly sendWithdrawalOtpEmail?: (email: string, code: string) => Promise<boolean>;
   readonly sharedCache?: SharedReadCache;
+  readonly userCache?: UserReadCache;
+  readonly publishUserEvent?: (userId: string, event: { type: string; data?: unknown }) => Promise<void> | void;
 }
 
 export const DEFAULT_WITHDRAWAL_COOLING_OFF_MS = 24 * 60 * 60 * 1000; // 24 hours (S4-12)
@@ -298,76 +301,83 @@ export async function registerMeRoutes(
     const scope = requireUser(request, reply);
     if (!scope) return;
 
-    const positions = await runScopedRead<{
-      id: string;
-      chain: string;
-      token_mint: string;
-      confirmed_quantity: string;
-      cost_basis_usd: string;
-      token_symbol: string | null;
-      master_wallet_address: string | null;
-      latest_price_usd: string | null;
-    }>(scope,
-      `SELECT cp.id, cp.chain, cp.token_mint, cp.confirmed_quantity, cp.cost_basis_usd,
-              tm.symbol AS token_symbol,
-              cpm.master_wallet_address,
-              ps.price_usd AS latest_price_usd
-         FROM copy_positions cp
-         LEFT JOIN tokens tm ON tm.mint = cp.token_mint
-         LEFT JOIN LATERAL (
-           SELECT master_wallet_address
-             FROM copy_position_master_lots
-            WHERE position_id = cp.id AND remaining_quantity > 0
-            LIMIT 1
-         ) cpm ON true
-         LEFT JOIN LATERAL (
-           SELECT price_usd
-             FROM price_snapshots
-            WHERE token_mint = cp.token_mint AND chain = cp.chain
-            ORDER BY snapshot_at DESC
-            LIMIT 1
-         ) ps ON true
-        WHERE cp.user_id = $1 AND cp.confirmed_quantity > 0
-        ORDER BY cp.cost_basis_usd DESC`,
-      [scope.userId]
-    );
+    const loadPositions = async () => {
+      const positions = await runScopedRead<{
+        id: string;
+        chain: string;
+        token_mint: string;
+        confirmed_quantity: string;
+        cost_basis_usd: string;
+        token_symbol: string | null;
+        master_wallet_address: string | null;
+        latest_price_usd: string | null;
+      }>(scope,
+        `SELECT cp.id, cp.chain, cp.token_mint, cp.confirmed_quantity, cp.cost_basis_usd,
+                tm.symbol AS token_symbol,
+                cpm.master_wallet_address,
+                ps.price_usd AS latest_price_usd
+           FROM copy_positions cp
+           LEFT JOIN tokens tm ON tm.mint = cp.token_mint
+           LEFT JOIN LATERAL (
+             SELECT master_wallet_address
+               FROM copy_position_master_lots
+              WHERE position_id = cp.id AND remaining_quantity > 0
+              LIMIT 1
+           ) cpm ON true
+           LEFT JOIN LATERAL (
+             SELECT price_usd
+               FROM price_snapshots
+              WHERE token_mint = cp.token_mint AND chain = cp.chain
+              ORDER BY snapshot_at DESC
+              LIMIT 1
+           ) ps ON true
+          WHERE cp.user_id = $1 AND cp.confirmed_quantity > 0
+          ORDER BY cp.cost_basis_usd DESC`,
+        [scope.userId]
+      );
 
-    return reply.send({
-      positionsAssessment: 'observed-runtime-unverified',
-      reducingExecution: { ...spotReducingCapability(), ...financialCapability(!!options.financial?.reducing) },
-      closeAllExecution: spotReducingCapability(),
-      positions: positions.map((p) => {
-        const confirmedQuantity = observedFiniteNumber(p.confirmed_quantity);
-        const costBasisUsd = observedFiniteNumber(p.cost_basis_usd);
-        const entryPriceUsd = confirmedQuantity !== null && confirmedQuantity > 0 && costBasisUsd !== null ? costBasisUsd / confirmedQuantity : null;
-        const observedPrice = observedFiniteNumber(p.latest_price_usd);
-        const currentPriceUsd = observedPrice !== null && observedPrice >= 0 ? observedPrice : null;
-        const value = currentPriceUsd !== null && confirmedQuantity !== null ? confirmedQuantity * currentPriceUsd : null;
-        const currentValueUsd = value !== null && Number.isFinite(value) ? value : null;
-        const gain = currentValueUsd !== null && costBasisUsd !== null ? currentValueUsd - costBasisUsd : null;
-        const unrealizedPnlUsd = gain !== null && Number.isFinite(gain) ? gain : null;
-        const unrealizedPnlPct = unrealizedPnlUsd !== null && costBasisUsd !== null && costBasisUsd > 0
-          ? unrealizedPnlUsd / costBasisUsd * 100 : null;
+      return {
+        positionsAssessment: 'observed-runtime-unverified',
+        reducingExecution: { ...spotReducingCapability(), ...financialCapability(!!options.financial?.reducing) },
+        closeAllExecution: spotReducingCapability(),
+        positions: positions.map((p) => {
+          const confirmedQuantity = observedFiniteNumber(p.confirmed_quantity);
+          const costBasisUsd = observedFiniteNumber(p.cost_basis_usd);
+          const entryPriceUsd = confirmedQuantity !== null && confirmedQuantity > 0 && costBasisUsd !== null ? costBasisUsd / confirmedQuantity : null;
+          const observedPrice = observedFiniteNumber(p.latest_price_usd);
+          const currentPriceUsd = observedPrice !== null && observedPrice >= 0 ? observedPrice : null;
+          const value = currentPriceUsd !== null && confirmedQuantity !== null ? confirmedQuantity * currentPriceUsd : null;
+          const currentValueUsd = value !== null && Number.isFinite(value) ? value : null;
+          const gain = currentValueUsd !== null && costBasisUsd !== null ? currentValueUsd - costBasisUsd : null;
+          const unrealizedPnlUsd = gain !== null && Number.isFinite(gain) ? gain : null;
+          const unrealizedPnlPct = unrealizedPnlUsd !== null && costBasisUsd !== null && costBasisUsd > 0
+            ? unrealizedPnlUsd / costBasisUsd * 100 : null;
 
-        return {
-          id: p.id,
-          chain: p.chain,
-          tokenMint: p.token_mint,
-          tokenSymbol: p.token_symbol || p.token_mint.slice(0, 8),
-          confirmedQuantityExact: p.confirmed_quantity,
-          confirmedQuantity,
-          costBasisUsdExact: p.cost_basis_usd,
-          costBasisUsd,
-          entryPriceUsd,
-          currentPriceUsd,
-          currentValueUsd,
-          valuationAssessment: currentValueUsd !== null ? 'observed-runtime-unverified' : 'unassessed',
-          unrealizedPnlUsd,
-          unrealizedPnlPct,
-          masterWalletAddress: p.master_wallet_address || undefined
-        };
-      })
-    });
+          return {
+            id: p.id,
+            chain: p.chain,
+            tokenMint: p.token_mint,
+            tokenSymbol: p.token_symbol || p.token_mint.slice(0, 8),
+            confirmedQuantityExact: p.confirmed_quantity,
+            confirmedQuantity,
+            costBasisUsdExact: p.cost_basis_usd,
+            costBasisUsd,
+            entryPriceUsd,
+            currentPriceUsd,
+            currentValueUsd,
+            valuationAssessment: currentValueUsd !== null ? 'observed-runtime-unverified' : 'unassessed',
+            unrealizedPnlUsd,
+            unrealizedPnlPct,
+            masterWalletAddress: p.master_wallet_address || undefined
+          };
+        })
+      };
+    };
+
+    const payload = options.userCache
+      ? await options.userCache.getOrLoad(scope, 'positions', loadPositions)
+      : await loadPositions();
+    return reply.send(payload);
   });
 
   // A local quantity update is not a financial exit. No authorized canonical
@@ -611,43 +621,51 @@ export async function registerMeRoutes(
   app.get('/v1/me/wallets', async (request, reply) => {
     const scope = requireUser(request, reply);
     if (!scope) return;
-    const subscriptions = await listWalletSubscriptions(scope);
-    if (subscriptions.length === 0) return reply.send({ wallets: [] });
 
-    // Subscriptions are per-user (Postgres RLS); global wallet stats come from
-    // the shared short-TTL cache or read replica with zero tenant mixing.
-    const loadMissingWallets = (addresses: string[]) =>
-      runSharedGlobalRead<GlobalWalletStatRow & Record<string, unknown>>(
-        scope,
-        `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
-           FROM wallets WHERE address = ANY($1)`,
-        [addresses]
-      );
-    const addresses = subscriptions.map((s) => s.walletAddress);
-    const rows = options.sharedCache
-      ? await options.sharedCache.getWalletStats(addresses, loadMissingWallets)
-      : await loadMissingWallets(addresses);
-    const byAddress = new Map(rows.map((row) => [row.address, row]));
+    const loadWallets = async () => {
+      const subscriptions = await listWalletSubscriptions(scope);
+      if (subscriptions.length === 0) return { wallets: [] };
 
-    return reply.send({
-      wallets: subscriptions.map((subscription) => {
-        const wallet = byAddress.get(subscription.walletAddress);
-        return {
-          address: subscription.walletAddress,
-          label: subscription.label,
-          source: subscription.source,
-          subscribedAt: subscription.createdAt,
-          chain: wallet?.chain ?? null,
-          status: wallet?.status ?? null,
-          compositeScore: wallet?.composite_score != null ? Number(wallet.composite_score) : null,
-          tier: wallet?.tier ?? null,
-          winRate: wallet?.win_rate != null ? Number((Number(wallet.win_rate) * 100).toFixed(1)) : null,
-          realizedRoi: wallet?.realized_roi != null ? Number((Number(wallet.realized_roi) * 100).toFixed(1)) : null,
-          totalTrades: wallet?.total_trades != null ? Number(wallet.total_trades) : null,
-          lastActive: wallet?.last_active ?? null
-        };
-      })
-    });
+      // Subscriptions are per-user (Postgres RLS); global wallet stats come from
+      // the shared short-TTL cache or read replica with zero tenant mixing.
+      const loadMissingWallets = (addresses: string[]) =>
+        runSharedGlobalRead<GlobalWalletStatRow & Record<string, unknown>>(
+          scope,
+          `SELECT address, chain, status, composite_score, tier, win_rate, realized_roi, total_trades, last_active
+             FROM wallets WHERE address = ANY($1)`,
+          [addresses]
+        );
+      const addresses = subscriptions.map((s) => s.walletAddress);
+      const rows = options.sharedCache
+        ? await options.sharedCache.getWalletStats(addresses, loadMissingWallets)
+        : await loadMissingWallets(addresses);
+      const byAddress = new Map(rows.map((row) => [row.address, row]));
+
+      return {
+        wallets: subscriptions.map((subscription) => {
+          const wallet = byAddress.get(subscription.walletAddress);
+          return {
+            address: subscription.walletAddress,
+            label: subscription.label,
+            source: subscription.source,
+            subscribedAt: subscription.createdAt,
+            chain: wallet?.chain ?? null,
+            status: wallet?.status ?? null,
+            compositeScore: wallet?.composite_score != null ? Number(wallet.composite_score) : null,
+            tier: wallet?.tier ?? null,
+            winRate: wallet?.win_rate != null ? Number((Number(wallet.win_rate) * 100).toFixed(1)) : null,
+            realizedRoi: wallet?.realized_roi != null ? Number((Number(wallet.realized_roi) * 100).toFixed(1)) : null,
+            totalTrades: wallet?.total_trades != null ? Number(wallet.total_trades) : null,
+            lastActive: wallet?.last_active ?? null
+          };
+        })
+      };
+    };
+
+    const payload = options.userCache
+      ? await options.userCache.getOrLoad(scope, 'wallets_list', loadWallets)
+      : await loadWallets();
+    return reply.send(payload);
   });
 
   app.get('/v1/me/wallets/inspect', async (request, reply) => {
@@ -753,6 +771,10 @@ export async function registerMeRoutes(
         });
       }
 
+      // Synchronous read-after-write cache invalidation BEFORE responding HTTP 200/201.
+      await options.userCache?.invalidateUser(scope.userId, ['wallets_list', 'feed', 'signals']);
+      await options.publishUserEvent?.(scope.userId, { type: 'wallets_changed' });
+
       return reply.code(result.subscriptionCreated ? 201 : 200).send({
         wallet: {
           address: result.subscription.walletAddress,
@@ -800,6 +822,8 @@ export async function registerMeRoutes(
           throw err;
         }
       }
+      await options.userCache?.invalidateUser(scope.userId, ['wallets_list', 'feed', 'signals']);
+      await options.publishUserEvent?.(scope.userId, { type: 'wallets_changed' });
       return reply.send({ ok: true, state: result.subscription.state });
     } catch (error) {
       if (error instanceof Error && error.name === 'WalletNotSubscribedError') {
@@ -831,6 +855,8 @@ export async function registerMeRoutes(
           throw err;
         }
       }
+      await options.userCache?.invalidateUser(scope.userId, ['wallets_list', 'positions']);
+      await options.publishUserEvent?.(scope.userId, { type: 'positions_changed' });
       return reply.send({
         ok: true,
         state: result.subscription.state,
@@ -976,54 +1002,91 @@ export async function registerMeRoutes(
     if (principal?.kind !== 'user') return reply.code(401).send({ error: 'Unauthorized' });
 
     const capabilities = capabilitiesFor(principal.user.tier, principal.user.tierExpiresAt);
+    const sinceRaw = (request.query as { since?: string } | undefined)?.since;
+    const sinceDate = sinceRaw ? new Date(sinceRaw) : null;
+    const hasSince = Boolean(sinceDate && Number.isFinite(sinceDate.getTime()));
 
-    // The free tier's feed is delayed. Applied in SQL rather than by filtering
-    // after the fact so the delay cannot be bypassed by paging, and so the row
-    // is never sent to the client in the first place.
-    // Column names verified against the live schema — `signals` uses
-    // `pattern_type`/`signal_score`, not `pattern`/`score`.
-    const rows = await runScopedRead(scope,
-      `SELECT DISTINCT s.id, s.pattern_type, s.chain, s.token_mint, s.token_symbol,
-              s.signal_score, s.confidence, s.status, s.detected_at
-         FROM signals s
-         JOIN cluster_memberships cm ON cm.cluster_id = s.cluster_id
-         JOIN user_wallet_subscriptions uws
-           ON uws.wallet_address = cm.wallet_address
-        WHERE uws.user_id = $1
-          -- Migration 051 retains an ended subscription, so without this a user
-          -- keeps receiving a master's signals after unsubscribing. winding_down
-          -- is deliberately still included: entries have stopped, but the user
-          -- holds positions whose exits arrive as that master's sells, and hiding
-          -- the activity would leave them unable to see their own exit coming.
-          -- No backticks here -- this SQL is a TS template literal.
-          AND uws.state <> 'ended'
-          AND s.detected_at <= NOW() - ($2::int * interval '1 second')
-        ORDER BY s.detected_at DESC
-        LIMIT 100`,
-      [scope.userId, capabilities.signalDelaySeconds]
-    );
-    return reply.send({ signals: rows, delayedSeconds: capabilities.signalDelaySeconds });
+    const loadSignals = async () => {
+      // The free tier's feed is delayed. Applied in SQL rather than by filtering
+      // after the fact so the delay cannot be bypassed by paging, and so the row
+      // is never sent to the client in the first place.
+      // Column names verified against the live schema — `signals` uses
+      // `pattern_type`/`signal_score`, not `pattern`/`score`.
+      const params: unknown[] = [scope.userId, capabilities.signalDelaySeconds];
+      if (hasSince && sinceDate) params.push(sinceDate.toISOString());
+
+      const rows = await runScopedRead(scope,
+        `SELECT DISTINCT s.id, s.pattern_type, s.chain, s.token_mint, s.token_symbol,
+                s.signal_score, s.confidence, s.status, s.detected_at
+           FROM signals s
+           JOIN cluster_memberships cm ON cm.cluster_id = s.cluster_id
+           JOIN user_wallet_subscriptions uws
+             ON uws.wallet_address = cm.wallet_address
+          WHERE uws.user_id = $1
+            -- Migration 051 retains an ended subscription, so without this a user
+            -- keeps receiving a master's signals after unsubscribing. winding_down
+            -- is deliberately still included: entries have stopped, but the user
+            -- holds positions whose exits arrive as that master's sells, and hiding
+            -- the activity would leave them unable to see their own exit coming.
+            -- No backticks here -- this SQL is a TS template literal.
+            AND uws.state <> 'ended'
+            AND s.detected_at <= NOW() - ($2::int * interval '1 second')
+            ${hasSince ? 'AND s.detected_at > $3::timestamptz' : ''}
+          ORDER BY s.detected_at DESC
+          LIMIT 100`,
+        params
+      );
+      return { signals: rows, delayedSeconds: capabilities.signalDelaySeconds };
+    };
+
+    if (hasSince) {
+      return reply.send(await loadSignals());
+    }
+    const payload = options.userCache
+      ? await options.userCache.getOrLoad(scope, 'signals', loadSignals, {
+          matchMeta: capabilities.signalDelaySeconds
+        })
+      : await loadSignals();
+    return reply.send(payload);
   });
 
   app.get('/v1/me/feed', async (request, reply) => {
     const scope = requireUser(request, reply);
     if (!scope) return;
-    // `source_trades` uses `direction`/`token_amount`, not `side`/`quantity`.
-    const rows = await runScopedRead(scope,
-      `SELECT st.id, st.chain, st.wallet_address, st.token_mint, st.direction,
-              st.token_amount, st.amount_usd, st.price_usd, st.event_at
-         FROM source_trades st
-         JOIN user_wallet_subscriptions uws
-           ON uws.wallet_address = st.wallet_address
-        WHERE uws.user_id = $1
-          -- Same as /v1/me/signals: an ended subscription is a retained record,
-          -- not a live feed. A winding_down subscription stays visible.
-          AND uws.state <> 'ended'
-        ORDER BY st.event_at DESC
-        LIMIT 100`,
-      [scope.userId]
-    );
-    return reply.send({ events: rows });
+    const sinceRaw = (request.query as { since?: string } | undefined)?.since;
+    const sinceDate = sinceRaw ? new Date(sinceRaw) : null;
+    const hasSince = Boolean(sinceDate && Number.isFinite(sinceDate.getTime()));
+
+    const loadFeed = async () => {
+      // `source_trades` uses `direction`/`token_amount`, not `side`/`quantity`.
+      const params: unknown[] = [scope.userId];
+      if (hasSince && sinceDate) params.push(sinceDate.toISOString());
+
+      const rows = await runScopedRead(scope,
+        `SELECT st.id, st.chain, st.wallet_address, st.token_mint, st.direction,
+                st.token_amount, st.amount_usd, st.price_usd, st.event_at
+           FROM source_trades st
+           JOIN user_wallet_subscriptions uws
+             ON uws.wallet_address = st.wallet_address
+          WHERE uws.user_id = $1
+            -- Same as /v1/me/signals: an ended subscription is a retained record,
+            -- not a live feed. A winding_down subscription stays visible.
+            AND uws.state <> 'ended'
+            ${hasSince ? 'AND st.event_at > $2::timestamptz' : ''}
+          ORDER BY st.event_at DESC
+          LIMIT 100`,
+        params
+      );
+      return { events: rows };
+    };
+
+    if (hasSince) {
+      return reply.send(await loadFeed());
+    }
+    const payload = options.userCache
+      ? await options.userCache.getOrLoad(scope, 'feed', loadFeed)
+      : await loadFeed();
+    return reply.send(payload);
   });
 
 

@@ -19,8 +19,8 @@ describe('Wave4 migration/provisioning source-only offline contract', () => {
     await expect(discoverMigrations(sqlRoot)).rejects.toThrow('explicit reviewed selection');
     const { proposal, selection, inventory, selected } = await reviewed();
     expect(proposal.excluded).toEqual([{ ...WAVE4_REFUSAL }]);
-    expect(proposal.included).toHaveLength(90);
-    expect(proposal.included.slice(-7).map(x => x.file)).toEqual([
+    expect(proposal.included).toHaveLength(91);
+    expect(proposal.included.slice(-8).map(x => x.file)).toEqual([
       '085_lp_protected_paper_admission.sql',
       '086_wave4_restricted_composition.sql',
       '087_wave4_protected_authentication.sql',
@@ -28,10 +28,11 @@ describe('Wave4 migration/provisioning source-only offline contract', () => {
       '089_wave4_protected_financial.sql',
       '090_wave4_protected_load_capture.sql',
       '091_wave4_read_indexes.sql',
+      '092_wave4b_scale_and_auth_opt.sql',
     ]);
     expect(() => selectMigrations(inventory, proposal as typeof selection)).toThrow('reviewed');
     expect(await discoverMigrations(sqlRoot, undefined, undefined, selection)).toEqual(selected);
-    expect(proposal.inventory).toHaveLength(91);
+    expect(proposal.inventory).toHaveLength(92);
   });
   it('fresh source, inventory, omission reason/hash and manifest drift all reject', async () => {
     const { inventory, selection } = await reviewed();

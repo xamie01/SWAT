@@ -56,9 +56,26 @@ function normalizedAccount(request: FastifyRequest): string | null {
 }
 
 export async function registerPackage28Limiters(app: FastifyInstance, config: Package28LimiterConfig): Promise<void> {
+  // Opt-in distributed Redis rate limiting (Wave 4b): dynamic import preserves
+  // zero eager Redis/DB side effects at module load time while sharing buckets across workers.
+  let limiterRedis: { quit(): Promise<unknown> } | undefined;
+  if (process.env.RATE_LIMIT_USE_REDIS === 'true' && process.env.REDIS_URL) {
+    const { Redis } = await import('ioredis');
+    const client = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 2 });
+    limiterRedis = client;
+    app.addHook('onClose', async () => {
+      await client.quit().catch(() => undefined);
+    });
+  }
+
   // Register once, then use independent child stores. rateLimit() handlers share a
   // per-request "already ran" symbol; createRateLimit() does not skip later phases.
-  await app.register(rateLimit, { global: false, skipOnError: false, cache: 10000 });
+  await app.register(rateLimit, {
+    global: false,
+    skipOnError: false,
+    cache: 10000,
+    ...(limiterRedis ? { redis: limiterRedis, nameSpace: 'swat:rl:' } : {})
+  });
   const globalIp = app.createRateLimit({ max: config.max, timeWindow: 60000, keyGenerator: request => request.ip });
   const authIp = app.createRateLimit({ max: config.authIpMax, timeWindow: 900000, keyGenerator: request => request.ip });
   const account = app.createRateLimit({ max: config.authAccountMax, timeWindow: 900000,
