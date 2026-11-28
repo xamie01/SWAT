@@ -9,14 +9,20 @@ fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SWAT_DIR="${SWAT_DIR:-$(cd -- "$SCRIPT_DIR/.." && pwd -P)}"
-PRIVATE_DIR="${PRIVATE_DIR:-/tmp/.swat-wave4-private}"
+PRIVATE_DIR="${PRIVATE_DIR:-$SWAT_DIR/.swat-wave4-private}"
+mkdir -p -m 700 "$PRIVATE_DIR"
 STAGE_A_CONFIG="$PRIVATE_DIR/private-config.json"
 STAGE_A_CREDS="$PRIVATE_DIR/credentials.env"
 [[ -d /usr/lib/postgresql/16/bin ]] && export PATH="/usr/lib/postgresql/16/bin:$PATH"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-  PGB_DIR="/var/run/postgresql/wave4"
+  if su -s /bin/sh postgres -c "test -x '$SWAT_DIR'" >/dev/null 2>&1; then
+    chmod 711 "$PRIVATE_DIR"
+    PGB_DIR="$PRIVATE_DIR/pgbouncer"
+  else
+    PGB_DIR="/var/run/postgresql/wave4"
+  fi
 else
-  PGB_DIR="$PRIVATE_DIR"
+  PGB_DIR="$PRIVATE_DIR/pgbouncer"
 fi
 
 needs_stage_a_bootstrap() {
@@ -414,7 +420,12 @@ console.log(`SCRAM-SHA-256$4096:${salt.toString('base64')}$${storedKey.toString(
 NODE
 )"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  if su -s /bin/sh postgres -c "test -x '$SWAT_DIR'" >/dev/null 2>&1; then
+    chmod 711 "$PRIVATE_DIR"
+  fi
   install -d -m 0700 -o postgres -g postgres "$PGB_DIR"
+else
+  install -d -m 0700 "$PGB_DIR"
 fi
 cat > "$PGB_DIR/load-userlist.txt" <<EOF
 "swat_app" "$LOAD_SCRAM_APP"
@@ -429,6 +440,7 @@ ${LOAD_DB} = host=127.0.0.1 port=${LOAD_PG_PORT} dbname=${LOAD_DB}
 [pgbouncer]
 listen_addr = 127.0.0.1
 listen_port = ${LOAD_PGB_PORT}
+unix_socket_dir = ${PGB_DIR}
 auth_type = scram-sha-256
 auth_file = ${PGB_DIR}/load-userlist.txt
 admin_users = wave4_pool_observer

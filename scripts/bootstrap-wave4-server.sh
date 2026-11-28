@@ -14,7 +14,7 @@ SWAT_DIR="${SWAT_DIR:-$(cd -- "$SCRIPT_DIR/.." && pwd -P)}"
   exit 1
 }
 
-PRIVATE_DIR="${PRIVATE_DIR:-/tmp/.swat-wave4-private}"
+PRIVATE_DIR="${PRIVATE_DIR:-$SWAT_DIR/.swat-wave4-private}"
 [[ -d /usr/lib/postgresql/16/bin ]] && export PATH="/usr/lib/postgresql/16/bin:$PATH"
 mkdir -p -m 700 "$PRIVATE_DIR"
 chmod 700 "$PRIVATE_DIR"
@@ -238,10 +238,16 @@ done
 echo "=== [6/7] Configuring & starting PgBouncer (transaction mode on 127.0.0.1:${PGBOUNCER_PORT}) ==="
 SCRAM_HASH="$(PGPASSWORD="$DBA_PASS" psql -h 127.0.0.1 -p "$CAND_PG_PORT" -U wave4_dba -d "$CAND_DB" -At -c "SELECT rolpassword FROM pg_authid WHERE rolname='swat_app'")"
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-  PGB_DIR="/var/run/postgresql/wave4"
+  if su -s /bin/sh postgres -c "test -x '$SWAT_DIR'" >/dev/null 2>&1; then
+    chmod 711 "$PRIVATE_DIR"
+    PGB_DIR="$PRIVATE_DIR/pgbouncer"
+  else
+    PGB_DIR="/var/run/postgresql/wave4"
+  fi
   install -d -m 0700 -o postgres -g postgres "$PGB_DIR"
 else
-  PGB_DIR="$PRIVATE_DIR"
+  PGB_DIR="$PRIVATE_DIR/pgbouncer"
+  install -d -m 0700 "$PGB_DIR"
 fi
 cat > "$PGB_DIR/userlist.txt" <<EOF
 "swat_app" "$SCRAM_HASH"
@@ -255,6 +261,7 @@ ${CAND_DB} = host=127.0.0.1 port=${CAND_PG_PORT} dbname=${CAND_DB}
 [pgbouncer]
 listen_addr = 127.0.0.1
 listen_port = ${PGBOUNCER_PORT}
+unix_socket_dir = ${PGB_DIR}
 auth_type = scram-sha-256
 auth_file = ${PGB_DIR}/userlist.txt
 admin_users =
@@ -417,7 +424,7 @@ TS
 
 bash "$SWAT_DIR/deploy/loadtest/wave4/run.sh" --plan
 NODE_OPTIONS="--max-old-space-size=512 --require=$SWAT_DIR/threats/sequential-fixes/offline-guard.cjs" \
-  REVIEW_RESULTS=/tmp/w4-tier2-3.json \
+  REVIEW_RESULTS="$PRIVATE_DIR/w4-tier2-3.json" \
   "$SWAT_DIR/node_modules/.bin/vitest" run --config "$SWAT_DIR/threats/project-completion-20261117/w4-tier2-3-20261125.config.ts"
 
 echo ""
